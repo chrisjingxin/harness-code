@@ -26,6 +26,7 @@ import {
   COMMANDS_BIND_MIN_MINOR,
 } from "../src/ipc/command-binding"
 import { parseArgs } from "../src/args"
+import { CLI_VERSION } from "../src/interactive/runtime"
 
 test("CLI shutdown 顺序：runTui 返回后 gateway → coordinator → controller.close，agent.stop 最后", () => {
   const source = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
@@ -79,7 +80,7 @@ test("交互界面拒绝经过管道或任务复用器启动", () => {
   expect(() => validateInteractiveTerminal(true, true)).not.toThrow()
 })
 
-test("源码与 dist CLI 都解析到 packages/agent sidecar", () => {
+test("开发形态：源码与 dist CLI 都解析到 packages/agent sidecar", () => {
   const packageDir = resolve(import.meta.dir, "..")
   const agentDir = resolve(packageDir, "../agent")
   const source = resolveAgentRuntimeLocations(resolve(packageDir, "src"))
@@ -180,6 +181,29 @@ test("Plugin CLI 按操作声明最小读写能力", () => {
   expect(clientCapabilities(validation)).not.toContain("plugins.manage")
   expect(clientCapabilities(install)).toContain("plugins.read")
   expect(clientCapabilities(install)).toContain("plugins.manage")
+})
+
+test("version 与 help 不启动 sidecar，stdout 为版本或用法", async () => {
+  let started = 0
+  const startAgent = async () => {
+    started += 1
+    throw new Error("startAgent must not run")
+  }
+  const printed: string[] = []
+  const originalLog = console.log
+  console.log = (message?: unknown) => {
+    printed.push(String(message ?? ""))
+  }
+  try {
+    await execute(parseArgs(["--version"]), { startAgent })
+    await execute(parseArgs(["--help"]), { startAgent })
+  } finally {
+    console.log = originalLog
+  }
+  expect(started).toBe(0)
+  expect(printed[0]).toBe(CLI_VERSION)
+  expect(printed[1] ?? "").toContain("harness")
+  expect(printed[1] ?? "").toContain("-n")
 })
 
 test("harness logs 命令路由在 startAgent 之前，不创建 sidecar、不调用 spawn", () => {

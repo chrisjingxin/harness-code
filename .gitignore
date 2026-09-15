@@ -11,6 +11,7 @@ packages/agent/.harness/
 # Node/Bun
 node_modules/
 dist/
+.publish/
 *.tsbuildinfo
 
 # 这两个精确 npm 发布包的 dist 是发布内容，不是仓库构建输出，必须随源码化工件提交。

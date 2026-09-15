@@ -5,7 +5,7 @@ import { createHash } from "node:crypto"
 import { once } from "node:events"
 import { existsSync, statSync } from "node:fs"
 import { realpath } from "node:fs/promises"
-import { delimiter, resolve } from "node:path"
+import { delimiter } from "node:path"
 import { createInterface } from "node:readline"
 import { TextDecoder } from "node:util"
 import {
@@ -18,7 +18,8 @@ import {
   type OperationName,
 } from "@za38/protocol"
 
-import { parseArgs, type Command } from "./args"
+import { CLI_USAGE, parseArgs, type Command } from "./args"
+import { resolveAgentProcessBinding } from "./runtime-binding"
 import { createDiagnosticLog, defaultProcessFields, type DiagnosticLog } from "./diagnostic-log/runtime"
 import { SidecarStderrDrain } from "./diagnostic-log/runtime/stderr-drain"
 import { runLogsQuery } from "./diagnostic-log/query"
@@ -177,7 +178,7 @@ export async function readPluginConsent(
 }
 
 /** 启动 Python sidecar、完成 initialize 握手，并返回可关闭的运行句柄。 */
-async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<RunningAgent> {
+async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" }>): Promise<RunningAgent> {
   validateWorkspace(command.cwd)
   const startedAtMs = Date.now()
   const startedAt = performance.now()
@@ -188,25 +189,26 @@ async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<
     startedAtMs,
   })
   log.info("process.started", defaultProcessFields(command.kind))
-  const locations = resolveAgentRuntimeLocations(import.meta.dir)
-  // Windows 上 .venv 布局是 Scripts/python.exe，Unix 是 bin/python；两者都探测后再降级到 PATH。
-  const python = process.env.HARNESS_AGENT_PYTHON
-    ?? locations.pythonExecutables.find(existsSync)
-    ?? "python3"
-  const sourceAgent = locations.agentDirectories.find(existsSync) ?? locations.agentDirectories[0]!
+  const binding = resolveAgentProcessBinding({
+    moduleDir: import.meta.dir,
+    env: process.env,
+  })
   const sandboxEnvironment = command.kind === "run" && command.sandbox !== undefined
     // CLI 显式参数必须高于用户环境变量；sidecar 仅把这个内部字段当作
     // 最后一层覆盖，不对外暴露为可长期配置的环境变量。
     ? { HARNESS_CLI_SANDBOX: command.sandbox ? "remote" : "false" }
     : {}
-  const child = spawn(python, ["-m", "harness_agent"], {
+  const [executable, ...agentArgs] = binding.argv
+  const child = spawn(executable, agentArgs, {
     cwd: command.cwd,
     env: {
       ...process.env,
       ...sandboxEnvironment,
       HARNESS_COMMAND_KIND: command.kind,
       ...(command.configPath ? { HARNESS_AGENT_CONFIG_PATH: command.configPath } : {}),
-      PYTHONPATH: process.env.PYTHONPATH ? `${sourceAgent}${delimiter}${process.env.PYTHONPATH}` : sourceAgent,
+      ...(binding.pythonPath
+        ? { PYTHONPATH: process.env.PYTHONPATH ? `${binding.pythonPath}${delimiter}${process.env.PYTHONPATH}` : binding.pythonPath }
+        : {}),
     },
     stdio: ["pipe", "pipe", "pipe"],
   })
@@ -337,23 +339,7 @@ export function validateWorkspace(cwd: string): void {
   }
 }
 
-/** 解析源码入口和编译后 dist 入口都能使用的 Agent sidecar 路径。 */
-export function resolveAgentRuntimeLocations(moduleDir: string): {
-  agentDirectories: readonly string[]
-  pythonExecutables: readonly string[]
-} {
-  const agentDirectories = [...new Set([
-    resolve(moduleDir, "../../agent"),
-    resolve(moduleDir, "../../../packages/agent"),
-  ])]
-  return {
-    agentDirectories,
-    pythonExecutables: agentDirectories.flatMap(directory => [
-      resolve(directory, ".venv/bin/python"),
-      resolve(directory, ".venv/Scripts/python.exe"),
-    ]),
-  }
-}
+export { resolveAgentProcessBinding, resolveAgentRuntimeLocations } from "./runtime-binding"
 
 /** OpenTUI 必须独占真实终端；管道或任务复用器会让控制序列进入普通文本流。 */
 export function validateInteractiveTerminal(stdinIsTty: boolean | undefined, stdoutIsTty: boolean | undefined): void {
@@ -485,7 +471,7 @@ export function clientMethodForCommand(command: Command): OperationName | undefi
 
 /** 执行一个非 run CLI 管理命令；request 是唯一的 Agent dispatch seam。 */
 export async function dispatchClientCommand(
-  command: Exclude<Command, { kind: "run" } | { kind: "logs" }>,
+  command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" }>,
   request: (method: OperationName, params: Record<string, unknown>) => Promise<unknown>,
   readValue: (secretStdin: boolean) => Promise<string> = readSettingValue,
 ): Promise<unknown> {
@@ -506,6 +492,14 @@ export async function execute(
   command: Command,
   dependencies: ExecuteDependencies = {},
 ): Promise<void> {
+  if (command.kind === "version") {
+    console.log(CLI_VERSION)
+    return
+  }
+  if (command.kind === "help") {
+    console.log(CLI_USAGE)
+    return
+  }
   if (command.kind === "logs") {
     // 完全离线短路：不创建 logger、不启动 sidecar、不打开 SQLite
     await runLogsQuery(command)
@@ -590,16 +584,8 @@ export async function execute(
   }
 }
 
-/** CLI 主入口：处理帮助/版本短路逻辑后执行用户命令。 */
+/** CLI 主入口：解析参数后执行；version/help/logs 在 execute 内短路。 */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  if (argv.includes("--help") || argv.includes("-h")) {
-    console.log("Usage: harness [--resume] [-n TEXT] [--json] [--config PATH] [--cwd PATH] [--sandbox[=remote|false]] | harness logs [--thread ID | --run ID] [--level L] [--event E] [--component C] [--limit N] [--cursor T] [--json] | harness skills <...> | harness plugins <...>")
-    return
-  }
-  if (argv.includes("--version") || argv.includes("-v")) {
-    console.log(`za38-cli ${CLI_VERSION}`)
-    return
-  }
   await execute(parseArgs(argv))
 }
 
