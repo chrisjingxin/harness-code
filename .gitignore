@@ -11,6 +11,7 @@ packages/agent/.harness/
 # Node/Bun
 node_modules/
 dist/
+.publish/
 *.tsbuildinfo
 
 # IDE

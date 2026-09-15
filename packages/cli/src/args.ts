@@ -1,6 +1,8 @@
 /** 命令行参数解析模块：把用户输入转换成稳定的内部命令描述。 */
 
 export type Command =
+  | { kind: "version" }
+  | { kind: "help" }
   | { kind: "run"; message?: string; nonInteractive: boolean; json: boolean; cwd: string; configPath?: string; resume: boolean; sandbox?: "remote" | false }
   | { kind: "config.show" | "config.path"; cwd: string; configPath?: string; params?: Record<string, unknown> }
   | { kind: SkillCommandKind | PluginCommandKind; cwd: string; configPath?: string; params: Record<string, unknown>; secretStdin?: boolean }
@@ -17,6 +19,19 @@ export type Command =
       component?: "cli" | "agent"
       cursor?: string
     }
+
+/** 安装器自检和用户查阅用的 CLI 用法；不启动 sidecar。 */
+export const CLI_USAGE = [
+  "Usage: harness",
+  "  After install, run harness in any project directory to open the TUI.",
+  "  harness [--resume] [-n TEXT | --message TEXT] [--json] [--config PATH] [--cwd PATH] [--sandbox[=remote|false]]",
+  "  harness --version | -V",
+  "  harness --help | -h",
+  "  harness config <show|path> [--config PATH]",
+  "  harness logs [--thread ID | --run ID] [--level L] [--event E] [--component C] [--limit N] [--cursor T] [--json]",
+  "  harness skills <...>",
+  "  harness plugins <...>",
+].join("\n")
 
 export type SkillCommandKind =
   | "skills.list"
@@ -43,6 +58,10 @@ export type PluginCommandKind =
 export function parseArgs(argv: string[], cwd = process.cwd()): Command {
   const args = [...argv]
   const command = args[0]
+  if (command !== "config" && command !== "skills" && command !== "plugins" && command !== "logs") {
+    if (hasOption(args, "--help") || hasOption(args, "-h")) return { kind: "help" }
+    if (hasOption(args, "--version") || hasOption(args, "-V")) return { kind: "version" }
+  }
   if (command === "config") {
     const action = args[1]
     if (action !== "show" && action !== "path") throw new Error("Usage: za38 config <show|path> [--config PATH]")

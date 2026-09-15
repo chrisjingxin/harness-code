@@ -20,6 +20,9 @@ dependencies = [
     "tree-sitter-bash>=0.25.0,<0.26.0",
 ]
 
+[project.scripts]
+harness-agent = "harness_agent.__main__:main"
+
 [project.optional-dependencies]
 test = [
     "pytest==9.0.3",

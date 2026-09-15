@@ -2,6 +2,23 @@ import { expect, test } from "bun:test"
 
 import { parseArgs } from "../src/args"
 
+test("无子命令的 --version/-V 是 CLI 版本，不启动 run", () => {
+  expect(parseArgs(["--version"], "/work")).toEqual({ kind: "version" })
+  expect(parseArgs(["-V"], "/work")).toEqual({ kind: "version" })
+})
+
+test("无子命令的 --help/-h 是用法，不启动 run", () => {
+  expect(parseArgs(["--help"], "/work")).toEqual({ kind: "help" })
+  expect(parseArgs(["-h"], "/work")).toEqual({ kind: "help" })
+})
+
+test("skills install --version 仍是 Skill 包版本", () => {
+  expect(parseArgs(["skills", "install", "review", "--market", "enterprise", "--version", "1.2.0"], "/work")).toMatchObject({
+    kind: "skills.install",
+    params: { market: "enterprise", name: "review", version: "1.2.0" },
+  })
+})
+
 test("parses a non-interactive JSON run", () => {
   expect(parseArgs(["--non-interactive", "summarize this", "--json", "--config", "/tmp/za38.toml"], "/work")).toEqual({
     kind: "run",
