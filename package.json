@@ -1,7 +1,11 @@
 {
   "name": "za38-cli",
   "private": true,
-  "packageManager": "bun@1.2.19",
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "bun": "1.2.19",
+    "node": ">=20"
+  },
   "workspaces": [
     "packages/*",
     "third_party/npm/*",
@@ -29,7 +33,7 @@
     "version:set": "bun run scripts/project/index.ts version:set",
     "release:check": "bun run scripts/project/index.ts release:check",
     "project:check": "bun run protocol:check && bun run scripts/project/index.ts project:check",
-    "test:web:e2e": "bunx playwright test -c packages/cli/tests/e2e"
+    "test:web:e2e": "npx playwright test -c packages/cli/tests/e2e"
   },
   "devDependencies": {
     "@playwright/test": "1.59.1"

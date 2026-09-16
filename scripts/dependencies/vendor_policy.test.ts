@@ -34,11 +34,11 @@ function createFixture(): string {
   })
   writeJson(join(root, "packages/cli/package.json"), {
     dependencies: {
-      "@opentui/core": "workspace:*",
-      "@opentui/react": "workspace:*",
+      "@opentui/core": "0.4.3",
+      "@opentui/react": "0.4.3",
     },
     devDependencies: {
-      "react-devtools-core": "workspace:*",
+      "react-devtools-core": "7.0.1",
     },
   })
   mkdirSync(join(root, "patches"), { recursive: true })
@@ -54,19 +54,17 @@ function createFixture(): string {
       license: "MIT",
     }
     if (spec.name === "@opentui/core") {
-      packageJson.dependencies = { "bun-ffi-structs": "workspace:*" }
-      packageJson.optionalDependencies = { "@opentui/core-win32-x64": "workspace:*" }
+      packageJson.dependencies = { "bun-ffi-structs": "0.2.4" }
+      packageJson.optionalDependencies = { "@opentui/core-win32-x64": "0.4.3" }
     }
     if (spec.name === "@opentui/react") {
-      packageJson.dependencies = { "@opentui/core": "workspace:*" }
+      packageJson.dependencies = { "@opentui/core": "0.4.3" }
       packageJson.devDependencies = { "@types/react": "19.2.14" }
     }
     if (spec.name === "react-devtools-core") {
       packageJson.dependencies = { ws: "7.5.10" }
     }
     if (spec.name === "@opentui/core-win32-x64") {
-      packageJson.os = ["win32"]
-      packageJson.cpu = ["x64"]
       writeFileSync(join(packageRoot, "opentui.dll"), "fixture dll\n", "utf-8")
     }
     writeJson(join(packageRoot, "package.json"), packageJson)
@@ -96,25 +94,9 @@ function createFixture(): string {
     packages: provenancePackages,
     normalizations: [
       {
-        kind: "workspace-dependency",
-        package: "@opentui/core",
-        field: "dependencies.bun-ffi-structs",
-        before: "0.2.4",
-        after: "workspace:*",
-      },
-      {
-        kind: "workspace-dependency",
-        package: "@opentui/core",
-        field: "optionalDependencies.@opentui/core-win32-x64",
-        before: "0.4.3",
-        after: "workspace:*",
-      },
-      {
-        kind: "workspace-dependency",
-        package: "@opentui/react",
-        field: "dependencies.@opentui/core",
-        before: "0.4.3",
-        after: "workspace:*",
+        package: "@opentui/core-win32-x64",
+        removedFields: ["os", "cpu"],
+        reason: "fixture normalization",
       },
     ],
     patches: {
@@ -125,10 +107,18 @@ function createFixture(): string {
     },
   })
 
-  writeJson(join(root, "bun.lock"), {
-    packages: Object.fromEntries(
-      VENDORED_PACKAGE_SPECS.map((spec) => [spec.name, [`${spec.name}@workspace:${spec.path}`]]),
-    ),
+  writeJson(join(root, "package-lock.json"), {
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "fixture" },
+      ...Object.fromEntries(
+        VENDORED_PACKAGE_SPECS.map((spec) => [`node_modules/${spec.name}`, { resolved: spec.path, link: true }]),
+      ),
+      "node_modules/marked": {
+        version: "17.0.1",
+        resolved: "https://npm.intranet.example/marked/-/marked-17.0.1.tgz",
+      },
+    },
   })
   return root
 }
@@ -208,44 +198,49 @@ test("rejects a Windows target package without opentui.dll", () => {
   })
 })
 
-test("rejects a target package published for the wrong platform", () => {
+test("rejects a target package that declares os/cpu in manifest", () => {
   withFixture((root) => {
     writeJson(join(root, "third_party/npm/@opentui/core-win32-x64/package.json"), {
       name: "@opentui/core-win32-x64",
       version: "0.4.3",
       license: "MIT",
-      os: ["darwin"],
-      cpu: ["arm64"],
+      os: ["win32"],
+      cpu: ["x64"],
     })
-    expect(validateVendoredWorkspace(root).join("\n")).toContain("must target win32/x64")
+    expect(validateVendoredWorkspace(root).join("\n")).toContain("manifest must not declare os/cpu")
   })
 })
 
 test("rejects registry resolution for any vendored package", () => {
   withFixture((root) => {
-    writeJson(join(root, "bun.lock"), {
-      packages: {
-        ...Object.fromEntries(
-          VENDORED_PACKAGE_SPECS.map((spec) => [spec.name, [`${spec.name}@${spec.version}`, "", {}, spec.integrity]]),
-        ),
-      },
+    writeJson(join(root, "package-lock.json"), {
+      lockfileVersion: 3,
+      packages: Object.fromEntries(
+        VENDORED_PACKAGE_SPECS.map((spec) => [
+          `node_modules/${spec.name}`,
+          { version: spec.version, resolved: `https://npm.intranet.example/${spec.name}/-/${spec.name}-${spec.version}.tgz` },
+        ]),
+      ),
     })
     expect(validateVendoredWorkspace(root).join("\n")).toContain("registry fallback")
   })
 })
 
-test("rejects a nested registry locator even when the primary record is workspace", () => {
+test("rejects a nested registry locator even when the primary record is a workspace link", () => {
   withFixture((root) => {
-    const lock = {
+    writeJson(join(root, "package-lock.json"), {
+      lockfileVersion: 3,
       packages: {
         ...Object.fromEntries(
-          VENDORED_PACKAGE_SPECS.map((spec) => [spec.name, [`${spec.name}@workspace:${spec.path}`]]),
+          VENDORED_PACKAGE_SPECS.map((spec) => [`node_modules/${spec.name}`, { resolved: spec.path, link: true }]),
         ),
-        "@opentui/core@0.4.3": ["@opentui/core@0.4.3", "", {}, VENDORED_PACKAGE_SPECS[0].integrity],
+        "node_modules/other/node_modules/@opentui/core": {
+          version: "0.4.3",
+          resolved: "https://npm.intranet.example/@opentui/core/-/core-0.4.3.tgz",
+        },
       },
-    }
-    writeJson(join(root, "bun.lock"), lock)
-    expect(validateVendoredWorkspace(root).join("\n")).toContain("@opentui/core: registry fallback")
+    })
+    expect(validateVendoredWorkspace(root).join("\n")).toContain("@opentui/core: nested registry locator")
   })
 })
 
@@ -260,38 +255,46 @@ test("rejects a duplicate root patchedDependencies entry", () => {
   })
 })
 
-test("rejects missing workspace normalization provenance", () => {
+test("rejects workspace: protocol residues in any package manifest", () => {
   withFixture((root) => {
-    mutateProvenance(root, (provenance) => {
-      provenance.normalizations = (provenance.normalizations as unknown[]).slice(1)
+    writeJson(join(root, "packages/cli/package.json"), {
+      dependencies: {
+        "@opentui/core": "workspace:*",
+        "@opentui/react": "0.4.3",
+      },
+      devDependencies: {
+        "react-devtools-core": "7.0.1",
+      },
     })
-    expect(validateVendoredWorkspace(root).join("\n")).toContain("workspace normalization set mismatch")
+    expect(validateVendoredWorkspace(root).join("\n")).toContain("workspace: protocol is unsupported by npm")
   })
 })
 
-test("rejects incorrect workspace normalization provenance", () => {
+test("rejects CLI dependency that does not pin vendored version", () => {
   withFixture((root) => {
-    mutateProvenance(root, (provenance) => {
-      const normalizations = provenance.normalizations as Array<Record<string, unknown>>
-      normalizations[0] = { ...normalizations[0], before: "0.2.3" }
+    writeJson(join(root, "packages/cli/package.json"), {
+      dependencies: {
+        "@opentui/core": "0.4.2",
+        "@opentui/react": "0.4.3",
+      },
+      devDependencies: {
+        "react-devtools-core": "7.0.1",
+      },
     })
-    expect(validateVendoredWorkspace(root).join("\n")).toContain("workspace normalization set mismatch")
+    expect(validateVendoredWorkspace(root).join("\n")).toContain("CLI @opentui/core must pin the vendored version 0.4.3")
   })
 })
 
-test("rejects extra workspace normalization drift", () => {
+test("rejects vendored package inter-dependency that does not pin vendored version", () => {
   withFixture((root) => {
-    mutateProvenance(root, (provenance) => {
-      const normalizations = provenance.normalizations as Array<Record<string, unknown>>
-      normalizations.push({
-        kind: "workspace-dependency",
-        package: "@opentui/core",
-        field: "dependencies.unexpected",
-        before: "1.0.0",
-        after: "workspace:*",
-      })
+    writeJson(join(root, "third_party/npm/@opentui/core/package.json"), {
+      name: "@opentui/core",
+      version: "0.4.3",
+      license: "MIT",
+      dependencies: { "bun-ffi-structs": "0.2.3" },
+      optionalDependencies: { "@opentui/core-win32-x64": "0.4.3" },
     })
-    expect(validateVendoredWorkspace(root).join("\n")).toContain("workspace normalization set mismatch")
+    expect(validateVendoredWorkspace(root).join("\n")).toContain("@opentui/core -> bun-ffi-structs must pin the vendored version 0.2.4")
   })
 })
 

@@ -22,11 +22,5 @@
       "import": "./index.js",
       "types": "./index.d.ts"
     }
-  },
-  "os": [
-    "win32"
-  ],
-  "cpu": [
-    "x64"
-  ]
+  }
 }

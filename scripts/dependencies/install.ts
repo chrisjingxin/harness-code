@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
-/** 内网依赖安装入口：校验来源和工具链后冻结安装并应用 DeepAgents 补丁。 */
+/** 内网依赖安装入口：校验来源和工具链后用 npm 冻结安装并应用 DeepAgents 补丁。 */
 
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import {
   DependencyPreflightError,
   expectedBunVersion,
+  expectedNpmVersion,
   resolveInternalSources,
   validateLockSources,
   validateToolchainVersions,
@@ -23,6 +24,11 @@ const environment = process.env.UV_PROJECT_ENVIRONMENT
   : resolve(agent, ".venv")
 const uv = process.env.UV_BIN ?? "uv"
 const pythonCommand = process.env.HARNESS_PYTHON ?? (process.platform === "win32" ? "python" : "python3")
+
+/** Windows 的 npm 是 cmd 脚本，无法被直接 spawn，必须经由 cmd 解析。 */
+function npmCommand(args: string[]): string[] {
+  return process.platform === "win32" ? ["cmd", "/c", "npm", ...args] : ["npm", ...args]
+}
 
 type Phase = "freeze" | "resolve"
 
@@ -85,10 +91,16 @@ function preflight(phase: Phase) {
   if (platformIssues.length > 0) throw new DependencyPreflightError(platformIssues)
   const sources = resolveInternalSources()
   const expectedBun = expectedBunVersion(root)
+  // packageManager 声明的必须是 npm；读取它作为安装器基准，防止入口退化回 Bun。
+  expectedNpmVersion(root)
+  const npmVersion = versionFromOutput("npm", capture(npmCommand(["--version"]), root))
+  const nodeVersion = versionFromOutput("node", capture(["node", "--version"], root))
   const uvVersion = versionFromOutput(uv, capture([uv, "--version"], root))
   const pythonVersion = versionFromOutput(pythonCommand, capture([pythonCommand, "--version"], root))
   const toolchainIssues = validateToolchainVersions({
     bun: Bun.version,
+    npm: npmVersion,
+    node: nodeVersion,
     uv: uvVersion,
     python: pythonVersion,
     expectedBun,
@@ -119,7 +131,7 @@ function validateInstalledVendorOrThrow(): void {
   if (issues.length > 0) {
     throw new DependencyPreflightError([
       ...issues,
-      "Bun 安装完成后五个目标包必须实际解析到 third_party/npm，禁止接受 registry 或缺失入口",
+      "npm 安装完成后五个目标包必须实际解析到 third_party/npm，禁止接受 registry 或缺失入口",
     ])
   }
 }
@@ -145,14 +157,16 @@ try {
 
   if (phase === "resolve") {
     // 首次内网副本允许重新解析；完成后仍走冻结安装，确保 lock 与实际安装一致。
-    run([process.execPath, "install", "--registry", sources.npmRegistry.toString()], root, sourceEnv)
+    // legacy-peer-deps 与 Bun 行为对齐：不自动安装 peerDependencies。
+    run(npmCommand(["install", "--registry", sources.npmRegistry.toString(), "--legacy-peer-deps"]), root, sourceEnv)
     validateInstalledVendorOrThrow()
     run([uv, "lock", "--refresh", "--default-index", sources.pythonIndex.toString(), "--no-python-downloads"], agent, sourceEnv)
     const lockIssues = validateLockSources(root, sources)
     if (lockIssues.length > 0) throw new DependencyPreflightError(lockIssues)
   }
 
-  run([process.execPath, "install", "--frozen-lockfile", "--registry", sources.npmRegistry.toString()], root, sourceEnv)
+  // npm ci 等价于冻结安装：lock 与 package.json 不一致即失败，不会改写 lock。
+  run(npmCommand(["ci", "--registry", sources.npmRegistry.toString(), "--legacy-peer-deps"]), root, sourceEnv)
   validateInstalledVendorOrThrow()
   run(
     [

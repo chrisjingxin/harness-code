@@ -55,7 +55,7 @@
     }
   },
   "dependencies": {
-    "bun-ffi-structs": "workspace:*",
+    "bun-ffi-structs": "0.2.4",
     "diff": "9.0.0",
     "marked": "17.0.1",
     "string-width": "7.2.0",
@@ -69,7 +69,7 @@
     "@opentui/core-darwin-arm64": "0.4.3",
     "@opentui/core-linux-x64": "0.4.3",
     "@opentui/core-linux-arm64": "0.4.3",
-    "@opentui/core-win32-x64": "workspace:*",
+    "@opentui/core-win32-x64": "0.4.3",
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-linux-x64-musl": "0.4.3",
     "@opentui/core-linux-arm64-musl": "0.4.3"

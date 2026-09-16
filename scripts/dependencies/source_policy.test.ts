@@ -5,8 +5,9 @@ import { expect, test } from "bun:test"
 import {
   DependencyPreflightError,
   expectedBunVersion,
+  expectedNpmVersion,
   resolveInternalSources,
-  validateBunLockSource,
+  validateNpmLockSource,
   validateToolchainVersions,
   validateUvLockSource,
 } from "./source_policy"
@@ -38,7 +39,7 @@ test("accepts internal source aliases and rejects public lock provenance", () =>
   expect(issues.some((issue) => issue.includes("公网包源") || issue.includes("不一致"))).toBe(true)
 })
 
-test("validates internal uv provenance and permits Bun locks without embedded URLs", () => {
+test("validates internal uv provenance and permits npm locks without embedded URLs", () => {
   const sources = resolveInternalSources(INTERNAL_ENV)
   const temp = mkdtempSync(resolve(tmpdir(), "harness-source-policy-"))
   writeFileSync(`${temp}/uv.lock`, [
@@ -49,21 +50,77 @@ test("validates internal uv provenance and permits Bun locks without embedded UR
     'wheels = [{ url = "https://pypi.intranet.example/packages/deepagents.whl" }]',
     '',
   ].join("\n"))
-  writeFileSync(`${temp}/bun.lock`, '{"packages": {"safe": ["safe@1.0.0", "", {}, "sha512-x"],},}')
+  writeFileSync(`${temp}/package-lock.json`, JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "za38-cli" },
+      "node_modules/@opentui/core": { resolved: "third_party/npm/@opentui/core", link: true },
+    },
+  }))
 
   expect(validateUvLockSource(`${temp}/uv.lock`, sources)).toEqual([])
-  expect(validateBunLockSource(`${temp}/bun.lock`, sources)).toEqual([])
+  expect(validateNpmLockSource(`${temp}/package-lock.json`, sources)).toEqual([])
 })
 
-test("rejects a public URL embedded in a Bun lock", () => {
+test("rejects a public URL embedded in an npm lock", () => {
   const sources = resolveInternalSources(INTERNAL_ENV)
-  const temp = `${mkdtempSync(resolve(tmpdir(), "harness-source-policy-public-"))}/bun.lock`
-  writeFileSync(temp, '{"packages": {"bad": ["bad@1.0.0", "https://registry.npmjs.org/bad.tgz", {}, "sha512-x"],},}')
-  expect(validateBunLockSource(temp, sources)).toContain(`Bun 锁文件 ${temp} 仍指向公网包源 registry.npmjs.org`)
+  const temp = `${mkdtempSync(resolve(tmpdir(), "harness-source-policy-public-"))}/package-lock.json`
+  writeFileSync(temp, JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "node_modules/marked": {
+        version: "17.0.1",
+        resolved: "https://registry.npmjs.org/marked/-/marked-17.0.1.tgz",
+      },
+    },
+  }))
+  expect(validateNpmLockSource(temp, sources)).toContain(`npm 锁文件 ${temp} 仍指向公网包源 registry.npmjs.org`)
+})
+
+test("rejects a missing npm lockfile", () => {
+  const sources = resolveInternalSources(INTERNAL_ENV)
+  const temp = mkdtempSync(resolve(tmpdir(), "harness-source-policy-missing-"))
+  const issues = validateNpmLockSource(`${temp}/package-lock.json`, sources)
+  expect(issues.some((issue) => issue.includes("找不到 npm 锁文件"))).toBe(true)
+})
+
+test("reads the Bun runtime version from engines.bun", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "harness-source-policy-bun-"))
+  writeFileSync(`${temp}/package.json`, JSON.stringify({ engines: { bun: "1.2.19" } }))
+  expect(expectedBunVersion(temp)).toBe("1.2.19")
+
+  writeFileSync(`${temp}/package.json`, JSON.stringify({ packageManager: "bun@1.2.19" }))
+  expect(() => expectedBunVersion(temp)).toThrow(DependencyPreflightError)
+})
+
+test("reads the npm package manager version from packageManager", () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "harness-source-policy-npm-"))
+  writeFileSync(`${temp}/package.json`, JSON.stringify({ packageManager: "npm@11.11.0" }))
+  expect(expectedNpmVersion(temp)).toBe("11.11.0")
+
+  writeFileSync(`${temp}/package.json`, JSON.stringify({ packageManager: "bun@1.2.19" }))
+  expect(() => expectedNpmVersion(temp)).toThrow(DependencyPreflightError)
 })
 
 test("checks the repository toolchain contract", () => {
   expect(expectedBunVersion(ROOT)).toBe("1.2.19")
-  expect(validateToolchainVersions({ bun: "1.2.19", uv: "0.11.30", python: "3.12.9", expectedBun: "1.2.19" })).toEqual([])
-  expect(validateToolchainVersions({ bun: "1.3.14", uv: "0.10.9", python: "3.10.9", expectedBun: "1.2.19" })).toHaveLength(3)
+  expect(expectedNpmVersion(ROOT)).toBe("11.11.0")
+  const ok = validateToolchainVersions({
+    bun: "1.2.19",
+    uv: "0.11.30",
+    python: "3.12.9",
+    npm: "11.11.0",
+    node: "24.14.1",
+    expectedBun: "1.2.19",
+  })
+  expect(ok).toEqual([])
+  const mismatched = validateToolchainVersions({
+    bun: "1.3.14",
+    uv: "0.10.9",
+    python: "3.10.9",
+    npm: "9.9.9",
+    node: "18.20.4",
+    expectedBun: "1.2.19",
+  })
+  expect(mismatched).toHaveLength(5)
 })

@@ -68,17 +68,6 @@ export const VENDORED_PACKAGE_CONSUMERS: Readonly<Record<string, readonly string
 const TARGET_PLATFORM = { os: "win32", cpu: "x64" } as const
 const PATCH_SOURCE = "patches/react-devtools-core@7.0.1.patch"
 
-const EXPECTED_WORKSPACE_NORMALIZATIONS = [
-  { package: "@opentui/core", field: "dependencies.bun-ffi-structs", before: "0.2.4", after: "workspace:*" },
-  {
-    package: "@opentui/core",
-    field: "optionalDependencies.@opentui/core-win32-x64",
-    before: "0.4.3",
-    after: "workspace:*",
-  },
-  { package: "@opentui/react", field: "dependencies.@opentui/core", before: "0.4.3", after: "workspace:*" },
-] as const
-
 type JsonRecord = Record<string, unknown>
 
 /** 校验只允许在目标 Windows x64 环境执行依赖安装或重新解析。 */
@@ -105,8 +94,8 @@ export function directorySha256(directory: string): string {
 
   function visit(current: string): void {
     for (const name of readdirSync(current).sort()) {
-      // Bun creates workspace links below each local package. They are install
-      // output, not part of the npm tarball and must not change its digest.
+      // 安装器（Bun/npm）会在各 workspace 包下创建链接；它们是安装产物，
+      // 不属于 npm tarball，不得影响目录摘要。
       if (name === "node_modules" || name === ".bun") continue
       const absolute = join(current, name)
       const relativePath = relative(directory, absolute).split("\\").join("/")
@@ -136,10 +125,8 @@ function packageRoot(root: string, spec: VendoredPackageSpec): string {
 
 function lockJson(path: string): JsonRecord | undefined {
   try {
-    // Bun lockfile v1 is JSON with trailing commas; no package data is parsed
-    // from strings here, so removing only closing-token commas is sufficient.
-    const source = readFileSync(path, "utf-8").replace(/,\s*([}\]])/g, "$1")
-    const parsed = JSON.parse(source) as unknown
+    // package-lock.json 是严格 JSON；解析失败视为锁文件无效。
+    const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown
     return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined
@@ -161,18 +148,9 @@ function objectValue(record: JsonRecord | undefined, key: string): JsonRecord | 
   return isRecord(value) ? value : undefined
 }
 
-function nestedStringValue(record: JsonRecord | undefined, path: string): string | undefined {
-  const segments = path.split(".")
-  let current: unknown = record
-  for (const segment of segments) {
-    if (!isRecord(current)) return undefined
-    current = current[segment]
-  }
-  return typeof current === "string" ? current : undefined
-}
-
-function hasWorkspaceDependency(record: JsonRecord | undefined, key: string): boolean {
-  return stringValue(record, key) === "workspace:*"
+/** npm 以精确版本链接 workspace；断言依赖声明精确锁定 vendored 版本。 */
+function hasVendoredDependency(record: JsonRecord | undefined, key: string, version: string): boolean {
+  return stringValue(record, key) === version
 }
 
 function manifestEntrypoints(manifest: JsonRecord): string[] {
@@ -222,74 +200,16 @@ function validatePackageFiles(root: string, spec: VendoredPackageSpec): string[]
   }
   issues.push(...validateRequiredFiles(directory, spec, manifest))
   if (spec.name === "@opentui/core-win32-x64") {
-    const os = manifest.os
-    const cpu = manifest.cpu
-    if (!Array.isArray(os) || !os.includes(TARGET_PLATFORM.os) || !Array.isArray(cpu) || !cpu.includes(TARGET_PLATFORM.cpu)) {
-      issues.push(`${spec.name}: must target win32/x64`)
+    // npm 对带 os/cpu 的 workspace 成员在平台不符时直接 notsup，无法跨平台
+    // 共用 lock；平台定位由 tarball provenance 与 DLL 门禁保障，清单必须
+    // 移除平台声明。
+    if (manifest.os !== undefined || manifest.cpu !== undefined) {
+      issues.push(`${spec.name}: manifest must not declare os/cpu; platform targeting is proven by tarball provenance and the DLL gate`)
     }
     const dll = join(directory, "opentui.dll")
     if (!existsSync(dll) || !statSync(dll).isFile() || statSync(dll).size === 0) {
       issues.push(`${spec.name}: missing opentui.dll`)
     }
-  }
-  return issues
-}
-
-function workspaceNormalizationKey(entry: unknown): string | undefined {
-  if (!isRecord(entry)) return undefined
-  const looksLikeWorkspaceNormalization = entry.kind === "workspace-dependency"
-    || "field" in entry
-    || "before" in entry
-    || "after" in entry
-  if (!looksLikeWorkspaceNormalization) return undefined
-  if (entry.kind !== "workspace-dependency") return "invalid"
-  const packageName = stringValue(entry, "package")
-  const field = stringValue(entry, "field")
-  const before = stringValue(entry, "before")
-  const after = stringValue(entry, "after")
-  if (!packageName || !field || !before || !after) return "invalid"
-  return `${packageName}\t${field}\t${before}\t${after}`
-}
-
-function actualWorkspaceEdges(root: string): string[] {
-  const edges: string[] = []
-  for (const spec of VENDORED_PACKAGE_SPECS) {
-    const manifest = packageManifest(root, spec)
-    for (const section of ["dependencies", "optionalDependencies", "devDependencies", "peerDependencies"]) {
-      const dependencies = objectValue(manifest, section)
-      for (const [dependency, version] of Object.entries(dependencies ?? {})) {
-        if (version === "workspace:*") edges.push(`${spec.name}\t${section}.${dependency}`)
-      }
-    }
-  }
-  return edges.sort()
-}
-
-function validateWorkspaceNormalizations(root: string, value: unknown): string[] {
-  const issues: string[] = []
-  const actualEntries = Array.isArray(value) ? value : []
-  const actualKeys = actualEntries
-    .map(workspaceNormalizationKey)
-    .filter((key): key is string => key !== undefined)
-    .sort()
-  const expectedKeys = EXPECTED_WORKSPACE_NORMALIZATIONS.map(
-    ({ package: packageName, field, before, after }) => `${packageName}\t${field}\t${before}\t${after}`,
-  ).sort()
-  if (actualKeys.join("\n") !== expectedKeys.join("\n")) {
-    issues.push("provenance workspace normalization set mismatch")
-  }
-
-  for (const expected of EXPECTED_WORKSPACE_NORMALIZATIONS) {
-    const spec = VENDORED_PACKAGE_SPECS.find(({ name }) => name === expected.package)
-    const manifest = spec ? packageManifest(root, spec) : undefined
-    if (nestedStringValue(manifest, expected.field) !== expected.after) {
-      issues.push(`provenance workspace normalization does not match ${expected.package}:${expected.field}`)
-    }
-  }
-
-  const expectedEdges = EXPECTED_WORKSPACE_NORMALIZATIONS.map(({ package: packageName, field }) => `${packageName}\t${field}`).sort()
-  if (actualWorkspaceEdges(root).join("\n") !== expectedEdges.join("\n")) {
-    issues.push("vendored workspace dependency drift is not represented in provenance")
   }
   return issues
 }
@@ -336,7 +256,6 @@ function validateProvenance(root: string): string[] {
   if (!patch || patch.source !== PATCH_SOURCE || !existsSync(patchPath) || patch.sourceSha256 !== sha256Hex(readFileSync(patchPath))) {
     issues.push("react-devtools-core: patch source provenance mismatch")
   }
-  issues.push(...validateWorkspaceNormalizations(root, provenance.normalizations))
   return issues
 }
 
@@ -353,29 +272,49 @@ function validateWorkspaceEdges(root: string): string[] {
     issues.push("duplicate root patchedDependencies for react-devtools-core")
   }
 
-  const cli = readJson(resolve(root, "packages/cli/package.json"))
-  const cliRecord = isRecord(cli) ? cli : undefined
-  if (!hasWorkspaceDependency(objectValue(cliRecord, "dependencies"), "@opentui/core")) {
-    issues.push("CLI @opentui/core must use workspace:*")
-  }
-  if (!hasWorkspaceDependency(objectValue(cliRecord, "dependencies"), "@opentui/react")) {
-    issues.push("CLI @opentui/react must use workspace:*")
-  }
-  if (!hasWorkspaceDependency(objectValue(cliRecord, "devDependencies"), "react-devtools-core")) {
-    issues.push("CLI react-devtools-core must use workspace:*")
+  // npm 不支持 workspace: 协议（EUNSUPPORTEDPROTOCOL），残留该协议会让
+  // npm install / npm ci 直接失败；在门禁层 fail closed。
+  const manifestPaths = [
+    resolve(root, "packages/cli/package.json"),
+    resolve(root, "packages/protocol/package.json"),
+    ...VENDORED_PACKAGE_SPECS.map((spec) => join(packageRoot(root, spec), "package.json")),
+  ]
+  for (const manifestPath of manifestPaths) {
+    const record = readJson(manifestPath)
+    if (!isRecord(record)) continue
+    for (const section of ["dependencies", "optionalDependencies", "devDependencies", "peerDependencies"]) {
+      for (const [dependency, version] of Object.entries(objectValue(record, section) ?? {})) {
+        if (typeof version === "string" && version.startsWith("workspace:")) {
+          issues.push(`workspace: protocol is unsupported by npm: ${relative(root, manifestPath)} ${section}.${dependency}`)
+        }
+      }
+    }
   }
 
-  const core = packageManifest(root, VENDORED_PACKAGE_SPECS[0])
-  const react = packageManifest(root, VENDORED_PACKAGE_SPECS[1])
-  const devtools = packageManifest(root, VENDORED_PACKAGE_SPECS[4])
-  if (!hasWorkspaceDependency(objectValue(core, "dependencies"), "bun-ffi-structs")) {
-    issues.push("@opentui/core -> bun-ffi-structs must use workspace:*")
+  const [coreSpec, reactSpec, win32Spec, ffiSpec, devtoolsSpec] = VENDORED_PACKAGE_SPECS
+  const cli = readJson(resolve(root, "packages/cli/package.json"))
+  const cliRecord = isRecord(cli) ? cli : undefined
+  if (!hasVendoredDependency(objectValue(cliRecord, "dependencies"), "@opentui/core", coreSpec.version)) {
+    issues.push(`CLI @opentui/core must pin the vendored version ${coreSpec.version}`)
   }
-  if (!hasWorkspaceDependency(objectValue(core, "optionalDependencies"), "@opentui/core-win32-x64")) {
-    issues.push("@opentui/core -> @opentui/core-win32-x64 must use workspace:*")
+  if (!hasVendoredDependency(objectValue(cliRecord, "dependencies"), "@opentui/react", reactSpec.version)) {
+    issues.push(`CLI @opentui/react must pin the vendored version ${reactSpec.version}`)
   }
-  if (!hasWorkspaceDependency(objectValue(react, "dependencies"), "@opentui/core")) {
-    issues.push("@opentui/react -> @opentui/core must use workspace:*")
+  if (!hasVendoredDependency(objectValue(cliRecord, "devDependencies"), "react-devtools-core", devtoolsSpec.version)) {
+    issues.push(`CLI react-devtools-core must pin the vendored version ${devtoolsSpec.version}`)
+  }
+
+  const core = packageManifest(root, coreSpec)
+  const react = packageManifest(root, reactSpec)
+  const devtools = packageManifest(root, devtoolsSpec)
+  if (!hasVendoredDependency(objectValue(core, "dependencies"), "bun-ffi-structs", ffiSpec.version)) {
+    issues.push(`@opentui/core -> bun-ffi-structs must pin the vendored version ${ffiSpec.version}`)
+  }
+  if (!hasVendoredDependency(objectValue(core, "optionalDependencies"), "@opentui/core-win32-x64", win32Spec.version)) {
+    issues.push(`@opentui/core -> @opentui/core-win32-x64 must pin the vendored version ${win32Spec.version}`)
+  }
+  if (!hasVendoredDependency(objectValue(react, "dependencies"), "@opentui/core", coreSpec.version)) {
+    issues.push(`@opentui/react -> @opentui/core must pin the vendored version ${coreSpec.version}`)
   }
   if (stringValue(objectValue(react, "devDependencies"), "@types/react") !== "19.2.14") {
     issues.push("@opentui/react must retain the CLI React type dependency for workspace declaration resolution")
@@ -488,37 +427,42 @@ export function validateInstalledVendoredWorkspace(root: string, requireInstalle
   return issues
 }
 
+/** 校验 package-lock.json：五个源码包必须是 workspace link 解析，禁止 registry 回退与嵌套 locator。 */
 function validateLock(root: string): string[] {
-  const path = resolve(root, "bun.lock")
+  const path = resolve(root, "package-lock.json")
   const parsed = lockJson(path)
-  if (!parsed) return [`invalid or missing Bun lockfile ${path}`]
+  if (!parsed) return [`invalid or missing npm lockfile ${path}`]
   const packages = objectValue(parsed, "packages")
-  if (!packages) return ["Bun lockfile packages must be an object"]
+  if (!packages) return ["npm lockfile packages must be an object"]
   const issues: string[] = []
-  const primaryRecords = new Set<string>()
+  const linkRecords = new Set<string>()
+
   for (const spec of VENDORED_PACKAGE_SPECS) {
-    const primary = packages[spec.name]
-    const primaryLocator = Array.isArray(primary) && typeof primary[0] === "string" ? primary[0] : ""
-    if (primaryLocator.startsWith(`${spec.name}@workspace:`)) primaryRecords.add(spec.name)
+    const entry = packages[`node_modules/${spec.name}`]
+    if (!isRecord(entry)) continue
+    const resolved = typeof entry.resolved === "string" ? entry.resolved.split("\\").join("/") : ""
+    if (entry.link === true && resolved === spec.path) linkRecords.add(spec.name)
   }
 
   for (const [key, entry] of Object.entries(packages)) {
-    const locator = Array.isArray(entry) && typeof entry[0] === "string" ? entry[0] : ""
+    if (!isRecord(entry)) continue
     for (const spec of VENDORED_PACKAGE_SPECS) {
-      const isPrimaryRecord = key === spec.name
-      const isTargetLocator = locator.startsWith(`${spec.name}@`) || key.startsWith(`${spec.name}@`)
-      if (!isTargetLocator) continue
-      if (!locator.startsWith(`${spec.name}@workspace:`)) {
-        issues.push(`${spec.name}: registry fallback in Bun lockfile (${locator || key})`)
+      // 精确匹配包名结尾，避免 @opentui/core 前缀误匹配 @opentui/core-win32-x64。
+      const directKey = key === `node_modules/${spec.name}`
+      const nestedKey = !directKey && key.endsWith(`/node_modules/${spec.name}`)
+      if (!directKey && !nestedKey) continue
+      if (nestedKey) {
+        issues.push(`${spec.name}: nested registry locator in npm lockfile (${key})`)
+        continue
       }
-      if (JSON.stringify(entry ?? "").includes("registry.npmjs.org") || JSON.stringify(entry ?? "").includes("registry.")) {
-        issues.push(`${spec.name}: registry fallback metadata in Bun lockfile (${locator || key})`)
+      const resolved = typeof entry.resolved === "string" ? entry.resolved.split("\\").join("/") : ""
+      if (entry.link !== true || resolved !== spec.path) {
+        issues.push(`${spec.name}: registry fallback in npm lockfile (${key})`)
       }
-      if (isPrimaryRecord && !locator.startsWith(`${spec.name}@workspace:`)) primaryRecords.delete(spec.name)
     }
   }
   for (const spec of VENDORED_PACKAGE_SPECS) {
-    if (!primaryRecords.has(spec.name)) issues.push(`${spec.name}: registry fallback in Bun lockfile`)
+    if (!linkRecords.has(spec.name)) issues.push(`${spec.name}: registry fallback in npm lockfile`)
   }
   return issues
 }
