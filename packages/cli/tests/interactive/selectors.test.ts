@@ -5,6 +5,7 @@ import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protoco
 import type { InteractiveSnapshot } from "../../src/interactive/types"
 import {
   selectCommandView,
+  selectCodeIndexView,
   selectConversationView,
   selectFeatureAvailability,
   selectInteractionView,
@@ -47,6 +48,7 @@ function snapshot(overrides: Partial<InteractiveSnapshot> = {}): InteractiveSnap
     workMode: "build",
     composeState: null,
     workItem: null,
+    codeIndex: null,
     threadMode: null,
     childTimelineExecutionId: null,
     ...overrides,
@@ -65,6 +67,93 @@ test("FeatureAvailability：空闲且能力齐全时全部可用", () => {
   expect(availability.canOpenSkillsPanel).toBe(true)
   expect(availability.canOpenMcpPanel).toBe(true)
   expect(availability.canOpenAgentsPanel).toBe(true)
+})
+
+test("代码索引 selector 对 absent/unavailable 使用同一供应商无关视图", () => {
+  const base = {
+    revision: 0,
+    generation: 0,
+    engine_version: "1.1.6" as const,
+    data_directory: ".harness-index" as const,
+    index_status: "absent" as const,
+    query_status: "stopped" as const,
+    watcher_status: "stopped" as const,
+    job: null,
+    stats: null,
+  }
+  expect(selectCodeIndexView(snapshot({ codeIndex: {
+    ...base,
+    runtime_status: "ready",
+    error: null,
+  } }))).toEqual({ title: "代码索引", indexStatus: "absent", body: "代码索引 · 未建立" })
+
+  const unavailable = selectCodeIndexView(snapshot({ codeIndex: {
+    ...base,
+    runtime_status: "unavailable",
+    error: {
+      code: "CODE_INDEX_RUNTIME_UNAVAILABLE",
+      message: "代码索引运行时不可用。",
+      recovery: "安装匹配的 1.1.6 依赖后重启 Harness。",
+    },
+  } }))
+  expect(unavailable?.indexStatus).toBe("unavailable")
+  expect(unavailable?.body).toContain("运行时不可用")
+  expect(unavailable?.body).not.toContain("CodeGraph")
+  expect(unavailable?.body).not.toContain("实验")
+  expect(unavailable?.body).not.toContain("/Users/")
+})
+
+test("代码索引 selector 展示阶段与数量，没有 total 时不生成百分比", () => {
+  const base = {
+    revision: 1,
+    generation: 0,
+    engine_version: "1.1.6" as const,
+    data_directory: ".harness-index" as const,
+    runtime_status: "ready" as const,
+    index_status: "absent" as const,
+    query_status: "stopped" as const,
+    watcher_status: "stopped" as const,
+    stats: null,
+    error: null,
+  }
+  const running = selectCodeIndexView(snapshot({
+    codeIndex: {
+      ...base,
+      job: { id: "job-1", action: "initialize", status: "running", phase: "indexing", completed: 2 },
+    },
+  }))
+  expect(running?.body).toBe("代码索引 · 建立中\n已处理 2 项")
+  expect(running?.body).not.toContain("%")
+
+  const withTotal = selectCodeIndexView(snapshot({
+    codeIndex: {
+      ...base,
+      job: { id: "job-1", action: "initialize", status: "running", phase: "resolving", completed: 3, total: 5 },
+    },
+  }))
+  expect(withTotal?.body).toBe("代码索引 · 解析中\n已处理 3 / 5 项")
+  expect(withTotal?.body).not.toContain("%")
+
+  const noCount = selectCodeIndexView(snapshot({
+    codeIndex: {
+      ...base,
+      job: { id: "job-1", action: "initialize", status: "running", phase: "preparing" },
+    },
+  }))
+  expect(noCount?.body).toBe("代码索引 · 准备中")
+
+  const failed = selectCodeIndexView(snapshot({
+    codeIndex: {
+      ...base,
+      index_status: "incomplete",
+      job: { id: "job-1", action: "initialize", status: "failed", phase: "validating" },
+      error: { code: "CODE_INDEX_INCOMPLETE", message: "代码索引不完整，不能安全查询。", recovery: "执行 /code-index rebuild 重建。" },
+    },
+  }))
+  expect(failed?.indexStatus).toBe("incomplete")
+  expect(failed?.body).toContain("不完整")
+  expect(failed?.body).toContain("rebuild")
+  expect(failed?.body).not.toContain("CodeGraph")
 })
 
 test("FeatureAvailability：活动 Run 期间禁止切换 Thread 与变更 Skill/MCP，允许取消", () => {

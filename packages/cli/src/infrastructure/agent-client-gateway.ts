@@ -3,6 +3,8 @@
 import type {
   AgentsListResult,
   ApprovalMode,
+  CodeIndexSnapshot,
+  CodeIndexApplyParams,
   ConfigChange,
   ContextCompactResult,
   GoalInspectResult,
@@ -66,6 +68,14 @@ export class AgentClientGateway implements AgentGateway {
     }
     this.client.on(Method.THREAD_SUMMARY, handler)
     return () => this.client.off(Method.THREAD_SUMMARY, handler)
+  }
+
+  onCodeIndexChanged(listener: (snapshot: CodeIndexSnapshot) => void): () => void {
+    const handler = (params: unknown) => {
+      listener(validateNotificationParams(Method.CODE_INDEX_CHANGED, params))
+    }
+    this.client.on(Method.CODE_INDEX_CHANGED, handler)
+    return () => this.client.off(Method.CODE_INDEX_CHANGED, handler)
   }
 
   onClose(listener: (error: Error) => void): () => void {
@@ -235,6 +245,22 @@ export class AgentClientGateway implements AgentGateway {
   async mcpStatus(): Promise<McpStatusResult> {
     try {
       return await this.client.mcpStatus()
+    } catch (error) {
+      throw this.wrapError(error)
+    }
+  }
+
+  async codeIndexStatus(): Promise<CodeIndexSnapshot> {
+    try {
+      return await this.client.codeIndexStatus()
+    } catch (error) {
+      throw this.wrapError(error)
+    }
+  }
+
+  async codeIndexApply(params: CodeIndexApplyParams): Promise<CodeIndexSnapshot> {
+    try {
+      return await this.client.codeIndexApply(params)
     } catch (error) {
       throw this.wrapError(error)
     }

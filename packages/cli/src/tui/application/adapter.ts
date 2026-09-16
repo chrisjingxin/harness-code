@@ -8,7 +8,7 @@ import type { AgentSummary, ModelProfile, ThreadSummary, TurnSummary } from "@za
 
 import type { InteractiveController, InteractiveIntent, InteractiveSnapshot, IntentOutcome, PresentationEffect } from "../../interactive/types"
 import type { ToolCard } from "../../interactive/state"
-import { selectWorkItemView, type WorkItemView } from "../../interactive/selectors"
+import { selectCodeIndexView, selectWorkItemView, type WorkItemView } from "../../interactive/selectors"
 import { filterAgents } from "../../presentation-shared/agent-catalog"
 import { threadMatchesQuery } from "../../presentation-shared/thread-title"
 import { filterCommandMenuItems } from "../../presentation-shared/command-menu-policy"
@@ -52,7 +52,7 @@ export type BtwState = {
 /** 执行中 Goal/Plan 只读查看浮层。 */
 export type InspectOverlayState = {
   visible: boolean
-  kind: "goal" | "plan" | "mcp"
+  kind: "goal" | "plan" | "mcp" | "code-index"
   title: string
   body: string
 }
@@ -249,7 +249,7 @@ export type TuiAdapterSnapshot = {
   readonly undoDialog?: UndoDialogState
   readonly sidebar: SidebarState
   readonly commandDialog?: {
-    readonly kind: "confirm-new-thread" | "confirm-quit"
+    readonly kind: "confirm-new-thread" | "confirm-quit" | "confirm-code-index-remove"
     readonly title: string
     readonly message: string
     readonly confirmLabel?: string
@@ -518,6 +518,10 @@ class TuiAdapterImpl implements TuiAdapter {
       const previousRequestId = previousInteraction?.requestId
       const nextRequestId = interactive.interaction?.requestId
       const directWorkspaceTools = this.observeWorkspaceTools(interactive, previousActiveRun)
+      if (this.inspectOverlayState.visible && this.inspectOverlayState.kind === "code-index") {
+        const view = selectCodeIndexView(interactive)
+        if (view) this.inspectOverlayState = { visible: true, kind: "code-index", title: view.title, body: view.body }
+      }
       const runEnded = Boolean(previousActiveRun && !interactive.activeRun)
       // 反向问答/审批会在 Run 进行中插入时间线；必须主动滚动，否则卡片落在
       // 当前视口下方，用户只能看到旧的 spinner，直到 Interaction 超时。
@@ -1952,11 +1956,11 @@ class TuiAdapterImpl implements TuiAdapter {
   }
 
   /** 执行 confirmation 的确认动作；共享 Controller 解释 confirmationId。 */
-  private async resolveDialog(kind: "command" | "model-binding", confirmed: boolean): Promise<void> {
+  private async resolveDialog(_kind: "command" | "model-binding", confirmed: boolean): Promise<void> {
     const interactive = this.controller.getSnapshot()
     const confirmation = interactive.confirmation
     if (!confirmation) return
-    await this.routeDispatch({
+    await this.dispatchInteractive({
       type: "confirmation.resolve",
       confirmationId: confirmation.confirmationId,
       confirmed,
@@ -2045,6 +2049,15 @@ class TuiAdapterImpl implements TuiAdapter {
     if (confirmation?.confirmationId === "quit-while-running") {
       return {
         kind: "confirm-quit",
+        title: confirmation.title,
+        message: confirmation.message,
+        confirmLabel: confirmation.confirmLabel,
+        cancelLabel: confirmation.cancelLabel,
+      }
+    }
+    if (confirmation?.confirmationId === "code-index-remove") {
+      return {
+        kind: "confirm-code-index-remove",
         title: confirmation.title,
         message: confirmation.message,
         confirmLabel: confirmation.confirmLabel,

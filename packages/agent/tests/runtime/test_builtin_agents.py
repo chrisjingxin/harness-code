@@ -97,7 +97,7 @@ def test_catalog_lists_builtins_before_plugins(tmp_path: Path) -> None:
     assert gp["source"] == "builtin"
     assert gp["model_profile_id"] == "inherit"
     assert explore["kind"] == "builtin"
-    assert explore["tools"] == ["glob", "grep", "ls", "lsp", "read_file"]
+    assert explore["tools"] == ["codebase_explore", "glob", "grep", "ls", "lsp", "read_file"]
     assert "task" not in gp["description"] or "不含委派" in (gp["description"] or "")
     plugin = next(item for item in summaries if item["id"] == "reviewer")
     assert plugin["kind"] == "plugin"

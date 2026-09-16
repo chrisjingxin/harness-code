@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { Capability } from "@za38/protocol"
 import { createTuiAdapter, type TuiAdapterOptions } from "../../src/tui/application/adapter"
 import { createWebInteractiveAdapter, type WebAdapterOptions } from "../../src/web/application/adapter"
 import { buildWebUiState } from "../../src/presentation-coordinator"
@@ -119,6 +120,49 @@ function createMockController(): InteractiveController {
 }
 
 describe("Adapter Parity (TUI vs Web)", () => {
+  test("代码索引删除确认在 TUI 与 Web 使用同一份共享文案", async () => {
+    const harness = makeHarness({
+      capabilities: [Capability.CODE_INDEX_READ, Capability.CODE_INDEX_MANAGE],
+    })
+    await harness.controller.dispatch({ type: "input.submit", value: "/code-index remove" })
+    const tuiAdapter = createTuiAdapter({
+      controller: harness.controller,
+      promptHistoryStore: { load: async () => [], append: async () => {} },
+      onRequestExit: () => undefined,
+    })
+    const client = {
+      state: buildWebUiState(harness.controller.getSnapshot(), {
+        tree: { status: "idle", rows: [], selectedPath: null, limited: false },
+        preview: { status: "idle" },
+      }),
+      handoffState: { phase: "web-active", handoffId: "h1" },
+      getState() { return this.state },
+      getHandoffState() { return this.handoffState },
+      subscribeState: () => () => {},
+      subscribeHandoff: () => () => {},
+      submitIntent: (intent: InteractiveIntent) => harness.controller.dispatch(intent),
+      workspaceIntent: async () => ({ status: "accepted" }),
+      ready: () => {},
+      returnToTui: () => {},
+      requestExit: () => {},
+      close: () => {},
+    } as unknown as WebUiClient
+    const webAdapter = createWebInteractiveAdapter({
+      client,
+      frameScheduler: { schedule: fn => fn(), cancel: () => {}, flush: () => {} },
+    })
+    try {
+      const tui = tuiAdapter.getSnapshot().commandDialog
+      const web = webAdapter.getSnapshot().interactive.confirmation
+      expect(tui).toMatchObject({ title: "删除代码索引？", confirmLabel: "删除索引", cancelLabel: "保留索引" })
+      expect(web).toMatchObject({ title: tui?.title, message: tui?.message, confirmLabel: tui?.confirmLabel, cancelLabel: tui?.cancelLabel })
+    } finally {
+      await tuiAdapter.close()
+      await webAdapter.close()
+      await harness.controller.close()
+    }
+  })
+
   test("同一意图序列在 TUI 与 Web 产生相同的 IntentOutcome 且拒绝时均保留草稿", async () => {
     const controller = createMockController()
     const historyStore = { load: async () => [], append: async () => {} }

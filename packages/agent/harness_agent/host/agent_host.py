@@ -283,6 +283,14 @@ ATTACHMENT_CAPABILITY_ALLOWLIST = frozenset(
         CAPABILITY["MCP_MANAGE"],
         CAPABILITY["MODELS_READ"],
         CAPABILITY["MODELS_SELECT"],
+        CAPABILITY["CODE_INDEX_READ"],
+        CAPABILITY["CODE_INDEX_MANAGE"],
+    }
+)
+_CODE_INDEX_CAPABILITIES = frozenset(
+    {
+        CAPABILITY["CODE_INDEX_READ"],
+        CAPABILITY["CODE_INDEX_MANAGE"],
     }
 )
 
@@ -375,6 +383,7 @@ class AgentHost:
         connection_id: str | None = None,
         connection_role: str = "owner",
         diagnostic_log: DiagnosticLog | None = None,
+        code_index_runtime: Any | None = None,
     ) -> None:
         """初始化运行表、反向请求表、发送锁和方法分发表。
 
@@ -427,6 +436,8 @@ class AgentHost:
         self._connection_role = connection_role
         self._config_home = config_home
         self._config: Za38Config | None = None
+        self._code_index_runtime = code_index_runtime
+        self._code_index_manager = None
         self._config_change_policy = config_change_policy or ManagedConfigPolicy()
         self._config_change_service: ConfigChangeService | None = None
         self._startup_error: str | None = None
@@ -588,6 +599,8 @@ class AgentHost:
             METHOD["MCP_STATUS"]: self._handle_mcp_status,
             METHOD["MCP_ADD"]: self._handle_mcp_add,
             METHOD["MCP_REMOVE"]: self._handle_mcp_remove,
+            METHOD["CODE_INDEX_STATUS"]: self._handle_code_index_status,
+            METHOD["CODE_INDEX_APPLY"]: self._handle_code_index_apply,
             METHOD["HOST_ATTACHMENT_CREATE"]: self._handle_host_attachment_create,
             METHOD["HOST_ATTACHMENT_REVOKE"]: self._handle_host_attachment_revoke,
             METHOD["HOST_CONTROL_ACQUIRE"]: self._handle_host_control_acquire,
@@ -703,6 +716,9 @@ class AgentHost:
         # AgentEngine 先释放自己的图和共享租约，Host owner 再关闭 MCP、
         # workspace/sandbox、Provider transport，最后才关闭 ThreadPersistence。
         await self._close_agent_engine_pool()
+        if self._code_index_manager is not None:
+            await self._code_index_manager.close()
+            self._code_index_manager = None
         if self._mcp_connect_task is not None:
             await asyncio.gather(self._mcp_connect_task, return_exceptions=True)
             self._mcp_connect_task = None
@@ -1151,6 +1167,16 @@ class AgentHost:
         enabled = requested.intersection(connection.capability_ceiling)
         if connection.role != "owner":
             enabled.discard(CAPABILITY["HOST_ATTACH"])
+        available = (
+            list(connection.capability_ceiling)
+            if connection.role != "owner"
+            else list(SERVER_CAPABILITIES)
+        )
+        if not self._code_index_configured():
+            enabled.difference_update(_CODE_INDEX_CAPABILITIES)
+            available = [item for item in available if item not in _CODE_INDEX_CAPABILITIES]
+        else:
+            await self._ensure_code_index_manager().start()
         handles = set(parsed.capabilities.handles)
         connection.protocol_minor = negotiated_minor
         connection.interaction_handles = handles
@@ -1173,11 +1199,7 @@ class AgentHost:
                 },
             },
             "capabilities": {
-                "available": (
-                    list(connection.capability_ceiling)
-                    if connection.role != "owner"
-                    else list(SERVER_CAPABILITIES)
-                ),
+                "available": available,
                 "enabled": sorted(enabled),
                 "handles": sorted(handles),
             },
@@ -1577,6 +1599,11 @@ class AgentHost:
                     actual_primary_profile_id=resolved.safe_primary.profile_id,
                     actual_primary_settings=resolved.primary_profile.settings,
                 )
+            code_index_lease = None
+            manager = self._code_index_manager
+            if manager is not None:
+                await manager.start()
+                code_index_lease = await manager.acquire_query()
             spec = await self._resolve_agent_engine_spec(
                 command.thread_id,
                 self._config,
@@ -1587,6 +1614,7 @@ class AgentHost:
                 goal_backed=goal_backed,
                 max_iterations=self._config.goal.max_iterations if goal_backed else 3,
                 grader_model_fingerprint=grader_fingerprint,
+                code_index_generation=None if code_index_lease is None else code_index_lease.generation,
             )
             # Policy 解析会把 Skill catalog 收窄成角色级的只读视图，Run 必须
             # 原样带上这份视图传给 Context/virtual backend；否则被代理执行的
@@ -1665,8 +1693,12 @@ class AgentHost:
                 ),
                 provider_retry_attempts=max_retries + 1,
                 snapshot_reservation=reservation,
+                code_index_lease=code_index_lease,
             )
         except BaseException:
+            lease = locals().get("code_index_lease")
+            if lease is not None:
+                await lease.release()
             await reservation.release()
             raise
 
@@ -4142,6 +4174,82 @@ class AgentHost:
             self._active_team_tasks.pop(run_id, None)
             self._active_team_tokens.pop(run_id, None)
 
+    def _code_index_configured(self) -> bool:
+        """配置开启才允许协商代码索引 capability；加载失败视为关闭。"""
+        return bool(
+            self._config is not None and self._config.experimental.code_index.enabled
+        )
+
+    def _ensure_code_index_manager(self):
+        """仅在配置开启后构造 Manager；关闭路径不得读取安装根。"""
+        if self._code_index_manager is not None:
+            return self._code_index_manager
+        runtime = self._code_index_runtime
+        if runtime is None:
+            from harness_agent.code_index.runtime import NodeCodeIndexRuntime
+
+            runtime = NodeCodeIndexRuntime.from_env()
+        from harness_agent.code_index.manager import CodeIndexManager
+
+        self._code_index_manager = CodeIndexManager(
+            self._workspace,
+            runtime,
+            on_changed=self._broadcast_code_index_changed,
+        )
+        return self._code_index_manager
+
+    async def _handle_code_index_status(self, _params: dict[str, Any], _id: str) -> dict[str, Any]:
+        """返回当前工作区代码索引只读快照，不创建目录。"""
+        manager = self._ensure_code_index_manager()
+        await manager.start()
+        return manager.snapshot()
+
+    async def _handle_code_index_apply(self, params: dict[str, Any], _id: str) -> dict[str, Any]:
+        """受理代码索引后台动作；业务拒绝统一映射为稳定 RPC error。"""
+        from harness_agent.code_index.manager import CodeIndexManagerError
+
+        manager = self._ensure_code_index_manager()
+        try:
+            await manager.start()
+            return await manager.apply(params)
+        except CodeIndexManagerError as exc:
+            raise RpcError(
+                -32004,
+                exc.code,
+                {
+                    "code": exc.code,
+                    "retryable": True,
+                    "details": {
+                        "message": exc.detail.message,
+                        "recovery": exc.detail.recovery,
+                    },
+                },
+            ) from exc
+
+    async def _broadcast_code_index_changed(self, snapshot: dict[str, object]) -> None:
+        """只向协商 v3.10 code_index.read 的连接发送完整状态。"""
+        message = {
+            "jsonrpc": "2.0",
+            "method": METHOD["CODE_INDEX_CHANGED"],
+            "params": snapshot,
+        }
+        targets = [
+            connection
+            for connection in self._connections.values()
+            if not connection.closed
+            and connection.protocol_minor >= 10
+            and CAPABILITY["CODE_INDEX_READ"] in connection.enabled_capabilities
+        ]
+        if not targets:
+            return
+        results = await asyncio.gather(
+            *(self._send_to(connection, message) for connection in targets),
+            return_exceptions=True,
+        )
+        for connection, result in zip(targets, results, strict=True):
+            if isinstance(result, Exception) and connection is not self._owner_connection:
+                asyncio.create_task(self.close_connection(connection))
+
     def _load_config(self) -> None:
         """刷新配置缓存，并保存用户可修复的错误。"""
         try:
@@ -4354,6 +4462,7 @@ class AgentHost:
         goal_backed: bool = False,
         max_iterations: int = 3,
         grader_model_fingerprint: str | None = None,
+        code_index_generation: int | None = None,
     ) -> ResolvedAgentSpec:
         """截取一次角色解析快照，Profile、审批策略和 builder 都从它派生。"""
         persistence = persistence or await self._ensure_thread_persistence()
@@ -4393,6 +4502,7 @@ class AgentHost:
             goal_backed=goal_backed,
             max_iterations=max_iterations,
             grader_model_fingerprint=grader_model_fingerprint,
+            code_index_generation=code_index_generation,
         )
         profile = spec.runtime_profile
         if mcp_owner is not None:
@@ -5482,7 +5592,7 @@ class AgentHost:
                 dynamic=True,
             )
 
-            extra_root_tools = ()
+            extra_root_tools: tuple[Any, ...] = ()
             rubric_middleware = None
             if getattr(spec, "goal_backed", False):
                 from harness_agent.goals.rubric_adapter import create_rubric_middleware
@@ -5497,6 +5607,10 @@ class AgentHost:
                     ),
                     max_iterations=getattr(spec, "max_iterations", 3),
                 )
+            if getattr(spec, "code_index_generation", None) is not None:
+                from harness_agent.tools.codebase_explore import create_codebase_explore_tool
+
+                extra_root_tools = (*extra_root_tools, create_codebase_explore_tool())
             graph = create_harness_agent(
                 model,
                 tools=mcp_tools or None,
@@ -5723,6 +5837,7 @@ class AgentHost:
             diagnostic_log=run.diagnostic_log,
             usage_ledger=getattr(run, "usage_ledger", None),
             goal_binding=run.preparation.goal_binding,
+            code_index_query_lease=run.preparation.code_index_lease,
             goal_store=(
                 run.persistence.goal_store()
                 if run.persistence is not None and hasattr(run.persistence, "goal_store")

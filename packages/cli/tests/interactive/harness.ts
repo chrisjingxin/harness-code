@@ -79,6 +79,8 @@ export function manualScheduler() {
 
 /** 内存 port：记录调用、可注入 Run 事件与 Interaction。 */
 function createPort(options: {
+  codeIndexStatusImpl?: AgentGateway["codeIndexStatus"]
+  codeIndexApplyImpl?: AgentGateway["codeIndexApply"]
   compactContextImpl?: AgentGateway["compactContext"]
   openThreadImpl?: AgentGateway["openThread"]
 } = {}) {
@@ -86,6 +88,7 @@ function createPort(options: {
   const runHandles: Array<{ threadId: string; runId: string }> = []
   let protocolErrorListener: ((error: Error) => void) | undefined
   let threadSummaryListener: ((thread: ThreadSummary) => void) | undefined
+  let codeIndexChangedListener: Parameters<AgentGateway["onCodeIndexChanged"]>[0] | undefined
   let closeListener: ((error: Error) => void) | undefined
   let interactionHandler: ((request: InteractionRequestEnvelope) => Promise<InteractionResponse>) | undefined
   const abandoned: string[] = []
@@ -113,6 +116,22 @@ function createPort(options: {
   }
   let compactContextImpl: AgentGateway["compactContext"] = options.compactContextImpl
     ?? (async () => ({ compacted: true, context: { action: "manual_summary" } }))
+  let codeIndexStatusImpl: AgentGateway["codeIndexStatus"] = options.codeIndexStatusImpl
+    ?? (async () => ({
+      revision: 0,
+      generation: 0,
+      engine_version: "1.1.6",
+      data_directory: ".harness-index",
+      runtime_status: "ready",
+      index_status: "absent",
+      query_status: "stopped",
+      watcher_status: "stopped",
+      job: null,
+      stats: null,
+      error: null,
+    }))
+  let codeIndexApplyImpl: AgentGateway["codeIndexApply"] = options.codeIndexApplyImpl
+    ?? (async () => { throw new Error("code index apply not configured") })
   const openThreadImpl: AgentGateway["openThread"] = options.openThreadImpl ?? (async threadId => ({
     thread: threadSummary(threadId, "恢复的请求"),
     messages: [{ kind: "user", content: "恢复的请求" }, { kind: "tool", tool_name: "execute", content: "恢复的工具结果" }],
@@ -152,6 +171,7 @@ function createPort(options: {
     sendInteraction: (request: InteractionRequestEnvelope) => Promise<InteractionResponse>
     protocolError: (message: string) => void
     emitThreadSummary: (thread: ThreadSummary) => void
+    emitCodeIndexChanged: (snapshot: Awaited<ReturnType<AgentGateway["codeIndexStatus"]>>) => void
     closeConnection: (message: string) => void
     setProfiles: (next: ModelProfile[]) => void
     setThreadSelection: (next: string | null) => void
@@ -159,6 +179,7 @@ function createPort(options: {
     setSkillEnabledImpl: (impl: (skillId: string, enabled: boolean) => Promise<Record<string, never>>) => void
     setApprovalModeImpl: (impl: AgentGateway["setApprovalMode"]) => void
     setCompactContextImpl: (impl: AgentGateway["compactContext"]) => void
+    setCodeIndexStatusImpl: (impl: AgentGateway["codeIndexStatus"]) => void
     setListAgentsImpl: (impl: AgentGateway["listAgents"]) => void
     lastRunSelection: () => { message: string; threadId: string; runId: string; mode: "build" | "compose"; modelSelection?: { primary_profile: string }; requestedSkill?: { id: string; args?: string } } | undefined
   } = {
@@ -169,6 +190,10 @@ function createPort(options: {
     onThreadSummary(listener) {
       threadSummaryListener = listener
       return () => { if (threadSummaryListener === listener) threadSummaryListener = undefined }
+    },
+    onCodeIndexChanged(listener) {
+      codeIndexChangedListener = listener
+      return () => { if (codeIndexChangedListener === listener) codeIndexChangedListener = undefined }
     },
     onClose(listener) {
       closeListener = listener
@@ -312,6 +337,14 @@ function createPort(options: {
       calls.push("mcp.status")
       return { servers: [{ name: "filesystem", transport: "stdio", status: "connected", tool_names: ["read"] }], total_tools: 1 }
     },
+    async codeIndexStatus() {
+      calls.push("code_index.status")
+      return codeIndexStatusImpl()
+    },
+    async codeIndexApply(params) {
+      calls.push(`code_index.apply(${params.action},${params.expected_revision})`)
+      return codeIndexApplyImpl(params)
+    },
     async mcpAdd() {
       calls.push("mcp.add")
       return { added: true, connected: true, tool_names: ["new_tool"] }
@@ -401,6 +434,9 @@ function createPort(options: {
     emitThreadSummary(thread) {
       threadSummaryListener?.(thread)
     },
+    emitCodeIndexChanged(snapshot) {
+      codeIndexChangedListener?.(snapshot)
+    },
     closeConnection(message) {
       closeListener?.(new Error(message))
     },
@@ -421,6 +457,9 @@ function createPort(options: {
     },
     setCompactContextImpl(impl) {
       compactContextImpl = impl
+    },
+    setCodeIndexStatusImpl(impl) {
+      codeIndexStatusImpl = impl
     },
     setListAgentsImpl(impl) {
       listAgentsImpl = impl
@@ -550,9 +589,13 @@ export function makeHarness(options: {
   agentCommands?: InteractiveRuntime["agentCommands"]
   commandRegistry?: CommandRegistry
   compactContextImpl?: AgentGateway["compactContext"]
+  codeIndexStatusImpl?: AgentGateway["codeIndexStatus"]
+  codeIndexApplyImpl?: AgentGateway["codeIndexApply"]
   openThreadImpl?: AgentGateway["openThread"]
 } = {}) {
   const portState = createPort({
+    codeIndexStatusImpl: options.codeIndexStatusImpl,
+    codeIndexApplyImpl: options.codeIndexApplyImpl,
     compactContextImpl: options.compactContextImpl,
     openThreadImpl: options.openThreadImpl,
   })

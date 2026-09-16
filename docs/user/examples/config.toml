@@ -57,6 +57,11 @@ X-Enterprise-Tenant = "HARNESS_TENANT"
 # [experimental.delegation.models]
 # explore = "fast"
 # general-purpose = "fast"
+#
+# 实验性代码索引，默认关闭。修改后重启 AgentHost。
+# 界面只显示“代码索引”；详见 docs/user/代码索引.md。
+# [experimental.code_index]
+# enabled = false
 
 [approval]
 mode = "auto"

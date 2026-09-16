@@ -380,6 +380,7 @@ class RunPreparation:
     # Coordinator 只透传不使用，快照协议归 Host 所有。
     snapshot_reservation: Any | None = None
     experimental_delegation: bool = False
+    code_index_lease: Any | None = None
 
     def __post_init__(self) -> None:
         """拒绝把 requested Skill、Context 和 Profile 拆成不同 snapshot。"""
@@ -1596,11 +1597,15 @@ class RunCoordinator:
     async def _release_snapshot_reservation(preparation: RunPreparation) -> None:
         """在每条受理路径（成功/失败/取消）上都释放 Host 的快照锁令牌。"""
         reservation = preparation.snapshot_reservation
-        if reservation is None:
-            return
-        release = getattr(reservation, "release", None)
-        if callable(release):
-            await release()
+        lease = preparation.code_index_lease
+        if reservation is not None:
+            release = getattr(reservation, "release", None)
+            if callable(release):
+                await release()
+        if lease is not None:
+            release_lease = getattr(lease, "release", None)
+            if callable(release_lease):
+                await release_lease()
 
     def _finish(self, run: RunState, status: str, payload: dict[str, object]) -> None:
         """收敛 Run 的唯一终态；已完成/已取消/已失败后再次调用是空操作。"""

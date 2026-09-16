@@ -2,6 +2,7 @@
 
 import { expect, test } from "bun:test"
 
+import { Capability, type CodeIndexApplyParams } from "@za38/protocol"
 import { createTuiAdapter } from "../../src/tui/application/adapter"
 import { makeHarness } from "../interactive/harness"
 
@@ -54,6 +55,57 @@ test("hint-interrupt 弹出 Ctrl+C 提示", async () => {
   try {
     await adapter.dispatch({ type: "shortcut", action: "hint-interrupt" })
     expect(adapter.getSnapshot().toasts.some(item => item.message === "中断请用 Ctrl+C")).toBe(true)
+  } finally {
+    await adapter.close()
+    await harness.controller.close()
+  }
+})
+
+test("/code-index remove 在 TUI 使用共享确认后才删除", async () => {
+  const requests: CodeIndexApplyParams[] = []
+  const harness = makeHarness({
+    capabilities: [Capability.CODE_INDEX_READ, Capability.CODE_INDEX_MANAGE],
+    codeIndexStatusImpl: async () => ({
+      revision: 3,
+      generation: 1,
+      engine_version: "1.1.6",
+      data_directory: ".harness-index",
+      runtime_status: "ready",
+      index_status: "ready",
+      query_status: "ready",
+      watcher_status: "ready",
+      job: null,
+      stats: null,
+      error: null,
+    }),
+    codeIndexApplyImpl: async params => {
+      requests.push(params)
+      return {
+        revision: 4,
+        generation: 1,
+        engine_version: "1.1.6",
+        data_directory: ".harness-index",
+        runtime_status: "ready",
+        index_status: "absent",
+        query_status: "stopped",
+        watcher_status: "stopped",
+        job: null,
+        stats: null,
+        error: null,
+      }
+    },
+  })
+  const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => {} })
+  try {
+    await adapter.dispatch({ type: "submit", value: "/code-index remove" })
+    expect(adapter.getSnapshot().commandDialog).toMatchObject({
+      kind: "confirm-code-index-remove",
+      title: "删除代码索引？",
+    })
+    expect(requests).toEqual([])
+    await adapter.dispatch({ type: "dialog-resolve", kind: "command", confirmed: true })
+    expect(requests).toEqual([{ action: "remove", expected_revision: 3, confirmed: true }])
+    expect(adapter.getSnapshot().inspectOverlay).toMatchObject({ visible: true, kind: "code-index" })
   } finally {
     await adapter.close()
     await harness.controller.close()

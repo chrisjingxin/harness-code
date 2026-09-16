@@ -54,6 +54,73 @@ function mountWebApp(active: boolean, snapshot: WebAdapterSnapshot): { adapter: 
 }
 
 describe("WebApp", () => {
+  test("代码索引删除使用共享确认文案并回传确认结果", async () => {
+    const confirmation = {
+      confirmationId: "code-index-remove",
+      title: "删除代码索引？",
+      message: "这会删除当前工作区的本地代码索引数据；源码不会被修改。",
+      confirmLabel: "删除索引",
+      cancelLabel: "保留索引",
+    }
+    const { adapter, handle } = mountWebApp(true, makeSnapshot({
+      interactive: makeInteractive({ confirmation }),
+    }))
+    try {
+      const dialog = handle.container.querySelector('[role="dialog"]')
+      expect(dialog?.textContent).toContain("删除代码索引？")
+      const confirm = handle.container.querySelector<HTMLButtonElement>('button[aria-label="删除索引"]')
+      expect(confirm).not.toBeNull()
+      await act(async () => { confirm?.click() })
+      expect(adapter.intentLog).toContainEqual({
+        type: "confirmation-resolve",
+        confirmationId: "code-index-remove",
+        confirmed: true,
+      })
+    } finally {
+      handle.unmount()
+    }
+  })
+
+  test("代码索引查看浮层只显示中性状态文案", () => {
+    const { handle } = mountWebApp(true, makeSnapshot({
+      inspectOverlay: {
+        visible: true,
+        kind: "code-index",
+        title: "代码索引",
+        body: "代码索引 · 未建立",
+      },
+    }))
+    try {
+      const dialog = handle.container.querySelector('[role="dialog"]')
+      expect(dialog?.getAttribute("aria-label")).toBe("代码索引")
+      expect(dialog?.textContent).toContain("代码索引 · 未建立")
+      expect(dialog?.textContent).not.toContain("CodeGraph")
+      expect(dialog?.textContent).not.toContain("实验")
+    } finally {
+      handle.unmount()
+    }
+  })
+
+  test("代码索引进度浮层显示阶段与数量且不含百分比", () => {
+    const { handle } = mountWebApp(true, makeSnapshot({
+      inspectOverlay: {
+        visible: true,
+        kind: "code-index",
+        title: "代码索引",
+        body: "代码索引 · 解析中\n已处理 3 / 5 项",
+      },
+    }))
+    try {
+      const dialog = handle.container.querySelector('[role="dialog"]')
+      expect(dialog?.textContent).toContain("解析中")
+      expect(dialog?.textContent).toContain("已处理 3 / 5 项")
+      expect(dialog?.textContent).not.toContain("%")
+      expect(dialog?.textContent).not.toContain("CodeGraph")
+    } finally {
+      handle.unmount()
+    }
+  })
+
   test("active=false 时显示「正在接管」只读提示，且 composer disabled", () => {
     const { adapter, handle } = mountWebApp(false, makeSnapshot())
     try {

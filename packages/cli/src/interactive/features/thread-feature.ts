@@ -141,11 +141,11 @@ export class ThreadFeature {
         )
         const withMode = applyThreadMode(restored, opened.threadMode)
         const withWorkItem = opened.workItem != null ? applyWorkItem(withMode, opened.workItem) : withMode
-        return applyGoalSnapshot(withWorkItem, {
+        return { ...applyGoalSnapshot(withWorkItem, {
           goal: opened.goal as any,
           pending: opened.goalPending as any,
           activities: opened.goalActivities as any,
-        })
+        }), codeIndex: current.codeIndex }
       })
       options.onSuccess?.()
       return { status: "accepted" }
@@ -176,7 +176,7 @@ export class ThreadFeature {
       const opened = threadOpenResult(await ctx.gateway.openThread(initialThreadId))
       if (currentEpoch !== this.threadEpoch) return
       this.openingThread = false
-      ctx.commit(current => applyGoalSnapshot(restoreThread(
+      ctx.commit(current => ({ ...applyGoalSnapshot(restoreThread(
         opened.threadId,
         opened.messages,
         current.workMode,
@@ -186,7 +186,7 @@ export class ThreadFeature {
         goal: opened.goal as any,
         pending: opened.goalPending as any,
         activities: opened.goalActivities as any,
-      }))
+      }), codeIndex: current.codeIndex }))
       options.onSuccess?.()
     } catch {
       if (currentEpoch === this.threadEpoch) {

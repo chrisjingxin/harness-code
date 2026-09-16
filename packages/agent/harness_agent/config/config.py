@@ -389,16 +389,36 @@ class ExperimentalDelegationSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ExperimentalCodeIndexSettings:
+    """实验性代码索引开关；默认关闭，重启后才生效。"""
+
+    enabled: bool = False
+
+    def redacted(self) -> dict[str, object]:
+        """返回开关和生效范围，不含路径或供应商名称。"""
+        return {
+            "enabled": self.enabled,
+            "applies_to": "restart",
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ExperimentalSettings:
-    """Host TOML [experimental] 区段；当前仅含 delegation。"""
+    """Host TOML [experimental] 区段。"""
 
     delegation: ExperimentalDelegationSettings = field(
         default_factory=ExperimentalDelegationSettings
     )
+    code_index: ExperimentalCodeIndexSettings = field(
+        default_factory=ExperimentalCodeIndexSettings
+    )
 
     def redacted(self) -> dict[str, object]:
         """返回脱敏后的实验配置。"""
-        return {"delegation": self.delegation.redacted()}
+        return {
+            "delegation": self.delegation.redacted(),
+            "code_index": self.code_index.redacted(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1257,14 +1277,32 @@ def _parse_goal(values: Mapping[str, object]) -> GoalSettings:
     )
 
 
+def _parse_code_index(values: object) -> ExperimentalCodeIndexSettings:
+    """解析 [experimental.code_index]：只接受 enabled 布尔值。"""
+    if values in (None, {}):
+        return ExperimentalCodeIndexSettings()
+    if not isinstance(values, dict):
+        raise ConfigError("[experimental.code_index] must be a TOML table")
+    unknown = set(values) - {"enabled"}
+    if unknown:
+        raise ConfigError(
+            "[experimental.code_index] contains unsupported fields: "
+            f"{', '.join(sorted(unknown))}"
+        )
+    raw_enabled = values.get("enabled", False)
+    if not isinstance(raw_enabled, bool):
+        raise ConfigError("experimental.code_index.enabled must be a boolean")
+    return ExperimentalCodeIndexSettings(enabled=raw_enabled)
+
+
 def _parse_experimental(
     values: Mapping[str, object],
     model_catalog: ModelCatalog | None,
 ) -> ExperimentalSettings:
-    """解析 [experimental.delegation]：关闭只检查结构，开启才解析 Profile 引用。"""
+    """解析 [experimental]：关闭只检查结构，开启 delegation 才解析 Profile 引用。"""
     if not values:
         return ExperimentalSettings()
-    unknown = set(values) - {"delegation"}
+    unknown = set(values) - {"delegation", "code_index"}
     if unknown:
         raise ConfigError(
             f"[experimental] contains unsupported fields: {', '.join(sorted(unknown))}"
@@ -1311,6 +1349,7 @@ def _parse_experimental(
                     f"{profile_id}"
                 )
     return ExperimentalSettings(
-        delegation=ExperimentalDelegationSettings(enabled=raw_enabled, models=parsed_models)
+        delegation=ExperimentalDelegationSettings(enabled=raw_enabled, models=parsed_models),
+        code_index=_parse_code_index(values.get("code_index")),
     )
 

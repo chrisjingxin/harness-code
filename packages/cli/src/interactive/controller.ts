@@ -3,7 +3,8 @@
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
 import { builtinCommandCapabilities } from "./commands"
-import { CatalogFeature, CommandFeature, formatMcpStatusNotice, GoalFeature, InteractionFeature, McpFeature, ModelFeature, PLAN_IMPLEMENT_PROMPT, RunFeature, SkillFeature, ThreadFeature, TimelineFeature, type FeatureContext } from "./features"
+import { CatalogFeature, CodeIndexFeature, CommandFeature, formatMcpStatusNotice, GoalFeature, InteractionFeature, McpFeature, ModelFeature, PLAN_IMPLEMENT_PROMPT, RunFeature, SkillFeature, ThreadFeature, TimelineFeature, type FeatureContext } from "./features"
+import { selectCodeIndexView } from "./selectors"
 import type { AgentGateway, Clock, IdGenerator, IntentOutcome, InteractiveConfirmation, InteractiveConnectionState, InteractiveController, InteractiveControllerOptions, InteractiveIntent, InteractiveSnapshot, LoadableCatalog, Scheduler } from "./ports"
 import { cryptoIdGenerator, systemClock, systemScheduler } from "../infrastructure"
 import { DEFAULT_APPROVAL_MODE, type InteractiveRuntime } from "./runtime"
@@ -20,6 +21,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   private readonly clearInteractionHandler: () => void
   private readonly unsubscribeProtocolError: () => void
   private readonly unsubscribeThreadSummary: () => void
+  private readonly unsubscribeCodeIndexChanged: () => void
   private readonly unsubscribeClose: () => void
   private state: InteractiveState
   private snapshot: InteractiveSnapshot
@@ -39,6 +41,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   private readonly timelineFeature = new TimelineFeature()
   private readonly runFeature = new RunFeature()
   private readonly goalFeature = new GoalFeature()
+  private readonly codeIndexFeature = new CodeIndexFeature()
   private get featureContext(): FeatureContext {
     return { gateway: this.gateway, clock: this.clock, scheduler: this.scheduler, idGenerator: this.idGenerator, baseRuntime: this.baseRuntime, getState: () => this.state, commit: u => this.commit(u), publish: () => this.publish() }
   }
@@ -82,6 +85,11 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.unsubscribeThreadSummary = this.gateway.onThreadSummary?.(thread => {
       if (this.closed) return
       this.catalogFeature.upsertThread(thread, this.featureContext)
+    }) ?? (() => {})
+
+    this.unsubscribeCodeIndexChanged = this.gateway.onCodeIndexChanged?.(snapshot => {
+      if (this.closed) return
+      this.codeIndexFeature.changed(snapshot, this.featureContext)
     }) ?? (() => {})
 
     this.unsubscribeClose = this.gateway.onClose?.(error => {
@@ -249,6 +257,7 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.closed = true
     this.unsubscribeProtocolError()
     this.unsubscribeThreadSummary()
+    this.unsubscribeCodeIndexChanged()
     this.unsubscribeClose()
     this.clearInteractionHandler()
     this.interactionFeature.close(this.featureContext)
@@ -532,6 +541,17 @@ export class InteractiveControllerImpl implements InteractiveController {
         return { status: "accepted" }
       case "goal":
         return this.goalFeature.execute(result.argument, this.featureContext, this.goalRunCallbacks())
+      case "code-index": {
+        const outcome = await this.codeIndexFeature.execute(result.argument, this.featureContext)
+        if (outcome.status !== "accepted") return outcome
+        const view = selectCodeIndexView(this.buildSnapshot())
+        return {
+          status: "accepted",
+          effects: view
+            ? [{ type: "inspect-overlay", kind: "code-index", title: view.title, body: view.body }]
+            : [],
+        }
+      }
       case "submit-prompt": {
         const resolved = await resolveMentions(this.baseRuntime.workspace, result.prompt)
         return this.runFeature.startRun(resolved.prompt, this.featureContext, {
@@ -633,6 +653,16 @@ export class InteractiveControllerImpl implements InteractiveController {
       this.beginNewThread()
     } else if (confirmationId === "model-binding") {
       this.resetThreadState(clearThread(this.state))
+    } else if (confirmationId === "code-index-remove") {
+      const outcome = await this.codeIndexFeature.execute("remove-confirmed", this.featureContext)
+      if (outcome.status !== "accepted") return outcome
+      const view = selectCodeIndexView(this.buildSnapshot())
+      return {
+        status: "accepted",
+        effects: view
+          ? [{ type: "inspect-overlay", kind: "code-index", title: view.title, body: view.body }]
+          : [],
+      }
     } else if (confirmationId === "compose-abandon") {
       const threadId = this.state.currentThreadId
       if (!threadId) {
@@ -705,6 +735,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       workMode: this.state.workMode,
       composeState: this.state.composeState,
       workItem: this.state.workItem,
+      codeIndex: this.state.codeIndex,
       goal: this.state.goal,
       goalPending: this.state.goalPending,
       goalEvaluation: this.state.goalEvaluation,

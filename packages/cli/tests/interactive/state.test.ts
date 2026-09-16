@@ -2,7 +2,7 @@
 
 import { expect, test } from "bun:test"
 import type { EventEnvelope, InteractionRequestEnvelope } from "@za38/protocol"
-import { applyAgentEvent, applyComposeState, applyInteractionRequest, clearThread, createInitialState, finishContextCompaction, isHomeState, markInteractionTimeout, restoreThread, setWorkMode, startContextCompaction, startRun, type InteractiveState } from "../../src/interactive/state"
+import { applyAgentEvent, applyCodeIndexSnapshot, applyComposeState, applyInteractionRequest, clearThread, createInitialState, finishContextCompaction, isHomeState, markInteractionTimeout, restoreThread, setWorkMode, startContextCompaction, startRun, type InteractiveState } from "../../src/interactive/state"
 
 const run = { threadId: "thread-1", runId: "run-1" }
 
@@ -21,6 +21,29 @@ test("手动压缩使用独立 pending 状态并在终态恢复空闲", () => {
   const idle = finishContextCompaction(compacting)
   expect(idle.pendingOperation).toBeNull()
   expect(idle.activity.kind).toBe("idle")
+})
+
+test("代码索引 snapshot 按 revision 原子替换且不改变 Run 状态", () => {
+  const active = startRun(createInitialState(), run, "继续任务")
+  const current = applyCodeIndexSnapshot(active, {
+    revision: 2,
+    generation: 0,
+    engine_version: "1.1.6",
+    data_directory: ".harness-index",
+    runtime_status: "ready",
+    index_status: "absent",
+    query_status: "stopped",
+    watcher_status: "stopped",
+    job: null,
+    stats: null,
+    error: null,
+  })
+  const stale = applyCodeIndexSnapshot(current, { ...current.codeIndex!, revision: 1 })
+  expect(stale).toBe(current)
+  expect(current.codeIndex?.revision).toBe(2)
+  expect(current.activeRun).toEqual(run)
+  expect(current.pendingOperation).toBeNull()
+  expect(clearThread(current).codeIndex?.revision).toBe(2)
 })
 
 test("恢复 thread 会原子替换时间线并清空旧运行状态", () => {

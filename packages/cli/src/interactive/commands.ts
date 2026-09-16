@@ -158,7 +158,12 @@ export class CommandRegistry {
   /** 将 capability 缺失与运行态约束收敛到一处，菜单和执行入口共同使用。 */
   availability(definition: CommandDefinition, context: CommandContext): CommandAvailability {
     const missing = definition.requirements?.capabilities?.find(capability => !context.capabilities.has(capability))
-    if (missing) return { state: "hidden", reason: `当前客户端未协商 ${missing}` }
+    if (missing) {
+      return {
+        state: "hidden",
+        reason: definition.requirements?.unavailableNotice ?? `当前客户端未协商 ${missing}`,
+      }
+    }
     if (definition.requirements?.workModes && !definition.requirements.workModes.includes(context.workMode)) {
       return { state: "hidden", reason: definition.requirements.unavailableNotice ?? "当前模式不可用（COMMAND_MODE_UNAVAILABLE）" }
     }
@@ -238,6 +243,20 @@ export const builtinCommandDefinitions: readonly CommandDefinition[] = [
   { id: "approval.plan", name: "plan", description: "进入计划模式，只调查并写计划，不改项目文件", source: { type: "builtin" }, presentation: "action", argumentHint: "[exit | <目标>]", suggested: true, requirements: { workModes: ["build"], unavailableNotice: "`/plan` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
   { id: "approval.plan-view", name: "plan-view", description: "查看当前 thread 的计划", source: { type: "builtin" }, presentation: "viewer", suggested: true, requirements: { capabilities: [Capability.THREADS_READ], workModes: ["build"], requiresThread: true, unavailableNotice: "`/plan-view` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
   { id: "goal.manage", name: "goal", description: "设置并验收当前 Build 目标", source: { type: "builtin" }, presentation: "viewer", argumentHint: "[<目标>|edit|pause|resume|clear]", suggested: true, requirements: { capabilities: [Capability.GOAL_READ], workModes: ["build"], unavailableNotice: "`/goal` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
+  {
+    id: "code-index.manage",
+    name: "code-index",
+    description: "建立、更新或管理代码索引",
+    source: { type: "builtin" },
+    presentation: "viewer",
+    argumentHint: "[status|rebuild|cancel|remove]",
+    suggested: true,
+    requirements: {
+      capabilities: [Capability.CODE_INDEX_READ],
+      unavailableNotice: "代码索引未开启。在配置中设置 [experimental.code_index] enabled = true 后重启 Harness。",
+    },
+    safety: { runtime: "allowed" },
+  },
 ]
 
 export const commandRegistry = new CommandRegistry(builtinCommandDefinitions)

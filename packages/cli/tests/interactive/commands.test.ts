@@ -374,6 +374,54 @@ test("菜单按 capability 隐藏命令，并以稳定原因展示运行态禁�
   expect(model.availability).toEqual({ state: "disabled", reason: "当前任务结束后可用" })
 })
 
+test("代码索引命令关闭时隐藏但手输给出开启说明，开启后支持首建与 status", () => {
+  const command = parseSlashCommand("/code-index status")
+  if (!command) throw new Error("expected /code-index")
+
+  const disabled = defaultCommandContext({ capabilities: [] })
+  expect(findSlashCommands("/", disabled).map(item => item.name)).not.toContain("code-index")
+  expect(dispatchSlashCommand(command, {
+    commandContext: disabled,
+    threadId: null,
+    runtimeStatus: "运行摘要",
+  })).toEqual({
+    type: "notice",
+    message: "代码索引未开启。在配置中设置 [experimental.code_index] enabled = true 后重启 Harness。",
+  })
+
+  const enabled = defaultCommandContext({ capabilities: ["code_index.read"] })
+  expect(findSlashCommands("/code-index", enabled).map(item => item.name)).toEqual(["code-index"])
+  expect(dispatchSlashCommand(command, {
+    commandContext: enabled,
+    threadId: null,
+    runtimeStatus: "运行摘要",
+  })).toEqual({ type: "code-index", argument: "status" })
+
+  const ensure = parseSlashCommand("/code-index")
+  if (!ensure) throw new Error("expected /code-index")
+  expect(dispatchSlashCommand(ensure, {
+    commandContext: enabled,
+    threadId: null,
+    runtimeStatus: "运行摘要",
+  })).toEqual({ type: "code-index", argument: undefined })
+
+  const rebuild = parseSlashCommand("/code-index rebuild")
+  if (!rebuild) throw new Error("expected /code-index rebuild")
+  expect(dispatchSlashCommand(rebuild, {
+    commandContext: enabled,
+    threadId: null,
+    runtimeStatus: "运行摘要",
+  })).toEqual({ type: "code-index", argument: "rebuild" })
+
+  const invalid = parseSlashCommand("/code-index wat")
+  if (!invalid) throw new Error("expected invalid /code-index argument")
+  expect(dispatchSlashCommand(invalid, {
+    commandContext: enabled,
+    threadId: null,
+    runtimeStatus: "运行摘要",
+  })).toEqual({ type: "notice", message: "用法：/code-index [status|rebuild|cancel|remove]" })
+})
+
 test("执行中只放行显式 runtime allowed 的命令，其余失败关闭", () => {
   const runningBuild = defaultCommandContext({
     capabilities: builtinCommandCapabilities,
@@ -910,4 +958,3 @@ test("/undo 与 /redo 的 dispatch 映射", () => {
     threadId: "thread-1",
   })
 })
-

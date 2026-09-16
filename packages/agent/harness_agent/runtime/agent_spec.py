@@ -255,6 +255,7 @@ class ResolvedAgentSpec:
     goal_backed: bool = False
     max_iterations: int = 3
     grader_model_fingerprint: str | None = None
+    code_index_generation: int | None = None
 
     def __post_init__(self) -> None:
         """冻结工具快照并验证会进入 Profile 的身份字段。"""
@@ -295,6 +296,17 @@ class ResolvedAgentSpec:
                     "view": self.tool_view_fingerprint,
                     "mcp_tool_schema": tool_schema_fingerprint(self.tools),
                     "builtin_tool_catalog": default_tool_catalog_fingerprint(),
+                    **(
+                        {
+                            "code_index": {
+                                "generation": self.code_index_generation,
+                                "tool": "codebase_explore",
+                                "schema": {"query": "string", "max_files": "integer"},
+                            }
+                        }
+                        if self.code_index_generation is not None
+                        else {}
+                    ),
                 }
             ),
             skill_catalog_fingerprint=skill_catalog_fingerprint(
@@ -383,6 +395,7 @@ def resolve_builtin_main_agent_spec(
     goal_backed: bool = False,
     max_iterations: int = 3,
     grader_model_fingerprint: str | None = None,
+    code_index_generation: int | None = None,
 ) -> ResolvedAgentSpec:
     """解析当前内置 main；不读取 Plugin catalog，也不携带 Thread/Run 状态。"""
     from harness_agent.runtime.agent import (
@@ -418,9 +431,12 @@ def resolve_builtin_main_agent_spec(
         else str(tool.get("name", ""))
         for tool in mcp_tools
     )
+    available_tools = (*BUILTIN_TOOL_NAMES, *mcp_tool_names)
+    if code_index_generation is not None:
+        available_tools = (*available_tools, "codebase_explore")
     capability_view = resolve_effective_capability_view(
         policy,
-        available_tools=(*BUILTIN_TOOL_NAMES, *mcp_tool_names),
+        available_tools=available_tools,
         mcp_tool_names=mcp_tool_names,
         available_skill_ids=(record.skill_id for record in skill_registry.records),
     )
@@ -431,6 +447,12 @@ def resolve_builtin_main_agent_spec(
     )
     effective_skills = skill_registry.restricted(capability_view.skill_ids)
     prompt = default_system_prompt()
+    if code_index_generation is not None:
+        prompt = (
+            f"{prompt}\n\n优先使用 codebase_explore 定位符号、文件与调用关系；"
+            "未命中、语言未覆盖或失败时回退 glob/grep/read_file。"
+            "返回的源码仅供理解，编辑前必须再用 read_file 取得当前 Snapshot。"
+        )
     if delegation_binding:
         bound = "、".join(f"{role}→{profile_id}" for role, profile_id in sorted(delegation_binding))
         roles = {role for role, _profile_id in delegation_binding}
@@ -503,6 +525,7 @@ def resolve_builtin_main_agent_spec(
         goal_backed=goal_backed,
         max_iterations=max_iterations,
         grader_model_fingerprint=grader_model_fingerprint,
+        code_index_generation=code_index_generation,
     )
 
 
@@ -600,6 +623,7 @@ def resolve_bound_builtin_child_spec(
         enable_memory=enable_memory,
         enable_skills=enable_skills,
         enable_ask_user=False,
+        code_index_generation=parent.code_index_generation,
     )
 
 

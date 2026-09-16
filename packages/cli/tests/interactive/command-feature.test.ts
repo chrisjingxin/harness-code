@@ -38,6 +38,99 @@ test("/agents 查询失败时 catalog 进入 error，浮层仍可打开", async 
   }
 })
 
+test("/code-index 关闭时只给本地开启说明，不请求 Host 或进入模型", async () => {
+  const harness = makeHarness()
+  try {
+    expect(harness.controller.getSnapshot().commands.map(item => item.kind === "command" ? item.command.name : ""))
+      .not.toContain("code-index")
+    const outcome = await harness.controller.dispatch({ type: "input.submit", value: "/code-index status" })
+    expect(outcome).toEqual({ status: "accepted" })
+    expect(notices(harness.controller.getSnapshot())).toContain("[experimental.code_index] enabled = true")
+    expect(harness.calls).not.toContain("code_index.status")
+    expect(harness.calls).not.toContain("run.start")
+  } finally {
+    await harness.controller.close()
+  }
+})
+
+test("/code-index status 更新独立状态并在活动 Run 期间打开状态浮层", async () => {
+  const harness = makeHarness({
+    capabilities: [...(runtime.capabilities ?? []), Capability.CODE_INDEX_READ],
+    codeIndexStatusImpl: async () => ({
+      revision: 3,
+      generation: 0,
+      engine_version: "1.1.6",
+      data_directory: ".harness-index",
+      runtime_status: "unavailable",
+      index_status: "absent",
+      query_status: "stopped",
+      watcher_status: "stopped",
+      job: null,
+      stats: null,
+      error: {
+        code: "CODE_INDEX_RUNTIME_UNAVAILABLE",
+        message: "代码索引运行时不可用。",
+        recovery: "安装匹配的 1.1.6 依赖后重启 Harness。",
+      },
+    }),
+  })
+  try {
+    await harness.controller.dispatch({ type: "input.submit", value: "继续普通任务" })
+    const outcome = await harness.controller.dispatch({ type: "input.submit", value: "/code-index status" })
+    expect(outcome).toEqual({
+      status: "accepted",
+      effects: [{
+        type: "inspect-overlay",
+        kind: "code-index",
+        title: "代码索引",
+        body: "代码索引 · 运行时不可用\n代码索引运行时不可用。\n安装匹配的 1.1.6 依赖后重启 Harness。",
+      }],
+    })
+    expect(harness.controller.getSnapshot().codeIndex?.revision).toBe(3)
+    expect(harness.controller.getSnapshot().activeRun).not.toBeNull()
+    expect(harness.controller.getSnapshot().activity.kind).toBe("starting")
+    expect(harness.calls).toContain("code_index.status")
+  } finally {
+    await harness.controller.close()
+  }
+})
+
+test("/code-index status 连接失败不占 pendingOperation，普通提交仍可继续", async () => {
+  const harness = makeHarness({
+    capabilities: [...(runtime.capabilities ?? []), Capability.CODE_INDEX_READ],
+    codeIndexStatusImpl: async () => { throw new Error("connection closed") },
+  })
+  try {
+    const outcome = await harness.controller.dispatch({ type: "input.submit", value: "/code-index status" })
+    expect(outcome).toEqual({ status: "rejected", code: "agent-error", message: "connection closed" })
+    expect(harness.controller.getSnapshot().activity.kind).toBe("home")
+    expect(harness.controller.getSnapshot().codeIndex).toBeNull()
+
+    const submit = await harness.controller.dispatch({ type: "input.submit", value: "继续普通任务" })
+    expect(submit.status).toBe("accepted")
+    expect(harness.calls).toContain("run.start")
+  } finally {
+    await harness.controller.close()
+  }
+})
+
+test("代码索引是工作区状态，切换 Thread 后仍保留", async () => {
+  const harness = makeHarness({
+    capabilities: [...(runtime.capabilities ?? []), Capability.CODE_INDEX_READ],
+  })
+  try {
+    await harness.controller.dispatch({ type: "input.submit", value: "/code-index status" })
+    expect(harness.controller.getSnapshot().codeIndex).not.toBeNull()
+
+    const opened = await harness.controller.dispatch({ type: "thread.open", threadId: "thread-2" })
+    expect(opened.status).toBe("accepted")
+    expect(harness.controller.getSnapshot().currentThreadId).toBe("thread-2")
+    expect(harness.controller.getSnapshot().codeIndex?.index_status).toBe("absent")
+  } finally {
+    await harness.controller.close()
+  }
+})
+
 
 test("compact/status/help/web 命令语义确定", async () => {
   const harness = makeHarness()

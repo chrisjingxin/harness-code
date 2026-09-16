@@ -78,6 +78,88 @@ test("空参 /mcp 打开 MCP 状态浮层", async () => {
   }
 })
 
+test("/code-index status 打开供应商无关的代码索引浮层", async () => {
+  const harness = makeHarness({
+    capabilities: [Capability.CODE_INDEX_READ],
+    codeIndexStatusImpl: async () => ({
+      revision: 0,
+      generation: 0,
+      engine_version: "1.1.6",
+      data_directory: ".harness-index",
+      runtime_status: "ready",
+      index_status: "absent",
+      query_status: "stopped",
+      watcher_status: "stopped",
+      job: null,
+      stats: null,
+      error: null,
+    }),
+  })
+  const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => {} })
+  try {
+    await adapter.dispatch({ type: "execute-command", commandId: "code-index.manage", argument: "status" })
+    const overlay = adapter.getSnapshot().inspectOverlay
+    expect(overlay).toMatchObject({
+      visible: true,
+      kind: "code-index",
+      title: "代码索引",
+      body: "代码索引 · 未建立",
+    })
+    expect(JSON.stringify(overlay)).not.toContain("CodeGraph")
+    expect(JSON.stringify(overlay)).not.toContain("实验")
+  } finally {
+    await adapter.close()
+    await harness.controller.close()
+  }
+})
+
+test("代码索引 changed 通知原地更新同一个浮层且不显示伪百分比", async () => {
+  const base = {
+    revision: 0,
+    generation: 0,
+    engine_version: "1.1.6" as const,
+    data_directory: ".harness-index" as const,
+    runtime_status: "ready" as const,
+    index_status: "absent" as const,
+    query_status: "stopped" as const,
+    watcher_status: "stopped" as const,
+    job: null,
+    stats: null,
+    error: null,
+  }
+  const harness = makeHarness({
+    capabilities: [Capability.CODE_INDEX_READ, Capability.CODE_INDEX_MANAGE],
+    codeIndexStatusImpl: async () => base,
+    codeIndexApplyImpl: async () => ({
+      ...base,
+      revision: 1,
+      job: { id: "job-1", action: "initialize" as const, status: "running" as const, phase: "indexing" as const, completed: 2 },
+    }),
+  })
+  const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => {} })
+  try {
+    await adapter.dispatch({ type: "execute-command", commandId: "code-index.manage" })
+    expect(adapter.getSnapshot().inspectOverlay.body).toBe("代码索引 · 建立中\n已处理 2 项")
+    expect(adapter.getSnapshot().inspectOverlay.body).not.toContain("%")
+
+    harness.port.emitCodeIndexChanged({
+      ...base,
+      revision: 2,
+      generation: 1,
+      index_status: "ready",
+      query_status: "ready",
+      watcher_status: "ready",
+      job: { id: "job-1", action: "initialize", status: "succeeded", phase: "starting_query" },
+      stats: { files: 3, symbols: 10, relationships: 4, db_bytes: 100, wal_bytes: 0 },
+    })
+    expect(adapter.getSnapshot().inspectOverlay.body).toContain("3 个文件 · 10 个符号 · 4 条关系")
+    expect(adapter.getSnapshot().inspectOverlay.visible).toBe(true)
+  } finally {
+    await adapter.close()
+    await harness.controller.close()
+  }
+})
+
 test("审批到来时关闭 Goal/Status/BTW overlay", async () => {
   const harness = makeHarness({
     capabilities: [Capability.GOAL_READ, Capability.GOAL_MANAGE],

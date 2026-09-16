@@ -77,6 +77,34 @@ def _spec(tmp_path: Path, *, model_name: str = "fast-model", tools: tuple[object
     )
 
 
+def test_code_index_generation_changes_profile_key_without_runtime_tokens(tmp_path: Path) -> None:
+    """索引 generation 进入 fingerprint；缺索引与不同 generation 不能复用同一张图。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    common = dict(
+        project_fingerprint=component_fingerprint({"project": "test"}),
+        workspace=workspace,
+        binding=_binding(),
+        execution=ExecutionSettings(approval_mode=DEFAULT_APPROVAL_MODE),
+        skill_registry=SkillRegistry(workspace, home=tmp_path / "home"),
+        mcp_snapshot=build_mcp_snapshot([], revision="test"),
+        mcp_tools=(),
+        interactive=True,
+        pinned=False,
+    )
+    absent = resolve_builtin_main_agent_spec(**common)
+    ready = resolve_builtin_main_agent_spec(**common, code_index_generation=1)
+    next_gen = resolve_builtin_main_agent_spec(**common, code_index_generation=2)
+    assert absent.runtime_profile.profile_key != ready.runtime_profile.profile_key
+    assert ready.runtime_profile.profile_key != next_gen.runtime_profile.profile_key
+    assert "codebase_explore" not in absent.capability_view.tool_names
+    assert "codebase_explore" in ready.capability_view.tool_names
+    assert "codebase_explore" in ready.prompt
+    identity = ready.runtime_profile.identity()
+    assert "lease" not in str(identity)
+    assert "token" not in str(identity).lower()
+
+
 def test_goal_backed_spec_does_not_reuse_plain_engine_profile(tmp_path: Path) -> None:
     """grader 角色和迭代上限必须进入 Profile Key，避免复用无验收图。"""
     plain = _spec(tmp_path)

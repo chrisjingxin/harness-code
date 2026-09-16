@@ -7,6 +7,7 @@ import {
   assertEventEnvelope,
   OPERATION_MIN_MINOR,
   PROTOCOL_VERSION,
+  SERVER_CAPABILITIES,
   validateInteractionParams,
   validateInteractionResult,
   validateNotificationParams,
@@ -30,12 +31,14 @@ const fixtures = JSON.parse(
   await readFile(resolve(import.meta.dir, "../../../protocol/fixtures/v3-contract.json"), "utf8"),
 ) as { valid: Fixture[]; invalid: Fixture[] }
 
-test("Settings、Plugin、Goal 与审批 RPC 在 canonical v3 contract 中要求 minor 8；set_title 要求 9", () => {
-  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 9 })
+test("Settings、Plugin、Goal 与审批 RPC 在 canonical v3 contract 中要求 minor 8；set_title 要求 9；代码索引要求 10", () => {
+  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 10 })
   expect(OPERATION_MIN_MINOR["commands.bind"]).toBe(6)
   expect(OPERATION_MIN_MINOR["goal.inspect"]).toBe(8)
   expect(OPERATION_MIN_MINOR["run.set_approval_mode"]).toBe(8)
   expect(OPERATION_MIN_MINOR["threads.set_title"]).toBe(9)
+  expect(OPERATION_MIN_MINOR["code_index.status"]).toBe(10)
+  expect(OPERATION_MIN_MINOR["code_index.apply"]).toBe(10)
 })
 
 test("thread.summary 是 notification，不是 Timeline Event", () => {
@@ -50,6 +53,69 @@ test("thread.summary 是 notification，不是 Timeline Event", () => {
     message_count: 1,
     title: "修索引",
   })).not.toThrow()
+})
+
+test("代码索引使用独立 v3.10 Host 操作与 notification", () => {
+  const snapshot = {
+    revision: 0,
+    generation: 0,
+    engine_version: "1.1.6",
+    data_directory: ".harness-index",
+    runtime_status: "ready",
+    index_status: "absent",
+    query_status: "stopped",
+    watcher_status: "stopped",
+    job: null,
+    stats: null,
+    error: null,
+  }
+  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 10 })
+  expect(SERVER_CAPABILITIES).toContain("code_index.read")
+  expect(SERVER_CAPABILITIES).toContain("code_index.manage")
+  expect(() => validateOperationParams("code_index.status" as OperationName, {})).not.toThrow()
+  expect(() => validateOperationResult("code_index.status" as OperationName, snapshot)).not.toThrow()
+  for (const params of [
+    { action: "ensure", expected_revision: 0 },
+    { action: "rebuild", expected_revision: 0 },
+    { action: "cancel", expected_revision: 0, job_id: "job-1" },
+    { action: "remove", expected_revision: 0, confirmed: true },
+  ]) {
+    expect(() => validateOperationParams("code_index.apply" as OperationName, params)).not.toThrow()
+  }
+  expect(() => validateOperationResult("code_index.apply" as OperationName, snapshot)).not.toThrow()
+  expect(() => validateNotificationParams("code_index.changed" as NotificationName, snapshot)).not.toThrow()
+  expect(() => validateOperationParams("code_index.apply" as OperationName, {
+    action: "remove",
+    expected_revision: 0,
+    confirmed: false,
+  })).toThrow()
+  expect(() => validateNotificationParams("code_index.changed" as NotificationName, {
+    ...snapshot,
+    thread_id: "t",
+  })).toThrow()
+  expect(() => validateNotificationParams("code_index.changed" as NotificationName, {
+    ...snapshot,
+    run_id: "r",
+  })).toThrow()
+  expect(() => validateOperationResult("code_index.status" as OperationName, {
+    ...snapshot,
+    revision: undefined,
+  })).toThrow()
+  expect(() => validateOperationParams("code_index.apply" as OperationName, {
+    action: "sync",
+    expected_revision: 0,
+  })).toThrow()
+  expect(() => validateOperationResult("code_index.status" as OperationName, {
+    ...snapshot,
+    error: {
+      code: "CODE_INDEX_UNKNOWN",
+      message: "x",
+      recovery: "y",
+    },
+  })).toThrow()
+  expect(NOTIFICATION_METHODS).toContain("code_index.changed")
+  expect(EVENT_TYPES).not.toContain("code_index.changed")
+  expect(EVENT_TYPES).toContain("run.progress")
 })
 
 test("TypeScript 接受全部共享有效 fixture", () => {

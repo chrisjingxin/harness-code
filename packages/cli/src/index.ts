@@ -19,7 +19,7 @@ import {
 } from "@za38/protocol"
 
 import { CLI_USAGE, parseArgs, type Command } from "./args"
-import { resolveAgentProcessBinding } from "./runtime-binding"
+import { CLI_INSTALL_ROOT_ENV, resolveAgentProcessBinding, resolveCliInstallRoot } from "./runtime-binding"
 import { createDiagnosticLog, defaultProcessFields, type DiagnosticLog } from "./diagnostic-log/runtime"
 import { SidecarStderrDrain } from "./diagnostic-log/runtime/stderr-drain"
 import { runLogsQuery } from "./diagnostic-log/query"
@@ -107,6 +107,8 @@ export function clientCapabilities(command: Command): string[] {
     Capability.TEAMS_MANAGE,
     Capability.GOAL_READ,
     Capability.GOAL_MANAGE,
+    Capability.CODE_INDEX_READ,
+    Capability.CODE_INDEX_MANAGE,
     Capability.RUN_APPROVAL_MODE,
   )
   if (command.kind.startsWith("skills.") || (command.kind === "run" && !command.nonInteractive)) capabilities.push(Capability.SKILLS_READ)
@@ -205,6 +207,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
       ...process.env,
       ...sandboxEnvironment,
       HARNESS_COMMAND_KIND: command.kind,
+      [CLI_INSTALL_ROOT_ENV]: resolveCliInstallRoot(import.meta.dir),
       ...(command.configPath ? { HARNESS_AGENT_CONFIG_PATH: command.configPath } : {}),
       ...(binding.pythonPath
         ? { PYTHONPATH: process.env.PYTHONPATH ? `${binding.pythonPath}${delimiter}${process.env.PYTHONPATH}` : binding.pythonPath }
