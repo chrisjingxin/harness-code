@@ -165,38 +165,33 @@ def check_lock(lock_path: Path) -> list[str]:
     return errors
 
 
-def check_bun_lock(lock_path: Path) -> list[str]:
-    """检查 Bun 锁文件中解析后的包记录，不扫描普通文本。"""
+def check_npm_lock(lock_path: Path) -> list[str]:
+    """检查 npm 锁文件中解析后的包记录，不扫描普通文本。"""
 
     if not lock_path.is_file():
-        return [f"missing Bun lockfile: {lock_path}"]
+        return [f"missing npm lockfile: {lock_path}"]
     try:
-        # Bun lock v1 is JSON-shaped but permits trailing commas.
-        lock_text = re.sub(
-            r",(\s*[}\]])",
-            r"\1",
-            lock_path.read_text(encoding="utf-8"),
-        )
-        document = json.loads(lock_text)
+        document = json.loads(lock_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return [f"cannot parse Bun lockfile {lock_path}: {exc}"]
-    packages = document.get("packages", {})
+        return [f"cannot parse npm lockfile {lock_path}: {exc}"]
+    packages = document.get("packages") if isinstance(document, dict) else None
+    if not isinstance(packages, dict):
+        return [f"npm lockfile packages section is not an object: {lock_path}"]
     names: set[str] = set()
-    for record in packages.values():
-        if not isinstance(record, list) or not record or not isinstance(record[0], str):
+    for key in packages:
+        # lockfileVersion 3 以 "node_modules/<name>" 为键，嵌套依赖形如
+        # "node_modules/<host>/node_modules/<name>"，取最后一段即包名。
+        if not isinstance(key, str) or "node_modules/" not in key:
             continue
-        locator = record[0]
-        separator = locator.rfind("@")
-        if separator > 0:
-            names.add(locator[:separator])
+        names.add(key.rsplit("node_modules/", 1)[1])
     return [
-        f"forbidden package in Bun lockfile: {name}"
+        f"forbidden package in npm lockfile: {name}"
         for name in sorted(name for name in names if is_forbidden(name))
     ]
 
 
-def _iter_bun_package_manifests(node_modules: Path) -> Iterator[Path]:
-    """遍历实际安装链接，跳过未链接的 Bun 缓存并防止符号链接循环。"""
+def _iter_package_manifests(node_modules: Path) -> Iterator[Path]:
+    """遍历实际安装链接，跳过缓存残留目录并防止符号链接循环。"""
 
     visited_node_modules: set[Path] = set()
 
@@ -239,8 +234,8 @@ def _iter_bun_package_manifests(node_modules: Path) -> Iterator[Path]:
         visited_node_modules.add(resolved)
         try:
             for entry in directory.iterdir():
-                # .bun/.old_modules 是缓存；只有从普通 node_modules 名称
-                # 链接进去的包才算实际安装结果。失效链接自然跳过。
+                # .bun/.old_modules 是历史安装器残留缓存；只有从普通
+                # node_modules 名称链接进去的包才算实际安装结果。失效链接自然跳过。
                 if entry.name in {".bun", ".old_modules", ".bin"}:
                     continue
                 if entry.name.startswith("@"):
@@ -253,13 +248,13 @@ def _iter_bun_package_manifests(node_modules: Path) -> Iterator[Path]:
     yield from node_modules_manifests(node_modules)
 
 
-def check_bun_installed(root: Path) -> list[str]:
+def check_installed_packages(root: Path) -> list[str]:
     """检查各 workspace 实际可加载的 npm 包清单。"""
 
     errors: list[str] = []
     seen_manifests: set[Path] = set()
     for node_modules in (root / "node_modules", root / "packages/cli/node_modules"):
-        for manifest in _iter_bun_package_manifests(node_modules):
+        for manifest in _iter_package_manifests(node_modules):
             try:
                 resolved_manifest = manifest.resolve(strict=True)
             except OSError:
@@ -283,14 +278,14 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", type=Path, default=Path(__file__).parents[2] / "packages/agent/uv.lock")
-    parser.add_argument("--bun-lock", type=Path, default=Path(__file__).parents[2] / "bun.lock")
+    parser.add_argument("--npm-lock", type=Path, default=Path(__file__).parents[2] / "package-lock.json")
     args = parser.parse_args(argv)
     root = Path(__file__).parents[2]
     errors = [
         *check_installed(),
         *check_lock(args.lock),
-        *check_bun_lock(args.bun_lock),
-        *check_bun_installed(root),
+        *check_npm_lock(args.npm_lock),
+        *check_installed_packages(root),
     ]
     if errors:
         for error in errors:

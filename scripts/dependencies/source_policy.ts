@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 export const MIN_UV_VERSION = "0.11.1"
+export const MIN_NPM_VERSION = "10.0.0"
+export const MIN_NODE_VERSION = "20.0.0"
 export const PYTHON_MIN_VERSION = "3.11.0"
 export const PYTHON_MAX_VERSION = "4.0.0"
 
@@ -32,6 +34,8 @@ export interface ToolchainVersions {
   bun: string
   uv: string
   python: string
+  npm?: string
+  node?: string
   expectedBun?: string
 }
 
@@ -105,11 +109,21 @@ function compareVersions(left: string, right: string): number | undefined {
 }
 
 export function expectedBunVersion(root: string): string {
-  const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")) as { packageManager?: unknown }
-  if (typeof manifest.packageManager !== "string" || !manifest.packageManager.startsWith("bun@")) {
-    throw new DependencyPreflightError(["package.json 缺少 bun@<version> 的 packageManager 约束"])
+  const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")) as { engines?: { bun?: unknown } }
+  const bun = manifest.engines?.bun
+  if (typeof bun !== "string" || !bun.trim()) {
+    throw new DependencyPreflightError(["package.json 缺少 engines.bun 的 Bun 运行时版本约束"])
   }
-  return manifest.packageManager.slice("bun@".length)
+  return bun.trim()
+}
+
+/** 读取 packageManager 声明的 npm 基准版本；安装器必须是 npm 而不是 Bun。 */
+export function expectedNpmVersion(root: string): string {
+  const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")) as { packageManager?: unknown }
+  if (typeof manifest.packageManager !== "string" || !manifest.packageManager.startsWith("npm@")) {
+    throw new DependencyPreflightError(["package.json 缺少 npm@<version> 的 packageManager 约束"])
+  }
+  return manifest.packageManager.slice("npm@".length)
 }
 
 export function resolveInternalSources(environment: Environment = process.env): InternalSources {
@@ -176,17 +190,17 @@ function validateUrlHost(raw: string, label: string, allowedHosts: Set<string>):
   return undefined
 }
 
-export function validateBunLockSource(lockPath: string, sources: InternalSources): string[] {
+export function validateNpmLockSource(lockPath: string, sources: InternalSources): string[] {
   let text: string
   try {
     text = readFileSync(lockPath, "utf-8")
   } catch {
-    return [`找不到 Bun 锁文件 ${lockPath}`]
+    return [`找不到 npm 锁文件 ${lockPath}`]
   }
   const allowedHosts = new Set([sources.npmRegistry.hostname.toLowerCase().replace(/\.$/, "")])
   return [...new Set(
     collectUrls(text)
-      .map((url) => validateUrlHost(url, `Bun 锁文件 ${lockPath}`, allowedHosts))
+      .map((url) => validateUrlHost(url, `npm 锁文件 ${lockPath}`, allowedHosts))
       .filter((issue): issue is string => Boolean(issue)),
   )]
 }
@@ -217,7 +231,7 @@ export function validateUvLockSource(lockPath: string, sources: InternalSources)
 
 export function validateLockSources(root: string, sources: InternalSources): string[] {
   return [
-    ...validateBunLockSource(resolve(root, "bun.lock"), sources),
+    ...validateNpmLockSource(resolve(root, "package-lock.json"), sources),
     ...validateUvLockSource(resolve(root, "packages/agent/uv.lock"), sources),
   ]
 }
@@ -227,6 +241,20 @@ export function validateToolchainVersions(versions: ToolchainVersions): string[]
   const expectedBun = versions.expectedBun
   if (expectedBun && versions.bun !== expectedBun) {
     issues.push(`Bun 版本为 ${versions.bun}，仓库要求 ${expectedBun}`)
+  }
+  if (versions.npm !== undefined) {
+    if (!parseVersion(versions.npm)) {
+      issues.push(`无法解析 npm 版本 ${versions.npm}`)
+    } else if ((compareVersions(versions.npm, MIN_NPM_VERSION) ?? -1) < 0) {
+      issues.push(`npm 版本为 ${versions.npm}，至少需要 ${MIN_NPM_VERSION}`)
+    }
+  }
+  if (versions.node !== undefined) {
+    if (!parseVersion(versions.node)) {
+      issues.push(`无法解析 node 版本 ${versions.node}`)
+    } else if ((compareVersions(versions.node, MIN_NODE_VERSION) ?? -1) < 0) {
+      issues.push(`node 版本为 ${versions.node}，至少需要 ${MIN_NODE_VERSION}`)
+    }
   }
   if (!parseVersion(versions.uv)) {
     issues.push(`无法解析 uv 版本 ${versions.uv}`)
