@@ -17,6 +17,7 @@ import {
 } from "../../presentation-shared"
 import { fileLanguageId } from "../../workspace/file-language"
 import type { WebUiClient } from "../ui-client"
+import { selectCodeIndexView } from "../../interactive/selectors"
 
 /** 每帧合并表现发布的可注入调度器；rAF 不可用时由工厂实现回退到 setTimeout(16)。 */
 export type WebFrameScheduler = {
@@ -52,7 +53,7 @@ export type WebBtwState = {
 /** 执行中 Goal/Plan 只读查看浮层。 */
 export type WebInspectOverlayState = {
   visible: boolean
-  kind: "goal" | "plan" | "mcp"
+  kind: "goal" | "plan" | "mcp" | "code-index"
   title: string
   body: string
 }
@@ -541,7 +542,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         await this.executeCoreIntent({ type: "goal-view.close" })
         return
       case "confirmation-resolve":
-        await this.executeCoreIntent({ type: "confirmation.resolve", confirmationId: intent.confirmationId, confirmed: intent.confirmed })
+        await this.dispatchInteractive({ type: "confirmation.resolve", confirmationId: intent.confirmationId, confirmed: intent.confirmed })
         return
       case "tool-toggle":
         this.toggleTool(intent.runId, intent.toolId)
@@ -622,6 +623,10 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     if (this.closed) return
     const previous = this.snapshot.interactive
     const next = this.getInteractive()
+    if (this.inspectOverlayState.visible && this.inspectOverlayState.kind === "code-index") {
+      const view = selectCodeIndexView(next)
+      if (view) this.inspectOverlayState = { visible: true, kind: "code-index", title: view.title, body: view.body }
+    }
     this.mergeWorkspacePreview()
     this.detectRunEnd(next)
     if (previous.activity.kind !== "compacting" && next.activity.kind === "compacting") {
@@ -793,6 +798,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       workMode: view.runtime.workMode,
       composeState: view.runtime.composeState,
       workItem: view.workItem.workItem,
+      codeIndex: view.runtime.codeIndex,
       goal: view.conversation.goal,
       goalPending: view.conversation.goalPending,
       goalEvaluation: view.conversation.goalEvaluation,

@@ -155,6 +155,7 @@ class RunContext:
     usage_ledger: Any | None = field(default=None, repr=False)
     # Goal-backed Run 冻结的目标身份与独立验收依赖；普通 Run 为 None。
     goal_binding: Any | None = field(default=None, repr=False)
+    code_index_query_lease: Any | None = field(default=None, repr=False)
     goal_store: Any | None = field(default=None, repr=False)
     verification_registry: Any | None = field(default=None, repr=False)
 

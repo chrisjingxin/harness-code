@@ -28,6 +28,35 @@ test("Peer 使用字符串 ID 发送请求并保留远端错误", async () => {
   })
 })
 
+test("Peer 以空参数请求代码索引 snapshot", async () => {
+  const { client, stdin, stdout } = peer()
+  let request: JsonRpcRequest | undefined
+  stdin.on("data", data => {
+    request = JSON.parse(data.toString()) as JsonRpcRequest
+    stdout.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: request.id,
+      result: {
+        revision: 0,
+        generation: 0,
+        engine_version: "1.1.6",
+        data_directory: ".harness-index",
+        runtime_status: "ready",
+        index_status: "absent",
+        query_status: "stopped",
+        watcher_status: "stopped",
+        job: null,
+        stats: null,
+        error: null,
+      },
+    }) + "\n")
+  })
+
+  const snapshot = await client.codeIndexStatus()
+  expect(request).toMatchObject({ method: "code_index.status", params: {} })
+  expect(snapshot).toMatchObject({ index_status: "absent", engine_version: "1.1.6" })
+})
+
 test("Peer 在 run.start 中携带显式 requested_skill", async () => {
   const { client, stdin, stdout } = peer()
   const requests: any[] = []

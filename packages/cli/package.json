@@ -15,6 +15,7 @@
     "test": "bun test tests/acceptance tests/args.test.ts tests/diagnostics tests/gateway.integration.test.ts tests/index.test.ts tests/infrastructure tests/install-ps1.test.ts tests/install-sh.test.ts tests/integration.test.ts tests/interactive tests/ipc tests/pack-publishable.test.ts tests/presentation-coordinator tests/presentation-shared tests/runtime-binding.test.ts tests/tui tests/web/application tests/web/architecture.test.ts tests/web/browser.test.ts tests/web/bundle.test.ts tests/web/integration.test.ts tests/web/presentation tests/web/presentation.test.tsx tests/web/ready-gate.test.ts tests/web/server.test.ts tests/web/syntax tests/workspace && bun test tests/web/takeover-recovery.test.ts"
   },
   "dependencies": {
+    "@colbymchenry/codegraph": "1.1.6",
     "@opentui/core": "0.4.3",
     "@opentui/react": "0.4.3",
     "@za38/protocol": "*",

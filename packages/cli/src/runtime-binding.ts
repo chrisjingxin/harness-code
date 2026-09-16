@@ -1,6 +1,9 @@
 /** 安装形态与开发形态下定位 Python sidecar 进程。 */
-import { existsSync } from "node:fs"
-import { delimiter, resolve } from "node:path"
+import { existsSync, realpathSync } from "node:fs"
+import { basename, delimiter, dirname, resolve } from "node:path"
+
+/** 传给 sidecar 的内部安装根；用户环境和 TOML 不能覆盖 CLI 写入的值。 */
+export const CLI_INSTALL_ROOT_ENV = "HARNESS_CLI_INSTALL_ROOT"
 
 /** spawn sidecar 所需的可执行文件 argv，以及仅开发形态注入的源码 PYTHONPATH。 */
 export type AgentProcessBinding = {
@@ -57,6 +60,23 @@ export function resolveAgentProcessBinding(lookup: AgentProcessBindingLookup): A
     return { argv: [python, "-m", "harness_agent"], pythonPath: sourceAgent }
   }
   throw new Error(MISSING_AGENT)
+}
+
+/**
+ * 从已加载 CLI 模块目录解析可信依赖根。
+ * 开发形态回到仓库根；发布形态回到包含 node_modules 的安装前缀。
+ */
+export function resolveCliInstallRoot(moduleDir: string): string {
+  const realModuleDir = realpathSync(moduleDir)
+  const leaf = basename(realModuleDir)
+  const packageRoot = leaf === "src" || leaf === "dist" ? dirname(realModuleDir) : realModuleDir
+  const parent = dirname(packageRoot)
+  if (basename(packageRoot) === "cli" && basename(parent) === "packages") return dirname(parent)
+  if (basename(parent).startsWith("@") && basename(dirname(parent)) === "node_modules") {
+    return dirname(dirname(parent))
+  }
+  if (basename(parent) === "node_modules") return dirname(parent)
+  return packageRoot
 }
 
 /** 在 PATH 各目录中查找 `harness-agent` 或 Windows 的 `.exe`。 */

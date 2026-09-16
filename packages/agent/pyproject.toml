@@ -82,4 +82,5 @@ packages = ["harness_agent"]
 asyncio_mode = "auto"
 markers = [
     "e2e: requires a loopback-only mock OpenAI server",
+    "codegraph_integration: requires local CodeGraph 1.1.6 platform package",
 ]

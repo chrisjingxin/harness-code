@@ -77,6 +77,13 @@ export type NavigationView = {
   }
 }
 
+/** 代码索引状态视图：供应商无关、无实验标签、无百分比。 */
+export type CodeIndexView = {
+  readonly title: string
+  readonly body: string
+  readonly indexStatus: "absent" | "ready" | "incomplete" | "unavailable"
+}
+
 /** 命令视图：可用命令与提交可用性；UI 契约 command 分片。 */
 export type CommandView = {
   readonly commands: readonly CommandMenuItem[]
@@ -92,6 +99,7 @@ export type RuntimeView = {
   readonly selection: InteractiveSnapshot["selection"]
   readonly workMode: InteractiveSnapshot["workMode"]
   readonly composeState: InteractiveSnapshot["composeState"]
+  readonly codeIndex: InteractiveSnapshot["codeIndex"]
   readonly availability: {
     readonly canCancelRun: boolean
     readonly canToggleSkill: boolean

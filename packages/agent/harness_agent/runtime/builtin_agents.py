@@ -27,7 +27,7 @@ FORCED_EXCLUSIONS: frozenset[str] = frozenset(
 """任何内置 child 都不可拥有的工具。"""
 
 EXPLORE_TOOL_ALLOWLIST: frozenset[str] = frozenset(
-    {"glob", "grep", "ls", "lsp", "read_file"}
+    {"glob", "grep", "ls", "lsp", "read_file", "codebase_explore"}
 )
 """explore 角色上限；还要和父能力、本机实现求交。"""
 
@@ -53,7 +53,7 @@ GENERAL_PURPOSE_DESCRIPTION = (
 )
 
 EXPLORE_DESCRIPTION = (
-    "只读代码定位与结构调查子代理。只能使用 ls、read_file、glob、grep、lsp。"
+    "只读代码定位与结构调查子代理。只能使用 ls、read_file、glob、grep、lsp、codebase_explore。"
     "适合按文件名、符号或内容搜索，以及回答代码在哪、结构如何连接。"
     "需要改文件、执行命令、访问网络或向用户提问时不要用它。"
 )
@@ -71,7 +71,7 @@ GENERAL_PURPOSE_PROMPT = """你是主 Agent 派出的通用子代理，只完成
 
 EXPLORE_PROMPT = """你是只读代码搜索子代理。用尽可能少的上下文，给父 Agent 一份可交接的调查结果。
 
-你只能使用 ls、read_file、glob、grep、lsp。没有写文件、命令执行、网络访问、MCP、Skill 目录或向用户提问的能力。只搜当前工作区和 AGENTS.md，不要按主 Agent 的工作流 Skill 行事。
+你只能使用 ls、read_file、glob、grep、lsp、codebase_explore。没有写文件、命令执行、网络访问、MCP、Skill 目录或向用户提问的能力。只搜当前工作区和 AGENTS.md，不要按主 Agent 的工作流 Skill 行事。
 
 做法：
 - 先用 glob、grep 或 lsp 定位，再按需 read_file。不要整文件通读，除非文件很小。

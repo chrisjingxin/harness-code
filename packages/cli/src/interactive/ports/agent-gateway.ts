@@ -10,6 +10,8 @@ import {
   type GoalInspectResult,
   type GoalMutateParams,
   type GoalMutateResult,
+  type CodeIndexSnapshot,
+  type CodeIndexApplyParams,
   type GoalRequestParams,
   type GoalRequestResult,
   type InteractionMode,
@@ -99,6 +101,8 @@ export interface AgentGateway {
   onProtocolError(listener: (error: Error) => void): () => void
   /** 订阅 thread.summary 通知；返回取消函数。 */
   onThreadSummary(listener: (thread: ThreadSummary) => void): () => void
+  /** 订阅 Host 级代码索引完整 snapshot。 */
+  onCodeIndexChanged(listener: (snapshot: CodeIndexSnapshot) => void): () => void
   /** 订阅连接关闭；返回取消函数。 */
   onClose(listener: (error: Error) => void): () => void
   /** 注册反向 Interaction 处理器；返回取消函数。 */
@@ -124,6 +128,8 @@ export interface AgentGateway {
   undo(params: ThreadsUndoParams): Promise<ThreadsUndoResult>
   redo(params: ThreadsRedoParams): Promise<ThreadsRedoResult>
   mcpStatus(): Promise<McpStatusResult>
+  codeIndexStatus(): Promise<CodeIndexSnapshot>
+  codeIndexApply(params: CodeIndexApplyParams): Promise<CodeIndexSnapshot>
   mcpAdd(params: McpAddParams): Promise<McpAddResult>
   mcpRemove(name: string): Promise<McpRemoveResult>
   listModels(threadId?: string): Promise<ModelsListResult>
@@ -223,6 +229,22 @@ export function createFallbackNoopGateway(): AgentGateway {
     async cancelTeam(runId) { return { run_id: runId, cancelled: false } },
     async sideQuestion(params) { return { reply_text: `echo: ${params.question}`, model_profile_id: params.model_profile_id ?? "echo" } },
     async mcpStatus() { return { servers: [], total_tools: 0 } },
+    async codeIndexStatus() {
+      return {
+        revision: 0,
+        generation: 0,
+        engine_version: "1.1.6" as const,
+        data_directory: ".harness-index" as const,
+        runtime_status: "ready" as const,
+        index_status: "absent" as const,
+        query_status: "stopped" as const,
+        watcher_status: "stopped" as const,
+        job: null,
+        stats: null,
+        error: null,
+      }
+    },
+    async codeIndexApply() { throw new Error("代码索引不可用") },
     async mcpAdd() { return { added: false, connected: false, tool_names: [] } },
     async mcpRemove() { return { removed: false } },
     async configDetails() { return { revision: "0", fields: [], immutable_fields: [] } },
@@ -233,6 +255,7 @@ export function createFallbackNoopGateway(): AgentGateway {
     abandonInteraction() {},
     onProtocolError() { return () => {} },
     onThreadSummary() { return () => {} },
+    onCodeIndexChanged() { return () => {} },
     onClose() { return () => {} },
     setInteractionHandler() { return () => {} },
   }

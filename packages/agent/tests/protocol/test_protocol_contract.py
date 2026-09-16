@@ -13,9 +13,12 @@ from jsonschema import ValidationError
 from harness_agent.protocol.generated import (
     ContextCompactParams,
     EventEnvelope,
+    OPERATION_MIN_MINOR,
+    PROTOCOL_MINOR,
     RunSetApprovalModeParams,
     RunSetApprovalModeResult,
     RunStartParams,
+    SERVER_CAPABILITIES,
 )
 from harness_agent.protocol.runtime import (
     EXPECTED_DIGEST,
@@ -483,6 +486,67 @@ def test_python_validates_compose_progress_projection() -> None:
                     ],
                 },
             }
+        )
+
+
+def test_python_validates_code_index_v310_contract() -> None:
+    """代码索引使用独立 Host 操作与 notification，不伪装成 Run event。"""
+    snapshot = {
+        "revision": 0,
+        "generation": 0,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": None,
+        "stats": None,
+        "error": None,
+    }
+    assert PROTOCOL_MINOR == 10
+    assert "code_index.read" in SERVER_CAPABILITIES
+    assert "code_index.manage" in SERVER_CAPABILITIES
+    assert OPERATION_MIN_MINOR["code_index.status"] == 10
+    assert OPERATION_MIN_MINOR["code_index.apply"] == 10
+    validate_operation_params("code_index.status", {})
+    validate_operation_result("code_index.status", snapshot)
+    for params in (
+        {"action": "ensure", "expected_revision": 0},
+        {"action": "rebuild", "expected_revision": 0},
+        {"action": "cancel", "expected_revision": 0, "job_id": "job-1"},
+        {"action": "remove", "expected_revision": 0, "confirmed": True},
+    ):
+        validate_operation_params("code_index.apply", params)
+    validate_operation_result("code_index.apply", snapshot)
+    validate_notification_params("code_index.changed", snapshot)
+    with pytest.raises((ValidationError, ValueError)):
+        validate_operation_params(
+            "code_index.apply",
+            {"action": "remove", "expected_revision": 0, "confirmed": False},
+        )
+    with pytest.raises((ValidationError, ValueError)):
+        validate_notification_params("code_index.changed", {**snapshot, "thread_id": "t"})
+    with pytest.raises((ValidationError, ValueError)):
+        validate_notification_params("code_index.changed", {**snapshot, "run_id": "r"})
+    with pytest.raises((ValidationError, ValueError)):
+        validate_operation_result("code_index.status", {**snapshot, "revision": None})
+    with pytest.raises((ValidationError, ValueError)):
+        validate_operation_params(
+            "code_index.apply",
+            {"action": "sync", "expected_revision": 0},
+        )
+    with pytest.raises((ValidationError, ValueError)):
+        validate_operation_result(
+            "code_index.status",
+            {
+                **snapshot,
+                "error": {
+                    "code": "CODE_INDEX_UNKNOWN",
+                    "message": "x",
+                    "recovery": "y",
+                },
+            },
         )
 
 

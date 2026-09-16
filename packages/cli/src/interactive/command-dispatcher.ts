@@ -63,6 +63,7 @@ export type CommandResult =
   | { type: "focus-plan" }
   | { type: "view-plan"; threadId: string; markdown: string; virtualPath: string; displayPath: string }
   | { type: "goal"; argument?: string }
+  | { type: "code-index"; argument?: string }
   | CommandRpcResult
 
 /** Dispatcher 所需的最小状态快照；展示文案由调用方在进入 Handler 前生成。 */
@@ -209,6 +210,7 @@ const builtinHandlers: Readonly<Record<string, CommandHandler>> = {
   "approval.plan": handlePlanCommand,
   "approval.plan-view": handlePlanViewCommand,
   "goal.manage": context => ({ type: "goal", argument: context.command.argument }),
+  "code-index.manage": handleCodeIndexCommand,
   "thread.undo": context => {
     if (!context.threadId) return notice("当前没有可撤销的 thread。")
     return { type: "present", target: "undo" }
@@ -217,6 +219,25 @@ const builtinHandlers: Readonly<Record<string, CommandHandler>> = {
     if (!context.threadId) return notice("当前没有可重做的 thread。")
     return { type: "request-redo", threadId: context.threadId }
   },
+}
+
+const CODE_INDEX_USAGE = "用法：/code-index [status|rebuild|cancel|remove]"
+
+function handleCodeIndexCommand(context: CommandHandlerContext): CommandResult {
+  const argument = context.command.argument?.trim() ?? ""
+  if (!argument) return { type: "code-index", argument: undefined }
+  if (["status", "rebuild", "cancel"].includes(argument)) return { type: "code-index", argument }
+  if (argument === "remove") {
+    return {
+      type: "request-confirmation",
+      confirmationId: "code-index-remove",
+      title: "删除代码索引？",
+      message: "这会删除当前工作区的本地代码索引数据；源码不会被修改。",
+      confirmLabel: "删除索引",
+      cancelLabel: "保留索引",
+    }
+  }
+  return notice(CODE_INDEX_USAGE)
 }
 
 const ALREADY_IN_PLAN_NOTICE = "已在计划模式。改计划请直接发消息；离开请用 `/plan exit`。"

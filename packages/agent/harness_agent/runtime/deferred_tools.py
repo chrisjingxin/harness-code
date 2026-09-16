@@ -158,6 +158,7 @@ RESIDENT_TOOL_NAMES: frozenset[str] = frozenset({
     "enter_plan_mode",
     "exit_plan_mode",
     "tool_search",
+    "codebase_explore",
 })
 
 # D8 deferred 名单：低频/场景特定内置工具，经 tool_search 发现后 reveal。

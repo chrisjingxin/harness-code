@@ -60,6 +60,11 @@ export async function stagePublishableCli(cliRoot: string, stagingDir: string): 
   await rm(stagingDir, { recursive: true, force: true })
   await mkdir(distDest, { recursive: true })
   await cp(distSource, distDest, { recursive: true })
+  await cp(
+    join(cliRoot, "src/code-index-adapter"),
+    join(distDest, "code-index-adapter"),
+    { recursive: true },
+  )
   await writeFile(join(stagingDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`, "utf8")
   return { stagingDir, packageJson }
 }

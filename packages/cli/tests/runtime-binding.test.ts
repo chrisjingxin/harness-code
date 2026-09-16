@@ -1,10 +1,10 @@
 /** 安装形态与开发形态的内核进程定位。 */
 import { expect, test } from "bun:test"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
-import { resolveAgentProcessBinding } from "../src/runtime-binding"
+import { resolveAgentProcessBinding, resolveCliInstallRoot } from "../src/runtime-binding"
 
 test("HARNESS_AGENT_PYTHON 优先，且不注入开发 PYTHONPATH", () => {
   const binding = resolveAgentProcessBinding({
@@ -61,4 +61,18 @@ test("找不到内核时失败关闭，不落到系统 python3", () => {
     env: { PATH: "/empty" },
     exists: () => false,
   })).toThrow("未找到 Harness 内核")
+})
+
+test("CLI 安装根来自已加载模块目录，保留空格和中文", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness 安装根-"))
+  const moduleDir = join(root, "packages/cli/src")
+  await mkdir(moduleDir, { recursive: true })
+  expect(resolveCliInstallRoot(moduleDir)).toBe(await realpath(root))
+})
+
+test("发布安装从 scoped package 位置确定包含依赖的可信根", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-published-root-"))
+  const moduleDir = join(root, "node_modules/@za38/cli/dist")
+  await mkdir(moduleDir, { recursive: true })
+  expect(resolveCliInstallRoot(moduleDir)).toBe(await realpath(root))
 })

@@ -958,6 +958,70 @@ def _load_with_experimental(
     return load_config(workspace=workspace, config_path=config_path, home=home, environ=environ)
 
 
+def test_experimental_code_index_defaults_closed_when_section_omitted(tmp_path: Path) -> None:
+    """省略 [experimental.code_index] 等价于关闭，摘要标明重启生效。"""
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    _write_config(home / ".harness" / "config.toml")
+    config = load_config(
+        workspace=workspace,
+        config_path=home / ".harness" / "config.toml",
+        home=home,
+        environ={},
+    )
+    assert config.experimental.code_index.enabled is False
+    summary = config.redacted()
+    assert summary["experimental"]["code_index"] == {
+        "enabled": False,
+        "applies_to": "restart",
+    }
+    assert summary["sources"]["experimental"] == "default"
+
+
+def test_experimental_code_index_parses_explicit_enabled(tmp_path: Path) -> None:
+    """显式开启代码索引只记录开关，不写入运行时配置白名单。"""
+    config = _load_with_experimental(
+        tmp_path,
+        "\n[experimental.code_index]\nenabled = true\n",
+    )
+    assert config.experimental.code_index.enabled is True
+    assert config.experimental.delegation.enabled is False
+    summary = config.redacted()
+    assert summary["experimental"]["code_index"] == {
+        "enabled": True,
+        "applies_to": "restart",
+    }
+    assert summary["sources"]["experimental"] == "explicit"
+
+
+def test_experimental_code_index_explicit_false_stays_closed(tmp_path: Path) -> None:
+    """显式 false 与缺省一样关闭。"""
+    config = _load_with_experimental(
+        tmp_path,
+        "\n[experimental.code_index]\nenabled = false\n",
+    )
+    assert config.experimental.code_index.enabled is False
+
+
+def test_experimental_code_index_rejects_illegal_types_and_unknown_fields(tmp_path: Path) -> None:
+    """非法类型与未知字段失败关闭，不静默开启。"""
+    with pytest.raises(ConfigError, match="experimental.code_index.enabled must be a boolean"):
+        _load_with_experimental(
+            tmp_path,
+            "\n[experimental.code_index]\nenabled = \"yes\"\n",
+        )
+    with pytest.raises(ConfigError, match=r"\[experimental.code_index\] must be a TOML table"):
+        _load_with_experimental(
+            tmp_path,
+            "\n[experimental]\ncode_index = true\n",
+        )
+    with pytest.raises(ConfigError, match=r"\[experimental.code_index\] contains unsupported fields"):
+        _load_with_experimental(
+            tmp_path,
+            "\n[experimental.code_index]\nenabled = false\nauto_start = true\n",
+        )
+
+
 def test_experimental_delegation_defaults_when_section_omitted(tmp_path: Path) -> None:
     """省略 [experimental] 等价于关闭，不绑定任何内建角色。"""
     home = tmp_path / "home"

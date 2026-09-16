@@ -1233,6 +1233,267 @@ class TestAutoModeClassifierAssembly:
 
 
 
+def _write_code_index_config(home: Path, *, enabled: bool) -> None:
+    """写入最小 v1 配置并设置代码索引实验开关。"""
+    path = home / ".harness" / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flag = "true" if enabled else "false"
+    path.write_text(
+        f'''[config]
+version = 1
+
+[models]
+default_profile = "enterprise"
+
+[models.profiles.enterprise]
+provider = "openai-compatible"
+model = "enterprise-model"
+base_url = "https://gateway.example.internal/v1"
+api_key_env = "HARNESS_API_KEY"
+
+[experimental.code_index]
+enabled = {flag}
+''',
+        encoding="utf-8",
+    )
+
+
+class _ProbeCodeIndexRuntime:
+    """记录 preflight 是否被调用；关闭路径必须保持零调用。"""
+
+    def __init__(self) -> None:
+        self.preflight_calls = 0
+
+    def preflight(self) -> dict[str, object]:
+        self.preflight_calls += 1
+        raise AssertionError("关闭路径不得探测代码索引运行时")
+
+
+@pytest.mark.asyncio
+async def test_code_index_capabilities_absent_when_experimental_closed(tmp_path: Path) -> None:
+    """默认或显式关闭时 initialize 不协商代码索引 capability，也不建目录。"""
+    probe = _ProbeCodeIndexRuntime()
+    frames: list[dict[str, Any]] = []
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    host = AgentHost(
+        allow_echo=True,
+        config_home=home,
+        workspace=workspace,
+        code_index_runtime=probe,
+    )
+    host.send = lambda message: _append(frames, message)  # type: ignore[method-assign]
+    try:
+        await host.dispatch(
+            _request(
+                "initialize",
+                _initialize("run.cancel", "code_index.read", "code_index.manage"),
+                "owner-init",
+            )
+        )
+        result = frames[-1]["result"]
+        assert "code_index.read" not in result["capabilities"]["enabled"]
+        assert "code_index.manage" not in result["capabilities"]["enabled"]
+        assert "code_index.read" not in result["capabilities"]["available"]
+        assert host._code_index_manager is None
+        assert probe.preflight_calls == 0
+        assert not (workspace / ".harness-index").exists()
+        assert not (workspace / ".codegraph").exists()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_code_index_capabilities_enabled_when_experimental_open(tmp_path: Path) -> None:
+    """开启后即使运行时稍后不可用，仍协商 capability 以便 status 返回恢复建议。"""
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_code_index_config(home, enabled=True)
+    frames: list[dict[str, Any]] = []
+    host = AgentHost(allow_echo=True, config_home=home, workspace=workspace)
+    host.send = lambda message: _append(frames, message)  # type: ignore[method-assign]
+    try:
+        await host.dispatch(
+            _request(
+                "initialize",
+                _initialize("run.cancel", "code_index.read", "code_index.manage"),
+                "owner-init",
+            )
+        )
+        result = frames[-1]["result"]
+        assert "code_index.read" in result["capabilities"]["enabled"]
+        assert "code_index.manage" in result["capabilities"]["enabled"]
+        assert not (workspace / ".harness-index").exists()
+    finally:
+        await host.close()
+
+
+def _initialize_v310(*requests: str) -> dict[str, Any]:
+    payload = _initialize(*requests)
+    payload["protocol"]["max_minor"] = 10
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_code_index_status_returns_absent_without_creating_directory(tmp_path: Path) -> None:
+    """开启后 status 返回未建立快照，不创建 .harness-index。"""
+    from harness_agent.code_index.runtime import FakeCodeIndexRuntime
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_code_index_config(home, enabled=True)
+    frames: list[dict[str, Any]] = []
+    runtime = FakeCodeIndexRuntime()
+    host = AgentHost(
+        allow_echo=True,
+        config_home=home,
+        workspace=workspace,
+        code_index_runtime=runtime,
+    )
+    host.send = lambda message: _append(frames, message)  # type: ignore[method-assign]
+    try:
+        await host.dispatch(
+            _request(
+                "initialize",
+                _initialize_v310("code_index.read", "code_index.manage"),
+                "owner-init",
+            )
+        )
+        await host.dispatch(_request("code_index.status", {}, "status-1"))
+        snapshot = frames[-1]["result"]
+        assert runtime.preflight_calls == 1
+        assert snapshot["index_status"] == "absent"
+        assert snapshot["runtime_status"] == "ready"
+        assert snapshot["data_directory"] == ".harness-index"
+        assert not (workspace / ".harness-index").exists()
+    finally:
+        await host.close()
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_initialize_restores_ready_code_index_query(tmp_path: Path) -> None:
+    """开启配置时，Host initialize 自动恢复干净关闭留下的健康索引。"""
+    from harness_agent.code_index.models import DurableCodeIndexState
+    from harness_agent.code_index.path_policy import CodeIndexPathPolicy
+    from harness_agent.code_index.runtime import FakeCodeIndexRuntime
+    from harness_agent.code_index.state_store import CodeIndexStateStore
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_code_index_config(home, enabled=True)
+    CodeIndexStateStore(CodeIndexPathPolicy(workspace)).write(
+        DurableCodeIndexState(revision=4, generation=2, lifecycle="ready")
+    )
+    runtime = FakeCodeIndexRuntime()
+    frames: list[dict[str, Any]] = []
+    host = AgentHost(
+        allow_echo=True,
+        config_home=home,
+        workspace=workspace,
+        code_index_runtime=runtime,
+    )
+    host.send = lambda message: _append(frames, message)  # type: ignore[method-assign]
+    try:
+        await host.dispatch(
+            _request(
+                "initialize",
+                _initialize_v310("code_index.read", "code_index.manage"),
+                "owner-init",
+            )
+        )
+        assert runtime.start_query_calls == 1
+        await host.dispatch(_request("code_index.status", {}, "status-1"))
+        snapshot = frames[-1]["result"]
+        assert snapshot["query_status"] == "ready"
+        assert snapshot["generation"] == 2
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_code_index_status_unavailable_when_runtime_missing(tmp_path: Path) -> None:
+    """运行时不可用时 status 仍成功，返回可恢复错误。"""
+    from harness_agent.code_index.models import CodeIndexPreflight, error_for
+    from harness_agent.code_index.runtime import FakeCodeIndexRuntime
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_code_index_config(home, enabled=True)
+    frames: list[dict[str, Any]] = []
+    host = AgentHost(
+        allow_echo=True,
+        config_home=home,
+        workspace=workspace,
+        code_index_runtime=FakeCodeIndexRuntime(
+            CodeIndexPreflight(ok=False, error=error_for("CODE_INDEX_RUNTIME_UNAVAILABLE"))
+        ),
+    )
+    host.send = lambda message: _append(frames, message)  # type: ignore[method-assign]
+    try:
+        await host.dispatch(
+            _request(
+                "initialize",
+                _initialize_v310("code_index.read", "code_index.manage"),
+                "owner-init",
+            )
+        )
+        await host.dispatch(_request("code_index.status", {}, "status-1"))
+        snapshot = frames[-1]["result"]
+        assert snapshot["runtime_status"] == "unavailable"
+        assert snapshot["error"]["code"] == "CODE_INDEX_RUNTIME_UNAVAILABLE"
+        assert "CodeGraph" not in snapshot["error"]["message"]
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_code_index_apply_returns_running_and_broadcasts_changed_only_to_readers(tmp_path: Path) -> None:
+    """Host 只向协商 code_index.read 的连接广播完整 snapshot。"""
+    from harness_agent.code_index.models import CodeIndexBuildResult
+    from harness_agent.code_index.runtime import FakeCodeIndexRuntime
+
+    class Runtime(FakeCodeIndexRuntime):
+        async def run_index(self, workspace: Path, *, on_progress, timeout: float = 1800.0):
+            await on_progress({"phase": "indexing", "completed": 1})
+            return CodeIndexBuildResult(
+                success=True,
+                stats={"files": 1, "symbols": 2, "relationships": 1, "db_bytes": 8, "wal_bytes": 0},
+            )
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_code_index_config(home, enabled=True)
+    owner_frames: list[dict[str, Any]] = []
+    reader_frames: list[dict[str, Any]] = []
+    non_reader_frames: list[dict[str, Any]] = []
+    host = AgentHost(allow_echo=True, config_home=home, workspace=workspace, code_index_runtime=Runtime())
+    host.send = lambda message: _append(owner_frames, message)  # type: ignore[method-assign]
+    reader = host.create_connection(lambda message: _append(reader_frames, message))
+    non_reader = host.create_connection(lambda message: _append(non_reader_frames, message))
+    try:
+        await host.dispatch(_request("initialize", _initialize_v310("code_index.read", "code_index.manage"), "owner-init"))
+        await host.dispatch_connection(reader, _request("initialize", _initialize_v310("code_index.read"), "reader-init"))
+        await host.dispatch_connection(non_reader, _request("initialize", _initialize_v310("threads.read"), "other-init"))
+        await host.dispatch(_request("code_index.apply", {"action": "ensure", "expected_revision": 0}, "apply-1"))
+        for _ in range(100):
+            if any(frame.get("method") == "code_index.changed" and frame["params"]["index_status"] == "ready" for frame in owner_frames):
+                break
+            await asyncio.sleep(0.01)
+        assert any(frame.get("method") == "code_index.changed" for frame in reader_frames)
+        assert not any(frame.get("method") == "code_index.changed" for frame in non_reader_frames)
+        response = next(frame for frame in owner_frames if frame.get("id") == "apply-1")
+        assert response["result"]["job"]["status"] == "running"
+    finally:
+        await host.close()
+
+
 async def _append(frames: list[dict[str, Any]], message: dict[str, Any]) -> None:
     frames.append(message)
 

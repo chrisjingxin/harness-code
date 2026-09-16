@@ -1079,6 +1079,87 @@
     },
     {
       "kind": "operation.params",
+      "name": "code_index.status",
+      "case": "valid",
+      "value": {}
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.status",
+      "case": "valid",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "code_index.apply",
+      "case": "valid",
+      "value": {
+        "action": "ensure",
+        "expected_revision": 1
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.apply",
+      "case": "valid",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
+      "kind": "operation.params",
       "name": "host.attachment.create",
       "case": "valid",
       "value": {
@@ -1989,6 +2070,39 @@
       }
     },
     {
+      "kind": "notification.params",
+      "name": "code_index.changed",
+      "case": "valid",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
       "kind": "error",
       "name": "ProtocolErrorData",
       "case": "valid",
@@ -2616,6 +2730,78 @@
       "value": {
         "code": "GOAL_STORE_UNAVAILABLE",
         "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+        "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_VERSION_MISMATCH",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_VERSION_MISMATCH",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_RUN_ACTIVE",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_RUN_ACTIVE",
+        "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_JOB_ACTIVE",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_JOB_ACTIVE",
+        "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_REVISION_CONFLICT",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_REVISION_CONFLICT",
+        "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_JOB_NOT_FOUND",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_JOB_NOT_FOUND",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_INCOMPLETE",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_INCOMPLETE",
+        "retryable": true
+      }
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_PATH_UNSAFE",
+      "case": "valid",
+      "value": {
+        "code": "CODE_INDEX_PATH_UNSAFE",
+        "retryable": false
       }
     }
   ],
@@ -5094,6 +5280,170 @@
     },
     {
       "kind": "operation.params",
+      "name": "code_index.status",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.params",
+      "name": "code_index.status",
+      "case": "extra_field",
+      "value": {
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.status",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.status",
+      "case": "extra_field",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.status",
+      "case": "missing_field",
+      "value": {
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "code_index.apply",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.apply",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.apply",
+      "case": "extra_field",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "code_index.apply",
+      "case": "missing_field",
+      "value": {
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
+      "kind": "operation.params",
       "name": "host.attachment.create",
       "case": "wrong_type",
       "value": null
@@ -7027,6 +7377,78 @@
       }
     },
     {
+      "kind": "notification.params",
+      "name": "code_index.changed",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "notification.params",
+      "name": "code_index.changed",
+      "case": "extra_field",
+      "value": {
+        "revision": 1,
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "notification.params",
+      "name": "code_index.changed",
+      "case": "missing_field",
+      "value": {
+        "generation": 1,
+        "engine_version": "1.1.6",
+        "data_directory": ".harness-index",
+        "runtime_status": "ready",
+        "index_status": "absent",
+        "query_status": "stopped",
+        "watcher_status": "stopped",
+        "job": {
+          "id": "x",
+          "action": "initialize",
+          "status": "running",
+          "phase": "preflight"
+        },
+        "stats": {
+          "files": 1,
+          "symbols": 1,
+          "relationships": 1,
+          "db_bytes": 1,
+          "wal_bytes": 1
+        },
+        "error": {
+          "code": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+          "message": "x",
+          "recovery": "x"
+        }
+      }
+    },
+    {
       "kind": "error",
       "name": "ProtocolErrorData",
       "case": "wrong_type",
@@ -7461,6 +7883,54 @@
     {
       "kind": "error",
       "name": "GOAL_STORE_UNAVAILABLE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_RUNTIME_UNAVAILABLE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_VERSION_MISMATCH",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_RUN_ACTIVE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_JOB_ACTIVE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_REVISION_CONFLICT",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_JOB_NOT_FOUND",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_INCOMPLETE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "CODE_INDEX_PATH_UNSAFE",
       "case": "wrong_type",
       "value": null
     }

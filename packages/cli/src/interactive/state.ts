@@ -1,6 +1,6 @@
 /** Interactive Core 的纯 reducer：把 sidecar 流事件折叠为稳定领域状态。 */
 
-import { EventType, type EventEnvelope, type GoalActivityProjection, type GoalEvaluationProjection, type GoalPendingProjection, type GoalProjection, type InteractionRequestEnvelope } from "@za38/protocol"
+import { EventType, type CodeIndexSnapshot, type EventEnvelope, type GoalActivityProjection, type GoalEvaluationProjection, type GoalPendingProjection, type GoalProjection, type InteractionRequestEnvelope } from "@za38/protocol"
 import type { IdGenerator } from "./ports/id-generator"
 
 export type MessageRole = "user" | "assistant" | "system"
@@ -230,6 +230,8 @@ export type InteractiveState = {
   composeState: ComposeProjection | null
   /** 当前 Thread 持久化的 Work Item 投影；无未终结项或 Build Thread 为 null。 */
   workItem: WorkItemProjection | null
+  /** 当前工作区代码索引状态；独立于 Run 与 pendingOperation。 */
+  codeIndex: CodeIndexSnapshot | null
   /** 当前 Thread 的持久 Goal 与独立审计投影。 */
   goal: GoalProjection | null
   goalPending: GoalPendingProjection | null
@@ -259,6 +261,7 @@ export function createInitialState(threadId: string | null = null, workMode: Wor
     workMode,
     composeState: null,
     workItem: null,
+    codeIndex: null,
     goal: null,
     goalPending: null,
     goalEvaluation: null,
@@ -308,6 +311,15 @@ export function applyThreadMode(state: InteractiveState, mode: unknown): Interac
 }
 
 /** 原子替换当前 Thread 的 Goal 投影；恢复本身永远不启动 Run。 */
+export function applyCodeIndexSnapshot(
+  state: InteractiveState,
+  snapshot: CodeIndexSnapshot,
+): InteractiveState {
+  const current = state.codeIndex
+  if (current && snapshot.revision < current.revision) return state
+  return { ...state, codeIndex: snapshot }
+}
+
 export function applyGoalSnapshot(
   state: InteractiveState,
   snapshot: {
@@ -490,7 +502,7 @@ export function appendNotice(state: InteractiveState, message: string, idGenerat
 
 /** 清空当前 thread 并返回沉浸式首页初始状态；Work Mode 是会话级选择。 */
 export function clearThread(state: InteractiveState): InteractiveState {
-  return createInitialState(null, state.workMode)
+  return { ...createInitialState(null, state.workMode), codeIndex: state.codeIndex }
 }
 
 /**
@@ -594,6 +606,7 @@ export function restoreThread(
     workMode,
     composeState: null,
     workItem: null,
+    codeIndex: null,
     goal: null,
     goalPending: null,
     goalEvaluation: null,

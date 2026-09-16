@@ -43,6 +43,8 @@ import {
   type McpAddParams,
   type McpAddResult,
   type McpRemoveResult,
+  type CodeIndexSnapshot,
+  type CodeIndexApplyParams,
   type McpStatusResult,
   type ModelsListResult,
   type PluginsInspectResult,
@@ -451,6 +453,16 @@ export class AgentClient {
   /** 查询所有已配置 MCP 服务器的运行时连接状态和工具列表。 */
   mcpStatus(): Promise<McpStatusResult> {
     return this.request(Method.MCP_STATUS, {})
+  }
+
+  /** 查询当前工作区代码索引状态；返回协议 snapshot，不在客户端重建文案。 */
+  codeIndexStatus(): Promise<CodeIndexSnapshot> {
+    return this.request(Method.CODE_INDEX_STATUS, {})
+  }
+
+  /** 受理代码索引后台动作；长任务结果由 code_index.changed 推送。 */
+  codeIndexApply(params: CodeIndexApplyParams): Promise<CodeIndexSnapshot> {
+    return this.request(Method.CODE_INDEX_APPLY, params)
   }
 
   /** 添加 MCP 服务器到用户配置并尝试热连接。 */

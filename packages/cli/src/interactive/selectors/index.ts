@@ -3,7 +3,7 @@
 export * from "./types"
 
 import type { InteractiveSnapshot } from "../types"
-import { CAPABILITY_GATE, type CommandView, type ConversationView, type FeatureAvailability, type InteractionView, type NavigationView, type RuntimeView, type WorkItemView } from "./types"
+import { CAPABILITY_GATE, type CodeIndexView, type CommandView, type ConversationView, type FeatureAvailability, type InteractionView, type NavigationView, type RuntimeView, type WorkItemView } from "./types"
 
 /** 由 snapshot 推导全部展示可用性；与 commands.ts 的 availability 计算共享同一输入。 */
 export function selectFeatureAvailability(snapshot: InteractiveSnapshot): FeatureAvailability {
@@ -27,6 +27,78 @@ export function selectFeatureAvailability(snapshot: InteractiveSnapshot): Featur
     canOpenAgentsPanel: capabilities.has(CAPABILITY_GATE.openAgentsPanel),
     hasSkillManage: capabilities.has(CAPABILITY_GATE.toggleSkill),
     hasMcpManage: capabilities.has(CAPABILITY_GATE.manageMcp),
+  }
+}
+
+const CODE_INDEX_PHASE_LABEL: Record<string, string> = {
+  preflight: "预检中",
+  preparing: "准备中",
+  indexing: "建立中",
+  resolving: "解析中",
+  validating: "校验中",
+  starting_query: "启动查询中",
+  removing: "删除中",
+}
+
+/** 代码索引状态：只使用 Harness 文案，不透传路径或供应商名称。 */
+export function selectCodeIndexView(snapshot: InteractiveSnapshot): CodeIndexView | null {
+  const state = snapshot.codeIndex
+  if (!state) return null
+  if (state.job?.status === "running") {
+    const phase = CODE_INDEX_PHASE_LABEL[state.job.phase] ?? "建立中"
+    const completed = state.job.completed
+    const total = state.job.total
+    const count = completed === undefined
+      ? ""
+      : total === undefined
+        ? `\n已处理 ${completed} 项`
+        : `\n已处理 ${completed} / ${total} 项`
+    return {
+      title: "代码索引",
+      indexStatus: state.index_status === "incomplete" ? "incomplete" : state.index_status,
+      body: `代码索引 · ${phase}${count}`,
+    }
+  }
+  if (state.runtime_status === "unavailable") {
+    return {
+      title: "代码索引",
+      indexStatus: "unavailable",
+      body: [
+        "代码索引 · 运行时不可用",
+        state.error?.message,
+        state.error?.recovery,
+      ].filter(Boolean).join("\n"),
+    }
+  }
+  if (state.index_status === "absent") {
+    return {
+      title: "代码索引",
+      indexStatus: "absent",
+      body: "代码索引 · 未建立",
+    }
+  }
+  if (state.index_status === "incomplete") {
+    return {
+      title: "代码索引",
+      indexStatus: "incomplete",
+      body: [
+        "代码索引 · 不完整",
+        state.error?.message,
+        state.error?.recovery,
+      ].filter(Boolean).join("\n"),
+    }
+  }
+  return {
+    title: "代码索引",
+    indexStatus: "ready",
+    body: [
+      "代码索引 · 已就绪",
+      state.stats
+        ? `${state.stats.files} 个文件 · ${state.stats.symbols} 个符号 · ${state.stats.relationships} 条关系`
+        : undefined,
+      `${state.query_status === "ready" ? "查询就绪" : "查询未就绪"} · ${state.watcher_status === "ready" ? "自动同步就绪" : "自动同步未就绪"}`,
+      state.watcher_status === "degraded" ? "索引可能已过期；执行 /code-index 手工更新。" : undefined,
+    ].filter(Boolean).join("\n"),
   }
 }
 
@@ -91,6 +163,7 @@ export function selectRuntimeView(snapshot: InteractiveSnapshot): RuntimeView {
     selection: snapshot.selection,
     workMode: snapshot.workMode,
     composeState: snapshot.composeState,
+    codeIndex: snapshot.codeIndex,
     availability: {
       canCancelRun: availability.canCancelRun,
       canToggleSkill: availability.canToggleSkill,

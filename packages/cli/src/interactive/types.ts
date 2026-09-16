@@ -2,6 +2,7 @@
 
 import type {
   AgentSummary,
+  CodeIndexSnapshot,
   DirectoryTrustDecision,
   FileDiffPresentation,
   GoalActivityProjection,
@@ -165,7 +166,7 @@ export type PresentationEffect =
   | { type: "present"; target: "threads" | "models" | "skills" | "agents" | "status" | "undo"; initialQuery?: string }
   | { type: "request-handoff"; threadId: string | null }
   | { type: "side-question"; question: string; threadId: string | null; replyText?: string; modelProfileId?: string; error?: string }
-  | { type: "inspect-overlay"; kind: "goal" | "plan" | "mcp"; title: string; body: string }
+  | { type: "inspect-overlay"; kind: "goal" | "plan" | "mcp" | "code-index"; title: string; body: string }
   | { type: "request-exit" }
   | { type: "request-redo"; threadId: string | null }
 
@@ -240,6 +241,7 @@ export type InteractiveSnapshot = {
   readonly composeState: ComposeProjection | null
   /** 当前 Thread 的持久 Work Item 投影；null 表示无未终结项或 Build Thread。 */
   readonly workItem: WorkItemProjection | null
+  readonly codeIndex: CodeIndexSnapshot | null
   readonly goal: GoalProjection | null
   readonly goalPending: GoalPendingProjection | null
   readonly goalEvaluation: GoalEvaluationProjection | null
