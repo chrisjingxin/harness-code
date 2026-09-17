@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import Ajv2020 from "ajv/dist/2020"
 import standaloneCode from "ajv/dist/standalone"
 
@@ -10,7 +11,7 @@ type Schema = Record<string, any>
 type EventMetadata = { levels: string[]; fields: string }
 type Metadata = { version: number; max_record_bytes: number; events: Record<string, EventMetadata> }
 
-const diagnosticRoot = resolve(import.meta.dir, "..")
+const diagnosticRoot = resolve(fileURLToPath(new URL("../", import.meta.url)))
 const protocolRoot = resolve(diagnosticRoot, "..")
 const repositoryRoot = resolve(protocolRoot, "../..")
 const schemaPath = resolve(diagnosticRoot, "schema/v1.json")
@@ -30,7 +31,7 @@ const targets = [
 if (process.argv.includes("--check")) {
   for (const [path, expected] of targets) {
     const actual = await readFile(path, "utf8").catch(() => "")
-    if (actual !== expected) throw new Error(`${path} 已过期，请运行 bun run protocol:generate`)
+    if (actual !== expected) throw new Error(`${path} 已过期，请运行 npm run protocol:generate`)
   }
 } else {
   for (const [path, content] of targets) await writeFile(path, content, "utf8")
@@ -101,6 +102,7 @@ function renderValidators(root: Schema, meta: Metadata): string {
   }))
   const moduleCode = standaloneCode(ajv, Object.fromEntries(Object.values(exportsByKey).map(value => [value.exportName, value.schemaId])))
     .replace(/const (\w+) = require\("ajv\/dist\/runtime\/ucs2length"\)\.default;/, "const $1 = function ucs2length(value){let length=0;for(let index=0;index<value.length;index++,length++){const first=value.charCodeAt(index);if(first>=55296&&first<=56319&&index+1<value.length&&(value.charCodeAt(index+1)&64512)===56320)index++;}return length;};")
+    .replace(/const (\w+) = require\("ajv\/dist\/runtime\/equal"\)\.default;/, "const $1 = function deepEqual(left,right){if(left===right)return true;if(left&&right&&typeof left===\"object\"&&typeof right===\"object\"){if(left.constructor!==right.constructor)return false;if(Array.isArray(left)){if(left.length!==right.length)return false;for(let index=left.length;index--!==0;)if(!deepEqual(left[index],right[index]))return false;return true;}if(left.constructor===RegExp)return left.source===right.source&&left.flags===right.flags;if(left.valueOf!==Object.prototype.valueOf)return left.valueOf()===right.valueOf();if(left.toString!==Object.prototype.toString)return left.toString()===right.toString();const keys=Object.keys(left);if(keys.length!==Object.keys(right).length)return false;for(const key of keys)if(!Object.prototype.hasOwnProperty.call(right,key)||!deepEqual(left[key],right[key]))return false;return true;}return left!==left&&right!==right;};")
   const entries = Object.entries(exportsByKey).map(([key, value]) => `  ${JSON.stringify(key)}: ${value.exportName},`).join("\n")
   return `/** 由 Diagnostic Log v1 Schema 构建期生成，请勿手工修改。 */
 // @ts-nocheck -- Ajv standalone 输出由跨语言契约测试覆盖。

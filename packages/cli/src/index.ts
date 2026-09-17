@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /** za38 CLI 启动层：管理 Python sidecar 生命周期并选择 TUI 或无头执行模式。 */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -8,6 +7,7 @@ import { realpath } from "node:fs/promises"
 import { delimiter } from "node:path"
 import { createInterface } from "node:readline"
 import { TextDecoder } from "node:util"
+import { fileURLToPath } from "node:url"
 import {
   Capability,
   EventType,
@@ -23,28 +23,18 @@ import { CLI_INSTALL_ROOT_ENV, resolveAgentProcessBinding, resolveCliInstallRoot
 import { createDiagnosticLog, defaultProcessFields, type DiagnosticLog } from "./diagnostic-log/runtime"
 import { SidecarStderrDrain } from "./diagnostic-log/runtime/stderr-drain"
 import { runLogsQuery } from "./diagnostic-log/query"
-import { AgentClient, JsonRpcRemoteError } from "./ipc/client"
+import { AgentClient } from "./ipc/client"
 import { bindPluginCommands } from "./ipc/command-binding"
 import { StdioRpcTransport } from "./ipc/stdio-transport"
-import { runTui } from "./tui/app"
+import { runTui } from "./tui/ink/app"
 import { CLI_VERSION, createInteractiveRuntime, type InteractiveRuntime } from "./interactive/runtime"
 import { createCommandRegistry } from "./interactive/commands"
 import { createInteractiveController } from "./interactive/controller"
 import type { InteractiveController } from "./interactive/types"
 import { AgentClientGateway } from "./infrastructure/agent-client-gateway"
 import { detectGitWorkspace } from "./infrastructure/git-workspace"
-import { createSystemBrowserOpener } from "./web/browser"
-import { browserBundle } from "./web/bundle"
-import { webHtml } from "./web/html"
 import { createWorkspaceExplorer } from "./workspace/explorer"
 import type { WorkspaceExplorer } from "./workspace/types"
-import {
-  createPresentationCoordinator,
-  createWebUiGateway,
-  type PresentationCoordinator,
-  type WebUiGateway,
-} from "./presentation-coordinator"
-import { createWebServer } from "./web/server"
 
 type RunningAgent = {
   client: AgentClient
@@ -59,6 +49,8 @@ type ExecuteDependencies = {
 }
 
 type TerminalStream = { isTTY?: boolean }
+
+const moduleDir = fileURLToPath(new URL(".", import.meta.url))
 
 /** Plugin consent 所需的三条真实终端流；任何一条被重定向都不能确认安装。 */
 export type PluginConsentTerminalState = {
@@ -192,7 +184,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
   })
   log.info("process.started", defaultProcessFields(command.kind))
   const binding = resolveAgentProcessBinding({
-    moduleDir: import.meta.dir,
+    moduleDir,
     env: process.env,
   })
   const sandboxEnvironment = command.kind === "run" && command.sandbox !== undefined
@@ -207,7 +199,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
       ...process.env,
       ...sandboxEnvironment,
       HARNESS_COMMAND_KIND: command.kind,
-      [CLI_INSTALL_ROOT_ENV]: resolveCliInstallRoot(import.meta.dir),
+      [CLI_INSTALL_ROOT_ENV]: resolveCliInstallRoot(moduleDir),
       ...(command.configPath ? { HARNESS_AGENT_CONFIG_PATH: command.configPath } : {}),
       ...(binding.pythonPath
         ? { PYTHONPATH: process.env.PYTHONPATH ? `${binding.pythonPath}${delimiter}${process.env.PYTHONPATH}` : binding.pythonPath }
@@ -529,8 +521,6 @@ export async function execute(
       return
     }
 
-    let presentationCoordinator: PresentationCoordinator | undefined
-    let webUiGateway: WebUiGateway | undefined
     let workspaceExplorer: WorkspaceExplorer | undefined
     let controller: InteractiveController | undefined
     try {
@@ -543,43 +533,16 @@ export async function execute(
       if (!command.nonInteractive) {
         // 工作区文件浏览独立于 Interactive Core；根解析失败时 explorer 自身进入 error 状态。
         workspaceExplorer = await createWorkspaceExplorer(command.cwd)
-        const server = createWebServer({
-          html: webHtml,
-          getAssets: browserBundle,
-          isActiveHandoff: handoffId =>
-            presentationCoordinator !== undefined && presentationCoordinator.isHandoffActive(handoffId),
-          validateUiToken: (id, token, origin) =>
-            presentationCoordinator!.validateUiToken(id, token, origin),
-          attachRenderer: (id, token, channel) =>
-            presentationCoordinator!.attachRenderer(id, token, channel),
-        })
-        presentationCoordinator = createPresentationCoordinator({
-          server,
-          openBrowser: createSystemBrowserOpener(),
-          dispatch: intent => controller!.dispatch(intent),
-          onRendererConnected: (channel, reconnectToken) => webUiGateway!.connectRenderer(channel, reconnectToken),
-          diagnostics: agent.log,
-        })
-        webUiGateway = createWebUiGateway({
-          coordinator: presentationCoordinator,
-          controller,
-          workspaceExplorer,
-          diagnostics: agent.log,
-        })
       }
       await runTui({
         controller,
         gateway,
         workspaceExplorer,
         resume: command.resume,
-        webHandoff: presentationCoordinator,
-        openWeb: () => presentationCoordinator!.open(),
       })
     } finally {
-      // 关闭顺序：Web 通道 → WorkspaceExplorer → Coordinator → Controller → agent.stop（外层 finally）。
-      await webUiGateway?.close()
+      // 停点 A 尚未启用 Web；关闭顺序为 WorkspaceExplorer → Controller → agent.stop（外层 finally）。
       await workspaceExplorer?.close()
-      await presentationCoordinator?.close()
       await controller?.close()
     }
   } finally {
@@ -590,22 +553,4 @@ export async function execute(
 /** CLI 主入口：解析参数后执行；version/help/logs 在 execute 内短路。 */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   await execute(parseArgs(argv))
-}
-
-if (import.meta.main) {
-  main().catch(error => {
-    // 旧 sidecar 仍可能只把 THREAD_STORE_UNAVAILABLE 放在 message 中、将
-    // 真正的迁移诊断码放在 JSON-RPC data.code；启动失败时把这个稳定码透传，
-    // 避免用户只能看到无法行动的笼统错误。
-    const message = error instanceof JsonRpcRemoteError
-      && error.message === "THREAD_STORE_UNAVAILABLE"
-      && typeof error.data === "object"
-      && error.data !== null
-      && "code" in error.data
-      && typeof error.data.code === "string"
-      ? `${error.message}: ${error.data.code}`
-      : error instanceof Error ? error.message : String(error)
-    console.error(`za38: ${message}`)
-    process.exitCode = 1
-  })
 }

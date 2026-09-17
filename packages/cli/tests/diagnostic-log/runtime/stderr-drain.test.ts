@@ -1,6 +1,6 @@
 /** Sidecar stderr drain 只记计数，内存不随洪泛增长。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { SidecarStderrDrain } from "../../../src/diagnostic-log/runtime/stderr-drain"
 
 test("大体积 stderr 只累计有界 bytes/lines，不保留原文", () => {

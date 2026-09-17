@@ -3,6 +3,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import Ajv2020 from "ajv/dist/2020"
 import standaloneCode from "ajv/dist/standalone"
 
@@ -21,7 +22,7 @@ type Metadata = {
   error_codes: Record<string, { jsonrpc_code: number; retryable: boolean }>
 }
 
-const protocolRoot = resolve(import.meta.dir, "..")
+const protocolRoot = resolve(fileURLToPath(new URL("../", import.meta.url)))
 const repositoryRoot = resolve(protocolRoot, "../..")
 const schemaPath = resolve(protocolRoot, "schema/v3.json")
 const schemaText = await readFile(schemaPath, "utf8")
@@ -40,7 +41,7 @@ const targets = [
 if (process.argv.includes("--check")) {
   for (const [path, expected] of targets) {
     const actual = await readFile(path, "utf8").catch(() => "")
-    if (actual !== expected) throw new Error(`${path} 已过期，请运行 bun run protocol:generate`)
+    if (actual !== expected) throw new Error(`${path} 已过期，请运行 npm run protocol:generate`)
   }
 } else {
   for (const [path, content] of targets) await writeFile(path, content, "utf8")

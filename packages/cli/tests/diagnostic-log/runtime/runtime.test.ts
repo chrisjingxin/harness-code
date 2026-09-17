@@ -1,10 +1,14 @@
 /** TypeScript DiagnosticLog 的异步、有界与文件生命周期测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDiagnosticLog } from "../../../src/diagnostic-log/runtime"
+import { createDiagnosticLog, defaultProcessFields } from "../../../src/diagnostic-log/runtime"
+
+test("默认进程诊断只报告 Node runtime", () => {
+  expect(defaultProcessFields("run").runtime_version).toBe(`node-${process.versions.node}`)
+})
 
 test("log.* 同步入队，child context 不可变，close 后得到 closed JSONL", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-diagnostic-ts-"))
@@ -69,7 +73,7 @@ test("retention 只删除过期 closed segment，绝不触碰 active/orphan", as
     const { lifecycle } = createDiagnosticLog({ ...options(root), retentionDays: 1 })
     await lifecycle.close()
     await expect(access(closed)).rejects.toBeDefined()
-    await expect(access(active)).resolves.toBeNull()
+    await expect(access(active)).resolves.toBeUndefined()
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -194,7 +198,7 @@ test("契约错误不抛给业务路径，只累计 contract violation", async (
     expect(() => (log.info as Function)("process.started", { token: "secret" })).not.toThrow()
     expect(lifecycle.snapshot().contractViolations).toBe(1)
     expect(() => (log.info as Function)("process.started", {
-      command_kind: "x".repeat(9_000), runtime_version: "bun", platform: "darwin", arch: "arm64",
+      command_kind: "x".repeat(9_000), runtime_version: "node-20", platform: "darwin", arch: "arm64",
     })).not.toThrow()
     expect(lifecycle.snapshot().oversize).toBe(1)
     await lifecycle.close()
@@ -218,5 +222,5 @@ function options(root: string) {
 }
 
 function processFields() {
-  return { command_kind: "run", runtime_version: "bun", platform: "darwin", arch: "arm64" }
+  return { command_kind: "run", runtime_version: "node-20", platform: "darwin", arch: "arm64" }
 }

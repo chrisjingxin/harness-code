@@ -3,37 +3,41 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "za38": "./dist/index.js",
     "harness": "./dist/index.js"
   },
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target bun --external @opentui/core --external @opentui/react --external react --external react-dom --external react-reconciler && bun run scripts/build-web-assets.ts",
-    "syntax:assets": "bun run scripts/vendor-syntax-assets.ts",
+    "dev": "node --import tsx src/bin.ts",
+    "build": "node --import tsx scripts/build.ts",
+    "syntax:assets": "node --import tsx scripts/vendor-syntax-assets.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test tests/acceptance tests/args.test.ts tests/diagnostics tests/gateway.integration.test.ts tests/index.test.ts tests/infrastructure tests/install-ps1.test.ts tests/install-sh.test.ts tests/integration.test.ts tests/interactive tests/ipc tests/pack-publishable.test.ts tests/presentation-coordinator tests/presentation-shared tests/runtime-binding.test.ts tests/tui tests/web/application tests/web/architecture.test.ts tests/web/browser.test.ts tests/web/bundle.test.ts tests/web/integration.test.ts tests/web/presentation tests/web/presentation.test.tsx tests/web/ready-gate.test.ts tests/web/server.test.ts tests/web/syntax tests/workspace && bun test tests/web/takeover-recovery.test.ts"
+    "test": "vitest run --config ../../vitest.config.ts packages/cli/tests/node packages/cli/tests/args.test.ts packages/cli/tests/index.test.ts packages/cli/tests/runtime-binding.test.ts packages/cli/tests/diagnostic-log packages/cli/tests/tui/adapter-runtime-input.test.ts"
   },
   "dependencies": {
     "@colbymchenry/codegraph": "1.1.6",
-    "@opentui/core": "0.4.3",
-    "@opentui/react": "0.4.3",
-    "@za38/protocol": "workspace:*",
+    "@za38/protocol": "0.1.0",
+    "ink": "6.8.0",
     "lucide-react": "1.16.0",
     "marked": "17.0.1",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "react-reconciler": "0.33.0",
-    "shiki": "3.23.0"
+    "shiki": "3.23.0",
+    "string-width": "8.2.2",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "20.0.11",
-    "@types/bun": "1.3.5",
-    "@types/node": "26.1.1",
+    "@types/node": "20.19.35",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.7",
-    "@types/react-reconciler": "0.32.0",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
     "happy-dom": "^20.11.1",
+    "tsx": "4.23.13",
     "typescript": "6.0.3"
   }
 }

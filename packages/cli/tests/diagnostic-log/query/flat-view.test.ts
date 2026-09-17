@@ -1,6 +1,6 @@
 /** harness logs flat 逐事件视图与树形 cursor 门禁测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -100,7 +100,7 @@ test("flat 宽终端逐行显示时间、级别、来源、原始 EVENT、安全
     expect(output).toContain("tool.failed")
     expect(output).toContain("MCP github.list_issues · 失败 · TIMEOUT")
     expect(output).not.toContain(seeded.fingerprint)
-    expect(output.split("\n").every(line => displayWidth(line) <= 100)).toBeTrue()
+    expect(output.split("\n").every(line => displayWidth(line) <= 100)).toBe(true)
   } finally {
     await rm(seeded.root, { recursive: true, force: true })
     await rm(seeded.cwd, { recursive: true, force: true })
@@ -117,7 +117,7 @@ test("flat 64 列降级为两行记录且不横向溢出", async () => {
     expect(output).not.toContain("时间          级别")
     expect(output).toContain("model.completed")
     expect(output).toContain("\n  回合 #1 · 尝试 #1 · 完成 · 8.61s")
-    expect(output.split("\n").every(line => displayWidth(line) <= 64)).toBeTrue()
+    expect(output.split("\n").every(line => displayWidth(line) <= 64)).toBe(true)
   } finally {
     await rm(seeded.root, { recursive: true, force: true })
     await rm(seeded.cwd, { recursive: true, force: true })
@@ -131,7 +131,7 @@ test("默认树形截断不生成 cursor，而是给出同选择器的 flat 命�
     const result = await queryLogs(query, seeded.root)
     const output = renderLogsHuman(result, query, 100)
 
-    expect(result.truncated).toBeTrue()
+    expect(result.truncated).toBe(true)
     expect(result.next_cursor).toBeNull()
     expect(output).not.toContain("下一页")
     expect(output).toContain("harness logs --run run-flat-view --flat --limit 2")

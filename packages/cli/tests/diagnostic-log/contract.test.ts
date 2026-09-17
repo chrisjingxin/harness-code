@@ -1,14 +1,16 @@
 /** Diagnostic Log v1 的 TypeScript/Python 共享契约测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { assertDiagnosticQueryResult, assertDiagnosticRecord } from "@za38/protocol/diagnostic-log"
 
 type Fixture = { valid: boolean; value: unknown }
+const testDir = fileURLToPath(new URL(".", import.meta.url))
 
 const fixtures = JSON.parse(
-  await readFile(resolve(import.meta.dir, "../../../protocol/diagnostic-log/fixtures/v1-contract.json"), "utf8"),
+  await readFile(resolve(testDir, "../../../protocol/diagnostic-log/fixtures/v1-contract.json"), "utf8"),
 ) as Fixture[]
 
 test("TypeScript 与 Python 共享 Diagnostic Log v1 正反 fixture", () => {

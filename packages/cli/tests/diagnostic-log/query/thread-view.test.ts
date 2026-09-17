@@ -1,6 +1,6 @@
 /** harness logs 的 Thread 聚合、过程关联与中文投影测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { realpath } from "node:fs/promises"
@@ -119,14 +119,14 @@ test("默认列表按最近活动聚合 Thread，--thread/--run 合并同进程�
     const thread = await queryLogs({ cwd: seeded.cwd, json: false, limit: 200, thread: "thread-a" }, seeded.root)
     expect(thread.thread_id).toBe("thread-alpha")
     expect(thread.summary).toMatchObject({ run_count: 2, outcome: "failed" })
-    expect(thread.events.some(event => event.event === "mcp.connection.completed")).toBeTrue()
+    expect(thread.events.some(event => event.event === "mcp.connection.completed")).toBe(true)
     expect(thread.events.filter(event => event.event === "run.started")).toHaveLength(2)
     expect(() => assertDiagnosticQueryResult(thread)).not.toThrow()
 
     const run = await queryLogs({ cwd: seeded.cwd, json: false, limit: 200, run: "run-alpha-2" }, seeded.root)
     expect(run.run_id).toBe("run-alpha-2")
     expect(run.thread_id).toBeUndefined()
-    expect(run.events.some(event => event.event === "mcp.connection.completed")).toBeTrue()
+    expect(run.events.some(event => event.event === "mcp.connection.completed")).toBe(true)
     const runOutput = renderLogsHuman(run, { cwd: seeded.cwd, json: false, limit: 200, run: "run-alpha-2" })
     expect(runOutput).toContain("失败点")
     expect(runOutput).toContain("过程")
@@ -275,7 +275,7 @@ test("human 输出在窄终端内截断而不产生横向溢出", async () => {
     const tool = result.events.find(event => event.event === "tool.failed")
     if (tool) (tool.fields as Record<string, unknown>).tool_name = `github.${"very_long_tool_name_".repeat(5)}`
     const output = renderLogsHuman(result, { cwd: seeded.cwd, json: false, limit: 200, run: "run-alpha-2" }, 64)
-    expect(output.split("\n").every(line => terminalWidth(line) <= 64)).toBeTrue()
+    expect(output.split("\n").every(line => terminalWidth(line) <= 64)).toBe(true)
   } finally {
     await rm(seeded.root, { recursive: true, force: true })
     await rm(seeded.cwd, { recursive: true, force: true })

@@ -1,6 +1,6 @@
 /** 执行中取消保留草稿；无浮层 Esc 只提示中断键。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { Capability, type CodeIndexApplyParams } from "@za38/protocol"
 import { createTuiAdapter } from "../../src/tui/application/adapter"
@@ -59,6 +59,36 @@ test("hint-interrupt 弹出 Ctrl+C 提示", async () => {
     await adapter.close()
     await harness.controller.close()
   }
+})
+
+test("受理后清空草稿，拒绝时保留草稿", async () => {
+  const harness = makeHarness()
+  const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => {} })
+  try {
+    await adapter.dispatch({ type: "draft-input", value: "第一条" })
+    await adapter.dispatch({ type: "submit", value: "第一条" })
+    expect(adapter.getSnapshot().draft).toBe("")
+
+    await adapter.dispatch({ type: "draft-input", value: "第二条" })
+    await adapter.dispatch({ type: "submit", value: "第二条" })
+    expect(adapter.getSnapshot().draft).toBe("第二条")
+    expect(adapter.getSnapshot().transientNotice?.message).toBeTruthy()
+  } finally {
+    await adapter.close()
+    await harness.controller.close()
+  }
+})
+
+test("adapter close 重复调用不会重复触发退出", async () => {
+  let exits = 0
+  const harness = makeHarness()
+  const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => { exits += 1 } })
+
+  await adapter.close()
+  await adapter.close()
+
+  expect(exits).toBe(0)
+  await harness.controller.close()
 })
 
 test("/code-index remove 在 TUI 使用共享确认后才删除", async () => {

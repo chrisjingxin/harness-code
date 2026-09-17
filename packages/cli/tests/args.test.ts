@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { parseArgs } from "../src/args"
 
@@ -42,7 +42,7 @@ test("--resume 只打开交互式 thread 选择器，不接受 thread_id", () =>
 
 test("sandbox 开关只接受企业远端模式或显式关闭", () => {
   expect(parseArgs(["--sandbox"], "/work").sandbox).toBe("remote")
-  expect(parseArgs(["--sandbox=false"], "/work").sandbox).toBeFalse()
+  expect(parseArgs(["--sandbox=false"], "/work").sandbox).toBe(false)
   expect(() => parseArgs(["--sandbox=docker"], "/work")).toThrow("only supports remote")
 })
 

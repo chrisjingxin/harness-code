@@ -1,6 +1,6 @@
 /** harness logs cursor 绑定、失效与离线安全边界测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { createHash } from "node:crypto"
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -37,7 +37,7 @@ async function setup() {
 
 async function firstCursor(value: Awaited<ReturnType<typeof setup>>): Promise<string> {
   const result = await queryLogs({ cwd: value.cwd, json: true, limit: 1, run: "run-cursor" }, value.root)
-  expect(result.next_cursor).toBeString()
+  expect(result.next_cursor).toEqual(expect.any(String))
   return result.next_cursor!
 }
 

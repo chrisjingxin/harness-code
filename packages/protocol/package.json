@@ -12,7 +12,7 @@
     "ajv": "8.17.1"
   },
   "scripts": {
-    "generate": "bun run scripts/generate.ts && bun run diagnostic-log/scripts/generate.ts",
-    "check": "bun run scripts/generate.ts --check && bun run diagnostic-log/scripts/generate.ts --check"
+    "generate": "node --import tsx scripts/generate.ts && node --import tsx diagnostic-log/scripts/generate.ts",
+    "check": "node --import tsx scripts/generate.ts --check && node --import tsx diagnostic-log/scripts/generate.ts --check"
   }
 }

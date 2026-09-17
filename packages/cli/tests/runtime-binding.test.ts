@@ -1,5 +1,5 @@
 /** 安装形态与开发形态的内核进程定位。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"

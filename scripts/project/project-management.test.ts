@@ -1,6 +1,6 @@
 /** 仓库协作脚本的回归测试：所有文件系统操作均限定在临时项目目录。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -106,12 +106,12 @@ test("认领和完成任务会同步状态、证据、归档与只读看板", as
     expect(claimed?.metadata.status).toBe("进行中")
     expect(claimed?.metadata.owner).toBe("codex")
 
-    await completeTask(projectRoot, "HC-001", "bun test scripts/project/project-management.test.ts", "abc123")
+    await completeTask(projectRoot, "HC-001", "npm run test:project -- scripts/project/project-management.test.ts", "abc123")
     expect(await loadTasks(projectRoot)).toHaveLength(0)
     const archivedPath = join(projectRoot, TASK_ARCHIVE_DIR, taskFileName("HC-001", "测试任务"))
     const archived = await readFile(archivedPath, "utf8")
     expect(archived).toContain("status: 已完成")
-    expect(archived).toContain("bun test")
+    expect(archived).toContain("npm run test:project")
     expect(archived).toContain("abc123")
     // 复核字段已随功能移除，写回时不再生成
     expect(archived).not.toContain("review_due")
@@ -182,7 +182,7 @@ test("归档任务不进入活动看板，但历史文档引用仍通过校验",
       status: "已完成",
       owner: "codex",
       branch: "codex/archive",
-      test_evidence: "bun test",
+      test_evidence: "npm run test:project",
       completed_at: "2026-07-30",
     }), "utf8")
     await writeFile(join(projectRoot, "README.md"), `提及 HC-000。\n\n[归档](${TASK_ARCHIVE_DIR}/${archivedName})\n`, "utf8")
@@ -247,7 +247,7 @@ const archivedMetadata = {
   status: "已完成",
   owner: "codex",
   branch: "codex/archive",
-  test_evidence: "bun test",
+  test_evidence: "npm run test:project",
   completed_at: "2026-07-30",
 }
 

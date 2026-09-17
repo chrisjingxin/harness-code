@@ -454,7 +454,7 @@ class SegmentWriter {
 }
 
 export function defaultProcessFields(commandKind: string): DiagnosticFieldsMap["process.started"] {
-  return { command_kind: commandKind, runtime_version: `bun-${Bun.version}`, platform: `${platform()}-${release()}`, arch: arch() }
+  return { command_kind: commandKind, runtime_version: `node-${process.versions.node}`, platform: `${platform()}-${release()}`, arch: arch() }
 }
 
 function environmentLevel(): DiagnosticLevel | null {

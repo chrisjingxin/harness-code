@@ -5,8 +5,9 @@
 import { execFileSync } from "node:child_process"
 import { readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(fileURLToPath(new URL("../../", import.meta.url)))
 const versionFiles = [
   "packages/cli/package.json",
   "packages/protocol/package.json",

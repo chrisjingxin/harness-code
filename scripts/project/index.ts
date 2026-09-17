@@ -3,6 +3,7 @@
  */
 
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { checkDocs } from "./docs"
 import { checkRelease, setVersion } from "./release"
@@ -14,7 +15,7 @@ export * from "./tasks"
 
 type CommandOptions = Record<string, string>
 
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(fileURLToPath(new URL("../../", import.meta.url)))
 
 /** 根据子命令运行项目管理操作，供 package.json 统一调用。 */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -91,7 +92,10 @@ function requiredOption(options: CommandOptions, key: string): string {
   return value
 }
 
-if (import.meta.main) {
+const isMainModule = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (isMainModule) {
   main().catch(error => {
     console.error(`project-management: ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1

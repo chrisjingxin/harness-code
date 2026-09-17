@@ -1,11 +1,12 @@
 /** CLI 启动层测试：验证工作区错误能在启动 Python 前得到清晰诊断。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { PassThrough, Readable } from "node:stream"
+import { fileURLToPath } from "node:url"
 
 import {
   clientCapabilities,
@@ -28,17 +29,17 @@ import {
 import { parseArgs } from "../src/args"
 import { CLI_VERSION } from "../src/interactive/runtime"
 
-test("CLI shutdown 顺序：runTui 返回后 gateway → coordinator → controller.close，agent.stop 最后", () => {
-  const source = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
+const testDir = fileURLToPath(new URL(".", import.meta.url))
+
+test("停点 A 的 CLI shutdown 顺序：runTui 返回后 explorer → controller.close，agent.stop 最后", () => {
+  const source = readFileSync(resolve(testDir, "../src/index.ts"), "utf8")
   const runTuiAt = source.indexOf("await runTui(")
-  const gatewayCloseAt = source.indexOf("await webUiGateway?.close()")
-  const coordinatorCloseAt = source.indexOf("await presentationCoordinator?.close()")
+  const explorerCloseAt = source.indexOf("await workspaceExplorer?.close()")
   const controllerCloseAt = source.indexOf("await controller?.close()")
   const agentStopAt = source.indexOf("await agent.stop()")
   expect(runTuiAt).toBeGreaterThan(-1)
-  expect(gatewayCloseAt).toBeGreaterThan(runTuiAt)
-  expect(coordinatorCloseAt).toBeGreaterThan(gatewayCloseAt)
-  expect(controllerCloseAt).toBeGreaterThan(coordinatorCloseAt)
+  expect(explorerCloseAt).toBeGreaterThan(runTuiAt)
+  expect(controllerCloseAt).toBeGreaterThan(explorerCloseAt)
   expect(agentStopAt).toBeGreaterThan(controllerCloseAt)
 })
 
@@ -62,13 +63,13 @@ test("CLI workspace fingerprint 使用平台真实路径且不暴露路径", asy
 })
 
 test("生产日志路径不再使用同步文件写入或旧 debug 目录", () => {
-  const source = readFileSync(resolve(import.meta.dir, "../src/diagnostic-log/runtime/index.ts"), "utf8")
+  const source = readFileSync(resolve(testDir, "../src/diagnostic-log/runtime/index.ts"), "utf8")
   expect(source).not.toContain("writeSync")
   expect(source).not.toContain('.harness", "debug')
 })
 
 test("sidecar stderr 使用有界 drain，不拼接原文", () => {
-  const source = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
+  const source = readFileSync(resolve(testDir, "../src/index.ts"), "utf8")
   expect(source).toContain("SidecarStderrDrain")
   expect(source).not.toContain("stderr += ")
   expect(source).not.toContain("stderrChunks")
@@ -81,7 +82,7 @@ test("交互界面拒绝经过管道或任务复用器启动", () => {
 })
 
 test("开发形态：源码与 dist CLI 都解析到 packages/agent sidecar", () => {
-  const packageDir = resolve(import.meta.dir, "..")
+  const packageDir = resolve(testDir, "..")
   const agentDir = resolve(packageDir, "../agent")
   const source = resolveAgentRuntimeLocations(resolve(packageDir, "src"))
   const dist = resolveAgentRuntimeLocations(resolve(packageDir, "dist"))
@@ -93,10 +94,10 @@ test("开发形态：源码与 dist CLI 都解析到 packages/agent sidecar", ()
 })
 
 test("根 dev 命令直接启动 CLI，避免 workspace 转发丢失 TTY", async () => {
-  const rootPackage = JSON.parse(await readFile(resolve(import.meta.dir, "../../../package.json"), "utf8")) as {
+  const rootPackage = JSON.parse(await readFile(resolve(testDir, "../../../package.json"), "utf8")) as {
     scripts: Record<string, string>
   }
-  expect(rootPackage.scripts.dev).toBe("bun packages/cli/src/index.ts")
+  expect(rootPackage.scripts.dev).toBe("node --import tsx packages/cli/src/bin.ts")
 })
 
 test("无头 CLI 不声明 Interaction handler", () => {
@@ -211,13 +212,13 @@ test("harness logs 命令路由在 startAgent 之前，不创建 sidecar、不�
   expect(logsCmd.kind).toBe("logs")
 
   // 源码证据：execute 中 logs 处理在 startAgent 调用之前，保证 spawn=0
-  const src = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
+  const src = readFileSync(resolve(testDir, "../src/index.ts"), "utf8")
   const startAgentIdx = src.indexOf("const agent = await (dependencies.startAgent ?? startAgent)(command)")
   const logsCheckIdx = src.indexOf('command.kind === "logs"')
   expect(logsCheckIdx).toBeGreaterThan(-1)
   expect(logsCheckIdx).toBeLessThan(startAgentIdx)
 
-  const querySource = readFileSync(resolve(import.meta.dir, "../src/diagnostic-log/query.ts"), "utf8")
+  const querySource = readFileSync(resolve(testDir, "../src/diagnostic-log/query.ts"), "utf8")
   expect(querySource).not.toContain("child_process")
   expect(querySource).not.toContain("Bun.spawn")
   expect(querySource).not.toContain("Database")

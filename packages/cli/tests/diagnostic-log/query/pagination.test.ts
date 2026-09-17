@@ -1,6 +1,6 @@
 /** harness logs 的双上限与 snapshot cursor 回归测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { tmpdir } from "node:os"
@@ -121,9 +121,9 @@ test("JSON 和 human stdout 均不超过 256 KiB，记录不被按字节切坏",
     const jsonOutput = `${JSON.stringify(jsonResult, null, 2)}\n`
     expect(Buffer.byteLength(jsonOutput, "utf8")).toBeLessThanOrEqual(MAX_STDOUT_BYTES)
     expect(jsonResult.returned_count).toBeLessThan(80)
-    expect(jsonResult.next_cursor).toBeString()
+    expect(jsonResult.next_cursor).toEqual(expect.any(String))
     expect(() => assertDiagnosticQueryResult(jsonResult)).not.toThrow()
-    expect(jsonResult.events.every(event => event.event === "catalog.bound")).toBeTrue()
+    expect(jsonResult.events.every(event => event.event === "catalog.bound")).toBe(true)
 
     const humanResult = await queryLogs(
       { cwd: seeded.cwd, json: false, flat: true, limit: 200, run: "run-large" },
@@ -153,7 +153,7 @@ test("cursor 三页无重复漏读，首页后追加和新 segment 不进入 sna
       { cwd: seeded.cwd, json: false, flat: true, limit: 2, run: "run-cursor" },
       seeded.root,
     )
-    expect(first.next_cursor).toBeString()
+    expect(first.next_cursor).toEqual(expect.any(String))
 
     await appendFile(
       seeded.file,
@@ -195,7 +195,7 @@ test("cursor 三页无重复漏读，首页后追加和新 segment 不进入 sna
     expect(sequences).toEqual([1, 2, 3, 4, 5])
     expect(new Set(sequences).size).toBe(5)
     expect(third.next_cursor).toBeNull()
-    expect(third.truncated).toBeFalse()
+    expect(third.truncated).toBe(false)
   } finally {
     await cleanup(seeded)
   }
