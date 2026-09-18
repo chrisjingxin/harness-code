@@ -1,7 +1,7 @@
 /** 文件代码视图：行号列 + 高亮内容（white-space: pre 不折行，行号与代码稳定对应）。 */
 /** @jsxImportSource react */
 
-import type { WorkspacePreviewView } from "../../../../presentation-coordinator"
+import type { WorkspacePreviewView } from "../../../../presentation-coordinator/contracts"
 import { HighlightedCode } from "../../code/highlighted-code"
 import { formatFileSize } from "./file-meta"
 

@@ -1,12 +1,13 @@
 /** Interactive Core 架构与依赖隔离性静态断言测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { sourceFiles } from "../acceptance/arch-imports"
 
-const interactiveSrcDir = resolve(import.meta.dir, "../../src/interactive")
+const interactiveSrcDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/interactive")
 
 test("interactive/ 生产代码零 ../ipc/、零 JsonRpcRemoteError 依赖", async () => {
   const files = sourceFiles(interactiveSrcDir)

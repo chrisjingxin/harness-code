@@ -1,6 +1,6 @@
 /** 跨端共享模型展示策略：选择优先、回退运行时；TUI 与 Web 必须一致。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { modelSelectionLabel } from "../../src/presentation-shared"
 

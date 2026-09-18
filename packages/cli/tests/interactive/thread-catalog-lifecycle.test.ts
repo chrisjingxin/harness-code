@@ -1,6 +1,6 @@
 /** Thread catalog 生命周期：run 终态、thread.open 后自动刷新，以及按更新时间排序。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { EventType, type ThreadSummary } from "@za38/protocol"
 

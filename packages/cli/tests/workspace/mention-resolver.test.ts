@@ -1,6 +1,6 @@
 /** 工作区提及解析器测试：文件读取、行号切片、128k 保守预算门禁与安全防御。 */
 
-import { expect, describe, test, beforeAll, afterAll } from "bun:test"
+import { expect, describe, test, beforeAll, afterAll } from "vitest"
 import { mkdir, writeFile, rm, realpath, truncate } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -154,7 +154,7 @@ describe("resolveMentions", () => {
   test("文件内容含 Markdown 代码围栏时使用更长外层 fence 保持上下文边界", async () => {
     const res = await resolveMentions(testDir, "查看 @docs/fenced.md")
     expect(res.contextBlock).toContain("````markdown\n# Example\n```ts")
-    expect(res.contextBlock).toEndWith("```\n````")
+    expect(res.contextBlock?.endsWith("```\n````")).toBe(true)
   })
 
   test("越界路径 (../) 或不存在的文件静默忽略不中断", async () => {

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   createInteractiveRuntime,
@@ -48,9 +48,9 @@ test("从脱敏初始化结果提取可展示的运行上下文", () => {
 })
 
 test("首页装饰在窄终端降级，并保留执行安全摘要", () => {
-  expect(supportsHomeDecoration(87, 40)).toBeFalse()
-  expect(supportsHomeDecoration(120, 27)).toBeFalse()
-  expect(supportsHomeDecoration(120, 40)).toBeTrue()
+  expect(supportsHomeDecoration(87, 40)).toBe(false)
+  expect(supportsHomeDecoration(120, 27)).toBe(false)
+  expect(supportsHomeDecoration(120, 40)).toBe(true)
   expect(executionStatusLabel({
     workspace: "/work/za38-cli",
     cliVersion: "0.1.0",
@@ -139,5 +139,5 @@ test("从 config_summary.ui 正确提取 showCacheHitRate 配置", () => {
     startup_error: null,
   }, "/fallback")
 
-  expect(runtimeWithUi.showCacheHitRate).toBeTrue()
+  expect(runtimeWithUi.showCacheHitRate).toBe(true)
 })

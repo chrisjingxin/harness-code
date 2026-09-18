@@ -1,7 +1,7 @@
 /** Timeline：用户/Assistant/Tool/Interaction 时间线 + Tool 折叠 dispatch + ARIA 属性。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act, useState } from "react"
 import { createElement, type ReactElement } from "react"
 
@@ -1067,7 +1067,7 @@ test("Compose 进度面板渲染五阶段、当前任务与 blocked 摘要", asy
     const timeline = handle.container.querySelector(".timeline")
     expect(progress).not.toBeNull()
     expect(column?.firstElementChild).toBe(progress)
-    expect(timeline?.contains(progress)).toBeFalse()
+    expect(timeline?.contains(progress)).toBe(false)
     const text = progress?.textContent ?? ""
     expect(text).toContain("需求")
     expect(text).toContain("规格")

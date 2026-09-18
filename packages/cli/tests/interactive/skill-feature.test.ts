@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Capability } from "@za38/protocol"
 import { makeHarness, flush, runtime } from "./harness"
 

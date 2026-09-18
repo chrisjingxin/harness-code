@@ -1,6 +1,6 @@
 /** 共享 Tool 显示策略的行为测试：动词标签、副作用基调、主参数提取与未知工具回退。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { toolDisplay, toolPrimaryArgument } from "../../src/presentation-shared/tool-display-policy"
 
 test("内置文件工具映射为动词化中文标签与读写基调", () => {

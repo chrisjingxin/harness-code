@@ -1,6 +1,6 @@
 /** 共享 Timeline 展示语义测试：activity/tool/interaction 状态的中文文案。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { activityLabel, goalEvaluationResultLabel, goalEvaluationTitle, interactionStatusLabel, progressPhaseLabel, toolStatusLabel } from "../../src/presentation-shared/timeline-presenter"
 
 test("activityLabel：领域 Kind 全部映射为稳定中文标签", () => {

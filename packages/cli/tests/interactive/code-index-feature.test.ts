@@ -1,5 +1,4 @@
-/** 首次建图的共享 Interactive 状态与通知闭环。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { Capability, type CodeIndexApplyParams, type CodeIndexSnapshot } from "@za38/protocol"
 import { selectCodeIndexView } from "../../src/interactive/selectors"

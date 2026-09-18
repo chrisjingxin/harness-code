@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { Capability } from "@za38/protocol"
 import { createTuiAdapter, type TuiAdapterOptions } from "../../src/tui/application/adapter"
 import { createWebInteractiveAdapter, type WebAdapterOptions } from "../../src/web/application/adapter"

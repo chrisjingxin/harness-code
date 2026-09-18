@@ -9,7 +9,7 @@ import { PresentationErrorBoundary } from "./presentation/error-boundary"
 import { WebApp } from "./presentation/web-app"
 import { closeHighlightService } from "./syntax/highlight-service"
 import { createWebUiClient, readUiToken, storeUiToken, type WebUiClient } from "./ui-client"
-import type { PresentationState } from "../presentation-coordinator"
+import type { PresentationState } from "../presentation-coordinator/state"
 import "./presentation/styles.css"
 
 /**

@@ -1,6 +1,6 @@
 /** 共享提及候选过滤策略测试：工作区文件模糊匹配、排序与上限截断。 */
 
-import { expect, describe, test } from "bun:test"
+import { expect, describe, test } from "vitest"
 import { searchMentionOptions, type MentionCandidateItem } from "../../src/presentation-shared/mention-filter-policy"
 
 const MOCK_FILES: readonly MentionCandidateItem[] = [

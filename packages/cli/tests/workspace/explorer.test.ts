@@ -1,6 +1,6 @@
 /** explorer：load 幂等、Git/非 Git 树、懒加载展开、预览状态机、刷新保留展开、generation 门禁。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"

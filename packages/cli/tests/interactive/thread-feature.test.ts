@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { makeHarness, flush } from "./harness"
 
 test("Thread 切换：/resume 打开选择器并原子恢复，运行中禁止切换", async () => {

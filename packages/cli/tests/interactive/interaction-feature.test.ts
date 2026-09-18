@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import type { GoalInteractionRequest } from "@za38/protocol"
 import { makeHarness, flush, notices, manualScheduler, approvalRequest, questionRequest } from "./harness"
 

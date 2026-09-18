@@ -1,7 +1,7 @@
 /** WorkspaceSidebar：Thread/Files 同屏、列表 dispatch、busy 禁用、比例拖动（迁移自 thread-sidebar.test）。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { WorkspaceSidebar } from "../../../src/web/presentation/workspace-sidebar/workspace-sidebar"

@@ -1,6 +1,6 @@
 /** 共享命令菜单策略测试：Slash 查询、可见项过滤与排序的确定性。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { filterCommandMenuItems } from "../../src/presentation-shared/command-menu-policy"
 import type { CommandMenuItem } from "../../src/interactive/commands"
 

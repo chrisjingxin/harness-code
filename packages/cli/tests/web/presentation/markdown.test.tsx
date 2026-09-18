@@ -1,7 +1,7 @@
 /** Markdown：GFM token 渲染、raw HTML 惰性化、非法 scheme 文本化、图片仅 alt。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 
 import { Markdown } from "../../../src/web/presentation/markdown"
 import { registerTestDom, render } from "./render"

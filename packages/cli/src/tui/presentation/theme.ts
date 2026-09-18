@@ -1,6 +1,4 @@
-/** Harness Code 终端主题：Mode 金/紫、Semantic 色与离线语法 scope。 */
-
-import { SyntaxStyle } from "@opentui/core"
+/** Harness Code 终端主题：Mode 金/紫、Semantic 色。 */
 
 /** Logo 仍用品牌蓝；Mode 身份只走 modeAccent，不得用 primary 冒充当前 Mode。 */
 export const tuiTheme = {
@@ -43,40 +41,6 @@ export const tuiTheme = {
   syntaxOperator: "#7bd4d0",
   syntaxPunctuation: "#b8becb",
 } as const
-
-/**
- * OpenTUI 使用 Tree-sitter 与 Markdown scope 名称，而非简化的 heading/strong 名称。
- * 统一 scope 后，普通文本、Markdown 和 fenced code block 可复用同一套语义色。
- */
-export const markdownSyntax = SyntaxStyle.fromTheme([
-  { scope: ["default"], style: { foreground: tuiTheme.text } },
-  { scope: ["comment", "comment.documentation"], style: { foreground: tuiTheme.syntaxComment, italic: true } },
-  { scope: ["string", "symbol", "character", "character.special"], style: { foreground: tuiTheme.syntaxString } },
-  { scope: ["number", "float", "boolean", "constant"], style: { foreground: tuiTheme.syntaxNumber } },
-  {
-    scope: ["keyword", "keyword.return", "keyword.conditional", "keyword.repeat", "keyword.exception"],
-    style: { foreground: tuiTheme.syntaxKeyword, italic: true },
-  },
-  { scope: ["keyword.type", "type", "class", "module", "namespace"], style: { foreground: tuiTheme.syntaxType, bold: true } },
-  { scope: ["keyword.function", "function", "function.method", "constructor"], style: { foreground: tuiTheme.syntaxFunction } },
-  { scope: ["variable", "variable.parameter", "property", "field", "parameter"], style: { foreground: tuiTheme.syntaxVariable } },
-  { scope: ["tag", "tag.name"], style: { foreground: tuiTheme.syntaxType, bold: true } },
-  { scope: ["tag.error"], style: { foreground: tuiTheme.danger, bold: true } },
-  { scope: ["attribute", "tag.attribute"], style: { foreground: tuiTheme.syntaxVariable } },
-  { scope: ["operator", "keyword.operator", "punctuation.delimiter"], style: { foreground: tuiTheme.syntaxOperator } },
-  { scope: ["punctuation", "punctuation.bracket"], style: { foreground: tuiTheme.syntaxPunctuation } },
-  { scope: ["string.escape", "string.regexp"], style: { foreground: tuiTheme.syntaxKeyword } },
-  { scope: ["variable.builtin", "type.builtin", "function.builtin", "module.builtin"], style: { foreground: tuiTheme.danger } },
-  { scope: ["markup.heading", "markup.heading.1", "markup.heading.2", "markup.heading.3"], style: { foreground: tuiTheme.primary, bold: true } },
-  { scope: ["markup.heading.4", "markup.heading.5", "markup.heading.6"], style: { foreground: tuiTheme.primary } },
-  { scope: ["markup.bold", "markup.strong"], style: { foreground: tuiTheme.warning, bold: true } },
-  { scope: ["markup.italic", "markup.quote"], style: { foreground: tuiTheme.warning, italic: true } },
-  { scope: ["markup.list", "markup.list.enumeration"], style: { foreground: tuiTheme.primary } },
-  { scope: ["markup.raw", "markup.raw.block", "markup.raw.inline"], style: { foreground: tuiTheme.syntaxString, background: tuiTheme.element } },
-  { scope: ["markup.link", "markup.link.url", "string.special.url"], style: { foreground: tuiTheme.primary, underline: true } },
-  { scope: ["markup.link.label", "label"], style: { foreground: tuiTheme.trail, underline: true } },
-  { scope: ["conceal"], style: { foreground: tuiTheme.subtle } },
-])
 
 /** 当前 Run / 输入栏身份色；Build 与 Compose 等权。 */
 export function modeAccent(mode: "build" | "compose"): string {

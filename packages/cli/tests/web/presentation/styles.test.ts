@@ -1,6 +1,6 @@
 /** CSS contract test：主题 token 完备、无系统主题覆盖、无历史双轨 class。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFileSync } from "node:fs"
 
 const css = readFileSync(new URL("../../../src/web/presentation/styles.css", import.meta.url), "utf8")

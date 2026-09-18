@@ -1,7 +1,4 @@
-/** 全局快捷键解析器；方向键留给 textarea 依据光标位置处理。 */
-
-/** 滚动意图：行/半页/跳转首尾，由全局快捷键与空 composer 方向键共用。 */
-export type ScrollIntent = "line-up" | "line-down" | "page-up" | "page-down" | "top" | "bottom"
+/** 全局快捷键解析器：同一按键只交给最高优先级 owner。 */
 
 type KeyLike = {
   name: string
@@ -9,28 +6,11 @@ type KeyLike = {
   shift?: boolean
 }
 
-/** 把审批预览专用的 Page/Ctrl 组合键映射为滚动意图；普通方向键留给 select。 */
-export function resolveScrollIntent(key: KeyLike): ScrollIntent | null {
-  if (key.ctrl) {
-    switch (key.name) {
-      case "up": return "line-up"
-      case "down": return "line-down"
-      case "home": return "top"
-      case "end": return "bottom"
-    }
-  }
-  switch (key.name) {
-    case "pageup": return "page-up"
-    case "pagedown": return "page-down"
-    default: return null
-  }
-}
+/** 当前占据动态区的全宽临时视图；无视图时不设值。 */
+export type TemporaryViewKind = "status" | "btw" | "inspect" | "workspace" | "tool-inspector"
 
 export type ShortcutContext = {
   commandDialogVisible?: boolean
-  btwModalVisible?: boolean
-  statusModalVisible?: boolean
-  inspectOverlayVisible?: boolean
   skillPickerVisible?: boolean
   skillOptionCount?: number
   threadPickerVisible?: boolean
@@ -54,6 +34,7 @@ export type ShortcutContext = {
   inputMode?: "chat" | "shell"
   childTimelineActive?: boolean
   interactionActive?: boolean
+  temporaryViewKind?: TemporaryViewKind
 }
 
 export type ShortcutAction =
@@ -61,10 +42,10 @@ export type ShortcutAction =
   | "exit-shell-mode"
   | "confirm-command-dialog"
   | "cancel-command-dialog"
-  | "close-btw-modal"
-  | "close-status-modal"
-  | "close-inspect-overlay"
+  | "close-temporary-view"
   | "copy-btw-answer"
+  | "open-workspace"
+  | "open-tool-inspector"
   | "leave-child-timeline"
   | "close-undo-dialog"
   | "undo-mode-prev"
@@ -119,38 +100,23 @@ export type ShortcutAction =
   | "hint-interrupt"
   | "exit"
   | "clear-selected-skill"
-  | "toggle-tool-details"
   | "cycle-approval-mode"
   | "cycle-work-mode"
-  | "scroll-line-up"
-  | "scroll-line-down"
-  | "scroll-page-up"
-  | "scroll-page-down"
-  | "scroll-top"
-  | "scroll-bottom"
 
-/** 滚动专用快捷键：Ctrl 组合键与 PageUp/PageDown，避免抢占方向键与 Home/End 的文本编辑语义。 */
-function resolveScrollShortcut(key: KeyLike): ShortcutAction {
-  const intent = resolveScrollIntent(key)
-  if (!intent) return "none"
-  return `scroll-${intent}` as ShortcutAction
+const NAVIGATION_KEYS = new Set(["return", "kpenter", "escape", "tab", "up", "down", "left", "right", "pageup", "pagedown"])
+
+/** Ctrl+C：清草稿 → 取消 Run → 退出。 */
+function resolveCtrlC(context: ShortcutContext): ShortcutAction {
+  if (context.hasDraft) return "clear-draft"
+  if (context.activeRun) return "cancel-run"
+  return "exit"
 }
 
-/** 快捷键先处理临时菜单，再处理运行态，避免输入控件吞掉 Ctrl+C 与 Esc。 */
+/** 快捷键按 Interaction → 确认框 → 临时视图 → 选择器/菜单 → 全局 的唯一 owner 解析。 */
 export function resolveShortcut(key: KeyLike, context: ShortcutContext): ShortcutAction {
-  if (context.statusModalVisible) {
-    if (key.name === "escape" || key.name === "return" || key.name === "kpenter" || key.name === "q") return "close-status-modal"
-    return "none"
-  }
-  if (context.btwModalVisible) {
-    if (key.name === "escape" || key.name === "return" || key.name === "kpenter") return "close-btw-modal"
-    if (key.name === "c" && !key.ctrl) return "copy-btw-answer"
-    return "none"
-  }
-  if (context.inspectOverlayVisible) {
-    if (key.ctrl && key.name === "c" && context.activeRun) return "cancel-run"
-    if (key.name === "escape" || key.name === "return" || key.name === "kpenter" || key.name === "q") return "close-inspect-overlay"
-    return "none"
+  if (context.interactionActive) {
+    if (key.ctrl && key.name === "c") return resolveCtrlC(context)
+    if (NAVIGATION_KEYS.has(key.name)) return "none"
   }
   if (context.commandDialogVisible) {
     if (key.name === "escape") return "cancel-command-dialog"
@@ -165,6 +131,17 @@ export function resolveShortcut(key: KeyLike, context: ShortcutContext): Shortcu
     if (key.name === "1" && !key.ctrl) return "undo-mode-1"
     if (key.name === "2" && !key.ctrl) return "undo-mode-2"
     if (key.name === "3" && !key.ctrl) return "undo-mode-3"
+    return "none"
+  }
+  if (context.temporaryViewKind) {
+    if (context.temporaryViewKind === "btw" && key.name === "c" && !key.ctrl) return "copy-btw-answer"
+    if (key.ctrl && key.name === "c") return resolveCtrlC(context)
+    const closesOnEnter = context.temporaryViewKind === "status"
+      || context.temporaryViewKind === "btw"
+      || context.temporaryViewKind === "inspect"
+    if (key.name === "escape") return "close-temporary-view"
+    if (closesOnEnter && (key.name === "return" || key.name === "kpenter" || key.name === "q")) return "close-temporary-view"
+    if (context.temporaryViewKind === "inspect" && key.name === "q") return "close-temporary-view"
     return "none"
   }
   if (context.undoPickerVisible) {
@@ -231,28 +208,16 @@ export function resolveShortcut(key: KeyLike, context: ShortcutContext): Shortcu
     }
   }
 
-  // 滚动键全局生效（含正在输入或运行中），与 opencode 的 session.global 对齐；
-  // 浮层打开时让位给选择器，避免在背后滚动历史。
-  if (!context.commandMenuVisible && !context.mentionMenuVisible && !context.skillPickerVisible && !context.threadPickerVisible && !context.modelPickerVisible && !context.agentPickerVisible && !context.undoPickerVisible && !context.undoDialogVisible) {
-    const scrollAction = resolveScrollShortcut(key)
-    if (scrollAction !== "none") return scrollAction
-  }
-
   if (key.ctrl && key.name === "p") return "command-open"
-  // 方向键必须留给 textarea：它需要依据真实光标边界决定回填历史还是滚动 thread。
-  if (key.ctrl && key.name === "c") {
-    if (context.activeRun) return "cancel-run"
-    if (context.hasDraft) return "clear-draft"
-    return "exit"
-  }
+  if (key.ctrl && key.name === "c") return resolveCtrlC(context)
   if ((key.name === "escape" || key.name === "backspace" || key.name === "delete") && context.childTimelineActive) {
     return "leave-child-timeline"
   }
-  if (key.name === "escape" && context.interactionActive) return "none"
   if (key.name === "escape" && context.inputMode === "shell") return "exit-shell-mode"
   if (key.name === "escape" && context.activeRun) return "hint-interrupt"
   if (key.name === "escape" && !context.hasDraft) return "clear-selected-skill"
-  if (key.ctrl && key.name === "o") return "toggle-tool-details"
+  if (key.ctrl && key.name === "b") return "open-workspace"
+  if (key.ctrl && key.name === "o") return "open-tool-inspector"
   // Shift+Tab 循环切换审批模式；浮层打开时让位，避免选择器焦点下误切换。
   if (key.shift && key.name === "tab") return "cycle-approval-mode"
   // 空闲且无浮层时 Tab 切换 Work Mode（Build/Compose）；输入草稿时保留

@@ -1,9 +1,22 @@
 /** Windows 安装器：与 install.sh 同一语义，可在无 pwsh 的机器上做脚本契约测试。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
+import { spawnSync } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const installer = join(import.meta.dir, "../../../scripts/install/install.ps1")
+const __dirname = fileURLToPath(new URL(".", import.meta.url))
+const installer = join(__dirname, "../../../scripts/install/install.ps1")
+
+function findPwsh(): string | null {
+  for (const bin of ["pwsh", "powershell"]) {
+    const res = spawnSync("which", [bin], { encoding: "utf8" })
+    if (res.status === 0 && res.stdout.trim()) {
+      return res.stdout.trim()
+    }
+  }
+  return null
+}
 
 test("install.ps1 存在并拒绝非 PowerShell 宿主与未知参数", async () => {
   const src = await readFile(installer, "utf8")
@@ -34,28 +47,25 @@ test("install.ps1 PATH 含 bun 与 uv tool bin，便于解析 harness-agent.exe"
 })
 
 test("若本机有 pwsh 则未知参数退出 2、--help 退出 0、cmd 宿主退出 1", async () => {
-  const pwsh = Bun.which("pwsh") ?? Bun.which("powershell")
+  const pwsh = findPwsh()
   if (!pwsh) {
     return
   }
-  const help = Bun.spawnSync([pwsh, "-NoProfile", "-File", installer, "--help"], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const help = spawnSync(pwsh, ["-NoProfile", "-File", installer, "--help"], {
+    encoding: "utf8",
   })
-  expect(help.exitCode).toBe(0)
-  expect(help.stdout.toString() + help.stderr.toString()).toContain("Usage")
+  expect(help.status).toBe(0)
+  expect((help.stdout || "") + (help.stderr || "")).toContain("Usage")
 
-  const unknown = Bun.spawnSync([pwsh, "-NoProfile", "-File", installer, "--nope"], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const unknown = spawnSync(pwsh, ["-NoProfile", "-File", installer, "--nope"], {
+    encoding: "utf8",
   })
-  expect(unknown.exitCode).toBe(2)
+  expect(unknown.status).toBe(2)
 
-  const cmdHost = Bun.spawnSync([pwsh, "-NoProfile", "-File", installer], {
+  const cmdHost = spawnSync(pwsh, ["-NoProfile", "-File", installer], {
     env: { ...process.env, HARNESS_INSTALL_SHELL: "cmd" },
-    stdout: "pipe",
-    stderr: "pipe",
+    encoding: "utf8",
   })
-  expect(cmdHost.exitCode).toBe(1)
-  expect(cmdHost.stderr.toString() + cmdHost.stdout.toString()).toContain("PowerShell")
+  expect(cmdHost.status).toBe(1)
+  expect((cmdHost.stderr || "") + (cmdHost.stdout || "")).toContain("PowerShell")
 })

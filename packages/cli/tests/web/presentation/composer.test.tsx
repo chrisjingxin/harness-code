@@ -1,7 +1,7 @@
 /** Composer：受控 draft、发送/取消、Skill chip、命令菜单与键盘交互。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 import { createElement, type ReactElement } from "react"
 

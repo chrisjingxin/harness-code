@@ -1,6 +1,6 @@
 /** /model 切换生效性：显式选择不得被服务端持久化的陈旧 thread_selection 覆盖。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { Capability, EventType } from "@za38/protocol"
 

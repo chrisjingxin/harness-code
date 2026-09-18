@@ -1,7 +1,7 @@
 /** `/goal` 的 Interactive Core 纵向行为测试。 */
 
 import { Capability, type GoalInteractionRequest } from "@za38/protocol"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { commandRegistry, defaultCommandContext } from "../../src/interactive/commands"
 import { dispatchSlashCommand } from "../../src/interactive/command-dispatcher"

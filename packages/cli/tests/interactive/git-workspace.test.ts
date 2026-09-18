@@ -1,6 +1,6 @@
 /** detectGitWorkspace：真实 git 仓库下区分 branch / detached / not-repository / unavailable。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"

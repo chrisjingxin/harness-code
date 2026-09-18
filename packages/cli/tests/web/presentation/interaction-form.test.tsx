@@ -1,7 +1,7 @@
 /** InteractionForm：动态 approval 决策、question 单/多选/other、完整答案集合提交。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act, useState } from "react"
 import { createElement, type ReactElement } from "react"
 

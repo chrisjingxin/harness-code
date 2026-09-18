@@ -1,7 +1,7 @@
 /** FileTree：行渲染（缩进/箭头/图标）、键盘导航 dispatch、loading/error/limited/空目录状态。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { FileTree } from "../../../src/web/presentation/workspace-sidebar/file-tree"

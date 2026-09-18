@@ -1,6 +1,8 @@
+import http from "node:http"
+import WebSocket from "ws"
 /** 真实 loopback 集成测试：createWebServer + createPresentationCoordinator + createWebUiGateway + 内存 controller。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { makeHarness } from "../interactive/harness"
 import { createWebServer } from "../../src/web/server"
@@ -22,6 +24,27 @@ function createFakeExplorer(): WorkspaceExplorer {
     dispatch: async () => ({ status: "accepted" }),
     close: async () => {},
   }
+}
+
+function requestStatus(url: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const req = http.request({
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers,
+    }, res => {
+      resolve(res.statusCode ?? 0)
+    })
+    req.on("upgrade", (_res, socket) => {
+      socket.destroy()
+      resolve(101)
+    })
+    req.on("error", reject)
+    req.end()
+  })
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
@@ -66,9 +89,9 @@ test("open 后真实 loopback：页面 200；带 token 的 WS 收到 replace/han
   const upgradeHeaders = (origin: string) => ({ upgrade: "websocket", connection: "Upgrade", origin })
 
   // 错误 token / 缺 token / 错误 Origin 的升级一律 403
-  expect((await fetch(`${uiHttp}?ui=wrong-token`, { headers: upgradeHeaders(server.origin) })).status).toBe(403)
-  expect((await fetch(uiHttp, { headers: upgradeHeaders(server.origin) })).status).toBe(403)
-  expect((await fetch(`${uiHttp}?ui=${token}`, { headers: upgradeHeaders("http://evil.example") })).status).toBe(403)
+  expect(await requestStatus(`${uiHttp}?ui=wrong-token`, upgradeHeaders(server.origin))).toBe(403)
+  expect(await requestStatus(uiHttp, upgradeHeaders(server.origin))).toBe(403)
+  expect(await requestStatus(`${uiHttp}?ui=${token}`, upgradeHeaders("http://evil.example"))).toBe(403)
 
   // 正确 token 的 WebSocket 连接
   const wsBase = `${server.origin.replace(/^http/, "ws")}${server.pathFor(opening.handoffId)}/ui`

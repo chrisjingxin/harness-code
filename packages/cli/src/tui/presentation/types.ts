@@ -1,7 +1,4 @@
-/** TUI 表现层与 Adapter 之间共享的视图契约。 */
-
-import type { KeyEvent, ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
-import type { RefObject } from "react"
+/** TUI 表现层与 Adapter 之间共享的语义视图契约；不含 Renderer ref 或按键对象。 */
 
 import type { CommandMenuItem, SkillMenuItem } from "../../interactive/commands"
 import type { GoalReviewResponse, InteractiveSnapshot } from "../../interactive/types"
@@ -20,28 +17,19 @@ export type SharedViewProps = {
   transientNotice?: { id: string; message: string }
   terminalWidth: number
   terminalHeight: number
-  inputRef: RefObject<TextareaRenderable | null>
-  conversationScrollRef: RefObject<ScrollBoxRenderable | null>
-  approvalScrollRef: RefObject<ScrollBoxRenderable | null>
   value: string
   onInput: (value: string, cursorOffset?: number) => void
   onInputCursorChange?: (cursorOffset: number) => void
-  onInputBarKeyDown: (event: KeyEvent) => void
   onSubmit: () => void
   commandMenu: CommandMenuState
   commandOptions: readonly CommandMenuItem[]
   onSelectCommand: (command: CommandMenuItem) => void
-  onHoverCommand: (index: number) => void
   mentionMenu?: import("../application/adapter").MentionMenuState
   mentionSearch?: import("../../presentation-shared/mention-filter-policy").MentionSearchResult
   onSelectMention?: (option: import("../../presentation-shared/mention-filter-policy").MentionOption) => void
-  onHoverMention?: (index: number) => void
   selectedSkill?: SkillMenuItem
   pickerVisible: boolean
   onClearSelectedSkill: () => void
-  showToolDetails: boolean
-  expandedTools: ReadonlySet<string>
-  onToggleTool: (toolId: string) => void
   onApproval: (decision: ApprovalDecision) => void
   onDirectoryTrust: (decision: DirectoryTrustDecision) => void
   onPlan: (decision: import("../../interactive/types").PlanDecision, feedback?: string) => void
@@ -50,7 +38,5 @@ export type SharedViewProps = {
   onGoalViewClose: () => void
   onQuestion: (answers: Record<string, string[]>) => void
   onOpenChildTimeline?: (executionId: string) => void
-  sidebarVisible?: boolean
-  onToggleSidebar?: () => void
   inputMode?: "chat" | "shell"
 }

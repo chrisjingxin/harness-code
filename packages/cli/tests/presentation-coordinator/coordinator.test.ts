@@ -1,6 +1,6 @@
 /** PresentationCoordinator 状态机测试：生命周期、token 校验、单 renderer 门禁与收敛。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { AsyncQueue } from "../../src/ipc/transport"
 import {

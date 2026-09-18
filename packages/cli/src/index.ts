@@ -35,6 +35,16 @@ import { AgentClientGateway } from "./infrastructure/agent-client-gateway"
 import { detectGitWorkspace } from "./infrastructure/git-workspace"
 import { createWorkspaceExplorer } from "./workspace/explorer"
 import type { WorkspaceExplorer } from "./workspace/types"
+import { createSystemBrowserOpener } from "./web/browser"
+import { browserBundle } from "./web/bundle"
+import { webHtml } from "./web/html"
+import {
+  createPresentationCoordinator,
+  createWebUiGateway,
+  type PresentationCoordinator,
+  type WebUiGateway,
+} from "./presentation-coordinator"
+import { createWebServer } from "./web/server"
 
 type RunningAgent = {
   client: AgentClient
@@ -523,6 +533,8 @@ export async function execute(
 
     let workspaceExplorer: WorkspaceExplorer | undefined
     let controller: InteractiveController | undefined
+    let presentationCoordinator: PresentationCoordinator | undefined
+    let webUiGateway: WebUiGateway | undefined
     try {
       // CLI Composition Root：全生命周期唯一 Controller，TUI/Web 共用（D-01）。
       const gateway = new AgentClientGateway(agent.client)
@@ -533,16 +545,43 @@ export async function execute(
       if (!command.nonInteractive) {
         // 工作区文件浏览独立于 Interactive Core；根解析失败时 explorer 自身进入 error 状态。
         workspaceExplorer = await createWorkspaceExplorer(command.cwd)
+        const server = createWebServer({
+          html: webHtml,
+          getAssets: browserBundle,
+          isActiveHandoff: handoffId =>
+            presentationCoordinator !== undefined && presentationCoordinator.isHandoffActive(handoffId),
+          validateUiToken: (id, token, origin) =>
+            presentationCoordinator!.validateUiToken(id, token, origin),
+          attachRenderer: (id, presentedToken, channel) =>
+            presentationCoordinator!.attachRenderer(id, presentedToken, channel),
+        })
+        presentationCoordinator = createPresentationCoordinator({
+          server,
+          openBrowser: createSystemBrowserOpener(),
+          dispatch: intent => controller!.dispatch(intent),
+          onRendererConnected: (channel, reconnectToken) => webUiGateway!.connectRenderer(channel, reconnectToken),
+          diagnostics: agent.log,
+        })
+        webUiGateway = createWebUiGateway({
+          coordinator: presentationCoordinator,
+          controller,
+          workspaceExplorer,
+          diagnostics: agent.log,
+        })
       }
       await runTui({
         controller,
         gateway,
         workspaceExplorer,
         resume: command.resume,
+        webHandoff: presentationCoordinator,
+        openWeb: presentationCoordinator ? () => presentationCoordinator!.open() : undefined,
       })
     } finally {
-      // 停点 A 尚未启用 Web；关闭顺序为 WorkspaceExplorer → Controller → agent.stop（外层 finally）。
+      // 关闭顺序：Web 通道 → WorkspaceExplorer → Coordinator → Controller → agent.stop（外层 finally）。
+      await webUiGateway?.close()
       await workspaceExplorer?.close()
+      await presentationCoordinator?.close()
       await controller?.close()
     }
   } finally {

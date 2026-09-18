@@ -1,69 +1,66 @@
-/** 分层规则测试：固定组合入口和单向依赖边界。 */
+/** TUI Adapter 与快捷键模块不得泄漏 OpenTUI/Ink 类型或已取消的滚动/鼠标/侧栏契约。 */
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import { describe, expect, it } from "vitest"
 
-import { expect, test } from "bun:test"
-import { readFileSync, readdirSync } from "node:fs"
-import { resolve } from "node:path"
+import { createTuiAdapter } from "../../src/tui/application/adapter"
+import { makeHarness } from "../interactive/harness"
 
-import { layerImports, sourceFiles } from "../acceptance/arch-imports"
+const here = dirname(fileURLToPath(import.meta.url))
+const adapterSource = readFileSync(resolve(here, "../../src/tui/application/adapter.ts"), "utf8")
+const shortcutSource = readFileSync(resolve(here, "../../src/tui/application/shortcuts.ts"), "utf8")
+const presentationTypes = readFileSync(resolve(here, "../../src/tui/presentation/types.ts"), "utf8")
+const inkAppSource = readFileSync(resolve(here, "../../src/tui/ink/app.tsx"), "utf8")
 
-const tuiRoot = resolve(import.meta.dir, "../../src/tui")
-const interactiveRoot = resolve(import.meta.dir, "../../src/interactive")
-const cliRoot = resolve(import.meta.dir, "../../src")
-const indexPath = resolve(cliRoot, "index.ts")
+describe("TuiAdapter seam", () => {
+  it("keeps adapter, shortcuts, and presentation types free of renderer objects", () => {
+    const combined = `${adapterSource}\n${shortcutSource}\n${presentationTypes}`
+    expect(combined).not.toMatch(/@opentui/)
+    expect(combined).not.toMatch(/KeyEvent|TextareaRenderable|ScrollBoxRenderable/)
+    expect(inkAppSource).not.toMatch(/@opentui/)
+  })
 
-test("TUI 根目录只保留组合入口", () => {
-  const rootFiles = readdirSync(tuiRoot, { withFileTypes: true })
-    .filter(entry => entry.isFile() && !entry.name.startsWith("."))
-    .map(entry => entry.name)
-    .sort()
+  it("drops conversation scroll, hover, and sidebar layout from the public contract", () => {
+    expect(adapterSource).not.toMatch(/scrollRequest/)
+    expect(adapterSource).not.toMatch(/sidebar-toggle|sidebar-focus-switch|sidebar-tab-switch/)
+    expect(adapterSource).not.toMatch(/command-menu-hover|mention-menu-hover|picker-hover/)
+    expect(adapterSource).not.toMatch(/file-preview-scroll/)
+    expect(adapterSource).not.toMatch(/readonly sidebar:/)
+    expect(shortcutSource).not.toMatch(/scroll-line-up|scroll-page-up/)
+  })
 
-  expect(rootFiles).toEqual(["app.tsx"])
+  it("exposes workspace and tool-inspector temporary-view intents", () => {
+    expect(adapterSource).toMatch(/workspace-open/)
+    expect(adapterSource).toMatch(/workspace-navigate/)
+    expect(adapterSource).toMatch(/temporary-view-close/)
+    expect(adapterSource).toMatch(/tool-inspector-open/)
+  })
+
+  it("projects workspace and inspector as exclusive temporary views", async () => {
+    const harness = makeHarness()
+    const adapter = createTuiAdapter({ controller: harness.controller, onRequestExit: () => {} })
+    try {
+      const initial = adapter.getSnapshot()
+      expect(initial).not.toHaveProperty("scrollRequest")
+      expect(initial).not.toHaveProperty("sidebar")
+      expect(initial.temporaryView.kind).toBe("none")
+
+      await adapter.dispatch({ type: "workspace-open" })
+      expect(adapter.getSnapshot().temporaryView.kind).toBe("workspace")
+      expect(adapter.getSnapshot().workspace.fileTree).toEqual(expect.objectContaining({
+        status: expect.stringMatching(/idle|loading|ready|error/),
+        rows: expect.any(Array),
+      }))
+
+      await adapter.dispatch({ type: "tool-inspector-open" })
+      expect(adapter.getSnapshot().temporaryView.kind).toBe("tool-inspector")
+
+      await adapter.dispatch({ type: "temporary-view-close" })
+      expect(adapter.getSnapshot().temporaryView.kind).toBe("none")
+    } finally {
+      await adapter.close()
+      await harness.controller.close()
+    }
+  })
 })
-
-test("createInteractiveController 生产调用点仅 CLI Composition Root 一处（ZC-114 移除 web 豁免）", () => {
-  const sources = sourceFiles(cliRoot).filter(file => !file.includes("/tests/"))
-
-  const callers = sources
-    .filter(file => file !== resolve(interactiveRoot, "controller.ts"))
-    .filter(file => readFileSync(file, "utf8").includes("createInteractiveController("))
-    .sort()
-
-  // index.ts 是唯一 Composition Root；web/app.tsx 的自建 Controller 已由 ZC-114 移除。
-  expect(callers).toEqual([indexPath])
-  // TUI 侧不再自行创建 Controller。
-  expect(callers.filter(file => file.startsWith(tuiRoot))).toEqual([])
-})
-
-test("Presentation 不直连 IPC，Application 不反向依赖 Presentation", () => {
-  expect(layerImports(resolve(tuiRoot, "presentation"))).not.toMatch(/(?:^|[/"])ipc(?:[/"]|$)/m)
-  expect(layerImports(resolve(tuiRoot, "application"))).not.toMatch(/(?:^|[/"])presentation(?:[/"]|$)/m)
-})
-
-test("interactive 共享模块不依赖 TUI/Web/React/OpenTUI/DOM", () => {
-  const imports = layerImports(resolve(interactiveRoot))
-  expect(imports).not.toMatch(/(?:^|[/"])\.\.\/tui(?:[/"]|$)/m)
-  expect(imports).not.toMatch(/(?:^|[/"])\.\.\/web(?:[/"]|$)/m)
-  expect(imports).not.toMatch(/@opentui/m)
-  expect(imports).not.toMatch(/(?:^|[/"])react(?:[/"]|$)/m)
-  expect(imports).not.toMatch(/(?:^|[/"])react-dom(?:[/"]|$)/m)
-})
-
-test("TUI Application 只依赖 interactive 与终端表现模块，不直接调用 IPC", () => {
-  const imports = layerImports(resolve(tuiRoot, "application"))
-  expect(imports).not.toMatch(/(?:^|[/"])\.\.\/\.\.\/ipc(?:[/"]|$)/m)
-})
-
-test("TUI 仅通过 types 依赖 workspace 契约", () => {
-  const imports = layerImports(tuiRoot)
-  // TUI 只允许导入 workspace/types 契约，不允许直接耦合内部实现
-  expect(imports).not.toMatch(/(?:^|[/"])\.\.\/workspace\/(?!types)["']/m)
-})
-
-test("语法资源维护脚本写入 Platform canonical 路径", () => {
-  const script = readFileSync(resolve(import.meta.dir, "../../scripts/vendor-syntax-assets.ts"), "utf8")
-  expect(script).toContain('resolve(import.meta.dir, "../src/tui/platform")')
-  expect(script).toContain('resolve(platformRoot, "assets/syntax")')
-  expect(script).toContain('resolve(platformRoot, "generated-syntax-parsers.ts")')
-  expect(script).not.toContain('resolve(tuiRoot, "assets/syntax")')
-})
-

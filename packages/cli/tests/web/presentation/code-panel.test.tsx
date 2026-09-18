@@ -1,7 +1,7 @@
 /** CodePanel：文件 Tab 渲染/激活/关闭、预览 ready/unsupported/error/空状态与截断提示。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { CodePanel } from "../../../src/web/presentation/context-dock/code/code-panel"

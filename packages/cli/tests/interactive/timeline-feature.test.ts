@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { EventType } from "@za38/protocol"
 import { makeHarness, flush, notices, terminalEvent } from "./harness"
 

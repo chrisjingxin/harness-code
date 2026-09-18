@@ -31,16 +31,24 @@ import { CLI_VERSION } from "../src/interactive/runtime"
 
 const testDir = fileURLToPath(new URL(".", import.meta.url))
 
-test("停点 A 的 CLI shutdown 顺序：runTui 返回后 explorer → controller.close，agent.stop 最后", () => {
+test("停点 C 的 CLI shutdown 顺序与 Web 装配：runTui 接入 webHandoff/openWeb，关闭时 webUiGateway → explorer → coordinator → controller → agent.stop", () => {
   const source = readFileSync(resolve(testDir, "../src/index.ts"), "utf8")
   const runTuiAt = source.indexOf("await runTui(")
+  const webCloseAt = source.indexOf("await webUiGateway?.close()")
   const explorerCloseAt = source.indexOf("await workspaceExplorer?.close()")
+  const coordinatorCloseAt = source.indexOf("await presentationCoordinator?.close()")
   const controllerCloseAt = source.indexOf("await controller?.close()")
   const agentStopAt = source.indexOf("await agent.stop()")
+
   expect(runTuiAt).toBeGreaterThan(-1)
-  expect(explorerCloseAt).toBeGreaterThan(runTuiAt)
-  expect(controllerCloseAt).toBeGreaterThan(explorerCloseAt)
+  expect(webCloseAt).toBeGreaterThan(runTuiAt)
+  expect(explorerCloseAt).toBeGreaterThan(webCloseAt)
+  expect(coordinatorCloseAt).toBeGreaterThan(explorerCloseAt)
+  expect(controllerCloseAt).toBeGreaterThan(coordinatorCloseAt)
   expect(agentStopAt).toBeGreaterThan(controllerCloseAt)
+
+  expect(source).toContain("webHandoff: presentationCoordinator")
+  expect(source).toContain("openWeb: presentationCoordinator ? () => presentationCoordinator!.open() : undefined")
 })
 
 test("不存在的工作区会给出明确错误", () => {

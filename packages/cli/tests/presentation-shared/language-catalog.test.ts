@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { LANGUAGE_CATALOG, resolveLanguage } from "../../src/presentation-shared/language-catalog"
 
 describe("language-catalog", () => {

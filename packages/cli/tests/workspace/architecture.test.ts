@@ -1,12 +1,13 @@
+import { fileURLToPath } from "node:url"
 /** workspace 分层规则测试：独立领域模块，零 UI/平台/Agent 内部依赖。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { sourceFiles } from "../acceptance/arch-imports"
 
-const workspaceSrcDir = resolve(import.meta.dir, "../../src/workspace")
+const workspaceSrcDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/workspace")
 
 test("workspace/ 生产代码只允许 node 内置与白名单 import", async () => {
   const files = sourceFiles(workspaceSrcDir)

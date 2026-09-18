@@ -1,6 +1,6 @@
 /** Web Interactive Adapter：通过 fake WebUiClient 验证视图缓存、语义意图、Context Dock 与工作区联动。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import type { InteractiveIntent, InteractiveSnapshot, IntentOutcome } from "../../../src/interactive/types"
 import type { WorkspaceIntent, WorkspaceOutcome, WorkspacePreviewState, WorkspaceSnapshot } from "../../../src/workspace/types"

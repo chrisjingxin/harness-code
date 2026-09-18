@@ -1,6 +1,6 @@
 /** @ 候选窗口导航纯函数测试：固定行数、边界夹取与窗口跟随。 */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 
 import {
   compactMentionRows,

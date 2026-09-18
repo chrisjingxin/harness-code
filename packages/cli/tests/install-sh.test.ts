@@ -1,11 +1,14 @@
 /** Unix 安装器：退出码、跳过已有依赖、PATH、示例配置。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
+import { spawnSync } from "node:child_process"
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const installer = join(import.meta.dir, "../../../scripts/install/install.sh")
-const exampleConfig = join(import.meta.dir, "../../../docs/user/examples/config.toml")
+const __dirname = fileURLToPath(new URL(".", import.meta.url))
+const installer = join(__dirname, "../../../scripts/install/install.sh")
+const exampleConfig = join(__dirname, "../../../docs/user/examples/config.toml")
 
 async function makeHome(): Promise<{ home: string; bin: string; log: string }> {
   const home = await mkdtemp(join(tmpdir(), "harness-install-"))
@@ -55,7 +58,7 @@ exit 1
 }
 
 function runInstaller(home: string, bin: string, args: string[], extraEnv: Record<string, string> = {}) {
-  return Bun.spawnSync(["bash", installer, ...args], {
+  const res = spawnSync("bash", [installer, ...args], {
     cwd: home,
     env: {
       HOME: home,
@@ -66,9 +69,13 @@ function runInstaller(home: string, bin: string, args: string[], extraEnv: Recor
       UV_INDEX_URL: "https://pypi.test.example/simple",
       ...extraEnv,
     },
-    stdout: "pipe",
-    stderr: "pipe",
+    encoding: "utf8",
   })
+  return {
+    exitCode: res.status ?? 1,
+    stdout: Buffer.from(res.stdout || ""),
+    stderr: Buffer.from(res.stderr || ""),
+  }
 }
 
 test("未填写企业包源时安装失败并提示填写 DEFAULT_*", async () => {

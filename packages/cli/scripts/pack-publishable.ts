@@ -1,6 +1,8 @@
 /** 生成可发布的 @za38/cli 副本：关闭 private、只带 dist、去掉已打进 bundle 的 protocol。 */
+import { spawnSync } from "node:child_process"
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 export type PublishableCliPackage = {
   stagingDir: string
@@ -74,24 +76,25 @@ export async function packPublishableCli(cliRoot: string, outDir: string): Promi
   const stagingDir = join(outDir, "staging")
   const { packageJson } = await stagePublishableCli(cliRoot, stagingDir)
   await mkdir(outDir, { recursive: true })
-  const filename = tarballName(packageJson)
-  const packed = Bun.spawnSync(["bun", "pm", "pack", "--filename", filename, "--quiet"], {
+  const packed = spawnSync("npm", ["pack", "--pack-destination", stagingDir], {
     cwd: stagingDir,
-    stdout: "pipe",
-    stderr: "pipe",
+    encoding: "utf8",
   })
-  if (packed.exitCode !== 0) {
-    throw new Error(`bun pm pack 失败：${packed.stderr.toString() || packed.stdout.toString()}`)
+  if (packed.status !== 0) {
+    throw new Error(`npm pack 失败：${packed.stderr || packed.stdout}`)
   }
-  return resolve(stagingDir, filename)
+  const lines = (packed.stdout || "").trim().split("\n")
+  const generatedFile = lines[lines.length - 1].trim()
+  return resolve(stagingDir, generatedFile)
 }
 
 function tarballName(packageJson: PublishableCliManifest): string {
   return `${packageJson.name.replace("@", "").replace("/", "-")}-${packageJson.version}.tgz`
 }
 
-if (import.meta.main) {
-  const cliRoot = resolve(import.meta.dir, "..")
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+if (isMain) {
+  const cliRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
   const outDir = resolve(cliRoot, ".publish")
   const tarball = await packPublishableCli(cliRoot, outDir)
   process.stdout.write(`${tarball}\n`)

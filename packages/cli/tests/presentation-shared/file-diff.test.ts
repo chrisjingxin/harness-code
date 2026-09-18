@@ -1,6 +1,6 @@
 /** 文件审批 unified diff parser 与 split 对齐的纯函数测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { alignFileDiffHunk, diffTextForRenderer, parseFileDiff } from "../../src/presentation-shared/file-diff"
 import { resolveLanguageForPath } from "../../src/presentation-shared/language-catalog"

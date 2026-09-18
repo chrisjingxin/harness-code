@@ -7,19 +7,21 @@
  * 该脚本与用例存在。证据台账记录在 ZC-115。
  */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { expectNoMatch, layerImports, readAllSourceFiles, sourceFiles } from "./arch-imports"
 
-const cliSrcRoot = resolve(import.meta.dir, "../../src")
+const __dirname = fileURLToPath(new URL(".", import.meta.url))
+const cliSrcRoot = resolve(__dirname, "../../src")
 const tuiRoot = resolve(cliSrcRoot, "tui")
 const webRoot = resolve(cliSrcRoot, "web")
 const interactiveRoot = resolve(cliSrcRoot, "interactive")
 const presentationSharedRoot = resolve(cliSrcRoot, "presentation-shared")
 const coordinatorRoot = resolve(cliSrcRoot, "presentation-coordinator")
-const repoRoot = resolve(import.meta.dir, "../../../..")
+const repoRoot = resolve(__dirname, "../../../..")
 
 test("A-01 单一 InteractiveController：生产调用点仅 CLI Composition Root", () => {
   const callers = sourceFiles(cliSrcRoot)
@@ -57,7 +59,7 @@ test("A-05 TUI→Web→TUI 连续性：E2E 脚本与真实浏览器用例存在"
   expect(rootPackage.scripts["test:web:e2e"]).toBeDefined()
   // 连续性断言（A-05）由 tests/e2e/ 的真实浏览器用例执行（Controller 未重建、
   // Thread/Timeline 连续）；此处保证用例文件存在且非空。
-  const e2eFiles = sourceFiles(resolve(import.meta.dir, "../e2e"))
+  const e2eFiles = sourceFiles(resolve(__dirname, "../e2e"))
   expect(e2eFiles.length).toBeGreaterThan(0)
   const e2eSource = e2eFiles.map(file => readFileSync(file, "utf8")).join("\n")
   // e2e 通过 UI 交互覆盖返回 TUI（.return-button）与 web-active 状态。
@@ -69,7 +71,7 @@ test("A-06 dispatch 均返回 Typed IntentOutcome，拒绝不清空草稿", () =
   const types = readFileSync(resolve(interactiveRoot, "types.ts"), "utf8")
   expect(types).toContain("dispatch(intent: InteractiveIntent): Promise<IntentOutcome>")
   // 拒绝保留草稿的端到端断言由 adapter parity 与 adapter 测试覆盖。
-  const parity = readFileSync(resolve(import.meta.dir, "../interactive/adapter-parity.test.ts"), "utf8")
+  const parity = readFileSync(resolve(__dirname, "../interactive/adapter-parity.test.ts"), "utf8")
   expect(parity).toContain("保留草稿")
 })
 
@@ -92,7 +94,7 @@ test("A-09 Web 高亮用单例 Shiki Worker，未知/失败安全降级", () => 
   expect(syntaxSource).toContain("shiki")
   expect(syntaxSource).toContain("Worker")
   // 未知语言/超长代码块降级纯文本的断言由 tests/web/syntax 覆盖。
-  const workerTests = readFileSync(resolve(import.meta.dir, "../web/syntax/worker.test.ts"), "utf8")
+  const workerTests = readFileSync(resolve(__dirname, "../web/syntax/worker.test.ts"), "utf8")
   expect(workerTests.length).toBeGreaterThan(0)
 })
 

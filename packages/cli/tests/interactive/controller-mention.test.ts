@@ -1,6 +1,6 @@
 /** Controller 提及上下文注入端到端测试。 */
 
-import { expect, describe, test, beforeAll, afterAll } from "bun:test"
+import { expect, describe, test, beforeAll, afterAll } from "vitest"
 import { mkdir, writeFile, rm, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"

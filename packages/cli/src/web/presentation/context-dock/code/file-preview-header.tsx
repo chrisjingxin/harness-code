@@ -3,7 +3,7 @@
 
 import { RefreshCw } from "lucide-react"
 
-import type { WorkspacePreviewView } from "../../../../presentation-coordinator"
+import type { WorkspacePreviewView } from "../../../../presentation-coordinator/contracts"
 import type { WebIntent } from "../../../application/adapter"
 import { fileLanguageDisplayLabel, formatFileSize } from "./file-meta"
 

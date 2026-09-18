@@ -48,7 +48,9 @@ async function main(): Promise<void> {
     platform: "browser",
     target: ["es2022"],
     minify: true,
-    external: ["node:*", "module", "fs", "path"],
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
   })
   await build({
     entryPoints: [resolve(sourceRoot, "web/syntax/worker.ts")],
@@ -58,7 +60,9 @@ async function main(): Promise<void> {
     platform: "browser",
     target: ["es2022"],
     minify: true,
-    external: ["node:*", "module"],
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
   })
 
   const manifest = {
@@ -67,12 +71,24 @@ async function main(): Promise<void> {
     style: "web.css",
     syntaxWorkerScript: "web-syntax-worker.js",
   }
-  await Promise.all([
-    readFile(resolve(distRoot, manifest.script)),
-    readFile(resolve(distRoot, manifest.style)),
-    readFile(resolve(distRoot, manifest.syntaxWorkerScript)),
+  const [scriptContent, styleContent, workerContent] = await Promise.all([
+    readFile(resolve(distRoot, manifest.script), "utf8"),
+    readFile(resolve(distRoot, manifest.style), "utf8"),
+    readFile(resolve(distRoot, manifest.syntaxWorkerScript), "utf8"),
   ])
+
+  // 严格校验浏览器静态产物不得包含任何 node:* 或非相对路径的外部 import，防止浏览器运行时解析失败
+  assertPureBrowserBundle(scriptContent, "web.js")
+  assertPureBrowserBundle(workerContent, "web-syntax-worker.js")
+
   await writeFile(resolve(distRoot, "web-assets.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8")
+}
+
+function assertPureBrowserBundle(content: string, filename: string): void {
+  const nodeImportMatch = content.match(/from\s*["']node:[^"']+["']/)
+  if (nodeImportMatch) {
+    throw new Error(`浏览器产物 ${filename} 包含了非法的 Node.js 模块导入：${nodeImportMatch[0]}`)
+  }
 }
 
 await main()

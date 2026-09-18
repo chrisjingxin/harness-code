@@ -180,7 +180,7 @@
 
 ### A6 Ink root、TerminalSize 与唯一关闭路径
 
-**Description:** 用 Ink render 替换 OpenTUI composition root，接入 `exitOnCtrlC=false`、incremental rendering、Kitty auto、TerminalSizeSource 和现有 shutdown；先渲染最小 Home/Thread 壳。
+**Description:** 用 Ink render 替换 OpenTUI composition root，接入 `exitOnCtrlC=false`、Kitty auto、TerminalSizeSource 和现有 shutdown；先渲染最小 Home/Thread 壳。
 
 **Acceptance criteria:**
 

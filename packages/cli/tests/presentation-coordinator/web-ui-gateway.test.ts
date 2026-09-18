@@ -1,6 +1,6 @@
 /** WebUiGateway 测试：真实 InteractiveController + 真实 Coordinator 驱动的分片发布与双域意图受理。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { AsyncQueue } from "../../src/ipc/transport"
 import { makeHarness } from "../interactive/harness"

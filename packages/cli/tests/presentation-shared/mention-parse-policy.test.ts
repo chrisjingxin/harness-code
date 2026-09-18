@@ -1,6 +1,6 @@
 /** 提及文本语法解析策略测试：从消息中提取普通路径、带引号路径、GitHub/Colon 行号切片。 */
 
-import { expect, describe, test } from "bun:test"
+import { expect, describe, test } from "vitest"
 import { parseMentionsFromText } from "../../src/presentation-shared/mention-parse-policy"
 
 describe("parseMentionsFromText", () => {

@@ -1,6 +1,6 @@
 /** Compose Timeline 活动分组纯函数测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import type { TimelineItem } from "../../src/interactive/state"
 import {
   activityGroupTitle,
@@ -48,7 +48,7 @@ test("Build 无 scope 条目保持扁平，不生成 activity 分组", () => {
     { type: "tool", tool: { id: "t1", runId: "run-1", name: "read_file", arguments: "", output: "ok", status: "completed" } },
   ]
   const segments = segmentTimeline(timeline)
-  expect(segments.every(segment => segment.kind === "flat")).toBeTrue()
+  expect(segments.every(segment => segment.kind === "flat")).toBe(true)
   expect(itemActivityKey(timeline[1]!)).toBeNull()
 })
 
@@ -113,14 +113,14 @@ test("同 activity 连续条目合成一组，中间 root 项打断分组", () =
   if (segments[0]?.kind === "group") {
     expect(segments[0].group.activityId).toBe("act-a")
     expect(segments[0].group.stage).toBe("understand")
-    expect(segments[0].group.terminal).toBeTrue()
-    expect(isGroupExpandedByDefault(segments[0].group)).toBeFalse()
+    expect(segments[0].group.terminal).toBe(true)
+    expect(isGroupExpandedByDefault(segments[0].group)).toBe(false)
     expect(activityGroupTitle(segments[0].group)).toContain("理解")
   }
   if (segments[2]?.kind === "group") {
     expect(segments[2].group.activityId).toBe("act-b")
     // 摘要终态但 reasoning 仍 active → 不视为 terminal 折叠
-    expect(segments[2].group.terminal).toBeFalse()
+    expect(segments[2].group.terminal).toBe(false)
   }
 })
 

@@ -1,4 +1,10 @@
-/** Bun 静态 server adapter：白名单路由、精细 Host/Origin 校验与 UI token 升级门禁。 */
+/** Node 静态 server adapter：白名单路由、精细 Host/Origin 校验与 UI token 升级门禁。 */
+
+import http from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import type { Duplex } from "node:stream"
+import { WebSocket, WebSocketServer } from "ws"
+import type { RawData } from "ws"
 
 import { AsyncQueue } from "../ipc/transport"
 import type { GatewayChannel } from "../presentation-coordinator"
@@ -21,15 +27,12 @@ export type WebServer = {
   stop(): Promise<void>
 }
 
-type BunWebSocketData = { handoffId: string; presentedToken: string }
-type BunServerWebSocket = import("bun").ServerWebSocket<BunWebSocketData>
-
-const COMMON_HEADERS = {
+const COMMON_HEADERS: Record<string, string> = {
   "cache-control": "no-store",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
   "cross-origin-resource-policy": "same-origin",
-} as const
+}
 
 const HTML_CSP = [
   "default-src 'none'",
@@ -43,71 +46,180 @@ const HTML_CSP = [
 
 /** 创建只服务当前 handoff 的本机静态 server；start 前不绑定端口。 */
 export function createWebServer(options: WebServerOptions): WebServer {
-  let server: ReturnType<typeof Bun.serve<BunWebSocketData>> | undefined
+  let httpServer: http.Server | undefined
+  let wss: WebSocketServer | undefined
+  let port = 0
   let assets: WebAssets = {
     script: "",
     style: "",
     syntaxWorkerScript: "",
   }
-  const queues = new WeakMap<BunServerWebSocket, AsyncQueue<unknown>>()
+  const openSockets = new Set<Duplex>()
+  const openWebSockets = new Set<WebSocket>()
 
-  const origin = () => (server ? `http://127.0.0.1:${server.port}` : "")
+  const origin = () => (port > 0 ? `http://127.0.0.1:${port}` : "")
 
-  function handleFetch(request: Request): Response | undefined {
-    if (!server) return new Response("Not Found", { status: 404 })
-    const url = new URL(request.url)
-    if (url.hostname !== "127.0.0.1" || url.port !== String(server.port)) {
-      return new Response("Forbidden", { status: 403 })
+  function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    if (!httpServer || port === 0) {
+      res.writeHead(404, COMMON_HEADERS)
+      res.end("Not Found")
+      return
     }
-    const isUpgrade = request.headers.get("upgrade")?.toLowerCase() === "websocket"
+
+    const host = req.headers.host
+    if (host !== `127.0.0.1:${port}`) {
+      res.writeHead(403, COMMON_HEADERS)
+      res.end("Forbidden")
+      return
+    }
+
+    const url = new URL(req.url ?? "/", origin())
     const path = url.pathname
+
     if (path === "/web/app.js") {
-      if (request.method !== "GET" || isUpgrade) {
-        return new Response("Method Not Allowed", { status: 405 })
+      if (req.method !== "GET") {
+        res.writeHead(405, COMMON_HEADERS)
+        res.end("Method Not Allowed")
+        return
       }
-      return staticResponse("text/javascript; charset=utf-8", assets.script)
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", ...COMMON_HEADERS })
+      res.end(assets.script)
+      return
     }
+
     if (path === "/web/app.css") {
-      if (request.method !== "GET" || isUpgrade) {
-        return new Response("Method Not Allowed", { status: 405 })
+      if (req.method !== "GET") {
+        res.writeHead(405, COMMON_HEADERS)
+        res.end("Method Not Allowed")
+        return
       }
-      return staticResponse("text/css; charset=utf-8", assets.style)
+      res.writeHead(200, { "content-type": "text/css; charset=utf-8", ...COMMON_HEADERS })
+      res.end(assets.style)
+      return
     }
+
     if (path === "/web/syntax-worker.js") {
-      if (request.method !== "GET" || isUpgrade) {
-        return new Response("Method Not Allowed", { status: 405 })
+      if (req.method !== "GET") {
+        res.writeHead(405, COMMON_HEADERS)
+        res.end("Method Not Allowed")
+        return
       }
-      return staticResponse("text/javascript; charset=utf-8", assets.syntaxWorkerScript || "")
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", ...COMMON_HEADERS })
+      res.end(assets.syntaxWorkerScript || "")
+      return
     }
+
     const match = matchHandoffPath(path)
-    if (!match) return new Response("Not Found", { status: 404 })
-    if (!options.isActiveHandoff(match.handoffId)) {
-      return new Response("Not Found", { status: 404 })
+    if (!match || !options.isActiveHandoff(match.handoffId)) {
+      res.writeHead(404, COMMON_HEADERS)
+      res.end("Not Found")
+      return
     }
+
     if (match.kind === "page") {
-      if (request.method !== "GET" || isUpgrade) {
-        return new Response("Method Not Allowed", { status: 405 })
+      if (req.method !== "GET") {
+        res.writeHead(405, COMMON_HEADERS)
+        res.end("Method Not Allowed")
+        return
       }
-      return htmlResponse(options.html)
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cross-origin-opener-policy": "same-origin",
+        "content-security-policy": HTML_CSP,
+        ...COMMON_HEADERS,
+      })
+      res.end(options.html)
+      return
     }
-    if (request.method !== "GET" || !isUpgrade) {
-      return new Response("Method Not Allowed", { status: 405 })
+
+    // /ui 路由是 WebSocket 专用路由，普通 HTTP 请求一律返回 405
+    res.writeHead(405, COMMON_HEADERS)
+    res.end("Method Not Allowed")
+  }
+
+  function handleHttpUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+    function rejectUpgrade(statusCode: number, statusText: string): void {
+      socket.end(`HTTP/1.1 ${statusCode} ${statusText}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
     }
-    if (request.headers.get("origin") !== origin()) {
-      return new Response("Forbidden", { status: 403 })
+
+    if (!httpServer || port === 0 || !wss) {
+      rejectUpgrade(500, "Server Not Ready")
+      return
     }
+
+    const host = req.headers.host
+    if (host !== `127.0.0.1:${port}`) {
+      rejectUpgrade(403, "Forbidden")
+      return
+    }
+
+    if (req.headers.origin !== origin()) {
+      rejectUpgrade(403, "Forbidden")
+      return
+    }
+
+    const url = new URL(req.url ?? "/", origin())
+    const match = matchHandoffPath(url.pathname)
+    if (!match || match.kind !== "ui" || !options.isActiveHandoff(match.handoffId)) {
+      rejectUpgrade(404, "Not Found")
+      return
+    }
+
     // UI token 从升级 URL 的查询参数读取（fragment 无法送达服务端）；bootstrap token
     // 绑定 handoffId、Origin 与 TTL，接管后使用每次成功连接都轮换的单次重连 token。
     // 本 server 只服务 127.0.0.1、无访问日志——禁止为该 server
     // 开启访问日志或接入代理，否则 token 会以明文出现在日志中。
     const token = url.searchParams.get("ui")
     if (!token || !options.validateUiToken(match.handoffId, token, origin())) {
-      return new Response("Forbidden", { status: 403 })
+      rejectUpgrade(403, "Forbidden")
+      return
     }
-    if (!server.upgrade(request, { data: { handoffId: match.handoffId, presentedToken: token } })) {
-      return new Response("Upgrade Failed", { status: 500 })
-    }
-    return undefined
+
+    wss.handleUpgrade(req, socket, head, ws => {
+      openWebSockets.add(ws)
+      const queue = new AsyncQueue<unknown>()
+
+      const channel: GatewayChannel = {
+        messages: queue,
+        send: async message => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(message))
+          }
+        },
+        close: async (code, reason) => {
+          try {
+            ws.close(code, reason)
+          } catch {
+            // 已断开时忽略。
+          }
+          queue.end()
+        },
+        isOpen: () => ws.readyState === WebSocket.OPEN,
+      }
+
+      ws.on("message", (raw: RawData) => {
+        const text = typeof raw === "string"
+          ? raw
+          : Buffer.isBuffer(raw)
+            ? raw.toString("utf8")
+            : Array.isArray(raw)
+              ? Buffer.concat(raw).toString("utf8")
+              : new TextDecoder().decode(raw)
+        queue.push(text)
+      })
+
+      ws.on("close", () => {
+        queue.end()
+        openWebSockets.delete(ws)
+      })
+
+      ws.on("error", () => {
+        queue.end()
+        openWebSockets.delete(ws)
+      })
+
+      void options.attachRenderer(match.handoffId, token, channel)
+    })
   }
 
   return {
@@ -116,70 +228,72 @@ export function createWebServer(options: WebServerOptions): WebServer {
     },
     pathFor: handoffId => `/web/h/${handoffId}`,
     start: async () => {
-      if (server) return
+      if (httpServer) return
       assets = await options.getAssets()
-      const websocket = {
-        open(ws: BunServerWebSocket) {
-          const queue = new AsyncQueue<unknown>()
-          queues.set(ws, queue)
-          const channel: GatewayChannel = {
-            messages: queue,
-            send: async message => {
-              if (ws.readyState === 1) {
-                ws.send(JSON.stringify(message))
-              }
-            },
-            close: async (code, reason) => {
-              try {
-                ws.close(code, reason)
-              } catch {
-                // 已断开时忽略。
-              }
-              queue.end()
-            },
-            // 活性探测：关闭/关闭中的连接视为失效，供 attachRenderer 替换接管。
-            isOpen: () => ws.readyState === 1,
+
+      wss = new WebSocketServer({
+        noServer: true,
+        perMessageDeflate: false,
+        maxPayload: 16 * 1024 * 1024,
+      })
+
+      httpServer = http.createServer(handleHttpRequest)
+      httpServer.on("upgrade", handleHttpUpgrade)
+      httpServer.on("connection", socket => {
+        openSockets.add(socket)
+        socket.on("close", () => openSockets.delete(socket))
+      })
+
+      await new Promise<void>((resolve, reject) => {
+        httpServer!.listen(0, "127.0.0.1", () => {
+          const address = httpServer?.address()
+          if (address && typeof address === "object") {
+            port = address.port
+            resolve()
+          } else {
+            reject(new Error("Failed to obtain loopback port"))
           }
-          void options.attachRenderer(ws.data.handoffId, ws.data.presentedToken, channel)
-        },
-        message(ws: BunServerWebSocket, raw: string | Uint8Array) {
-          // 帧形状/大小校验统一由网关执行：超限帧按协议违规走 notifyInvalidMessage
-          // 直接结束会话，与畸形帧路径一致；此处只解码后原样入队。
-          const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw)
-          queues.get(ws)?.push(text)
-        },
-        close(ws: BunServerWebSocket) {
-          queues.get(ws)?.end()
-          queues.delete(ws)
-        },
-      }
-      let lastError: unknown
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        try {
-          server = Bun.serve<BunWebSocketData>({
-            hostname: "127.0.0.1",
-            port: randomLoopbackPort(attempt),
-            fetch: handleFetch,
-            websocket,
-          })
-          break
-        } catch (error) {
-          lastError = error
-        }
-      }
-      if (!server) throw lastError instanceof Error ? lastError : new Error("Failed to start Web server")
+        })
+        httpServer!.once("error", reject)
+      })
     },
     stop: async () => {
-      if (!server) return
-      server.stop(true)
-      server = undefined
+      if (!httpServer) return
+      const currentServer = httpServer
+      const currentWss = wss
+      httpServer = undefined
+      wss = undefined
+      port = 0
+
+      for (const ws of openWebSockets) {
+        try {
+          ws.terminate()
+        } catch {
+          // 忽略
+        }
+      }
+      openWebSockets.clear()
+
+      for (const socket of openSockets) {
+        try {
+          socket.destroy()
+        } catch {
+          // 忽略
+        }
+      }
+      openSockets.clear()
+
+      try {
+        currentWss?.close()
+      } catch {
+        // 忽略
+      }
+
+      await new Promise<void>(resolve => {
+        currentServer.close(() => resolve())
+      })
     },
   }
-}
-
-function randomLoopbackPort(attempt: number): number {
-  if (attempt === 0) return 0
-  return 40_000 + Math.floor(Math.random() * 20_000)
 }
 
 /** 只解析两条精确路径；不做任何文件系统读取。 */
@@ -205,21 +319,4 @@ function decodePathSegment(value: string): string | undefined {
   } catch {
     return undefined
   }
-}
-
-function staticResponse(contentType: string, body: string): Response {
-  return new Response(body, {
-    headers: { "content-type": contentType, ...COMMON_HEADERS },
-  })
-}
-
-function htmlResponse(html: string): Response {
-  return new Response(html, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      ...COMMON_HEADERS,
-      "cross-origin-opener-policy": "same-origin",
-      "content-security-policy": HTML_CSP,
-    },
-  })
 }

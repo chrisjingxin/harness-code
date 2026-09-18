@@ -1,6 +1,6 @@
 /** 共享 formatters 的边界测试：时长、token 用量与上下文预算格式化的确定性。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { formatContext, formatDuration, formatElapsed, formatUsage } from "../../src/presentation-shared/formatters"
 
 test("formatDuration：缺失/零/亚毫秒统一返回 undefined", () => {

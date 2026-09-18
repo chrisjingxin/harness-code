@@ -1,6 +1,6 @@
 /** MCP Feature：添加/删除 MCP 服务器的能力检查、RPC 调用与 catalog 刷新协调。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Capability } from "@za38/protocol"
 import { makeHarness, flush } from "./harness"
 

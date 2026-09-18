@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -57,11 +57,11 @@ test("新增一条提示词追加到 JSONL，历史裁剪时重写保留集合",
 
 test("上下键在空输入与历史提示词之间回填，并保留手动编辑行为", () => {
   const history = ["第一条", "第二条"]
-  expect(canNavigatePromptHistory(history, "")).toBeTrue()
+  expect(canNavigatePromptHistory(history, "")).toBe(true)
   expect(selectPromptHistory(history, "", "previous")).toBe("第二条")
   expect(selectPromptHistory(history, "第二条", "previous")).toBe("第一条")
   expect(selectPromptHistory(history, "第一条", "next")).toBe("第二条")
   expect(selectPromptHistory(history, "第二条", "next")).toBe("")
-  expect(canNavigatePromptHistory(history, "第二条（已手动修改）")).toBeFalse()
+  expect(canNavigatePromptHistory(history, "第二条（已手动修改）")).toBe(false)
   expect(selectPromptHistory(history, "第二条（已手动修改）", "previous")).toBeUndefined()
 })

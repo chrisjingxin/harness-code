@@ -1,6 +1,6 @@
 /** Interactive Selector 契约测试：视图可序列化，FeatureAvailability 与 snapshot 状态一致。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import type { InteractiveSnapshot } from "../../src/interactive/types"
 import {

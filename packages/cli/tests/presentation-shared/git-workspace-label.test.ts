@@ -1,6 +1,6 @@
 /** gitWorkspaceLabel：四种探测结果与未探测状态渲染为稳定短文案。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { gitWorkspaceLabel } from "../../src/presentation-shared"
 

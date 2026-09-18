@@ -1,7 +1,7 @@
 /** DialogHost：confirmation 模态焦点、确认/取消 dispatch、Escape 行为。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { DialogHost } from "../../../src/web/presentation/dialog"

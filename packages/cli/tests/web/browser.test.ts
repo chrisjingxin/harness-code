@@ -1,6 +1,6 @@
 /** 系统 Browser opener：spawn/error 传播与平台参数测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { EventEmitter } from "node:events"
 import type { ChildProcess } from "node:child_process"
 

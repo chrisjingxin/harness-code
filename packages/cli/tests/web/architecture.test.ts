@@ -1,14 +1,15 @@
+import { fileURLToPath } from "node:url"
 /** Web 分层规则测试：presentation 不持有 IPC、agent-transport、handoff 凭据；composition root 是唯一装配入口。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import { resolve } from "node:path"
 
 import { layerImports, readAllSourceFiles, sourceFiles } from "../acceptance/arch-imports"
 
-const webRoot = resolve(import.meta.dir, "../../src/web")
-const interactiveRoot = resolve(import.meta.dir, "../../src/interactive")
-const cliSrcRoot = resolve(import.meta.dir, "../../src")
+const webRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/web")
+const interactiveRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/interactive")
+const cliSrcRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src")
 
 test("Web 根目录只保留组合入口与白名单基础设施文件", () => {
   const entries = readdirSync(webRoot, { withFileTypes: true })

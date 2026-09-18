@@ -1,5 +1,4 @@
-/** 内部 Node adapter 只输出 Harness JSONL，不透传依赖对象或终端文案。 */
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { runAdapter, runServe } from "../src/code-index-adapter/index.mjs"
 

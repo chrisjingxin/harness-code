@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { EventType } from "@za38/protocol"
 import { makeHarness, flush, notices, terminalEvent, approvalRequest, planRequest } from "./harness"
 import { PLAN_IMPLEMENT_PROMPT } from "../../src/interactive/features/run-feature"
@@ -663,7 +663,7 @@ test("Compose 失败前 TUI 保留用户消息与进度投影，失败后显示�
     harness.port.emitEvent(terminalEvent(EventType.COMPOSE_PROGRESS, run.threadId, run.runId, 3, frame(0, "none")))
     await flush()
     let snapshot = harness.controller.getSnapshot()
-    expect(snapshot.timeline.some(item => item.type === "message" && item.message.role === "user")).toBeTrue()
+    expect(snapshot.timeline.some(item => item.type === "message" && item.message.role === "user")).toBe(true)
     expect(snapshot.composeState?.revision).toBe(0)
     expect(snapshot.activity.kind).toBe("running")
 

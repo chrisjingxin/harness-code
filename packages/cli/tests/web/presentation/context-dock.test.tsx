@@ -1,7 +1,7 @@
 /** ContextDock：各面板内容、主 tab 语义、capability 门禁、dock-close / dock-width-change（迁移自 panels.test）。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { ContextDock } from "../../../src/web/presentation/context-dock/context-dock"

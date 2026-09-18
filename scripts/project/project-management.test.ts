@@ -12,6 +12,7 @@ import {
   checkDocs,
   checkRelease,
   checkTasks,
+  checkZeroBun,
   claimTask,
   compareSemVer,
   completeTask,
@@ -359,4 +360,33 @@ test("renderTaskBoard 文案指向新目录", () => {
   expect(board).toContain("docs/developer/task/archive/")
   expect(board).not.toContain("docs/developer/tasks/")
   expect(board).not.toContain("下次复核")
+})
+
+test("checkZeroBun 门禁检测非法 bun.lock、opentui 依赖与 bun 模块引用", async () => {
+  const projectRoot = await createFixture()
+  try {
+    // 初始合法夹具应顺利通过
+    await expect(checkZeroBun(projectRoot)).resolves.toBeUndefined()
+
+    // 1. 存在 bun.lock 报错
+    await writeFile(join(projectRoot, "bun.lock"), "", "utf8")
+    await expect(checkZeroBun(projectRoot)).rejects.toThrow("发现遗留的 Bun 锁文件")
+    await rm(join(projectRoot, "bun.lock"))
+
+    // 2. 存在 @opentui 生产依赖报错
+    await writeFile(join(projectRoot, "packages/cli/package.json"), JSON.stringify({
+      name: "cli",
+      version: "0.0.0",
+      dependencies: { "@opentui/core": "0.4.3" },
+    }), "utf8")
+    await expect(checkZeroBun(projectRoot)).rejects.toThrow("OpenTUI 依赖")
+    await writeFile(join(projectRoot, "packages/cli/package.json"), '{"name":"cli","version":"0.0.0"}\n', "utf8")
+
+    // 3. 活跃代码包含 bun 导入报错
+    const srcFile = join(projectRoot, "packages/cli/src/interactive/bad.ts")
+    await writeFile(srcFile, 'import { test } from "bun:test"\n', "utf8")
+    await expect(checkZeroBun(projectRoot)).rejects.toThrow("零 Bun / OpenTUI 门禁扫描未通过")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
 })

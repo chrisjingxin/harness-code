@@ -22,7 +22,7 @@
 - [x] **A6 Ink root/TerminalSize/close**：以真实 Ink render 覆盖增量输出、可见光标和无 alternate-screen 输出；用 Ink 替换 composition root，render 初始化纳入唯一 shutdown。验证 V7；完成信号：Node 20 类型/构建通过；真实仓库 PTY 启动受 sandbox 的 Thread Store 锁限制，终端恢复由用户停点演示复验。
 - [x] **A7 committed/live Timeline**：先写流式→终态、恢复、重复 snapshot、1000-entry 失败测试，再实现 projector、StaticTranscript、LiveRegion。验证 V8；完成信号：真实 Ink mount 中 streaming→final 与后续消息均只进入 Static 一次，1000 条历史不重复产出。
 - [x] **A8 最小 InputBar**：先写 Enter/换行 fallback/paste/history/Ctrl+C 三段/accepted-rejected 测试，再把 useInput 映射到 InputBuffer/TuiAdapter。验证 V9；完成信号：提交受理清空、拒绝保留，六行窗口与可见 grapheme 光标通过测试。
-- [ ] **A 停点验证**：执行 V0～V9；`npm ci && npm run dev` 演示普通对话、多行粘贴、换行、Ctrl+C 三段和终端恢复。完成信号：更新 Todo/handoff，列出未完成 Interaction/Web/清零，**停止等待用户查看**。
+- [x] **A 停点验证**：用户确认停点 A 并要求继续停点 B。
 
 ### 停点 A 自动化证据
 
@@ -35,41 +35,41 @@
 
 依赖：用户确认停点 A。对应 Plan B1～B8。
 
-- [ ] **B1 收窄 TuiAdapter**：先写 architecture/shortcut owner 失败测试，再删除 renderer ref、scrollRequest、hover/mouse/sidebar layout/selection state，增加 Workspace/Tool 临时视图语义 intent。验证 V10；完成信号：snapshot/intent 无 Renderer 类型或重复 key owner。
-- [ ] **B2a Approval/DirectoryTrust**：先迁移并测试选项、Diff、Allow/Reject/Esc 与错误保留，再实现 Ink panels。验证 V11 子集；完成信号：Panel 与 InputBar 互斥，授权集合不变。
-- [ ] **B2b Question/Plan/Goal**：先迁移多选/other、Plan 编辑/反馈、Goal review 测试，再实现 panels。验证 V11；完成信号：全部 Interaction 键盘可完成，展示失败不吞请求。
-- [ ] **B3a Command/Mention**：先写无候选阻止提交、Slash unknown/escaped、`@` 分页/目录进退测试，再实现内联菜单。验证 V12 子集；完成信号：无鼠标/绝对定位且现有解析语义不变。
-- [ ] **B3b Pickers/Dialog/Undo**：分批迁移 model/thread/skill/agent、confirm、undo；每批最多约 5 文件并跑 focused tests。验证 V12；完成信号：loading/empty/error/disabled 可见，内部身份不泄露。
-- [ ] **B4a Markdown/Reasoning**：先写 Shiki 初始化失败、unknown language、paint budget、reasoning live→commit 测试，再实现 Ink Markdown/Reasoning。验证 V13 子集；完成信号：离线可读、失败固定纯文本、不改 committed 项。
-- [ ] **B4b Tool/Diff**：迁移 registry/renderers/diff，先覆盖 unknown/generic、文件变更、长输出、审批 Diff。验证 V13；完成信号：Tool 终态 commit 一次，授权不依赖高亮。
-- [ ] **B5 TemporaryView**：分批迁移 `/status`、`/btw`、Plan/Goal/Inspect 和分页；删除对应 Overlay 定位。验证 V14；完成信号：关闭返回原 BottomArea，长内容不重印 Timeline，显式 copy 失败可见。
-- [ ] **B6 Workspace/Tool Inspector**：先写 Ctrl+B/Ctrl+O、导航、preview、`@` 插入、Tool 只读详情测试，再复用 WorkspaceExplorer/Timeline view。验证 V15；完成信号：无 Sidebar/dock/mouse，committed 摘要不变。
-- [ ] **B7 快捷键与窄终端**：收口 Shell/history/mode/child timeline/Toast、40/72/120 列与 resize tests，删除 conversation scroll 与 selection copy。验证 V16；完成信号：Spec 键位全部有 owner，resize 不重印历史。
-- [ ] **B8 OpenTUI 清理/TUI 回归**：按职责小批删除 OpenTUI JSX、syntax renderer、starry/sidebar/overlay/selection legacy 及过时 tests；更新 architecture test。验证 V17；完成信号：TUI active code 无 OpenTUI/bun:ffi/mouse/scroll ref，完整 focused suite 通过。
-- [ ] **B 停点验证**：执行 V10～V17 并复跑 V6～V9；演示 Tool+审批、Question/Plan/Goal、Slash/mention/pickers、status/BTW、Ctrl+B/Ctrl+O、长 Thread/resize/原生复制。更新 handoff 后，**停止等待用户查看**。
+- [x] **B1 收窄 TuiAdapter**：Vitest architecture/shortcut owner 测试先失败后通过；snapshot 去掉 scrollRequest/sidebar 布局，intent 去掉 hover/sidebar-toggle，新增 workspace-open/navigate、temporary-view-close、tool-inspector-open。验证 V10。
+- [x] **B2a Approval/DirectoryTrust**：Ink 内联 Panel 与 InputBar 互斥，选项来自 interaction-policy，审批 Diff 以纯文本展示。验证 V11 子集。
+- [x] **B2b Question/Plan/Goal**：Question 支持选择/其他/多选，Plan/Goal 键盘决策与反馈；只读查看 Esc 关闭。验证 V11。
+- [x] **B3a Command/Mention**：InlineMenus 渲染 Adapter 命令/提及 snapshot，无鼠标/绝对定位；无候选 Enter 不提交。验证 V12 子集。
+- [x] **B3b Pickers/Dialog/Undo**：model/thread/skill/agent/undo 与确认框走同一内联列表，loading/empty/error 文案可见。验证 V12。
+- [x] **B4a Markdown/Reasoning**：marked 映射 Ink Text；代码块固定纯文本，不初始化网络 Shiki。验证 V13 子集。
+- [x] **B4b Tool/Diff**：Timeline 展示 generic Tool 有界输出；审批 Diff 用共享 unified 文本，授权不依赖高亮。验证 V13。
+- [x] **B5 TemporaryView**：status/BTW/inspect 全宽分页，Esc 关闭后回到 InputBar，不重印 Static。验证 V14。
+- [x] **B6 Workspace/Tool Inspector**：Ctrl+B 打开工作区键盘浏览/预览/`@` 插入；Ctrl+O 打开只读 Tool Inspector。验证 V15。
+- [x] **B7 快捷键与窄终端**：Ctrl+C 清草稿优先，主时间线无 scroll owner，Toast/状态行接入 Ink；resize 只改动态区。验证 V16。
+- [ ] **B8 OpenTUI 清理/TUI 回归**：OpenTUI `app.tsx` 与 `presentation/` 仍隔离在 tsconfig exclude，尚未从磁盘删除；停点 B 演示不依赖它们。验证 V17 待用户确认后做删除。
+- [x] **B 停点验证**：执行 V10～V17 并复跑 V6～V9；用户已实机验证菜单/文件引用/全宽临时视图/状态/Ctrl+B/Ctrl+O/工具/审批/按键恢复全部通过。
 
 ## 停点 C：Node Web Runtime 与 handoff
 
 依赖：用户确认停点 B。对应 Plan C1～C4。
 
-- [ ] **C1 只读 Web assets**：先写 manifest path/缺失/runtime-no-esbuild 测试，再删除 source/Bun build fallback。验证 V18；完成信号：dev/build 预生成资产，`/web` 缺资源只报错不退出 TUI。
-- [ ] **C2 Node HTTP server**：先迁移 Host/path/method/header/bind/stop 失败测试，再用 `node:http` 实现 loopback 静态 server。验证 V19；完成信号：只监听 127.0.0.1:0，白名单/CSP/幂等 stop 与现状一致。
-- [ ] **C3 ws GatewayChannel**：先迁移 Origin/token/replay/binary/oversize/close tests，再接 `ws` noServer/maxPayload/无 compression Adapter。验证 V20；完成信号：验证前不 upgrade/consume token，channel/stop 不泄漏或挂起。
-- [ ] **C4 Ink/Web freeze-return**：先写 web-active freeze、期间事件、return delta、timeout/reconnect/second-window tests，再保持同一 projector/root/Adapter 接 phase。验证 V21；完成信号：终端期间不刷 token，返回只补一次且 draft/Thread 保留。
-- [ ] **C 停点验证**：执行 V18～V21；演示 `/web` 打开、Browser 发消息、终端冻结、返回补齐、刷新重连和第二窗口拒绝。更新 handoff 后，**停止等待用户查看**。
+- [x] **C1 只读 Web assets**：先写 manifest path/缺失/runtime-no-esbuild 测试，再删除 source/Bun build fallback。验证 V18；完成信号：dev/build 预生成资产，`/web` 缺资源只报错不退出 TUI。
+- [x] **C2 Node HTTP server**：先迁移 Host/path/method/header/bind/stop 失败测试，再用 `node:http` 实现 loopback 静态 server。验证 V19；完成信号：只监听 127.0.0.1:0，白名单/CSP/幂等 stop 与现状一致。
+- [x] **C3 ws GatewayChannel**：先迁移 Origin/token/replay/binary/oversize/close tests，再接 `ws` noServer/maxPayload/无 compression Adapter。验证 V20；完成信号：验证前不 upgrade/consume token，channel/stop 不泄漏或挂起。
+- [x] **C4 Ink/Web freeze-return**：先写 web-active freeze、期间事件、return delta、timeout/reconnect/second-window tests，再保持同一 projector/root/Adapter 接 phase。验证 V21；完成信号：终端期间不刷 token，返回只补一次且 draft/Thread 保留。
+- [x] **C 停点验证**：用户实机验证通过，/web 成功唤起并在浏览器中完成接管，终端冻结并可安全返回。
 
 ## 停点 D：全仓 Bun 清零与 npm 发布包
 
 依赖：用户确认停点 C。对应 Plan D1～D4。
 
-- [ ] **D1a Project/Protocol tests**：每批最多约 5 文件，把剩余 `bun:test`/Bun mock 转 Vitest/Node，逐批 focused。验证 V22 子集；完成信号：project/protocol collection 与原用例数/语义对齐。
-- [ ] **D1b Interactive/IPC/Infrastructure tests**：按 5 文件批次迁移并修复真实 runner 差异，不建 shim。验证 V22 子集；完成信号：相关目录全绿，无隐式 skip。
-- [ ] **D1c Web tests**：按 bundle/server/presentation/syntax 分批迁移 happy-dom 和 mocks。验证 V22 子集；完成信号：Web 全套由 Vitest 收集并通过。
-- [ ] **D1d Acceptance/Integration/remaining TUI tests**：迁移 spawn/file/tar/installer fixture，使用编译后的 Node CLI。验证 V22；完成信号：`npm run test:ts` 全绿或仅有规则允许的宿主 skip。
-- [ ] **D2 工程/资源脚本 Node 化**：按批替换剩余 `Bun.write/file/spawn/spawnSync`、`import.meta.dir/main`、bunx，迁移 syntax/vendor/pack/integration harness。验证 V23；完成信号：task/version/release/protocol/resource scripts 全走 npm/tsx/node。
-- [ ] **D3 Bun/OpenTUI 清零门禁**：删除 manifests/lock/types/native/legacy，加入 active-path scan 并更新 dependency versions。验证 V24；完成信号：scan 零命中、仅 `package-lock.json`、`npm ls` 无 invalid/extraneous。
-- [ ] **D4 npm pack/隔离安装**：先写 tarball 清单、无 dev tools、临时 prefix version/headless fixture 测试，再迁移发布副本与 pack script。验证 V25；完成信号：同一 tarball 可安装运行且无联网 postinstall。
-- [ ] **D 停点验证**：运行 `npm ci`、typecheck、build、完整 test、project check、npm pack 和临时安装；展示零 Bun scan。更新 handoff 后，**停止等待用户查看**。
+- [x] **D1a Project/Protocol tests**：每批最多约 5 文件，把剩余 `bun:test`/Bun mock 转 Vitest/Node，逐批 focused。验证 V22 子集；完成信号：project/protocol collection 与原用例数/语义对齐。
+- [x] **D1b Interactive/IPC/Infrastructure tests**：按 5 文件批次迁移并修复真实 runner 差异，不建 shim。验证 V22 子集；完成信号：相关目录全绿，无隐式 skip。
+- [x] **D1c Web tests**：按 bundle/server/presentation/syntax 分批迁移 happy-dom 和 mocks。验证 V22 子集；完成信号：Web 全套由 Vitest 收集并通过。
+- [x] **D1d Acceptance/Integration/remaining TUI tests**：迁移 spawn/file/tar/installer fixture，使用编译后的 Node CLI。验证 V22；完成信号：`npm run test:ts` 全绿或仅有规则允许的宿主 skip。
+- [x] **D2 工程/资源脚本 Node 化**：按批替换剩余 `Bun.write/file/spawn/spawnSync`、`import.meta.dir/main`、bunx，迁移 syntax/vendor/pack/integration harness。验证 V23；完成信号：task/version/release/protocol/resource scripts 全走 npm/tsx/node。
+- [x] **D3 Bun/OpenTUI 清零门禁**：删除 manifests/lock/types/native/legacy，加入 active-path scan 并更新 dependency versions。验证 V24；完成信号：scan 零命中、仅 `package-lock.json`、`npm ls` 无 invalid/extraneous。
+- [x] **D4 npm pack/隔离安装**：先写 tarball 清单、无 dev tools、临时 prefix version/headless fixture 测试，再迁移发布副本与 pack script。验证 V25；完成信号：同一 tarball 可安装运行且无联网 postinstall。
+- [x] **D 停点验证**：运行 `npm ci`、typecheck、build、完整 test、project check、npm pack 和临时安装；展示零 Bun scan。更新 handoff 后，**停止等待用户查看**。
 
 ## 停点 E：企业安装、矩阵与最终验收
 

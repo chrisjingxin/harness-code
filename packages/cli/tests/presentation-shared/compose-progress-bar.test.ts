@@ -1,6 +1,6 @@
 /** Compose 进度条纯函数：步骤名固定，状态只出现在 hint。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   composeStepperHint,
@@ -36,7 +36,7 @@ test("步骤标签固定为五段中文，不把等你/失败拼进步骤名", (
   expect(segments.map(item => item.label)).toEqual(["需求", "规格", "计划", "实现", "检视"])
   expect(segments.map(item => item.mark)).toEqual(["done", "skipped", "current", "pending", "pending"])
   expect(composeStepperHint(progress())).toBe("等你确认")
-  expect(segments.some(item => item.label.includes("等你"))).toBeFalse()
+  expect(segments.some(item => item.label.includes("等你"))).toBe(false)
 })
 
 test("失败只出现在 hint，步骤名仍是实现", () => {
@@ -60,9 +60,9 @@ test("失败只出现在 hint，步骤名仍是实现", () => {
 })
 
 test("轨道只在已完成或跳过的步骤之后填实，当前/失败之后留空", () => {
-  expect(composeStepperTrackFilled("done")).toBeTrue()
-  expect(composeStepperTrackFilled("skipped")).toBeTrue()
-  expect(composeStepperTrackFilled("current")).toBeFalse()
-  expect(composeStepperTrackFilled("failed")).toBeFalse()
-  expect(composeStepperTrackFilled("pending")).toBeFalse()
+  expect(composeStepperTrackFilled("done")).toBe(true)
+  expect(composeStepperTrackFilled("skipped")).toBe(true)
+  expect(composeStepperTrackFilled("current")).toBe(false)
+  expect(composeStepperTrackFilled("failed")).toBe(false)
+  expect(composeStepperTrackFilled("pending")).toBe(false)
 })

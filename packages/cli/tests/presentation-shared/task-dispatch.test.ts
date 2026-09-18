@@ -1,6 +1,6 @@
 /** task 派出视图：角色 + 任务描述，不把 JSON 键铺给用户。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import {
   parseTaskDispatch,
   taskDispatchLabel,

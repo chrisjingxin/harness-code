@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { isValidElement } from "react"
 
 import { resolveLanguage } from "../../../src/presentation-shared/language-catalog"

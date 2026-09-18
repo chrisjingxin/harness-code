@@ -1,8 +1,10 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
+import { spawn } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 const loopbackTest = process.env.HARNESS_RUN_LOOPBACK_E2E === "1" ? test : test.skip
 
@@ -57,28 +59,33 @@ base_url = "http://127.0.0.1:${address.port}/v1"
 api_key_env = "HARNESS_TEST_KEY"
 `,
   )
-  const packageDir = resolve(import.meta.dir, "..")
+  const packageDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
   const agentDir = resolve(packageDir, "../agent")
   try {
-    const child = Bun.spawn({
-      cmd: [process.execPath, "src/index.ts", "--non-interactive", "say hello", "--json", "--config", configPath],
-      cwd: packageDir,
-      env: {
-        ...process.env,
-        // E2E 只验证传入的 v1 配置，不能受开发机用户级配置污染。
-        HOME: resolve(configDirectory, "home"),
-        HARNESS_AGENT_PYTHON: resolve(agentDir, ".venv/bin/python"),
-        PYTHONPATH: agentDir,
-        HARNESS_TEST_KEY: "test-key",
+    const child = spawn(
+      process.execPath,
+      ["dist/index.js", "--non-interactive", "say hello", "--json", "--config", configPath],
+      {
+        cwd: packageDir,
+        env: {
+          ...process.env,
+          // E2E 只验证传入的 v1 配置，不能受开发机用户级配置污染。
+          HOME: resolve(configDirectory, "home"),
+          HARNESS_AGENT_PYTHON: resolve(agentDir, ".venv/bin/python"),
+          PYTHONPATH: agentDir,
+          HARNESS_TEST_KEY: "test-key",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
+    )
+    let stdout = ""
+    let stderr = ""
+    child.stdout.setEncoding("utf8")
+    child.stdout.on("data", chunk => { stdout += chunk })
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", chunk => { stderr += chunk })
+
+    const exitCode = await new Promise(resolve => child.on("close", resolve))
     if (exitCode !== 0) throw new Error(`CLI exited with ${exitCode}: ${stderr}`)
     expect(stderr).toBe("")
     expect(JSON.parse(stdout)).toMatchObject({ text: "gateway response", usage: { input_tokens: 3, output_tokens: 2 } })

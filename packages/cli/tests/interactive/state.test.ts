@@ -1,6 +1,6 @@
 /** v3 事件和交互请求的共享 reducer 归约测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import type { EventEnvelope, InteractionRequestEnvelope } from "@za38/protocol"
 import { applyAgentEvent, applyCodeIndexSnapshot, applyComposeState, applyInteractionRequest, clearThread, createInitialState, finishContextCompaction, isHomeState, markInteractionTimeout, restoreThread, setWorkMode, startContextCompaction, startRun, type InteractiveState } from "../../src/interactive/state"
 
@@ -8,8 +8,8 @@ const run = { threadId: "thread-1", runId: "run-1" }
 
 test("初始状态和清空后的状态进入首页", () => {
   const initial = createInitialState()
-  expect(isHomeState(initial)).toBeTrue()
-  expect(isHomeState(clearThread(startRun(initial, run, "生成组件")))).toBeTrue()
+  expect(isHomeState(initial)).toBe(true)
+  expect(isHomeState(clearThread(startRun(initial, run, "生成组件")))).toBe(true)
 })
 
 test("手动压缩使用独立 pending 状态并在终态恢复空闲", () => {
@@ -170,14 +170,14 @@ test("思考按流式顺序与消息/工具交错成时间线条目", () => {
   // 正文到达：思考段冻结，正文进入 assistant 消息
   state = applyAgentEvent(state, event("content.delta", 3, { text: "结论一" }))
   expect(state.timeline.map(item => item.type)).toEqual(["message", "reasoning", "message"])
-  expect((state.timeline[1] as { reasoning: { active: boolean } }).reasoning.active).toBeFalse()
+  expect((state.timeline[1] as { reasoning: { active: boolean } }).reasoning.active).toBe(false)
   // 新一轮思考：作为新条目追加在正文之后
   state = applyAgentEvent(state, event("reasoning.delta", 4, { text: "再次" }))
   expect(state.timeline.map(item => item.type)).toEqual(["message", "reasoning", "message", "reasoning"])
   // 工具开始：冻结思考段，工具条目追加
   state = applyAgentEvent(state, event("tool.started", 5, { tool_call_id: "t-1", name: "execute" }))
   expect(state.timeline.map(item => item.type)).toEqual(["message", "reasoning", "message", "reasoning", "tool"])
-  expect((state.timeline[3] as { reasoning: { active: boolean } }).reasoning.active).toBeFalse()
+  expect((state.timeline[3] as { reasoning: { active: boolean } }).reasoning.active).toBe(false)
   // 正文再次到达：因 tool 条目在末尾，正文分段为新 assistant 消息
   state = applyAgentEvent(state, event("content.delta", 6, { text: "结论二" }))
   expect(state.timeline.map(item => item.type)).toEqual(["message", "reasoning", "message", "reasoning", "tool", "message"])
@@ -220,8 +220,8 @@ test("重复和倒序事件被忽略，sequence 缺口产生诊断但继续应�
   state = applyAgentEvent(state, event("content.delta", 2, { text: "新内容" }))
   state = applyAgentEvent(state, event("content.delta", 1, { text: "旧内容" }))
   state = applyAgentEvent(state, event("content.delta", 4, { text: "继续" }))
-  expect(messages(state).some(message => message.content.includes("旧内容"))).toBeFalse()
-  expect(messages(state).some(message => message.content.includes("sequence-gap"))).toBeTrue()
+  expect(messages(state).some(message => message.content.includes("旧内容"))).toBe(false)
+  expect(messages(state).some(message => message.content.includes("sequence-gap"))).toBe(true)
   expect(messages(state).at(-1)?.content).toBe("继续")
 })
 
@@ -438,7 +438,7 @@ test("goal.evaluation 进入独立 Timeline 项且不伪装 assistant", () => {
     expect(items[0].evaluation.result).toBe("needs_revision")
     expect(items[0].evaluation.explanation).toBe("缺少测试")
   }
-  expect(state.timeline.some(item => item.type === "message" && item.message.role === "assistant")).toBeFalse()
+  expect(state.timeline.some(item => item.type === "message" && item.message.role === "assistant")).toBe(false)
 })
 
 test("goal.evaluation 不同轮次各自保留终态卡片", () => {

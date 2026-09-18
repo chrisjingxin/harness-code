@@ -1,8 +1,9 @@
 /** TypeScript 与 Python 消费同一份 v3 contract fixture。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import {
   assertEventEnvelope,
   OPERATION_MIN_MINOR,
@@ -28,7 +29,7 @@ type Fixture = {
 }
 
 const fixtures = JSON.parse(
-  await readFile(resolve(import.meta.dir, "../../../protocol/fixtures/v3-contract.json"), "utf8"),
+  await readFile(resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../protocol/fixtures/v3-contract.json"), "utf8"),
 ) as { valid: Fixture[]; invalid: Fixture[] }
 
 test("Settings、Plugin、Goal 与审批 RPC 在 canonical v3 contract 中要求 minor 8；set_title 要求 9；代码索引要求 10", () => {

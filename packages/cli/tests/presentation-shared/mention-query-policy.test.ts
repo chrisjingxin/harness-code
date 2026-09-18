@@ -1,6 +1,6 @@
 /** 共享提及词法触发策略测试：光标处 @ 识别、查询词提取与替换范围判定。 */
 
-import { expect, describe, test } from "bun:test"
+import { expect, describe, test } from "vitest"
 import { extractMentionQuery } from "../../src/presentation-shared/mention-query-policy"
 
 describe("extractMentionQuery", () => {

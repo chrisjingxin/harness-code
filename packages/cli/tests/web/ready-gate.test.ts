@@ -1,6 +1,6 @@
 /** ready 上报门测试：只有"首帧视图 + opening-web"才发送 handoff.ready（P0 回归）。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { createReadyGate } from "../../src/web/app"
 import type { PresentationState } from "../../src/presentation-coordinator"

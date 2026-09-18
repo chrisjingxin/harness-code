@@ -1,10 +1,11 @@
+import { fileURLToPath } from "node:url"
 /** presentation-shared 依赖隔离静态断言：纯展示策略，零平台/组件库 import。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { readdir, readFile } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 
-const sharedSrcDir = resolve(import.meta.dir, "../../src/presentation-shared")
+const sharedSrcDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../src/presentation-shared")
 
 async function getSourceFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { recursive: true, withFileTypes: true })

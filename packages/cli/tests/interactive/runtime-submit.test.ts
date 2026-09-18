@@ -1,6 +1,6 @@
 /** 执行中提交路由：运行时命令放行，普通文字与禁用命令 rejected。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { makeHarness, notices } from "./harness"
 

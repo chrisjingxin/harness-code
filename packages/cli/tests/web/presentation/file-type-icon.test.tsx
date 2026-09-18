@@ -1,7 +1,7 @@
 /** 文件类型图标：扩展名/特殊文件名 → 类型 class 映射；FileTree 行携带类型 class；选中行保留类型色。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 
 import { fileIconFor } from "../../../src/web/presentation/workspace-sidebar/file-type-icon"
 import { FileTree } from "../../../src/web/presentation/workspace-sidebar/file-tree"

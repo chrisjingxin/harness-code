@@ -1,6 +1,6 @@
 /** 绘制限额：用固定长文验证 head/tail 窗口，期望值不由实现回算。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { boundVisibleText, nextThinkingExpanded, thinkingVisibleBody, writeFileVisibleBody } from "../../src/presentation-shared/paint-budget"
 

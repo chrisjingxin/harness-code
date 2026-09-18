@@ -1,6 +1,6 @@
 /** @ 目录浏览策略测试：只列直接子项、目录优先并保持稳定路径。 */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 
 import {
   mentionOptionsForQuery,

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import type { AgentSummary } from "@za38/protocol"
 import { agentBrowsePurpose, agentKindLabel, filterAgents } from "../../src/presentation-shared/agent-catalog"
 

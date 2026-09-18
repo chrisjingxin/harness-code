@@ -1,6 +1,7 @@
+import { setTimeout as sleep } from "node:timers/promises"
 /** TUI 工作区变更工具完成后的文件树、Git 状态与预览刷新测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { createTuiAdapter } from "../../../src/tui/application/adapter"
 import type { GitChangedFile } from "../../../src/interactive/runtime"
@@ -208,7 +209,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
   const deadline = Date.now() + timeoutMs
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("waitFor 超时")
-    await Bun.sleep(2)
+    await sleep(2)
   }
 }
 
@@ -247,8 +248,8 @@ test("运行中 write_file 成功完成后立即刷新文件树与 Git，新增�
 
     await waitFor(() => (
       harness.intents.some(intent => intent.type === "workspace.refresh")
-      && adapter.getSnapshot().sidebar.fileTree.rows.some(row => row.path === "src/new.ts")
-      && adapter.getSnapshot().sidebar.workspaceChangedFiles?.some(file => file.path === "src/new.ts") === true
+      && adapter.getSnapshot().workspace.fileTree.rows.some(row => row.path === "src/new.ts")
+      && adapter.getSnapshot().workspace.changedFiles?.some(file => file.path === "src/new.ts") === true
     ))
     expect(controlled.controller.getSnapshot().activeRun).toEqual(RUN)
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(1)
@@ -279,8 +280,8 @@ test("成功 edit_file 会强制刷新当前已打开文件预览", async () => 
     controlled.push(current => ({ ...current, timeline: [tool("edit_file", "completed", "edit-1")] }))
 
     await waitFor(() => (
-      adapter.getSnapshot().sidebar.preview?.status === "ready"
-      && adapter.getSnapshot().sidebar.preview.file.content === "new content"
+      adapter.getSnapshot().workspace.preview?.status === "ready"
+      && adapter.getSnapshot().workspace.preview.file.content === "new content"
     ))
     expect(harness.intents).toContainEqual({ type: "workspace.refresh-preview", path: "src/changed.ts" })
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(1)
@@ -312,7 +313,7 @@ test("同一完成工具的重复 snapshot 只刷新一次，失败工具不触�
     await waitFor(() => harness.intents.filter(intent => intent.type === "workspace.refresh").length === 1)
     controlled.push(completed)
     controlled.push(current => ({ ...current, timeline: [tool("delete_file", "failed", "delete-failed")] }))
-    await Bun.sleep(20)
+    await sleep(20)
 
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(1)
     expect(probeCalls.value).toBe(1)
@@ -341,7 +342,7 @@ test("未知工具不触发运行中刷新，但任何 Run 结束都保留完整
     await waitFor(() => probeCalls.value >= 1)
     clearInitialRefresh(harness, probeCalls)
     controlled.push(current => ({ ...current, timeline: [tool("mcp_workspace_mutation", "completed", "mcp-1")] }))
-    await Bun.sleep(10)
+    await sleep(10)
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(0)
 
     controlled.push(current => ({ ...current, activeRun: null, timeline: [tool("mcp_workspace_mutation", "completed", "mcp-1")] }))
@@ -349,11 +350,11 @@ test("未知工具不触发运行中刷新，但任何 Run 结束都保留完整
 
     clearInitialRefresh(harness, probeCalls)
     controlled.push(current => ({ ...current, activeRun: RUN, timeline: [tool("execute", "failed", "exec-2")] }))
-    await Bun.sleep(20)
+    await sleep(20)
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(0)
     controlled.push(current => ({ ...current, activeRun: null, timeline: [tool("execute", "failed", "exec-2")] }))
     await waitFor(() => harness.intents.filter(intent => intent.type === "workspace.refresh").length === 1)
-    await Bun.sleep(20)
+    await sleep(20)
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(1)
     expect(probeCalls.value).toBe(1)
   } finally {
@@ -381,14 +382,14 @@ test("连续完成的写操作在刷新进行中合并排队，晚到的旧刷�
 
     harness.setNextRows(secondRows)
     controlled.push(current => ({ ...current, timeline: [tool("write_file", "completed", "write-1"), tool("edit_file", "completed", "edit-2")] }))
-    await Bun.sleep(10)
+    await sleep(10)
     expect(harness.intents.filter(intent => intent.type === "workspace.refresh")).toHaveLength(1)
 
     harness.releaseNextRefresh()
     await waitFor(() => harness.intents.filter(intent => intent.type === "workspace.refresh").length === 2)
     harness.releaseNextRefresh()
-    await waitFor(() => adapter.getSnapshot().sidebar.fileTree.rows.some(row => row.path === "src/second.ts"))
-    expect(adapter.getSnapshot().sidebar.fileTree.rows.some(row => row.path === "src/first.ts")).toBe(true)
+    await waitFor(() => adapter.getSnapshot().workspace.fileTree.rows.some(row => row.path === "src/second.ts"))
+    expect(adapter.getSnapshot().workspace.fileTree.rows.some(row => row.path === "src/first.ts")).toBe(true)
   } finally {
     harness.releaseNextRefresh()
     harness.releaseNextRefresh()

@@ -1,7 +1,8 @@
 /** v3 AgentClient 的 JSONL、错误、Interaction 与资源边界测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { PassThrough } from "node:stream"
+import { setTimeout as sleep } from "node:timers/promises"
 import type { JsonRpcRequest } from "@za38/protocol"
 import { AgentClient, JsonRpcRemoteError } from "../../src/ipc/client"
 import { StdioRpcTransport } from "../../src/ipc/stdio-transport"
@@ -234,7 +235,7 @@ test("run.start 受理不设置会产生幽灵 Run 的本地超时", async () =>
   stdin.on("data", data => { request = JSON.parse(data.toString()) })
 
   const run = client.startRun({ input: { kind: "user", message: "等待受理" }, mode: "build", threadId: "thread-slow-start" })
-  await Bun.sleep(0)
+  await sleep(0)
   expect((client as any).pending.get(request.id).timeout).toBeUndefined()
 
   stdout.write(JSON.stringify({
@@ -487,7 +488,7 @@ test("Peer 处理半帧、多帧和统一 event", async () => {
   const bytes = Buffer.from(`${first}\n${second}\n`)
   stdout.write(bytes.subarray(0, 23))
   stdout.write(bytes.subarray(23))
-  await Bun.sleep(10)
+  await sleep(10)
   expect(events.map(item => item.type)).toEqual(["content.delta", "run.completed"])
 })
 
@@ -572,7 +573,7 @@ test("Peer 响应 Agent 发起的审批 request", async () => {
     jsonrpc: "2.0", method: "interaction.approval", id: "approval-1",
     params: { thread_id: "t", run_id: "r", timeout_ms: 1000, payload: { interrupt_id: "approval-1", description: "写文件", requests: {}, decisions: ["approve_once", "reject"] } },
   }) + "\n")
-  await Bun.sleep(10)
+  await sleep(10)
   expect(responses[0]).toMatchObject({ id: "approval-1", result: { decision: "reject" } })
 })
 
@@ -581,7 +582,7 @@ test("Peer 对畸形反向 request 返回结构化错误", async () => {
   const responses: any[] = []
   stdin.on("data", data => responses.push(JSON.parse(data.toString())))
   stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "interaction.approval", id: "bad-1", params: {} }) + "\n")
-  await Bun.sleep(10)
+  await sleep(10)
   expect(responses[0]).toMatchObject({ id: "bad-1", error: { code: -32602 } })
 })
 
@@ -602,8 +603,8 @@ test("context.compact 等待服务端终态而不使用通用请求超时", asyn
 
   let settled = false
   const result = client.compactContext("thread-compact").finally(() => { settled = true })
-  await Bun.sleep(40)
-  expect(settled).toBeFalse()
+  await sleep(40)
+  expect(settled).toBe(false)
 
   stdout.write(JSON.stringify({
     jsonrpc: "2.0",
@@ -640,7 +641,7 @@ test("Peer 只忽略已超时 ID 的迟到响应并继续报告真正未知 ID",
 
   stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\n")
   stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "never-sent", result: {} }) + "\n")
-  await Bun.sleep(10)
+  await sleep(10)
 
   expect(errors).toHaveLength(1)
   expect(errors[0]?.message).toBe("Unknown JSON-RPC response id: never-sent")

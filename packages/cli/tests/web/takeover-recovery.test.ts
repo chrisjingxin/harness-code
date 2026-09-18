@@ -7,7 +7,7 @@
  * 断言页面在看门狗宽限后整页重载、重连同一 handoff 并最终恢复可写。
  */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { chromium } from "@playwright/test"
 
 import { makeHarness } from "../interactive/harness"
@@ -31,6 +31,7 @@ function createFakeExplorer(): WorkspaceExplorer {
 
 test(
   "web-active 帧丢失后页面看门狗重载并恢复 active",
+  { timeout: 40_000 },
   async () => {
     const { controller } = makeHarness({ initialThreadId: "thread-1" })
     let gateway!: WebUiGateway
@@ -83,11 +84,11 @@ test(
       await coordinator.close()
     }
   },
-  { timeout: 40_000 },
 )
 
 test(
   "Web 长时间保持 active 后刷新仍轮换凭据并恢复",
+  { timeout: 40_000 },
   async () => {
     const { controller } = makeHarness({ initialThreadId: "thread-1" })
     let gateway!: WebUiGateway
@@ -125,5 +126,4 @@ test(
       await coordinator.close()
     }
   },
-  { timeout: 40_000 },
 )

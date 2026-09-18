@@ -1,7 +1,7 @@
 /** GoalBanner 的可访问摘要投影。 */
 /** @jsxImportSource react */
 
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "vitest"
 
 import { GoalBanner } from "../../../src/web/presentation/goal-view"
 import { makeInteractive } from "./fixtures"

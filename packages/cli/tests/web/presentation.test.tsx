@@ -1,7 +1,7 @@
 /** Web presentation DOM 契约：安全 Markdown、Tool 折叠和动态 Interaction 不越过 Adapter seam。 */
 /** @jsxImportSource react */
 
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "vitest"
 import { act, createElement } from "react"
 
 import type { WebAdapterSnapshot, WebIntent } from "../../src/web/application/adapter"

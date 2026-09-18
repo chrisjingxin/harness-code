@@ -1,6 +1,6 @@
 /** path-policy：路径安全校验、根内解析与 symlink 越界防护（真实临时目录）。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

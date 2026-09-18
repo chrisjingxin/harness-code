@@ -1,6 +1,6 @@
 /** UI 契约帧校验测试：尺寸、JSON、精确字段与类型白名单（fail-closed）。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   MAX_REQUEST_ID_LENGTH,

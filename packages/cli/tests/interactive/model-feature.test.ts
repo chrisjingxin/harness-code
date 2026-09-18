@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { makeHarness, flush, notices } from "./harness"
 
 test("模型选择先更新当前 Thread，再独立同步默认值", async () => {

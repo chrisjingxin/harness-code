@@ -1,6 +1,6 @@
 /** Tool 输出渲染模型：JSON 美化、行数统计、折叠阈值与分工具结构化解析。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   prettifyJson,

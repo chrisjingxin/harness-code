@@ -1,7 +1,7 @@
 /** WorkItemBanner：六种 Work Item 状态、模式锁定指示器与窄宽度渲染。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 
 import { WorkItemBanner } from "../../../src/web/presentation/work-item-view"
 import type { WorkItemView } from "../../../src/interactive/selectors"

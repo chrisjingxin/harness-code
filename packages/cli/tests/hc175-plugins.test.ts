@@ -1,6 +1,6 @@
 /** HC-175 第一轮 Shell grammar 与公开契约的先行失败测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { PassThrough, Readable } from "node:stream"
 import { parseArgs } from "../src/args"
 import {

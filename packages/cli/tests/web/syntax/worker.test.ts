@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "vitest"
 import { processHighlightRequest } from "../../../src/web/syntax/worker"
 
 describe("Shiki Syntax Worker", () => {

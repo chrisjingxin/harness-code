@@ -13,9 +13,8 @@
   "scripts": {
     "dev": "node --import tsx src/bin.ts",
     "build": "node --import tsx scripts/build.ts",
-    "syntax:assets": "node --import tsx scripts/vendor-syntax-assets.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts packages/cli/tests/node packages/cli/tests/args.test.ts packages/cli/tests/index.test.ts packages/cli/tests/runtime-binding.test.ts packages/cli/tests/diagnostic-log packages/cli/tests/tui/adapter-runtime-input.test.ts"
+    "test": "vitest run --config ../../vitest.config.ts"
   },
   "dependencies": {
     "@colbymchenry/codegraph": "1.1.6",

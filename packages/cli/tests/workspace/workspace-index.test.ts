@@ -1,6 +1,6 @@
 /** workspace-index：Git 全量树（含子目录工作区）、非 Git 懒加载、排序与截断。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"

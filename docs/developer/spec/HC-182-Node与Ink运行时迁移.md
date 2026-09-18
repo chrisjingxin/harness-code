@@ -342,7 +342,7 @@ Tab/Enter 在有候选项时选择候选；无候选时阻止误提交。`Ctrl+P
 ```ts
 {
   exitOnCtrlC: false,
-  incrementalRendering: true,
+  incrementalRendering: false,
   maxFps: 30,
   kittyKeyboard: { mode: "auto" },
 }

@@ -2,7 +2,8 @@
 
 import type { ApprovalDecision, InteractiveApprovalMode, InteractiveIntent, InteractiveMcpInput, IntentOutcome, InteractiveSnapshot, InteractiveResponse, PresentationEffect } from "../../interactive/types"
 import type { CommandMenuItem } from "../../interactive/commands"
-import type { PresentationState, WorkspacePreviewView, WorkspaceTreeView } from "../../presentation-coordinator"
+import type { PresentationState } from "../../presentation-coordinator/state"
+import type { WorkspacePreviewView, WorkspaceTreeView } from "../../presentation-coordinator/contracts"
 import {
   EMPTY_MENTION_SEARCH_RESULT,
   ensureMentionWindow,

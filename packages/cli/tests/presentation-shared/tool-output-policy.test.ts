@@ -1,6 +1,6 @@
 /** 共享 Tool 输出策略的边界测试：折叠阈值、参数摘要与截断的确定性。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import {
   DEFAULT_ARGUMENT_SUMMARY_MAX,
   collapseToolOutput,

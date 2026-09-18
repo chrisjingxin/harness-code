@@ -5,10 +5,12 @@
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { checkZeroBun } from "./bun-scan"
 import { checkDocs } from "./docs"
 import { checkRelease, setVersion } from "./release"
 import { checkTasks, claimTask, completeTask, syncTasks } from "./tasks"
 
+export * from "./bun-scan"
 export * from "./docs"
 export * from "./release"
 export * from "./tasks"
@@ -52,13 +54,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     case "release:check":
       await checkRelease(root)
       return
+    case "bun:check":
+      await checkZeroBun(root)
+      return
     case "project:check":
       await checkDocs(root)
       await checkTasks(root)
       await checkRelease(root)
+      await checkZeroBun(root)
       return
     default:
-      throw new Error("用法：docs:check|tasks:sync|tasks:check|task:claim|task:complete|version:set|release:check|project:check")
+      throw new Error("用法：docs:check|tasks:sync|tasks:check|task:claim|task:complete|version:set|release:check|bun:check|project:check")
   }
 }
 

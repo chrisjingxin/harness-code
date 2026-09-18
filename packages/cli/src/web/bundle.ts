@@ -1,8 +1,9 @@
-/** 加载 Web JS/CSS/Worker 构建产物；源码开发模式下即时构建同一份资源。 */
+/** 加载 Web JS/CSS/Worker 构建产物；运行时只读取预构建的静态资产清单。 */
 
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 export type WebAssets = {
   script: string
@@ -21,85 +22,34 @@ export type WebAssetsManifest = {
   readonly syntaxWorkerScript: string
 }
 
-let sourceBundlePromise: Promise<WebAssets> | undefined
+/** 获取当前模块所在物理目录。 */
+function getCurrentModuleDir(): string {
+  return fileURLToPath(new URL(".", import.meta.url))
+}
 
-/** 根据当前 bundle 模块所在目录解析 source 与 dist 两种运行形态的资源位置。 */
-export function resolveWebBundleLocations(moduleDir: string): {
+/** 根据当前 bundle 模块所在目录解析构建资产的位置。 */
+export function resolveWebBundleLocations(moduleDir?: string): {
   builtDirectories: readonly string[]
-  sourceEntrypoints: readonly string[]
 } {
+  const baseDir = moduleDir ?? getCurrentModuleDir()
   return {
     builtDirectories: [
-      resolve(moduleDir, "../../dist"),
-      resolve(moduleDir),
-    ],
-    sourceEntrypoints: [
-      resolve(moduleDir, "app.tsx"),
-      resolve(moduleDir, "../src/web/app.tsx"),
+      resolve(baseDir, "../../dist"),
+      resolve(baseDir, "../dist"),
+      resolve(baseDir),
     ],
   }
 }
 
-/** 加载当前运行形态所需的完整 Web 资产；source 与 dist 返回同一资源形状。 */
-export async function browserBundle(): Promise<WebAssets> {
-  const locations = resolveWebBundleLocations(import.meta.dir)
-  const localSourceEntrypoint = locations.sourceEntrypoints[0]!
-  if (existsSync(localSourceEntrypoint)) return buildSourceBundle(localSourceEntrypoint)
+/** 加载当前运行形态所需的完整 Web 资产；运行时仅从预构建的 dist 读取。 */
+export async function browserBundle(customModuleDir?: string): Promise<WebAssets> {
+  const locations = resolveWebBundleLocations(customModuleDir)
   for (const directory of locations.builtDirectories) {
     const assets = await readBuiltWebAssets(directory)
     if (assets) return assets
   }
 
-  const sourceEntrypoint = locations.sourceEntrypoints.find(entrypoint => existsSync(entrypoint))
-  if (!sourceEntrypoint) throw new Error("Web app entrypoint is missing")
-  return buildSourceBundle(sourceEntrypoint)
-}
-
-async function buildSourceBundle(sourceEntrypoint: string): Promise<WebAssets> {
-  if (sourceBundlePromise) return sourceBundlePromise
-  sourceBundlePromise = buildSourceBundleOnce(sourceEntrypoint)
-  try {
-    return await sourceBundlePromise
-  } catch (error) {
-    sourceBundlePromise = undefined
-    throw error
-  }
-}
-
-async function buildSourceBundleOnce(sourceEntrypoint: string): Promise<WebAssets> {
-  const workerEntrypoint = resolve(import.meta.dir, "syntax/worker.ts")
-  const appResult = await Bun.build({
-    entrypoints: [sourceEntrypoint],
-    target: "browser",
-    minify: true,
-    external: ["module", "node:module", "fs", "node:fs", "path", "node:path"],
-  })
-  const workerResult = await Bun.build({
-    entrypoints: [workerEntrypoint],
-    target: "browser",
-    minify: true,
-    external: ["module", "node:module", "fs", "node:fs", "path", "node:path"],
-  })
-
-  const scriptOutput = appResult.outputs.find(output => output.path.endsWith(".js"))
-  const styleOutput = appResult.outputs.find(output => output.path.endsWith(".css"))
-  const workerOutput = workerResult.outputs.find(output => output.path.endsWith(".js"))
-
-  if (!appResult.success || !workerResult.success || !scriptOutput || !styleOutput || !workerOutput) {
-    throw new Error(
-      [...appResult.logs, ...workerResult.logs].map(log => log.message).join("\n") || "Web bundle build failed",
-    )
-  }
-
-  const script = await scriptOutput.text()
-  const style = await styleOutput.text()
-  const syntaxWorkerScript = workerOutput ? await workerOutput.text() : ""
-
-  return {
-    script,
-    style,
-    syntaxWorkerScript,
-  }
+  throw new Error("Web 静态资产缺失。请先运行 `npm run build` 生成 Web assets。")
 }
 
 /** 读取生产构建清单；清单缺失表示该目录不是可运行的 Web dist。 */

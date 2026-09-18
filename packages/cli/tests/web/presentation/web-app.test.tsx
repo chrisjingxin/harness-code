@@ -1,7 +1,7 @@
 /** WebApp：active=false 时显示接管只读提示；active=true 时 composer 可用。 */
 /** @jsxImportSource react */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "vitest"
 import { act } from "react"
 
 import { WebApp } from "../../../src/web/presentation/web-app"

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { currentThreadDisplayTitle, threadDisplayTitle, threadMatchesQuery } from "../../src/presentation-shared/thread-title"
 

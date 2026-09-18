@@ -78,6 +78,18 @@ export function isPlanDecision(value: unknown): value is PlanDecision {
   return typeof value === "string" && (PLAN_DECISION_ORDER as readonly string[]).includes(value)
 }
 
+export type BottomAreaKind = "input" | "approval" | "directory_trust" | "question" | "plan" | "goal"
+
+/** 底部同时只出现一个可聚焦面。只读 Goal/Plan 查看仍占用底部槽。 */
+export function bottomAreaKind(interaction: InteractiveInteraction | null | undefined): BottomAreaKind {
+  if (interaction?.type === "approval") return "approval"
+  if (interaction?.type === "directory_trust") return "directory_trust"
+  if (interaction?.type === "plan") return "plan"
+  if (interaction?.type === "goal") return "goal"
+  if (interaction?.type === "question") return "question"
+  return "input"
+}
+
 /** 独占底部槽：审批/目录信任/问答/计划审批/Goal 审核。只读 Goal/Plan 查看器不算。 */
 export function isExclusiveInteraction(interaction: InteractiveInteraction | null | undefined): boolean {
   if (!interaction) return false

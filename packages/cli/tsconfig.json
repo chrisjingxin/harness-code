@@ -5,21 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react",
+    "jsxImportSource": "react",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": [
-    "src/tui/app.tsx",
-    "src/tui/platform/generated-syntax-parsers.ts",
-    "src/tui/platform/syntax-parsers.ts",
-    "src/tui/platform/terminal-win32.ts",
-    "src/tui/presentation/**/*",
-    "src/web/bundle.ts",
-    "src/web/server.ts"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

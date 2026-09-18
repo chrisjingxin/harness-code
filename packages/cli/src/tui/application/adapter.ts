@@ -34,7 +34,7 @@ import {
   rememberPrompt,
   type PromptHistoryCursor,
 } from "./prompt-history"
-import type { ShortcutAction } from "./shortcuts"
+import type { ShortcutAction, TemporaryViewKind } from "./shortcuts"
 
 export type UndoMode = "both" | "conversation" | "code"
 
@@ -150,14 +150,11 @@ import type {
   WorkspaceExplorer,
   WorkspaceIntent,
   WorkspaceTreeRow,
-  WorkspaceTreeState,
   WorkspacePreviewState,
 } from "../../workspace/types"
 import type { GitChangedFile } from "../../interactive/runtime"
 
-export type SidebarTab = "files" | "status"
-
-export type SidebarFileTreeState = {
+export type WorkspaceFileTreeState = {
   status: "idle" | "loading" | "ready" | "error"
   rows: readonly WorkspaceTreeRow[]
   selectedIndex: number
@@ -166,15 +163,18 @@ export type SidebarFileTreeState = {
   message?: string
 }
 
-export type SidebarState = {
-  mode: "auto" | "show" | "hide"
-  drawerOpen: boolean
-  focus: "chat" | "sidebar"
-  activeTab: SidebarTab
-  /** Git 工作树当前变更列表；undefined 表示非 Git、探测失败或尚未完成。 */
-  workspaceChangedFiles?: readonly GitChangedFile[]
-  fileTree: SidebarFileTreeState
-  preview: WorkspacePreviewState | null
+export type WorkspaceViewState = {
+  readonly fileTree: WorkspaceFileTreeState
+  readonly preview: WorkspacePreviewState | null
+  readonly changedFiles?: readonly GitChangedFile[]
+}
+
+export type ToolInspectorState = {
+  readonly selectedToolId: string | null
+}
+
+export type TemporaryViewState = {
+  readonly kind: "none" | TemporaryViewKind
 }
 
 /** 直接修改工作区的内置工具；别名与 TUI 工具目录保持一致。 */
@@ -247,7 +247,9 @@ export type TuiAdapterSnapshot = {
   readonly agents: PickerSnapshot<AgentSummary>
   readonly undo: PickerSnapshot<TurnSummary>
   readonly undoDialog?: UndoDialogState
-  readonly sidebar: SidebarState
+  readonly temporaryView: TemporaryViewState
+  readonly workspace: WorkspaceViewState
+  readonly toolInspector: ToolInspectorState
   readonly commandDialog?: {
     readonly kind: "confirm-new-thread" | "confirm-quit" | "confirm-code-index-remove"
     readonly title: string
@@ -270,8 +272,6 @@ export type TuiAdapterSnapshot = {
   readonly inspectOverlay: InspectOverlayState
   readonly toasts: readonly ToastItem[]
   readonly inputMode: "chat" | "shell"
-  /** 递增后由 React adapter 滚动到最新内容。 */
-  readonly scrollRequest: number
 }
 
 /** React、快捷键和鼠标只能通过这些语义意图驱动 Adapter。 */
@@ -284,12 +284,9 @@ export type TuiIntent =
   | { type: "execute-command"; commandId: string; argument?: string }
   | { type: "shortcut"; action: ShortcutAction }
   | { type: "command-menu-select"; item: CommandMenuItem }
-  | { type: "command-menu-hover"; selectedIndex: number }
   | { type: "mention-menu-select"; item: MentionOption }
-  | { type: "mention-menu-hover"; selectedIndex: number }
   | { type: "mention-menu-page"; direction: "previous" | "next"; pageSize: number }
   | { type: "picker-search"; picker: PickerKind; query: string }
-  | { type: "picker-hover"; picker: PickerKind; selectedIndex: number }
   | { type: "picker-select-skill"; skill: SkillMenuItem }
   | { type: "picker-select-thread"; thread: ThreadPickerItem }
   | { type: "picker-select-model"; model: ModelProfile }
@@ -312,15 +309,15 @@ export type TuiIntent =
   | { type: "btw-copy" }
   | { type: "status-close" }
   | { type: "inspect-overlay-close" }
-  | { type: "sidebar-toggle"; target?: "show" | "hide" }
-  | { type: "sidebar-focus-switch" }
-  | { type: "sidebar-tab-switch"; tab?: SidebarTab }
+  | { type: "workspace-open" }
+  | { type: "workspace-navigate"; direction: "up" | "down" | "parent" | "child" }
+  | { type: "temporary-view-close" }
+  | { type: "tool-inspector-open" }
   | { type: "file-tree-select"; index: number }
   | { type: "file-tree-toggle-expand"; path: string }
   | { type: "file-tree-navigate"; direction: "up" | "down" | "parent" | "child" }
   | { type: "file-tree-preview"; path: string }
   | { type: "file-preview-close" }
-  | { type: "file-preview-scroll"; delta: number }
   | { type: "file-preview-insert-ref"; path: string }
   | { type: "child-timeline-open"; executionId: string }
   | { type: "child-timeline-leave" }
@@ -398,11 +395,10 @@ class TuiAdapterImpl implements TuiAdapter {
   private inspectOverlayState: InspectOverlayState = { visible: false, kind: "goal", title: "", body: "" }
   private toasts: ToastItem[] = []
   private toastTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  private sidebarState: SidebarState = {
-    mode: "auto",
-    drawerOpen: false,
-    focus: "chat",
-    activeTab: "files",
+  private workspaceVisible = false
+  private toolInspectorVisible = false
+  private toolInspectorSelectedId: string | null = null
+  private workspaceState: WorkspaceViewState = {
     fileTree: {
       status: "idle",
       rows: [],
@@ -417,7 +413,6 @@ class TuiAdapterImpl implements TuiAdapter {
   private historyApplyValue: string | undefined
   private showToolDetails = false
   private expandedTools: ReadonlySet<string> = new Set()
-  private scrollRequest = 0
   private workspaceChangeGeneration = 0
   /** 已观测工具的终态；跨 child scope 保留，避免离开/返回子时间线重复刷新。 */
   private readonly workspaceToolStates = new Map<string, ToolCard["status"]>()
@@ -444,8 +439,8 @@ class TuiAdapterImpl implements TuiAdapter {
 
     if (this.workspaceExplorer) {
       const initSnapshot = this.workspaceExplorer.getSnapshot()
-      this.sidebarState = {
-        ...this.sidebarState,
+      this.workspaceState = {
+        ...this.workspaceState,
         fileTree: {
           status: initSnapshot.tree.status,
           rows: initSnapshot.tree.rows,
@@ -457,11 +452,11 @@ class TuiAdapterImpl implements TuiAdapter {
         preview: initSnapshot.preview.status !== "idle" ? initSnapshot.preview : null,
       }
       this.unsubscribeWorkspaceExplorer = this.workspaceExplorer.subscribe(snapshot => {
-        const prevIndex = this.sidebarState.fileTree.selectedIndex
+        const prevIndex = this.workspaceState.fileTree.selectedIndex
         const rows = snapshot.tree.rows
         const safeIndex = rows.length > 0 ? Math.min(prevIndex, rows.length - 1) : 0
-        this.sidebarState = {
-          ...this.sidebarState,
+        this.workspaceState = {
+          ...this.workspaceState,
           fileTree: {
             status: snapshot.tree.status,
             rows: snapshot.tree.rows,
@@ -523,9 +518,6 @@ class TuiAdapterImpl implements TuiAdapter {
         if (view) this.inspectOverlayState = { visible: true, kind: "code-index", title: view.title, body: view.body }
       }
       const runEnded = Boolean(previousActiveRun && !interactive.activeRun)
-      // 反向问答/审批会在 Run 进行中插入时间线；必须主动滚动，否则卡片落在
-      // 当前视口下方，用户只能看到旧的 spinner，直到 Interaction 超时。
-      if (nextRequestId && nextRequestId !== previousRequestId) this.scrollRequest += 1
       if (isExclusiveInteraction(interactive.interaction)
         && (nextRequestId !== previousRequestId || !isExclusiveInteraction(previousInteraction))) {
         this.clearRuntimeOverlays()
@@ -582,28 +574,14 @@ class TuiAdapterImpl implements TuiAdapter {
       case "command-menu-select":
         await this.selectCommandMenuItem(intent.item)
         return
-      case "command-menu-hover": {
-        const selectedIndex = intent.selectedIndex
-        const window = ensureMentionWindow(selectedIndex, this.commandMenu.windowStart, this.snapshot.commandOptions.length, 8)
-        this.commandMenu = { ...this.commandMenu, selectedIndex, windowStart: window.start }
-        this.publish()
-        return
-      }
       case "mention-menu-select":
         this.selectMentionMenuItem(intent.item)
-        return
-      case "mention-menu-hover":
-        this.mentionMenu = { ...this.mentionMenu, selectedIndex: intent.selectedIndex }
-        this.publish()
         return
       case "mention-menu-page":
         this.moveMentionMenu(intent.direction === "next" ? intent.pageSize : -intent.pageSize, intent.pageSize)
         return
       case "picker-search":
         this.updatePickerQuery(intent.picker, intent.query)
-        return
-      case "picker-hover":
-        this.updatePickerIndex(intent.picker, intent.selectedIndex)
         return
       case "picker-select-skill":
         this.selectSkill(intent.skill)
@@ -671,14 +649,17 @@ class TuiAdapterImpl implements TuiAdapter {
       case "inspect-overlay-close":
         this.closeInspectOverlay()
         return
-      case "sidebar-toggle":
-        this.toggleSidebar(intent.target)
+      case "workspace-open":
+        this.openWorkspaceView()
         return
-      case "sidebar-focus-switch":
-        this.switchSidebarFocus()
+      case "temporary-view-close":
+        this.closeTemporaryView()
         return
-      case "sidebar-tab-switch":
-        this.switchSidebarTab(intent.tab)
+      case "tool-inspector-open":
+        this.openToolInspector()
+        return
+      case "workspace-navigate":
+        await this.navigateFileTree(intent.direction)
         return
       case "file-tree-select":
         this.selectFileTreeNode(intent.index)
@@ -695,9 +676,6 @@ class TuiAdapterImpl implements TuiAdapter {
       case "file-preview-close":
         this.closeFilePreview()
         return
-      case "file-preview-scroll":
-        this.scrollFilePreview(intent.delta)
-        return
       case "file-preview-insert-ref":
         this.insertFileRefToDraft(intent.path)
         return
@@ -710,18 +688,50 @@ class TuiAdapterImpl implements TuiAdapter {
     }
   }
 
-  private toggleSidebar(target?: "show" | "hide"): void {
-    if (target === "show") {
-      this.sidebarState = { ...this.sidebarState, mode: "show", drawerOpen: true }
-    } else if (target === "hide") {
-      this.sidebarState = { ...this.sidebarState, mode: "hide", drawerOpen: false }
-    } else {
-      const isHidden = this.sidebarState.mode === "hide"
-      this.sidebarState = isHidden
-        ? { ...this.sidebarState, mode: "show", drawerOpen: true }
-        : { ...this.sidebarState, mode: "hide", drawerOpen: false }
-    }
+  private currentTemporaryViewKind(): TemporaryViewState["kind"] {
+    if (this.workspaceVisible) return "workspace"
+    if (this.toolInspectorVisible) return "tool-inspector"
+    if (this.statusModalState.visible) return "status"
+    if (this.btwState.visible) return "btw"
+    if (this.inspectOverlayState.visible) return "inspect"
+    return "none"
+  }
+
+  /** 关闭当前全宽临时视图；工作区树状态保留，下次打开不丢位置。 */
+  private closeTemporaryView(): void {
+    this.workspaceVisible = false
+    this.toolInspectorVisible = false
+    this.toolInspectorSelectedId = null
+    this.statusModalState = { visible: false }
+    this.btwState = { visible: false, question: "", status: "loading", copied: false }
+    this.inspectOverlayState = { visible: false, kind: "goal", title: "", body: "" }
     this.publish()
+  }
+
+  private openWorkspaceView(): void {
+    this.closeTemporaryViewWithoutPublish()
+    this.workspaceVisible = true
+    this.publish()
+    if (this.workspaceExplorer) void this.workspaceExplorer.dispatch({ type: "workspace.load" })
+  }
+
+  private openToolInspector(): void {
+    this.closeTemporaryViewWithoutPublish()
+    this.toolInspectorVisible = true
+    const tools = this.controller.getSnapshot().timeline
+      .filter((item): item is { type: "tool"; tool: ToolCard } => item.type === "tool")
+      .map(item => item.tool)
+    this.toolInspectorSelectedId = tools.at(-1)?.id ?? null
+    this.publish()
+  }
+
+  private closeTemporaryViewWithoutPublish(): void {
+    this.workspaceVisible = false
+    this.toolInspectorVisible = false
+    this.toolInspectorSelectedId = null
+    this.statusModalState = { visible: false }
+    this.btwState = { visible: false, question: "", status: "loading", copied: false }
+    this.inspectOverlayState = { visible: false, kind: "goal", title: "", body: "" }
   }
 
   /** 启动与每次 Run 结束后刷新 Git 工作树变更列表；generation 防止旧探测覆盖新结果。 */
@@ -735,34 +745,21 @@ class TuiAdapterImpl implements TuiAdapter {
       files = null
     }
     if (this.closed || generation !== this.workspaceChangeGeneration) return
-    this.sidebarState = {
-      ...this.sidebarState,
-      workspaceChangedFiles: files ?? undefined,
+    this.workspaceState = {
+      ...this.workspaceState,
+      changedFiles: files ?? undefined,
     }
     this.publish()
   }
 
-  private switchSidebarFocus(): void {
-    const nextFocus = this.sidebarState.focus === "chat" ? "sidebar" : "chat"
-    this.sidebarState = { ...this.sidebarState, focus: nextFocus }
-    this.publish()
-  }
-
-  private switchSidebarTab(tab?: SidebarTab): void {
-    const nextTab = tab ?? (this.sidebarState.activeTab === "files" ? "status" : "files")
-    this.sidebarState = { ...this.sidebarState, activeTab: nextTab }
-    this.publish()
-    if (nextTab === "status") void this.refreshWorkspaceChanges()
-  }
-
   private selectFileTreeNode(index: number): void {
-    const rows = this.sidebarState.fileTree.rows
+    const rows = this.workspaceState.fileTree.rows
     if (index < 0 || index >= rows.length) return
     const selectedRow = rows[index]
-    this.sidebarState = {
-      ...this.sidebarState,
+    this.workspaceState = {
+      ...this.workspaceState,
       fileTree: {
-        ...this.sidebarState.fileTree,
+        ...this.workspaceState.fileTree,
         selectedIndex: index,
         selectedPath: selectedRow?.path ?? null,
       },
@@ -783,7 +780,7 @@ class TuiAdapterImpl implements TuiAdapter {
   }
 
   private async navigateFileTree(direction: "up" | "down" | "parent" | "child"): Promise<void> {
-    const { rows, selectedIndex } = this.sidebarState.fileTree
+    const { rows, selectedIndex } = this.workspaceState.fileTree
     if (!rows.length) return
 
     if (direction === "up") {
@@ -825,19 +822,16 @@ class TuiAdapterImpl implements TuiAdapter {
   }
 
   private closeFilePreview(): void {
-    this.sidebarState = { ...this.sidebarState, preview: null }
+    this.workspaceState = { ...this.workspaceState, preview: null }
     this.publish()
-  }
-
-  private scrollFilePreview(delta: number): void {
-    // 占位：预览浮层的滚动暂未接通，保留 intent 以免上游报未知动作。
   }
 
   private insertFileRefToDraft(path: string): void {
     const ref = `@${path}`
     const nextDraft = this.draft ? `${this.draft.trimEnd()} ${ref}` : ref
     this.updateDraft(nextDraft)
-    this.sidebarState = { ...this.sidebarState, focus: "chat", drawerOpen: false, mode: "hide", preview: null }
+    this.workspaceState = { ...this.workspaceState, preview: null }
+    this.workspaceVisible = false
     this.publish()
   }
 
@@ -881,7 +875,7 @@ class TuiAdapterImpl implements TuiAdapter {
     const refreshes: Promise<void>[] = []
     if (this.workspaceExplorer) {
       refreshes.push(this.dispatchWorkspaceIntent({ type: "workspace.refresh" }))
-      const previewPath = currentPreviewPath(this.sidebarState.preview)
+      const previewPath = currentPreviewPath(this.workspaceState.preview)
       if (previewPath) {
         refreshes.push(this.dispatchWorkspaceIntent({ type: "workspace.refresh-preview", path: previewPath }))
       }
@@ -957,7 +951,13 @@ class TuiAdapterImpl implements TuiAdapter {
       agents: this.pickerSnapshot(this.agentPicker, filterAgents(interactive.catalogs.agents.items, this.agentPicker.query), interactive.catalogs.agents.status === "loading", interactive.catalogs.agents.status === "error" ? interactive.catalogs.agents.message : undefined),
       undo: this.pickerSnapshot(this.undoPicker, filterTurns(this.undoPicker.items ?? [], this.undoPicker.query), this.undoPicker.loading, this.undoPicker.error),
       undoDialog: this.undoDialogState ?? undefined,
-      sidebar: { ...this.sidebarState },
+      temporaryView: { kind: this.currentTemporaryViewKind() },
+      workspace: {
+        fileTree: { ...this.workspaceState.fileTree, rows: [...this.workspaceState.fileTree.rows] },
+        preview: this.workspaceState.preview,
+        changedFiles: this.workspaceState.changedFiles,
+      },
+      toolInspector: { selectedToolId: this.toolInspectorSelectedId },
       btw: { ...this.btwState },
       statusModal: { ...this.statusModalState },
       inspectOverlay: { ...this.inspectOverlayState },
@@ -968,7 +968,6 @@ class TuiAdapterImpl implements TuiAdapter {
       transientNotice: this.transientNotice,
       showToolDetails: this.showToolDetails,
       expandedTools: new Set(this.expandedTools),
-      scrollRequest: this.scrollRequest,
     }
   }
 
@@ -1130,7 +1129,6 @@ class TuiAdapterImpl implements TuiAdapter {
       const nextHistory = rememberPrompt(previousHistory, input)
       this.promptHistory = nextHistory
       void this.historyStore.append(input)
-      this.scrollRequest += 1
       this.publish()
       await this.applyPresentationEffects(outcome.effects)
     } else {
@@ -1201,6 +1199,7 @@ class TuiAdapterImpl implements TuiAdapter {
 
   /** 打开 BTW 临时问答浮层并异步请求 Agent 端问答结果。 */
   private openBtw(question: string, threadId: string | null): void {
+    this.closeTemporaryViewWithoutPublish()
     this.btwState = {
       visible: true,
       question,
@@ -1249,6 +1248,7 @@ class TuiAdapterImpl implements TuiAdapter {
 
   /** 打开运行状态仪表盘浮层。 */
   private openStatusModal(): void {
+    this.closeTemporaryViewWithoutPublish()
     this.statusModalState = { visible: true }
     this.publish()
     void this.refreshWorkspaceChanges()
@@ -1262,6 +1262,7 @@ class TuiAdapterImpl implements TuiAdapter {
 
   /** 打开执行中 Goal/Plan 只读查看浮层。 */
   private openInspectOverlay(kind: InspectOverlayState["kind"], title: string, body: string): void {
+    this.closeTemporaryViewWithoutPublish()
     this.inspectOverlayState = { visible: true, kind, title, body }
     this.publish()
   }
@@ -1274,9 +1275,7 @@ class TuiAdapterImpl implements TuiAdapter {
 
   /** 审批等独占 Interaction 到来时关闭查看类浮层，不发布（由调用方 publish）。 */
   private clearRuntimeOverlays(): void {
-    this.btwState = { visible: false, question: "", status: "loading", copied: false }
-    this.statusModalState = { visible: false }
-    this.inspectOverlayState = { visible: false, kind: "goal", title: "", body: "" }
+    this.closeTemporaryViewWithoutPublish()
   }
 
   /** 将 BTW 回答复制到系统剪贴板并在右上角展示气泡通知。 */
@@ -1343,24 +1342,18 @@ class TuiAdapterImpl implements TuiAdapter {
   private async handleShortcut(action: ShortcutAction): Promise<void> {
     switch (action) {
       case "none":
-      case "scroll-line-up":
-      case "scroll-line-down":
-      case "scroll-page-up":
-      case "scroll-page-down":
-      case "scroll-top":
-      case "scroll-bottom":
       case "thread-block":
       case "model-block":
       case "skill-block":
         return
-      case "close-btw-modal":
-        this.closeBtw()
+      case "close-temporary-view":
+        this.closeTemporaryView()
         return
-      case "close-status-modal":
-        this.closeStatusModal()
+      case "open-workspace":
+        this.openWorkspaceView()
         return
-      case "close-inspect-overlay":
-        this.closeInspectOverlay()
+      case "open-tool-inspector":
+        this.openToolInspector()
         return
       case "copy-btw-answer":
         await this.copyBtwAnswer()
@@ -1437,10 +1430,6 @@ class TuiAdapterImpl implements TuiAdapter {
         return
       case "hint-interrupt":
         this.showToast("中断请用 Ctrl+C", "info")
-        return
-      case "toggle-tool-details":
-        this.showToolDetails = !this.showToolDetails
-        this.publish()
         return
       case "cycle-approval-mode": {
         const outcome = await this.routeDispatch({ type: "approval-mode.cycle" })

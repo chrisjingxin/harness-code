@@ -1,6 +1,6 @@
 /** AgentClientGateway (及兼容别名 AgentClientInteractiveAdapter) 把 AgentGateway 调用映射到 AgentClient 的契约测试。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { PassThrough } from "node:stream"
 import { AgentClient } from "../../src/ipc/client"
 import { StdioRpcTransport } from "../../src/ipc/stdio-transport"

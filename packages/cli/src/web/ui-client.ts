@@ -9,8 +9,8 @@
 
 import type { InteractiveIntent, IntentOutcome } from "../interactive/types"
 import type { WorkspaceIntent, WorkspaceOutcome } from "../workspace/types"
-import { parseServerFrame, type PresentationState, type WebUiPatch, type WebUiState } from "../presentation-coordinator"
-import { isWebActive } from "../presentation-coordinator"
+import { parseServerFrame, type WebUiPatch, type WebUiState } from "../presentation-coordinator/contracts"
+import { isWebActive, type PresentationState } from "../presentation-coordinator/state"
 
 /** 浏览器 WebSocket 的最小形状；生产传真实 WebSocket，测试传 fake。 */
 export type UiSocket = {

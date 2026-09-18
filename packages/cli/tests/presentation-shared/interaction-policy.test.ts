@@ -1,6 +1,6 @@
 /** 共享 Interaction 展示策略测试：approval 选项顺序、目录信任选项、中文文案与 question 占位值。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import {
   APPROVAL_DECISION_ORDER,
   DIRECTORY_TRUST_DECISION_ORDER,

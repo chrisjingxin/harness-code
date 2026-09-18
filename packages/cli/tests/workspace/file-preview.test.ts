@@ -1,6 +1,6 @@
 /** file-preview：文本读取、容量/行数截断、二进制与非 UTF-8 识别、变化检测与 LRU 缓存。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, appendFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

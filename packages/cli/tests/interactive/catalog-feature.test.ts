@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { makeHarness, flush } from "./harness"
 
 test("catalog 单项失败只影响对应 catalog", async () => {

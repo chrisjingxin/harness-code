@@ -1,6 +1,6 @@
 /** Infrastructure 生产基础设施单测：Clock、IdGenerator 与 PromptHistoryStore 行为断言。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"

@@ -1,6 +1,6 @@
 /** 父子时间线切片：父视图不含 child 工具，子视图不含父项。 */
 
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { scopeTimeline, timelineItemExecutionId } from "../../src/presentation-shared/timeline-scope"
 import type { TimelineItem } from "../../src/interactive/state"
 
