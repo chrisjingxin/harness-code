@@ -340,9 +340,9 @@ describe("Timeline", () => {
     try {
       const rows = handle.container.querySelectorAll<HTMLDivElement>(".tool-row")
       expect(rows).toHaveLength(2)
-      // 已知工具：动词标签 + 主参数 + write 基调 + 失败行标记。
+      // 已知工具：动词标签 + 主参数 + execute 基调 + 失败行标记。
       const first = rows[0]!
-      expect(first.getAttribute("data-tone")).toBe("write")
+      expect(first.getAttribute("data-tone")).toBe("execute")
       expect(first.classList.contains("tool-row-failed")).toBe(true)
       expect(first.querySelector(".tool-row-label")?.textContent).toBe("执行命令")
       expect(first.querySelector(".tool-row-label")?.getAttribute("title")).toBe("execute")

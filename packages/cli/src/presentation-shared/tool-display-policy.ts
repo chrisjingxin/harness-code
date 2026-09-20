@@ -21,8 +21,8 @@ export type ToolIconName =
   | "question"
   | "wrench"
 
-/** 副作用基调：write 表示调用会改动文件或环境，渲染端用暖色图标提示；read/neutral 保持中性。 */
-export type ToolDisplayTone = "read" | "write" | "neutral"
+/** 副作用基调：write（写入/修改）、execute（执行命令）、delete（删除）、read（读取/检索）、neutral（中性任务/计划）。 */
+export type ToolDisplayTone = "read" | "write" | "execute" | "delete" | "neutral"
 
 /** 单个工具的展示语义：动词标签、图标、基调与是否命中内置目录。 */
 export type ToolDisplay = {
@@ -50,12 +50,12 @@ const TOOL_DISPLAY_SPECS: Record<string, ToolDisplaySpec> = {
   read_file: { label: "读取文件", icon: "file-read", tone: "read", primaryArguments: ["file_path"] },
   write_file: { label: "写入文件", icon: "file-write", tone: "write", primaryArguments: ["file_path"] },
   edit_file: { label: "编辑文件", icon: "file-write", tone: "write", primaryArguments: ["file_path"] },
-  delete_file: { label: "删除文件", icon: "file-delete", tone: "write", primaryArguments: ["file_path"] },
+  delete_file: { label: "删除文件", icon: "file-delete", tone: "delete", primaryArguments: ["file_path"] },
   ls: { label: "列出目录", icon: "folder", tone: "read", primaryArguments: ["path"] },
   glob: { label: "搜索文件", icon: "search", tone: "read", primaryArguments: ["pattern", "path"] },
   grep: { label: "查找内容", icon: "search", tone: "read", primaryArguments: ["pattern", "path"] },
   lsp: { label: "代码洞察", icon: "code", tone: "read", primaryArguments: ["action", "file_path"] },
-  execute: { label: "执行命令", icon: "terminal", tone: "write", primaryArguments: ["command"] },
+  execute: { label: "执行命令", icon: "terminal", tone: "execute", primaryArguments: ["command"] },
   web_search: { label: "联网搜索", icon: "globe", tone: "read", primaryArguments: ["query"] },
   web_fetch: { label: "抓取网页", icon: "globe", tone: "read", primaryArguments: ["url"] },
   memory_save: { label: "保存记忆", icon: "brain", tone: "write", primaryArguments: ["key"] },

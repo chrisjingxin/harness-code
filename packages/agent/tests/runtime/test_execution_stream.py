@@ -20,6 +20,7 @@ from harness_agent.runtime.execution_stream import (
     StreamSession,
     execute,
     extract_interaction,
+    message_stream_chunk,
     translate_stream_event,
     update_usage,
 )
@@ -455,3 +456,47 @@ def test_update_usage_keeps_current_round_absolute_values() -> None:
     assert session.usage["input_tokens"] == 20
     assert session.last_call_usage == {"input_tokens": 20, "output_tokens": 2}
     assert session.call_usages == [{"input_tokens": 10, "output_tokens": 1}]
+
+
+def test_classifier_and_skip_stream_messages_are_rejected() -> None:
+    """带有 harness_skip_stream 或 harness_internal_classifier 的 chunk 不得泄露为 CONTENT_DELTA。"""
+    session = StreamSession(run_id="run-test")
+    chunk = AIMessageChunk(content='{"decision": "allow", "confidence": "high", "reason": "ok"}')
+
+    # 1. 带有 harness_skip_stream metadata
+    events = list(
+        translate_stream_event(
+            ("messages", (chunk, {"harness_skip_stream": True})),
+            session,
+            content_visibility="passthrough",
+        )
+    )
+    assert events == []
+    assert session.content_parts == []
+
+    # 2. 带有 harness_internal_classifier metadata
+    events = list(
+        translate_stream_event(
+            ("messages", (chunk, {"harness_internal_classifier": True})),
+            session,
+            content_visibility="passthrough",
+        )
+    )
+    assert events == []
+    assert session.content_parts == []
+
+    # 3. 带有 tags 包含 harness_skip_stream
+    events = list(
+        translate_stream_event(
+            ("messages", (chunk, {"tags": ["harness_skip_stream"]})),
+            session,
+            content_visibility="passthrough",
+        )
+    )
+    assert events == []
+    assert session.content_parts == []
+
+    # 4. message_stream_chunk 也过滤
+    assert message_stream_chunk(("messages", (chunk, {"harness_skip_stream": True}))) is None
+    assert message_stream_chunk(("messages", (chunk, {"harness_internal_classifier": True}))) is None
+

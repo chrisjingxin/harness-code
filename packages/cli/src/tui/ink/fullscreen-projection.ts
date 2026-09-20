@@ -28,6 +28,9 @@ export type FullscreenProjectionContext = {
   pendingInteractionId?: string
   /** 活动条目的固定宽 spinner；由外层负责定时重绘。 */
   spinnerGlyph?: string
+  /** 当前是否有活跃运行；在等待首包时挂起状态条目。 */
+  active?: boolean
+  activityKind?: string
 }
 
 type FullscreenEntryBase<K extends FullscreenEntry["kind"]> = {
@@ -61,6 +64,7 @@ export type ReasoningEntry = FullscreenEntryBase<"reasoning"> & {
   status: "active" | "completed"
   active: boolean
   collapsed: boolean
+  lineCount?: number
 }
 
 export type ToolEntry = FullscreenEntryBase<"tool"> & {
@@ -69,6 +73,7 @@ export type ToolEntry = FullscreenEntryBase<"tool"> & {
   toolName: string
   label: string
   primaryArgument: string | null
+  chip?: string | null
   childExecutionId?: string
 }
 
@@ -104,6 +109,10 @@ export type GoalEvaluationEntry = FullscreenEntryBase<"goal-evaluation"> & {
   result?: GoalEvaluationCard["result"]
 }
 
+export type TimelineActivityEntry = FullscreenEntryBase<"activity"> & {
+  status: "running"
+}
+
 /** FullscreenProjection 的稳定语义联合；每一项都能独立测量和绘制。 */
 export type FullscreenEntry =
   | UserEntry
@@ -114,10 +123,16 @@ export type FullscreenEntry =
   | InteractionResultEntry
   | ComposeSummaryEntry
   | GoalEvaluationEntry
+  | TimelineActivityEntry
 
 const DEFAULT_SPINNER = "⠋"
 const READ_GROUP_TOOLS = new Set(["read_file", "grep", "glob", "ls"])
-const TOOL_OUTPUT_LINES = 3
+export const TOOL_DIFF_MAX_LINES = 12
+export const TOOL_WRITE_MAX_LINES = 10
+export const TOOL_READ_MAX_LINES = 10
+export const TOOL_EXEC_MAX_LINES = 8
+export const TOOL_LIST_MAX_LINES = 8
+const TOOL_OUTPUT_LINES = 8
 
 /**
  * 将 Timeline 投影为稳定的全屏条目。
@@ -149,6 +164,30 @@ export function projectFullscreenTimeline(
 
     const entry = projectItem(item, { columns, fallbackWorkMode: context.fallbackWorkMode, spinnerGlyph })
     if (entry) entries.push(entry)
+  }
+
+  // 当运行处于 starting/running 态且末尾没有任何活跃的条目（例如等待模型首包中），
+  // 追加动态活动条目（⠋ 正在等待响应… · Esc 取消），平滑让位给真实的思考或正文流。
+  const isActive = context.active ?? (context.activityKind === "running" || context.activityKind === "starting")
+  if (isActive) {
+    const hasActiveTail = entries.some(e =>
+      (e.kind === "assistant" && e.streaming) ||
+      (e.kind === "reasoning" && e.active) ||
+      (e.kind === "tool" && e.status === "running")
+    )
+    if (!hasActiveTail) {
+      entries.push({
+        id: "activity:active-run",
+        kind: "activity",
+        text: "",
+        status: "running",
+        statusLabel: "正在等待响应… · Esc 取消",
+        glyph: spinnerGlyph,
+        spinnerGlyph,
+        tone: context.fallbackWorkMode,
+        details: [],
+      })
+    }
   }
 
   return entries
@@ -222,13 +261,14 @@ function projectAssistant(message: ConversationMessage, context: ProjectionParts
 
 function projectReasoning(reasoning: ReasoningCard, context: ProjectionParts): ReasoningEntry {
   const sanitized = sanitizeTerminalText(reasoning.text)
-  const bounded = thinkingVisibleBody(sanitized, reasoning.active ? "live" : "collapsed")
+  const allLines = sanitized.split("\n").map(l => l.trim()).filter(Boolean)
+  const lineCount = allLines.length
 
   if (reasoning.active) {
     return {
       id: `reasoning:${reasoning.id}`,
       kind: "reasoning",
-      text: bounded.text,
+      text: sanitized,
       status: "active",
       active: true,
       collapsed: false,
@@ -236,7 +276,8 @@ function projectReasoning(reasoning: ReasoningCard, context: ProjectionParts): R
       glyph: context.spinnerGlyph,
       spinnerGlyph: context.spinnerGlyph,
       tone: "neutral",
-      details: bounded.overflow ? ["思考内容较长，已保留有界预览"] : [],
+      details: allLines,
+      lineCount,
       runId: reasoning.runId,
       executionId: reasoning.executionId,
       activityId: reasoning.activityId,
@@ -244,19 +285,19 @@ function projectReasoning(reasoning: ReasoningCard, context: ProjectionParts): R
     }
   }
 
-  const lines = sanitized.split("\n").map(l => l.trim()).filter(Boolean)
-  const firstLine = lines[0] ?? ""
+  const summary = allLines[0] ? (allLines[0].length > 40 ? allLines[0].slice(0, 40) + "…" : allLines[0]) : "思考完毕"
   return {
     id: `reasoning:${reasoning.id}`,
     kind: "reasoning",
-    text: firstLine,
+    text: summary,
     status: "completed",
     active: false,
     collapsed: true,
     statusLabel: "已完成",
     glyph: "·",
     tone: "neutral",
-    details: lines.slice(1),
+    details: allLines,
+    lineCount,
     runId: reasoning.runId,
     executionId: reasoning.executionId,
     activityId: reasoning.activityId,
@@ -264,10 +305,69 @@ function projectReasoning(reasoning: ReasoningCard, context: ProjectionParts): R
   }
 }
 
-function computeToolChip(name: string, output: string): string | null {
+function tryParseJsonObject(text: string | undefined): Record<string, any> | null {
+  if (!text) return null
+  const trimmed = text.trim()
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (parsed && typeof parsed === "object") return parsed
+  } catch {}
+  return null
+}
+
+function computeToolChip(name: string, output: string, argsText?: string): string | null {
   if (!output) return null
   const trimmed = output.trim()
   if (!trimmed) return null
+
+  const parsed = tryParseJsonObject(trimmed)
+  if (parsed && typeof parsed === "object") {
+    if (parsed.ok === false) {
+      return null
+    }
+
+    if (name.includes("edit") || name.includes("patch")) {
+      const cr = parsed.changed_range
+      if (cr && (typeof cr.added_lines === "number" || typeof cr.removed_lines === "number")) {
+        const adds = cr.added_lines ?? 0
+        const dels = cr.removed_lines ?? 0
+        if (adds > 0 || dels > 0) return `+${adds} -${dels}`
+      }
+      const lines = parsed.line_count ?? parsed.total_lines
+      if (typeof lines === "number" && lines > 0) return `${lines} 行`
+    }
+
+    if (name.includes("write") || name.includes("create")) {
+      const lines = parsed.total_lines ?? parsed.line_count ?? parsed.changed_range?.added_lines
+      if (typeof lines === "number" && lines > 0) return `+${lines} 行`
+    }
+
+    if (name.includes("read") || name.includes("view")) {
+      if (parsed.shown_lines && typeof parsed.shown_lines.start_line === "number" && typeof parsed.shown_lines.end_line === "number") {
+        const lines = parsed.shown_lines.end_line - parsed.shown_lines.start_line + 1
+        return `${lines} 行`
+      }
+      const lines = parsed.line_count ?? parsed.total_lines
+      if (typeof lines === "number" && lines > 0) return `${lines} 行`
+    }
+
+    if (name.includes("delete")) {
+      return "已删除"
+    }
+
+    if (name.includes("grep") || name.includes("search")) {
+      if (Array.isArray(parsed.matches)) return `${parsed.matches.length} 处`
+      if (Array.isArray(parsed.items)) return `${parsed.items.length} 处`
+    }
+
+    if (name.includes("glob") || name.includes("find") || name.includes("list") || name.includes("ls")) {
+      if (Array.isArray(parsed.entries)) return `${parsed.entries.length} 项`
+      if (Array.isArray(parsed.items)) return `${parsed.items.length} 项`
+    }
+  }
+
+  // 非 JSON 或回退文本匹配
   if (name.includes("edit") || name.includes("patch")) {
     const adds = (trimmed.match(/^\+[^+]/gm) || []).length
     const dels = (trimmed.match(/^-[^-]/gm) || []).length
@@ -277,7 +377,7 @@ function computeToolChip(name: string, output: string): string | null {
   }
   if (name.includes("write") || name.includes("create")) {
     const lines = trimmed.split("\n").length
-    return `${lines} 行`
+    return `+${lines} 行`
   }
   if (name.includes("read") || name.includes("view")) {
     const lines = trimmed.split("\n").length
@@ -294,15 +394,153 @@ function computeToolChip(name: string, output: string): string | null {
   return null
 }
 
+function formatToolDetails(tool: ToolCard, columns: number): string[] {
+  const sanitizedOutput = sanitizeTerminalText(tool.output ?? "")
+  const parsed = tryParseJsonObject(sanitizedOutput)
+
+  if (tool.status === "failed") {
+    if (parsed && parsed.ok === false) {
+      const err = parsed.error
+      const code = err?.code ? `[${err.code}] ` : ""
+      const msg = err?.message || err?.next_action || "操作失败"
+      return [`│ 错误 ${code}${msg}`]
+    }
+    const collapsed = collapseToolOutput(sanitizedOutput, TOOL_EXEC_MAX_LINES, Math.max(80, columns * TOOL_EXEC_MAX_LINES))
+    return toolDetails(collapsed.output, collapsed.overflow)
+  }
+
+  if (parsed && typeof parsed === "object") {
+    // 1. edit_file: 提取 +/- diff
+    if (tool.name.includes("edit") || tool.name.includes("patch")) {
+      const args = tryParseJsonObject(tool.arguments)
+      if (args && (args.old_string !== undefined || args.new_string !== undefined)) {
+        const oldStr = sanitizeTerminalText(String(args.old_string ?? ""))
+        const newStr = sanitizeTerminalText(String(args.new_string ?? ""))
+        const oldLines = oldStr ? oldStr.split("\n") : []
+        const newLines = newStr ? newStr.split("\n") : []
+
+        let prefixLen = 0
+        while (prefixLen < oldLines.length && prefixLen < newLines.length && oldLines[prefixLen] === newLines[prefixLen]) {
+          prefixLen++
+        }
+        let suffixLen = 0
+        while (
+          suffixLen < (oldLines.length - prefixLen) &&
+          suffixLen < (newLines.length - prefixLen) &&
+          oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]
+        ) {
+          suffixLen++
+        }
+
+        const removed = oldLines.slice(prefixLen, oldLines.length - suffixLen)
+        const added = newLines.slice(prefixLen, newLines.length - suffixLen)
+        const diffLines: string[] = []
+
+        for (const line of removed) diffLines.push(`- ${line}`)
+        for (const line of added) diffLines.push(`+ ${line}`)
+
+        if (diffLines.length === 0 && (oldLines.length > 0 || newLines.length > 0)) {
+          for (const line of oldLines.slice(0, 1)) diffLines.push(`- ${line}`)
+          for (const line of newLines.slice(0, 1)) diffLines.push(`+ ${line}`)
+        }
+
+        const visible = diffLines.slice(0, TOOL_DIFF_MAX_LINES)
+        const result = visible.map(line => `│ ${line}`)
+        if (diffLines.length > TOOL_DIFF_MAX_LINES) {
+          result.push(`│ … (共 ${diffLines.length} 行变更)`)
+        }
+        return result
+      }
+
+      // 如果未携带 old_string/new_string，提取 content
+      if (typeof parsed.content === "string") {
+        return formatContentLines(parsed.content, TOOL_DIFF_MAX_LINES, parsed.total_lines)
+      }
+      return []
+    }
+
+    // 2. write_file: 提取写入的新增内容
+    if (tool.name.includes("write") || tool.name.includes("create")) {
+      const args = tryParseJsonObject(tool.arguments)
+      const rawContent = typeof args?.content === "string" ? args.content : (typeof parsed.content === "string" ? parsed.content : null)
+      if (rawContent) {
+        const cleanContent = sanitizeTerminalText(rawContent)
+        const lines = cleanContent.split("\n").filter((l: string, i: number, arr: string[]) => !(i === arr.length - 1 && l === ""))
+        const visible = lines.slice(0, TOOL_WRITE_MAX_LINES)
+        const result = visible.map(line => `│ + ${line}`)
+        const total = parsed.total_lines ?? parsed.line_count ?? lines.length
+        if (total > TOOL_WRITE_MAX_LINES) {
+          result.push(`│ … (共 ${total} 行)`)
+        }
+        return result
+      }
+      return []
+    }
+
+    // 3. read_file: 提取带行号的代码
+    if (tool.name.includes("read") || tool.name.includes("view")) {
+      if (typeof parsed.content === "string") {
+        return formatContentLines(parsed.content, TOOL_READ_MAX_LINES, parsed.shown_lines ? (parsed.shown_lines.end_line - parsed.shown_lines.start_line + 1) : parsed.total_lines)
+      }
+      return []
+    }
+
+    // 4. delete_file
+    if (tool.name.includes("delete")) {
+      return ["│ 文件已删除"]
+    }
+
+    // 5. 其他带 entries/items/content 的 JSON
+    if (Array.isArray(parsed.entries)) {
+      const visible = parsed.entries.slice(0, TOOL_LIST_MAX_LINES)
+      const result = visible.map((e: any) => `│ ${sanitizeTerminalText(typeof e === "string" ? e : (e.path || e.name || JSON.stringify(e)))}`)
+      if (parsed.entries.length > TOOL_LIST_MAX_LINES) {
+        result.push(`│ … (共 ${parsed.entries.length} 项)`)
+      }
+      return result
+    }
+
+    if (typeof parsed.content === "string") {
+      return formatContentLines(parsed.content, TOOL_READ_MAX_LINES)
+    }
+
+    // 严禁打印裸 JSON
+    return []
+  }
+
+  // 原始文本输出（如命令执行 stdout/stderr）
+  const collapsed = collapseToolOutput(sanitizedOutput, TOOL_EXEC_MAX_LINES, Math.max(80, columns * TOOL_EXEC_MAX_LINES))
+  return toolDetails(collapsed.output, collapsed.overflow)
+}
+
+function formatContentLines(content: string, maxLines: number, totalCount?: number): string[] {
+  const clean = sanitizeTerminalText(content)
+  const lines = clean.split("\n").filter((l, i, arr) => !(i === arr.length - 1 && l === ""))
+  const visible = lines.slice(0, maxLines)
+  const result = visible.map(line => {
+    const tabIdx = line.indexOf("\t")
+    if (tabIdx > 0 && !isNaN(Number(line.slice(0, tabIdx)))) {
+      const lineNum = line.slice(0, tabIdx)
+      const code = line.slice(tabIdx + 1)
+      return `│ ${lineNum.padStart(4)} │ ${code}`
+    }
+    return `│ ${line}`
+  })
+  const total = totalCount ?? lines.length
+  if (total > maxLines) {
+    result.push(`│ … (共 ${total} 行)`)
+  }
+  return result
+}
+
 function projectTool(tool: ToolCard, context: ProjectionParts): ToolEntry {
   const display = toolDisplay(tool.name)
   const rawPrimaryArgument = toolPrimaryArgument(tool.name, tool.arguments, Math.min(72, Math.max(16, context.columns - 18)))
   const primaryArgument = rawPrimaryArgument ? sanitizeTerminalText(rawPrimaryArgument) : null
   const status = tool.status
   const active = status === "running"
-  const collapsed = collapseToolOutput(sanitizeTerminalText(tool.output), TOOL_OUTPUT_LINES, Math.max(80, context.columns * TOOL_OUTPUT_LINES))
   const label = sanitizeTerminalText(display.label)
-  const chip = computeToolChip(tool.name, tool.output)
+  const chip = computeToolChip(tool.name, tool.output, tool.arguments)
   const chipSuffix = chip ? ` [${chip}]` : ""
   return {
     id: toolEntryId(tool),
@@ -312,7 +550,7 @@ function projectTool(tool: ToolCard, context: ProjectionParts): ToolEntry {
     statusLabel: toolStatusLabel(status),
     glyph: toolGlyph(status, context.spinnerGlyph),
     tone: display.tone,
-    details: toolDetails(collapsed.output, collapsed.overflow),
+    details: formatToolDetails(tool, context.columns),
     runId: tool.runId,
     executionId: tool.executionId,
     activityId: tool.activityId,
@@ -321,6 +559,7 @@ function projectTool(tool: ToolCard, context: ProjectionParts): ToolEntry {
     toolName: sanitizeTerminalText(tool.name),
     label,
     primaryArgument,
+    chip,
     childExecutionId: tool.childExecutionId,
     ...(active ? { spinnerGlyph: context.spinnerGlyph } : {}),
   }
@@ -346,8 +585,8 @@ function projectToolGroup(tools: readonly ToolCard[], columns: number): ToolGrou
     statusLabel: "已完成",
     glyph: ICON.CHECK,
     tone: "read",
-    details: tools.slice(0, TOOL_OUTPUT_LINES).map((tool, idx) => {
-      const isLast = idx === Math.min(tools.length, TOOL_OUTPUT_LINES) - 1 && tools.length <= TOOL_OUTPUT_LINES
+    details: tools.slice(0, TOOL_LIST_MAX_LINES).map((tool, idx) => {
+      const isLast = idx === Math.min(tools.length, TOOL_LIST_MAX_LINES) - 1 && tools.length <= TOOL_LIST_MAX_LINES
       const prefix = isLast ? "└─" : "├─"
       const rawArgument = toolPrimaryArgument(tool.name, tool.arguments, Math.min(72, Math.max(16, columns - 18)))
       const argument = rawArgument ? sanitizeTerminalText(rawArgument) : null

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import type { TimelineItem } from "../../src/interactive/state"
 import {
   projectFullscreenTimeline,
+  TOOL_EXEC_MAX_LINES,
   type FullscreenEntry,
   type FullscreenProjectionContext,
 } from "../../src/tui/ink/fullscreen-projection"
@@ -99,11 +100,13 @@ describe("projectFullscreenTimeline", () => {
     ], { ...context, spinnerGlyph: "◌" })
 
     const [active, inactive] = findByKind(entries, "reasoning")
-    expect(active?.text.split("\n")).toHaveLength(12)
+    expect(active?.text).toBe(source)
+    expect(active?.lineCount).toBe(30)
     expect(active?.spinnerGlyph).toBe("◌")
     expect(active?.statusLabel).toBe("正在思考")
     expect(inactive?.collapsed).toBe(true)
     expect(inactive?.text).toBe("已完成的思考")
+    expect(inactive?.lineCount).toBe(2)
     expect(inactive?.spinnerGlyph).toBeUndefined()
   })
 
@@ -177,7 +180,7 @@ describe("projectFullscreenTimeline", () => {
     if (entry?.kind !== "tool") return
     expect(entry.statusLabel).toBe("失败")
     expect(entry.glyph).toBe("×")
-    expect(entry.details.join("\n").split("\n").length).toBeLessThanOrEqual(4)
+    expect(entry.details.join("\n").split("\n").length).toBeLessThanOrEqual(TOOL_EXEC_MAX_LINES + 1)
     expect(entry.details.some(line => line.startsWith("│ "))).toBe(true)
   })
 
@@ -212,5 +215,138 @@ describe("projectFullscreenTimeline", () => {
     expect(serialized).toContain("用户")
     expect(serialized).toContain("思考")
     expect(serialized).toContain("失败")
+  })
+
+  it("appends waiting activity entry when active and no active tail exists", () => {
+    const timeline: TimelineItem[] = [
+      { type: "message", message: { id: "u", role: "user", content: "hi" } },
+      tool("t1", "execute", "completed"),
+    ]
+    const entries = projectFullscreenTimeline(timeline, { ...context, active: true })
+    const last = entries[entries.length - 1]
+    expect(last?.kind).toBe("activity")
+    expect(last?.statusLabel).toBe("正在等待响应… · Esc 取消")
+
+    // 当尾部已有活跃条目时（如思考中），不追加 activity 占位
+    const withReasoning = projectFullscreenTimeline([
+      ...timeline,
+      { type: "reasoning", reasoning: { id: "r1", runId: "r", text: "思考中", active: true } },
+    ], { ...context, active: true })
+    expect(withReasoning.some(e => e.kind === "activity")).toBe(false)
+  })
+
+  it("parses structured file tool payloads, generates +/- diffs and chips, and never leaks raw JSON", () => {
+    const editItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "edit-1",
+        runId: "run-1",
+        name: "edit_file",
+        arguments: JSON.stringify({
+          file_path: "/workspace/test.py",
+          old_string: "res.words == 0",
+          new_string: "res.words == 7",
+        }),
+        output: JSON.stringify({
+          ok: true,
+          path: "/workspace/test.py",
+          changed_range: { start_line: 56, end_line: 56, added_lines: 1, removed_lines: 1 },
+          total_lines: 132,
+          content: "56\tres.words == 7",
+        }),
+        status: "completed",
+      },
+    }
+
+    const writeItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "write-1",
+        runId: "run-1",
+        name: "write_file",
+        arguments: JSON.stringify({
+          file_path: "/workspace/new.py",
+          content: "#!/usr/bin/env python3\nimport sys\n",
+        }),
+        output: JSON.stringify({
+          ok: true,
+          path: "/workspace/new.py",
+          total_lines: 211,
+          line_count: 211,
+          changed_range: { start_line: 1, end_line: 211, added_lines: 211, removed_lines: 0 },
+        }),
+        status: "completed",
+      },
+    }
+
+    const readItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "read-1",
+        runId: "run-1",
+        name: "read_file",
+        arguments: JSON.stringify({ file_path: "/workspace/test.py" }),
+        output: JSON.stringify({
+          ok: true,
+          path: "/workspace/test.py",
+          shown_lines: { start_line: 46, end_line: 75 },
+          total_lines: 132,
+          content: "46\tdef test_run():\n47\t    pass",
+        }),
+        status: "completed",
+      },
+    }
+
+    const failedItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "fail-1",
+        runId: "run-1",
+        name: "edit_file",
+        arguments: JSON.stringify({ file_path: "/workspace/test.py" }),
+        output: JSON.stringify({
+          ok: false,
+          error: { code: "EXACT_MATCH_NOT_FOUND", message: "原文本未匹配" },
+        }),
+        status: "failed",
+      },
+    }
+
+    const executeItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "exec-1",
+        runId: "run-1",
+        name: "execute",
+        arguments: JSON.stringify({ command: "pytest -v" }),
+        output: "test session starts\npassed",
+        status: "completed",
+      },
+    }
+
+    const entries = projectFullscreenTimeline([editItem, writeItem, readItem, failedItem, executeItem], context)
+    const [editEntry, writeEntry, readEntry, failEntry, execEntry] = findByKind(entries, "tool")
+
+    expect(editEntry?.text).toContain("[+1 -1]")
+    expect(editEntry?.details.some(line => line.includes("- res.words == 0"))).toBe(true)
+    expect(editEntry?.details.some(line => line.includes("+ res.words == 7"))).toBe(true)
+    expect(editEntry?.details.some(line => line.includes('{"ok"'))).toBe(false)
+    expect(editEntry?.tone).toBe("write")
+
+    expect(writeEntry?.text).toContain("[+211 行]")
+    expect(writeEntry?.details.some(line => line.includes("+ #!/usr/bin/env python3"))).toBe(true)
+    expect(writeEntry?.details.some(line => line.includes('{"ok"'))).toBe(false)
+    expect(writeEntry?.tone).toBe("write")
+
+    expect(readEntry?.text).toContain("[30 行]")
+    expect(readEntry?.details.some(line => line.includes("def test_run():"))).toBe(true)
+    expect(readEntry?.details.some(line => line.includes('{"ok"'))).toBe(false)
+    expect(readEntry?.tone).toBe("read")
+
+    expect(failEntry?.details.some(line => line.includes("EXACT_MATCH_NOT_FOUND") && line.includes("原文本未匹配"))).toBe(true)
+    expect(failEntry?.details.some(line => line.includes('{"ok"'))).toBe(false)
+
+    expect(execEntry?.tone).toBe("execute")
+    expect(execEntry?.details).toEqual(["│ test session starts", "│ passed"])
   })
 })

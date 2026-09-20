@@ -805,11 +805,22 @@ def translate_stream_event(
 
 
 def _message_event_matches_execution(data: tuple[Any, ...], execution_id: str) -> bool:
-    """拒绝嵌套 graph 泄漏到外层 callback stream 的跨 execution 消息。"""
-    if not execution_id or len(data) < 2 or not isinstance(data[1], Mapping):
+    """拒绝嵌套 graph、内部安全分类器或跨 execution 泄漏到外层 stream 的消息。"""
+    if len(data) < 2 or not isinstance(data[1], Mapping):
         return True
-    actual = data[1].get("harness_execution_id")
+    metadata = data[1]
+    if metadata.get("harness_skip_stream") or metadata.get("harness_internal_classifier"):
+        return False
+    tags = metadata.get("tags")
+    if isinstance(tags, (list, tuple, set)) and (
+        "harness_skip_stream" in tags or "harness_internal_classifier" in tags
+    ):
+        return False
+    if not execution_id:
+        return True
+    actual = metadata.get("harness_execution_id")
     return not isinstance(actual, str) or not actual or actual == execution_id
+
 
 
 def _tool_result_was_emitted(session: StreamSession, chunk: object) -> bool:

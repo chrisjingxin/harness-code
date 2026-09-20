@@ -885,7 +885,7 @@ export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, i
       return {
         ...next,
         activity: { kind: "running" },
-        timeline: appendReasoningDelta(next.timeline, identity, text, idGenerator),
+        timeline: appendReasoningDelta(finishStreamingAssistant(next.timeline, runId, identity), identity, text, idGenerator),
       }
     }
     case EventType.TOOL_STARTED: {
@@ -893,7 +893,7 @@ export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, i
       return {
         ...next,
         activity: { kind: "running" },
-        timeline: freezeReasoning(updateTool(next.timeline, withScopeFields({
+        timeline: freezeReasoning(updateTool(finishStreamingAssistant(next.timeline, runId, identity), withScopeFields({
           id: stringValue(payload.tool_call_id, `tool-${runId}`),
           runId,
           name: stringValue(payload.name, "tool"),
@@ -1099,6 +1099,34 @@ function acceptSequence(state: InteractiveState, threadId: string, runId: string
   return nextState
 }
 
+function finishStreamingAssistant(
+  timeline: TimelineItem[],
+  runId: string,
+  identity?: EventIdentity,
+): TimelineItem[] {
+  let changed = false
+  const updated = timeline.map(entry => {
+    if (
+      entry.type === "message"
+      && entry.message.role === "assistant"
+      && entry.message.runId === runId
+      && entry.message.streaming === true
+      && (!identity || scopeEquals(entry.message, identity))
+    ) {
+      changed = true
+      return {
+        ...entry,
+        message: {
+          ...entry.message,
+          streaming: false,
+        },
+      }
+    }
+    return entry
+  })
+  return changed ? updated : timeline
+}
+
 // 流式追加只续写时间线末尾的那条 assistant 消息；工具卡等条目插进来之后，
 // 新的 delta 一律新开消息，避免文字被拼进错误的上下文位置。
 function appendAssistantDelta(
@@ -1133,6 +1161,9 @@ function appendAssistantDelta(
         : entry
     ))
   }
+  // 如果中间被工具卡等条目隔开了，前序所有 assistant 消息的 streaming 必须置为 false，
+  // 决不能遗留多个同时处于 streaming: true 的悬挂消息。
+  const settledTimeline = finishStreamingAssistant(timeline, identity.runId, identity)
   const message: ConversationMessage = withScopeFields({
     id: `assistant-${identity.runId}-${idGenerator.uuid()}`,
     role: "assistant",
@@ -1141,7 +1172,7 @@ function appendAssistantDelta(
     streaming: true,
   }, identity)
   if (createdAtMs !== undefined) message.createdAtMs = createdAtMs
-  return [...timeline, { type: "message", message }]
+  return [...settledTimeline, { type: "message", message }]
 }
 
 function finishAssistant(timeline: TimelineItem[], runId: string, suffix = "", idGenerator: IdGenerator = defaultIdGenerator): TimelineItem[] {

@@ -694,7 +694,9 @@ pre, code { font-family: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Co
 .tool-row-header:hover { background: var(--surface-2); }
 .tool-row-icon { width: 14px; height: 14px; flex: 0 0 auto; color: var(--subtle); }
 /* 写类工具（改文件/执行命令/删文件）用暖色图标提示副作用；失败行优先用危险色。 */
-.tool-row[data-tone="write"] .tool-row-icon { color: var(--warning-text); }
+.tool-row[data-tone="write"] .tool-row-icon,
+.tool-row[data-tone="execute"] .tool-row-icon { color: var(--warning-text); }
+.tool-row[data-tone="delete"] .tool-row-icon { color: var(--danger-text); }
 .tool-row-failed .tool-row-icon { color: var(--danger-text); }
 .tool-row-label { flex: 0 0 auto; color: var(--text-soft); font-size: 13px; font-weight: 550; }
 .tool-row-args { min-width: 0; overflow: hidden; color: var(--muted); font-family: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

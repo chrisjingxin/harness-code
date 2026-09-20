@@ -234,6 +234,84 @@ describe("FullscreenConversationView input", () => {
     expect(output).not.toMatch(/You:|Harness:|Reasoning:|Tool:|Interaction:|Goal evaluation:/)
   })
 
+  it("renders completed reasoning collapsed as single line with summary and count", () => {
+    const timeline: TimelineItem[] = [
+      { type: "reasoning", reasoning: { id: "r1", runId: "run", text: "首先解析语法树\n然后遍历AST\n最后输出代码", active: false } },
+    ]
+    const output = renderToString(
+      <FullscreenConversationView committed={timeline} live={[]} draft="" terminalWidth={72} terminalHeight={32} />,
+      { columns: 72 },
+    )
+    expect(output).toContain("◆")
+    expect(output).toContain("思考完成 · 首先解析语法树 (共 3 行)")
+    expect(output).not.toContain("遍历AST")
+  })
+
+  it("renders active streaming reasoning with unbroken guide rail and bounded rolling tail", () => {
+    const longThought = "Analyzing requirements for a simplified wc tool. Core functionality will encompass counting lines, words, and characters within specified files. Considering a design that supports command-line file path arguments for input.\n\nHandling standard input when no file arguments are provided ensures compatibility with common Unix patterns."
+    const timeline: TimelineItem[] = [
+      { type: "reasoning", reasoning: { id: "r-active", runId: "run", text: longThought, active: true } },
+    ]
+    const output = renderToString(
+      <FullscreenConversationView committed={[]} live={timeline} draft="" terminalWidth={60} terminalHeight={32} />,
+      { columns: 60 },
+    )
+    expect(output).toContain("正在思考…")
+    const lines = visibleLines(output).filter(l => l.startsWith("  │ "))
+    expect(lines.length).toBeLessThanOrEqual(4)
+    expect(lines.every(l => l.startsWith("  │ "))).toBe(true)
+    expect(lines.every(l => l.trim() !== "│")).toBe(true)
+  })
+
+  it("renders distinct tool colors and highlighted +/- diffs for mutations", () => {
+    const editItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "edit",
+        runId: "run",
+        name: "edit_file",
+        arguments: JSON.stringify({
+          file_path: "/workspace/test.py",
+          old_string: "assert res.words == 0",
+          new_string: "assert res.words == 7",
+        }),
+        output: JSON.stringify({
+          ok: true,
+          path: "/workspace/test.py",
+          changed_range: { start_line: 56, end_line: 56, added_lines: 1, removed_lines: 1 },
+          total_lines: 132,
+        }),
+        status: "completed",
+      },
+    }
+    const execItem: TimelineItem = {
+      type: "tool",
+      tool: {
+        id: "exec",
+        runId: "run",
+        name: "execute",
+        arguments: JSON.stringify({ command: "pytest -v" }),
+        output: "passed",
+        status: "completed",
+      },
+    }
+    const output = renderToString(
+      <FullscreenConversationView committed={[editItem, execItem]} live={[]} draft="" terminalWidth={72} terminalHeight={32} />,
+      { columns: 72 },
+    )
+    // 写入/编辑文件拥有翠绿标签与彩色 diff
+    expect(output).toContain("\u001b[38;5;114m")
+    expect(output).toContain("编辑文件")
+    expect(output).toContain("+1")
+    expect(output).toContain("-1")
+    expect(output).toContain("\u001b[38;5;203m- assert res.words == 0")
+    expect(output).toContain("\u001b[38;5;114m+ \u001b[39m")
+    // 命令执行拥有琥珀金色标签与参数
+    expect(output).toContain("\u001b[38;5;214m")
+    expect(output).toContain("执行命令")
+    expect(output).toContain("\u001b[38;5;223mpytest -v\u001b[39m")
+  })
+
   it("uses the terminal Markdown projection in the production timeline path", () => {
     const content = "# 结果\n\n**重点** 与 `code`\n\n| 名称 | 状态 |\n| --- | --- |\n| TUI | 完成 |\n\n```ts\nconst value = 1\n```"
     const output = renderToString(

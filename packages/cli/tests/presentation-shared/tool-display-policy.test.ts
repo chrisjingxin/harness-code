@@ -8,8 +8,8 @@ test("内置文件工具映射为动词化中文标签与读写基调", () => {
   expect(toolDisplay("ls")).toEqual({ label: "列出目录", icon: "folder", tone: "read", known: true })
   expect(toolDisplay("write_file").tone).toBe("write")
   expect(toolDisplay("edit_file").tone).toBe("write")
-  expect(toolDisplay("delete_file").tone).toBe("write")
-  expect(toolDisplay("execute")).toEqual({ label: "执行命令", icon: "terminal", tone: "write", known: true })
+  expect(toolDisplay("delete_file").tone).toBe("delete")
+  expect(toolDisplay("execute")).toEqual({ label: "执行命令", icon: "terminal", tone: "execute", known: true })
 })
 
 test("未登记工具回退为 wrench 图标与原始工具名", () => {

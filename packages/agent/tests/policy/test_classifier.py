@@ -25,6 +25,7 @@ class _FakeClassifierModel:
         """初始化脚本响应序列；Exception 实例会在调用时抛出。"""
         self._responses = list(responses)
         self.bound_tokens: list[int | None] = []
+        self.configs: list[Any] = []
         self.call_count = 0
         self._pending_tokens: int | None = None
 
@@ -35,10 +36,12 @@ class _FakeClassifierModel:
 
     def invoke(self, messages: list[Any], config: Any = None) -> AIMessage:
         """同步返回下一条脚本响应；脚本耗尽视为错误。"""
+        self.configs.append(config)
         return self._next()
 
     async def ainvoke(self, messages: list[Any], config: Any = None) -> AIMessage:
         """异步入口复用同步脚本序列。"""
+        self.configs.append(config)
         return self._next()
 
     def _next(self) -> AIMessage:
@@ -249,3 +252,23 @@ def test_describe_tool_call_clips_long_args():
 def test_stage_accepts_only_objects_with_decision(response: str):
     """空对象或数组输出视为无法解析，进入下一阶段或回退。"""
     assert extract_verdict(response) is None
+
+
+async def test_classifier_invokes_model_with_isolated_stream_config():
+    """分类器模型调用必须显式清空 callbacks 并标记 skip_stream，阻断流式泄漏。"""
+    model = _FakeClassifierModel([_ALLOW_HIGH])
+    classifier = SafetyClassifier(model)
+
+    await classifier.aclassify("execute", {"command": "echo test"})
+
+    assert len(model.configs) == 1
+    config = model.configs[0]
+    assert isinstance(config, dict)
+    assert config.get("callbacks") == []
+    metadata = config.get("metadata", {})
+    assert metadata.get("harness_skip_stream") is True
+    assert metadata.get("harness_internal_classifier") is True
+    tags = config.get("tags", [])
+    assert "harness_skip_stream" in tags
+    assert "harness_internal_classifier" in tags
+

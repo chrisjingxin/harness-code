@@ -426,7 +426,7 @@ function wrapWithPrefix(value: string, prefix: string, width: number, continuati
   return wrapped.map((line, index) => `${index === 0 ? prefix : continuation}${line}`)
 }
 
-function wrapText(value: string, width: number): string[] {
+export function wrapText(value: string, width: number): string[] {
   const sourceLines = value.split("\n")
   return sourceLines.flatMap((line) => wrapLine(line, width))
 }

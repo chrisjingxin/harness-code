@@ -712,3 +712,42 @@ test("restoreThread 保留会话级 workMode 并清空 compose projection", () =
   expect(restored.workMode).toBe("compose")
   expect(restored.composeState).toBeNull()
 })
+
+test("工具启动时自动闭合前序 assistant 消息的 streaming 状态", () => {
+  let state = startRun(createInitialState(), run, "列出文件")
+  state = applyAgentEvent(state, event("content.delta", 1, { text: "准备执行：" }))
+  const msgs1 = messages(state)
+  expect(msgs1).toHaveLength(2) // user + assistant
+  expect(msgs1[1].streaming).toBe(true)
+
+  // 工具启动：前序 assistant 消息必须闭合 streaming
+  state = applyAgentEvent(state, event("tool.started", 2, { tool_call_id: "call-1", name: "ls" }))
+  const msgs2 = messages(state)
+  expect(msgs2[1].streaming).toBe(false)
+})
+
+test("推理/思考到达时自动闭合前序 assistant 消息的 streaming 状态", () => {
+  let state = startRun(createInitialState(), run, "分析问题")
+  state = applyAgentEvent(state, event("content.delta", 1, { text: "初步判断：" }))
+  expect(messages(state)[1].streaming).toBe(true)
+
+  // 推理到达：前序 assistant 消息必须闭合 streaming
+  state = applyAgentEvent(state, event("reasoning.delta", 2, { text: "深入思考..." }))
+  expect(messages(state)[1].streaming).toBe(false)
+})
+
+test("被工具卡隔开后新追加的 assistant 消息不会导致多条消息同时处于 streaming", () => {
+  let state = startRun(createInitialState(), run, "多阶段任务")
+  state = applyAgentEvent(state, event("content.delta", 1, { text: "第一阶段" }))
+  state = applyAgentEvent(state, event("tool.started", 2, { tool_call_id: "call-1", name: "ls" }))
+  state = applyAgentEvent(state, event("tool.completed", 3, { tool_call_id: "call-1", result: { content: "ok" } }))
+  state = applyAgentEvent(state, event("content.delta", 4, { text: "第二阶段" }))
+
+  const assistantMsgs = messages(state).filter(m => m.role === "assistant")
+  expect(assistantMsgs).toHaveLength(2)
+  expect(assistantMsgs[0].content).toBe("第一阶段")
+  expect(assistantMsgs[0].streaming).toBe(false)
+  expect(assistantMsgs[1].content).toBe("第二阶段")
+  expect(assistantMsgs[1].streaming).toBe(true)
+})
+

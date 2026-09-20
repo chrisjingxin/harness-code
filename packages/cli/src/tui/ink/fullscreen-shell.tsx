@@ -103,20 +103,114 @@ export function FullscreenWelcome(props: {
   )
 }
 
-/** Footer 在窄屏只保留活动状态，宽屏再补输入与连接上下文。 */
+/** 审批模式的色彩与英文标识（纯英文模式名，无多余图标）。 */
+export function approvalModeVisual(mode: string): { label: string; color: string } {
+  switch (mode) {
+    case "auto":
+      return { label: "auto", color: tuiTheme.success }
+    case "yolo":
+      return { label: "yolo", color: tuiTheme.danger }
+    case "auto-edit":
+      return { label: "auto-edit", color: tuiTheme.brand }
+    case "plan":
+      return { label: "plan", color: tuiTheme.warning }
+    case "default":
+    default:
+      return { label: mode || "default", color: tuiTheme.textMuted }
+  }
+}
+
+/**
+ * 底部状态行：左侧为当前状态/英文审批模式，右侧为操作快捷键提示。
+ * 摒弃无意义的内部状态（如 chat、open）和多余图标，聚焦英文审批模式与按键操作。
+ */
 export function FullscreenFooter(props: {
   width: number
   activity: string
   approvalMode: string
-  inputMode: "chat" | "shell"
-  connection: string
+  inputMode?: "chat" | "shell"
+  connection?: string
 }) {
-  const secondary = props.width >= 72
-    ? ` · ${props.inputMode} · ${props.approvalMode}${props.width >= 100 ? ` · ${props.connection}` : ""}`
-    : ""
+  const isRunning = props.activity === "运行中"
+  const isWeb = props.activity === "Web 接管中"
+  const isActionWaiting = props.activity === "等待操作"
+  const approval = approvalModeVisual(props.approvalMode)
+  const isShell = props.inputMode === "shell"
+
+  let leftNode: React.ReactNode
+  let rightNode: React.ReactNode
+
+  if (isRunning) {
+    leftNode = (
+      <Box flexShrink={1} overflow="hidden">
+        <Text color={tuiTheme.warning}>● 运行中</Text>
+        {props.width >= 55 && (
+          <Text dimColor>{` · `}<Text color={approval.color}>{approval.label}</Text></Text>
+        )}
+      </Box>
+    )
+    rightNode = (
+      <Box flexShrink={0}>
+        <Text dimColor>{props.width >= 50 ? "Ctrl+C 取消运行" : "^C 取消"}</Text>
+      </Box>
+    )
+  } else if (isWeb) {
+    leftNode = (
+      <Box flexShrink={1} overflow="hidden">
+        <Text color={tuiTheme.brand}>● Web 接管中</Text>
+      </Box>
+    )
+    rightNode = null
+  } else if (isActionWaiting) {
+    leftNode = (
+      <Box flexShrink={1} overflow="hidden">
+        <Text color={tuiTheme.brand}>● 等待确认</Text>
+        {props.width >= 55 && (
+          <Text dimColor>{` · `}<Text color={approval.color}>{approval.label}</Text></Text>
+        )}
+      </Box>
+    )
+    rightNode = (
+      <Box flexShrink={0}>
+        <Text dimColor>Enter 确认 · Esc 取消</Text>
+      </Box>
+    )
+  } else {
+    // 正常输入待机状态：展示英文审批模式及按键指引
+    const showCycleTip = props.width >= 65
+
+    leftNode = (
+      <Box flexShrink={1} overflow="hidden">
+        {isShell && <Text color={tuiTheme.brand}>! Shell · </Text>}
+        <Text color={approval.color}>{approval.label}</Text>
+        {showCycleTip && <Text dimColor>{` · Shift+Tab 切换`}</Text>}
+      </Box>
+    )
+
+    rightNode = (
+      <Box flexShrink={0}>
+        {props.width >= 75 ? (
+          <Text dimColor>Enter 发送 · Shift+Enter 换行 · Ctrl+C 退出</Text>
+        ) : props.width >= 48 ? (
+          <Text dimColor>Enter 发送 · Ctrl+C 退出</Text>
+        ) : props.width >= 35 ? (
+          <Text dimColor>↵ 发送</Text>
+        ) : null}
+      </Box>
+    )
+  }
+
   return (
-    <Box height={1} flexShrink={0} overflow="hidden">
-      <Text dimColor wrap="truncate">{`${props.activity}${secondary}`}</Text>
+    <Box
+      height={1}
+      flexShrink={0}
+      width={props.width}
+      paddingX={props.width >= 40 ? 1 : 0}
+      justifyContent="space-between"
+      overflow="hidden"
+    >
+      {leftNode}
+      {rightNode}
     </Box>
   )
 }
@@ -159,7 +253,6 @@ export function FullscreenInputBar(props: {
       })}
       <InputFrameBorder
         edge="bottom"
-        label={props.width < 60 ? "Enter 发送 · Ctrl+C 取消/退出" : "Enter 发送 · Shift/Alt+Enter 换行 · Ctrl+C 取消/退出"}
         width={props.width}
         color={accent}
       />
@@ -168,17 +261,18 @@ export function FullscreenInputBar(props: {
 }
 
 function InputFrameBorder(props: { edge: "top" | "bottom"; label?: string; width: number; color: string }) {
-  if (!props.label) {
-    return <Text color={props.color}>{`╭${"─".repeat(Math.max(1, props.width - 2))}╮`}</Text>
-  }
-  const left = "╰─ "
+  const left = props.edge === "top" ? "╭" : "╰"
   const right = props.edge === "top" ? "╮" : "╯"
-  const labelWidth = Math.max(0, props.width - stringWidth(left) - stringWidth(right) - 1)
+  if (!props.label) {
+    return <Text color={props.color}>{`${left}${"─".repeat(Math.max(1, props.width - 2))}${right}`}</Text>
+  }
+  const leftDecorated = `${left}─ `
+  const labelWidth = Math.max(0, props.width - stringWidth(leftDecorated) - stringWidth(right) - 1)
   const label = truncateCells(props.label, labelWidth)
-  const fill = "─".repeat(Math.max(1, props.width - stringWidth(left) - stringWidth(label) - stringWidth(right)))
+  const fill = "─".repeat(Math.max(1, props.width - stringWidth(leftDecorated) - stringWidth(label) - stringWidth(right)))
   return (
     <Box height={1} flexShrink={0} overflow="hidden">
-      <Text color={props.color}>{left}</Text>
+      <Text color={props.color}>{leftDecorated}</Text>
       <Text dimColor>{label}</Text>
       <Text color={props.color}>{fill}{right}</Text>
     </Box>

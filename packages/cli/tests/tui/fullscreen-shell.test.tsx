@@ -74,11 +74,14 @@ describe("FullscreenFooter", () => {
     const wide = renderToString(<FullscreenFooter {...props} width={120} />, { columns: 120 })
 
     expect(lines(compact)).toHaveLength(1)
-    expect(compact).toContain("等待输入")
-    expect(compact).not.toContain("default")
+    expect(compact).toContain("default")
+    expect(compact).not.toContain("chat")
+    expect(compact).not.toContain("open")
     expect(wide).toContain("default")
-    expect(wide).toContain("chat")
-    expect(wide).toContain("open")
+    expect(wide).toContain("Shift+Tab")
+    expect(wide).toContain("Enter 发送")
+    expect(wide).not.toContain("chat")
+    expect(wide).not.toContain("open")
   })
 })
 
@@ -99,7 +102,6 @@ describe("FullscreenInputBar", () => {
     expect(output).not.toContain("CHAT")
     expect(output).not.toContain("/workspace/harness-code")
     expect(output).toContain("❯")
-    expect(output).toContain("Enter 发送")
     expect(output).toContain("╭")
     expect(output).toContain("╮")
     expect(output).toContain("╰")
@@ -174,7 +176,7 @@ describe("compact full-screen shell", () => {
     expect(output).toContain("Harness")
     expect(output).toContain("Harness Code 0.1.0")
     expect(output).toContain("❯")
-    expect(output).toContain("等待输入")
+    expect(output).toContain("default")
   })
 
   it("renders stable frames without overflow across the 40/72/120 x 12/17/24 size matrix", () => {

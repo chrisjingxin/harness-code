@@ -40,14 +40,40 @@ import {
   projectFullscreenTimeline,
   type FullscreenEntry,
   type FullscreenTone,
+  type ToolEntry,
 } from "./fullscreen-projection"
+import { highlightCodeLine, wrapText } from "./terminal-markdown"
 import { useActivitySpinner } from "./activity-spinner"
 import { ICON } from "./symbols"
 
 const STABLE_SPINNER_GLYPH = ICON.SPINNER
 
+function formatActiveReasoning(text: string, glyph: string, statusLabel: string, columns = 80): string {
+  const header = `${glyph} \u001b[38;5;176;3m${statusLabel}…\u001b[0m`
+  const trimmed = text.trim()
+  if (!trimmed) return header
+
+  const contentWidth = Math.max(20, columns - 6)
+  const rawLines = trimmed.split("\n").map(l => l.trim()).filter(Boolean)
+  if (rawLines.length === 0) return header
+
+  const wrappedLines: string[] = []
+  for (const line of rawLines) {
+    wrappedLines.push(...wrapText(line, contentWidth))
+  }
+
+  const MAX_LIVE_THINKING_LINES = 4
+  const visibleLines = wrappedLines.slice(-MAX_LIVE_THINKING_LINES)
+
+  const body = visibleLines
+    .map(line => `  \u001b[90m│\u001b[0m \u001b[3;90m${line}\u001b[0m`)
+    .join("\n")
+
+  return `${header}\n${body}`
+}
+
 /** 把一个语义条目收敛为 viewport 可测量文本；活动 glyph 固定宽度且不参与新内容计数。 */
-function fullscreenEntryText(entry: FullscreenEntry): string {
+function fullscreenEntryText(entry: FullscreenEntry, columns = 80): string {
   const glyph = entry.spinnerGlyph ? STABLE_SPINNER_GLYPH : entry.glyph
   const details = entry.details.length > 0 ? `\n${entry.details.join("\n")}` : ""
   switch (entry.kind) {
@@ -60,23 +86,124 @@ function fullscreenEntryText(entry: FullscreenEntry): string {
       : entry.text
     case "reasoning": {
       if (entry.active) {
-        const header = `${glyph} \u001b[38;5;176;3m${entry.statusLabel}…\u001b[0m`
-        if (!entry.text) return header
-        const body = entry.text
-          .split("\n")
-          .slice(-3)
-          .map(line => `  │ \u001b[3;90m${line}\u001b[0m`)
-          .join("\n")
-        return `${header}\n${body}`
+        return formatActiveReasoning(entry.text, glyph, entry.statusLabel, columns)
       }
-      return `${ICON.THEREFORE} \u001b[90m${entry.text}\u001b[0m`
+      const countSuffix = entry.lineCount && entry.lineCount > 1 ? ` (共 ${entry.lineCount} 行)` : ""
+      return `\u001b[38;5;176m◆\u001b[0m \u001b[90m思考完成 · ${entry.text}${countSuffix}\u001b[0m`
     }
-    case "tool": return `${glyph} \u001b[1m${entry.text}\u001b[0m · \u001b[90m${entry.statusLabel}\u001b[0m${details}`
+    case "activity": return `${glyph} \u001b[38;5;75m${entry.statusLabel}\u001b[0m`
+    case "tool": return renderFullscreenToolEntry(entry, glyph)
     case "tool-group": return `${glyph} \u001b[38;5;75m${entry.text}\u001b[0m · \u001b[90m${entry.count} 项 · ${entry.statusLabel}\u001b[0m${details}`
     case "interaction-result": return `${glyph} \u001b[1m${entry.text}\u001b[0m · \u001b[90m${entry.statusLabel}\u001b[0m${details}`
     case "compose-summary": return `${glyph} \u001b[38;5;141m${entry.text}\u001b[0m · \u001b[90m${entry.statusLabel}\u001b[0m${details}`
     case "goal-evaluation": return `${glyph} \u001b[1m${entry.text}\u001b[0m · \u001b[90m${entry.statusLabel}\u001b[0m${details}`
   }
+}
+
+function renderFullscreenToolEntry(entry: ToolEntry, glyph: string): string {
+  const toneColors = toolToneColor(entry.tone)
+  const isFailed = entry.status === "failed"
+  const isRunning = entry.status === "running"
+
+  const coloredGlyph = isFailed
+    ? `\u001b[38;5;203m×\u001b[0m`
+    : `${toneColors.glyphColor}${glyph}\u001b[0m`
+
+  const labelText = entry.label || entry.toolName || entry.text
+  const coloredLabel = `${toneColors.labelColor}${labelText}\u001b[0m`
+
+  const coloredArg = entry.primaryArgument
+    ? ` \u001b[90m·\u001b[0m ${entry.tone === "execute" ? `\u001b[38;5;223m${entry.primaryArgument}\u001b[0m` : `\u001b[1;37m${entry.primaryArgument}\u001b[0m`}`
+    : ""
+
+  const coloredChip = formatColoredChip(entry.chip)
+
+  const coloredStatus = isFailed
+    ? `\u001b[38;5;203m${entry.statusLabel}\u001b[0m`
+    : isRunning
+      ? `\u001b[38;5;75m${entry.statusLabel}…\u001b[0m`
+      : `\u001b[90m${entry.statusLabel}\u001b[0m`
+
+  const header = `${coloredGlyph} ${coloredLabel}${coloredArg}${coloredChip} · ${coloredStatus}`
+
+  if (entry.details.length === 0) return header
+
+  const ext = extractExtension(entry.primaryArgument)
+  const formattedDetails = entry.details.map(line => formatDetailLine(line, ext)).join("\n")
+
+  return `${header}\n${formattedDetails}`
+}
+
+function formatColoredChip(chip: string | null | undefined): string {
+  if (!chip) return ""
+  const diffMatch = chip.match(/^\+(\d+)\s+-(\d+)$/)
+  if (diffMatch) {
+    return ` [\u001b[38;5;114m+${diffMatch[1]}\u001b[0m \u001b[38;5;203m-${diffMatch[2]}\u001b[0m]`
+  }
+  if (chip.startsWith("+")) {
+    return ` [\u001b[38;5;114m${chip}\u001b[0m]`
+  }
+  if (chip === "已删除") {
+    return ` [\u001b[38;5;203m已删除\u001b[0m]`
+  }
+  return ` [\u001b[38;5;75m${chip}\u001b[0m]`
+}
+
+function toolToneColor(tone: FullscreenTone): { glyphColor: string; labelColor: string } {
+  switch (tone) {
+    case "execute":
+      return { glyphColor: "\u001b[38;5;214m", labelColor: "\u001b[38;5;214;1m" } // 琥珀/金黄
+    case "write":
+      return { glyphColor: "\u001b[38;5;114m", labelColor: "\u001b[38;5;114;1m" } // 翡翠/翠绿
+    case "delete":
+      return { glyphColor: "\u001b[38;5;203m", labelColor: "\u001b[38;5;203;1m" } // 玫瑰/警示红
+    case "read":
+      return { glyphColor: "\u001b[38;5;75m", labelColor: "\u001b[38;5;75;1m" }   // 青空/天蓝
+    default:
+      return { glyphColor: "\u001b[38;5;141m", labelColor: "\u001b[38;5;141;1m" } // 淡紫
+  }
+}
+
+function extractExtension(filePath: string | null | undefined): string {
+  if (!filePath) return "code"
+  const dot = filePath.lastIndexOf(".")
+  if (dot >= 0 && dot < filePath.length - 1) {
+    return filePath.slice(dot + 1).toLowerCase()
+  }
+  return "code"
+}
+
+function formatDetailLine(line: string, ext: string): string {
+  if (line.startsWith("│ - ")) {
+    return `  \u001b[90m│\u001b[0m \u001b[38;5;203m- ${line.slice(4)}\u001b[0m`
+  }
+  if (line.startsWith("│ + ")) {
+    const code = line.slice(4)
+    const highlighted = highlightCodeLine(code, ext)
+    return `  \u001b[90m│\u001b[0m \u001b[38;5;114m+ \u001b[0m${highlighted}`
+  }
+  const lineNumMatch = line.match(/^│\s*(\d+)\s*│\s*(.*)$/)
+  if (lineNumMatch) {
+    const num = lineNumMatch[1]!
+    const code = lineNumMatch[2]!
+    const highlighted = highlightCodeLine(code, ext)
+    return `  \u001b[90m│\u001b[0m \u001b[90m${num.padStart(4)} │ \u001b[0m${highlighted}`
+  }
+  if (line.startsWith("│ …")) {
+    return `  \u001b[90m│\u001b[0m \u001b[90m${line.slice(2).trim()}\u001b[0m`
+  }
+  if (line.startsWith("│ 错误")) {
+    return `  \u001b[90m│\u001b[0m \u001b[38;5;203m${line.slice(2).trim()}\u001b[0m`
+  }
+  if (line.startsWith("│ 文件已删除")) {
+    return `  \u001b[90m│\u001b[0m \u001b[38;5;203m- 文件已删除\u001b[0m`
+  }
+  return `  \u001b[90m│\u001b[0m ${line.startsWith("│ ") ? line.slice(2) : line}`
+}
+
+function formatViewportEntryText(entry: FullscreenEntry, index: number, total: number, columns = 80): string {
+  const raw = fullscreenEntryText(entry, columns).replace(/\n+$/, "")
+  return index < total - 1 ? `${raw}\n` : raw
 }
 
 function fullscreenToneColor(tone: FullscreenTone): string | undefined {
@@ -85,8 +212,10 @@ function fullscreenToneColor(tone: FullscreenTone): string | undefined {
     case "compose": return modeAccent(tone)
     case "success": return tuiTheme.success
     case "warning":
-    case "write": return tuiTheme.warning
-    case "danger": return tuiTheme.danger
+    case "execute": return tuiTheme.warning
+    case "danger":
+    case "delete": return tuiTheme.danger
+    case "write": return tuiTheme.success
     case "read": return tuiTheme.muted
     case "neutral": return undefined
   }
@@ -202,9 +331,9 @@ export function FullscreenConversationView(props: {
   })
   const entryById = new Map(entries.map(entry => [entry.id, entry]))
   const visibleRows = props.viewportRows ?? layoutViewport(
-    entries.map(entry => ({
+    entries.map((entry, index) => ({
       id: entry.id,
-      text: fullscreenEntryText(entry),
+      text: formatViewportEntryText(entry, index, entries.length, props.terminalWidth),
       aliases: entry.kind === "tool-group" ? entry.sourceEntryIds : undefined,
     })),
     createViewportState(),
@@ -227,7 +356,7 @@ export function FullscreenConversationView(props: {
             return (
               <Text
                 key={`${row.entryId}:${row.row}`}
-                color={entry ? fullscreenToneColor(entry.tone) : undefined}
+                color={entry && entry.kind !== "tool" && entry.kind !== "user" && entry.kind !== "reasoning" ? fullscreenToneColor(entry.tone) : undefined}
                 dimColor={entry?.kind === "tool-group"}
                 wrap="truncate"
               >
@@ -295,12 +424,14 @@ export function InkConversationRoot(props: { adapter: TuiAdapter; webHandoff?: P
     fallbackWorkMode: snapshot.interactive.workMode,
     pendingInteractionId: snapshot.interactive.interaction?.requestId,
     spinnerGlyph: STABLE_SPINNER_GLYPH,
-  }), [displayTimeline, snapshot.interactive.interaction?.requestId, snapshot.interactive.workMode, terminalSize.columns])
-  const viewportEntries = useMemo(() => projectedEntries.map(entry => ({
+    active: snapshot.interactive.activity.kind === "running" || snapshot.interactive.activity.kind === "starting",
+    activityKind: snapshot.interactive.activity.kind,
+  }), [displayTimeline, snapshot.interactive.activity.kind, snapshot.interactive.interaction?.requestId, snapshot.interactive.workMode, terminalSize.columns])
+  const viewportEntries = useMemo(() => projectedEntries.map((entry, index) => ({
     id: entry.id,
-    text: fullscreenEntryText(entry),
+    text: formatViewportEntryText(entry, index, projectedEntries.length, terminalSize.columns),
     aliases: entry.kind === "tool-group" ? entry.sourceEntryIds : undefined,
-  })), [projectedEntries])
+  })), [projectedEntries, terminalSize.columns])
   const inputRows = interactionKind === "input" && snapshot.temporaryView.kind === "none"
     ? fullscreenInputRows(buffer.value, buffer.cursor)
     : 0
