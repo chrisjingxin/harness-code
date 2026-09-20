@@ -197,13 +197,18 @@ async def _iter_sse_json(response: httpx.Response) -> AsyncIterator[dict[str, An
 
 
 def _delta_reasoning_content(chunk: Mapping[str, Any]) -> str:
-    """从原始 chunk dict 提取 Chat Completions 的 reasoning_content 增量。"""
+    """从原始 chunk dict 提取 Chat Completions 的 reasoning/thinking 增量。"""
     try:
         delta = chunk["choices"][0]["delta"]
     except (KeyError, IndexError, TypeError):
         return ""
-    value = delta.get("reasoning_content") if isinstance(delta, Mapping) else None
-    return value if isinstance(value, str) and value else ""
+    if not isinstance(delta, Mapping):
+        return ""
+    for key in ("reasoning_content", "reasoning", "thinking", "thought"):
+        value = delta.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def resolve_model(model: BaseChatModel) -> BaseChatModel:

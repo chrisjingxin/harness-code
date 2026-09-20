@@ -26,20 +26,52 @@ import {
 } from "../../presentation-shared/interaction-policy"
 import { diffTextForRenderer } from "../../presentation-shared/file-diff"
 import type { ApprovalDecision, DirectoryTrustDecision, TuiAdapter } from "../application/adapter"
-import { isInkBackspace } from "./input-key"
+import { tuiTheme } from "../presentation/theme"
+import { isInkBackspace, isInkMouseReport } from "./input-key"
 
 type Option = { value: string; label: string; description?: string }
 
-function OptionList(props: { options: readonly Option[]; selectedIndex: number }) {
+/** 通用 Interaction 容器外壳：统一强边界、标题、描述、内容与 Footer。 */
+export function InteractionShell(props: {
+  title: string
+  titleColor?: string
+  borderColor: string
+  description?: string
+  children: React.ReactNode
+  footer?: string
+}) {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={props.borderColor} paddingX={1}>
+      <Text color={props.titleColor ?? props.borderColor} bold wrap="truncate">{props.title}</Text>
+      {props.description ? <Text wrap="truncate">{props.description}</Text> : null}
+      {props.children}
+      {props.footer ? <Text dimColor wrap="truncate">{props.footer}</Text> : null}
+    </Box>
+  )
+}
+
+function OptionList(props: { options: readonly Option[]; selectedIndex: number; maxItems?: number }) {
+  const maxItems = Math.max(1, Math.min(props.options.length, props.maxItems ?? props.options.length))
+  const windowStart = Math.max(0, props.selectedIndex - maxItems + 1)
+  const visible = props.options.slice(windowStart, windowStart + maxItems)
   return (
     <Box flexDirection="column">
-      {props.options.map((option, index) => (
-        <Text key={option.value} inverse={index === props.selectedIndex}>
-          {index === props.selectedIndex ? "❯ " : "  "}
-          {option.label}
-          {option.description ? ` · ${option.description}` : ""}
-        </Text>
-      ))}
+      {visible.map((option, offset) => {
+        const index = windowStart + offset
+        const isSelected = index === props.selectedIndex
+        return (
+          <Text
+            key={option.value}
+            color={isSelected ? tuiTheme.selection : undefined}
+            bold={isSelected}
+            wrap="truncate"
+          >
+            {isSelected ? "❯ " : "  "}
+            {option.label}
+            {option.description ? ` · ${option.description}` : ""}
+          </Text>
+        )
+      })}
     </Box>
   )
 }
@@ -58,14 +90,49 @@ function isNavKey(key: Key, input: string): "up" | "down" | "confirm" | "escape"
   return "none"
 }
 
-function ApprovalDiff(props: { presentation: FileDiffPresentation }) {
+function parseShellCommand(requests: unknown, description?: string): string | null {
+  if (requests && typeof requests === "object") {
+    const reqObj = requests as Record<string, unknown>
+    if (Array.isArray(reqObj.action_requests)) {
+      for (const ar of reqObj.action_requests) {
+        if (ar && typeof ar === "object") {
+          const item = ar as Record<string, unknown>
+          if (item.name === "execute" || item.name === "shell" || item.name === "bash") {
+            if (item.args && typeof item.args === "object" && typeof (item.args as Record<string, unknown>).command === "string") {
+              return (item.args as Record<string, unknown>).command as string
+            }
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(requests)) {
+    for (const item of requests) {
+      if (item && typeof item === "object") {
+        const req = item as Record<string, unknown>
+        if (typeof req.command === "string") return req.command
+        if (req.args && typeof req.args === "object" && typeof (req.args as Record<string, unknown>).command === "string") {
+          return (req.args as Record<string, unknown>).command as string
+        }
+      }
+    }
+  }
+  if (description) {
+    const match = description.match(/执行命令\s+(.+)$/)
+    if (match?.[1]) return match[1]
+  }
+  return null
+}
+
+function ApprovalDiff(props: { presentation: FileDiffPresentation; maxLines: number }) {
   const text = diffTextForRenderer(props.presentation.unified_diff)
-  const lines = text.split("\n").slice(0, 14)
+  const lines = text.split("\n").slice(0, Math.max(0, props.maxLines))
+  const opLabel = props.presentation.operation === "write" ? "创建" : props.presentation.operation === "delete" ? "删除" : "修改"
   return (
     <Box flexDirection="column">
-      <Text dimColor>{`${props.presentation.operation} ${props.presentation.path}  +${props.presentation.added_lines}/-${props.presentation.removed_lines}`}</Text>
-      {props.presentation.truncated ? <Text color="yellow">diff 已截断</Text> : null}
-      {lines.map((line, index) => <Text key={`${index}-${line.slice(0, 24)}`}>{line || " "}</Text>)}
+      <Text dimColor wrap="truncate">{`${opLabel} ${props.presentation.path}  +${props.presentation.added_lines}/-${props.presentation.removed_lines}`}</Text>
+      {props.presentation.truncated ? <Text color={tuiTheme.warning} wrap="truncate">diff 已截断</Text> : null}
+      {lines.map((line, index) => <Text key={`${index}-${line.slice(0, 24)}`} wrap="truncate">{line || " "}</Text>)}
     </Box>
   )
 }
@@ -73,6 +140,7 @@ function ApprovalDiff(props: { presentation: FileDiffPresentation }) {
 function ApprovalPanel(props: {
   interaction: Extract<InteractiveSnapshot["interaction"], { type: "approval" }>
   onApproval: (decision: ApprovalDecision) => void
+  maxRows: number
 }) {
   const options = useMemo(() => {
     const allowed = props.interaction.decisions.filter(isApprovalDecision)
@@ -84,6 +152,7 @@ function ApprovalPanel(props: {
   }, [props.interaction.decisions])
   const [selectedIndex, setSelectedIndex] = useState(0)
   useInput((input, key) => {
+    if (isInkMouseReport(input)) return
     const nav = isNavKey(key, input)
     if (nav === "up") setSelectedIndex(index => moveIndex(index, -1, options.length))
     else if (nav === "down") setSelectedIndex(index => moveIndex(index, 1, options.length))
@@ -95,20 +164,41 @@ function ApprovalPanel(props: {
   const title = props.interaction.agentId && props.interaction.agentId !== "main"
     ? `子代理 ${props.interaction.agentId} 需要审批`
     : "需要审批"
+  const shellCommand = !props.interaction.presentation
+    ? parseShellCommand(props.interaction.requests, props.interaction.description)
+    : null
+  const presentationRows = props.interaction.presentation ? 1 : 0
+  const shellRows = shellCommand ? 2 : 0
+  const optionBudget = Math.max(1, props.maxRows - 2 - 1 - (props.interaction.description && !shellCommand ? 1 : 0) - presentationRows - shellRows - 1)
+  const optionRows = Math.min(options.length, optionBudget)
+  const fixedRows = 2 + 1 + (props.interaction.description && !shellCommand ? 1 : 0) + optionRows + 1
+    + presentationRows
+    + shellRows
+    + (props.interaction.presentation?.truncated ? 1 : 0)
+  const diffLines = Math.max(0, props.maxRows - fixedRows)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text color="yellow">{title}</Text>
-      {props.interaction.description ? <Text>{props.interaction.description}</Text> : null}
-      {props.interaction.presentation ? <ApprovalDiff presentation={props.interaction.presentation} /> : null}
-      <OptionList options={options} selectedIndex={selectedIndex} />
-      <Text dimColor>{props.interaction.presentation ? "↑↓ 选择 · Enter 确认" : "↑↓ 选择 · Enter 确认"}</Text>
-    </Box>
+    <InteractionShell
+      title={title}
+      borderColor={tuiTheme.warning}
+      description={props.interaction.description && !shellCommand ? props.interaction.description : undefined}
+      footer="↑↓ 选择 · Enter 确认"
+    >
+      {props.interaction.presentation ? <ApprovalDiff presentation={props.interaction.presentation} maxLines={diffLines} /> : null}
+      {shellCommand ? (
+        <Box flexDirection="column">
+          <Text wrap="truncate">{`命令：${shellCommand}`}</Text>
+          <Text color={tuiTheme.warning} wrap="truncate">注意：执行 Shell 命令可能会产生副作用或系统变更。</Text>
+        </Box>
+      ) : null}
+      <OptionList options={options} selectedIndex={selectedIndex} maxItems={optionRows} />
+    </InteractionShell>
   )
 }
 
 function DirectoryTrustPanel(props: {
   interaction: Extract<InteractiveSnapshot["interaction"], { type: "directory_trust" }>
   onDirectoryTrust: (decision: DirectoryTrustDecision) => void
+  maxRows: number
 }) {
   const options = useMemo(() => {
     const allowed = props.interaction.decisions.filter(isDirectoryTrustDecision)
@@ -120,6 +210,7 @@ function DirectoryTrustPanel(props: {
   }, [props.interaction.decisions])
   const [selectedIndex, setSelectedIndex] = useState(0)
   useInput((input, key) => {
+    if (isInkMouseReport(input)) return
     const nav = isNavKey(key, input)
     if (nav === "up") setSelectedIndex(index => moveIndex(index, -1, options.length))
     else if (nav === "down") setSelectedIndex(index => moveIndex(index, 1, options.length))
@@ -132,22 +223,28 @@ function DirectoryTrustPanel(props: {
   const title = props.interaction.agentId && props.interaction.agentId !== "main"
     ? `子代理 ${props.interaction.agentId} 需要目录信任`
     : "目录信任"
+  const warningRows = props.interaction.shadowsWorkspace ? 1 : 0
+  const optionRows = Math.min(options.length, Math.max(1, props.maxRows - 5 - warningRows))
+  const detailRows = Math.max(0, props.maxRows - 2 - 1 - 1 - warningRows - optionRows - 1)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text color="yellow">{title}</Text>
-      <Text>{`工具：${props.interaction.toolName}（${access}）`}</Text>
-      <Text>{`目标路径：${props.interaction.targetPath}`}</Text>
-      <Text color="yellow">{`待信任目录：${props.interaction.directory}`}</Text>
-      {props.interaction.shadowsWorkspace ? <Text color="yellow">注意：该目录会遮蔽主工作区内的同名路径。</Text> : null}
-      <OptionList options={options} selectedIndex={selectedIndex} />
-      <Text dimColor>↑↓ 选择 · Enter 确认</Text>
-    </Box>
+    <InteractionShell
+      title={title}
+      borderColor={tuiTheme.warning}
+      footer="↑↓ 选择 · Enter 确认"
+    >
+      <Text color={tuiTheme.warning} wrap="truncate">{`待信任目录：${props.interaction.directory}`}</Text>
+      {props.interaction.shadowsWorkspace ? <Text color={tuiTheme.warning} wrap="truncate">注意：该目录会遮蔽主工作区内的同名路径。</Text> : null}
+      {detailRows >= 1 ? <Text wrap="truncate">{`工具：${props.interaction.toolName}（${access}）`}</Text> : null}
+      {detailRows >= 2 ? <Text wrap="truncate">{`目标路径：${props.interaction.targetPath}`}</Text> : null}
+      <OptionList options={options} selectedIndex={selectedIndex} maxItems={optionRows} />
+    </InteractionShell>
   )
 }
 
 function QuestionPanel(props: {
   interaction: Extract<InteractiveSnapshot["interaction"], { type: "question" }>
   onQuestion: (answers: Record<string, string[]>) => void
+  maxRows: number
 }) {
   const questions = props.interaction.questions
   const [index, setIndex] = useState(0)
@@ -178,6 +275,7 @@ function QuestionPanel(props: {
   }
 
   useInput((input, key) => {
+    if (isInkMouseReport(input)) return
     if (custom !== null) {
       if (key.escape) { setCustom(null); return }
       if (key.return) { if (custom.trim()) accept(custom.trim()); return }
@@ -213,19 +311,27 @@ function QuestionPanel(props: {
   })
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text color="cyan">{questions.length > 1 ? `Agent 需要你的回答 · ${index + 1}/${questions.length}` : "Agent 需要你的回答"}</Text>
-      {question?.question ? <Text>{question.question}</Text> : null}
+    <InteractionShell
+      title={questions.length > 1 ? `Agent 需要你的回答 · ${index + 1}/${questions.length}` : "Agent 需要你的回答"}
+      borderColor={tuiTheme.brand}
+      description={question?.question}
+      footer={
+        custom !== null
+          ? "Enter 提交 · Esc 取消"
+          : question?.multiSelect
+            ? "空格多选 · Enter 确认"
+            : "↑↓ 选择 · Enter 确认"
+      }
+    >
       {custom !== null
-        ? <Text>回答：{custom || " "}▏</Text>
+        ? <Text wrap="truncate-start">回答：{custom || " "}▏</Text>
         : options.length
-          ? <OptionList options={options.map(option => ({
+          ? <OptionList maxItems={Math.max(1, props.maxRows - 5)} options={options.map(option => ({
               ...option,
               label: question?.multiSelect && multiSelected.includes(option.value) ? `✓ ${option.label}` : option.label,
             }))} selectedIndex={selectedIndex} />
           : <Text dimColor>输入回答…</Text>}
-      <Text dimColor>{question?.multiSelect ? "空格多选 · Enter 确认" : "↑↓ 选择 · Enter 确认"}</Text>
-    </Box>
+    </InteractionShell>
   )
 }
 
@@ -233,6 +339,7 @@ function PlanPanel(props: {
   interaction: Extract<InteractiveSnapshot["interaction"], { type: "plan" }>
   onPlan: (decision: PlanDecision, feedback?: string) => void
   onClose: () => void
+  maxRows: number
 }) {
   const options = useMemo(() => {
     const allowed = props.interaction.decisions.filter(isPlanDecision)
@@ -245,6 +352,7 @@ function PlanPanel(props: {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [feedback, setFeedback] = useState<string | null>(null)
   useInput((input, key) => {
+    if (isInkMouseReport(input)) return
     if (props.interaction.readOnly) {
       if (key.escape || key.return) props.onClose()
       return
@@ -269,18 +377,30 @@ function PlanPanel(props: {
       else if (isPlanDecision(value)) props.onPlan(value)
     } else if (nav === "escape") props.onClose()
   })
-  const lines = props.interaction.hasPlan ? props.interaction.planMarkdown.split("\n").slice(0, 12) : []
+  const optionRows = Math.min(options.length, Math.max(1, props.maxRows - 4))
+  const fixedRows = props.interaction.readOnly || feedback !== null ? 4 : 2 + 1 + optionRows + 1
+  const lines = props.interaction.hasPlan
+    ? props.interaction.planMarkdown.split("\n").slice(0, Math.max(0, props.maxRows - fixedRows))
+    : []
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Text color="magenta">{props.interaction.readOnly ? "计划预览" : "审核计划"}</Text>
-      {lines.map((line, index) => <Text key={`${index}-${line.slice(0, 24)}`}>{line || " "}</Text>)}
+    <InteractionShell
+      title={props.interaction.readOnly ? "计划预览" : "审核计划"}
+      borderColor={tuiTheme.modeCompose}
+      footer={
+        props.interaction.readOnly
+          ? "Esc/Enter 关闭"
+          : feedback !== null
+            ? "Enter 提交 · Esc 取消"
+            : "↑↓ 选择 · Enter 确认 · Esc 关闭"
+      }
+    >
+      {lines.map((line, index) => <Text key={`${index}-${line.slice(0, 24)}`} wrap="truncate">{line || " "}</Text>)}
       {feedback !== null
-        ? <Text>打磨意见：{feedback || " "}▏</Text>
+        ? <Text wrap="truncate-start">打磨意见：{feedback || " "}▏</Text>
         : props.interaction.readOnly
-          ? <Text dimColor>Esc/Enter 关闭</Text>
-          : <OptionList options={options} selectedIndex={selectedIndex} />}
-      {props.interaction.readOnly || feedback !== null ? null : <Text dimColor>↑↓ 选择 · Enter 确认</Text>}
-    </Box>
+          ? null
+          : <OptionList options={options} selectedIndex={selectedIndex} maxItems={optionRows} />}
+    </InteractionShell>
   )
 }
 
@@ -288,6 +408,7 @@ function GoalPanel(props: {
   interaction: Extract<InteractiveSnapshot["interaction"], { type: "goal" }>
   onGoal: (response: GoalReviewResponse) => void
   onClose: () => void
+  maxRows: number
 }) {
   const options = [
     { value: "accepted", label: "接受并开始", description: "保存目标并自动开始工作" },
@@ -298,7 +419,12 @@ function GoalPanel(props: {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [editMode, setEditMode] = useState<"criteria" | "feedback" | null>(null)
   const [draft, setDraft] = useState("")
+  const optionBudget = props.maxRows <= 10 ? 2 : Math.max(1, props.maxRows - 5)
+  const optionRows = Math.min(options.length, optionBudget)
+  const fixedRows = editMode || props.interaction.readOnly ? 5 : 2 + 1 + 1 + optionRows + 1
+  const visibleCriteria = props.interaction.criteria.slice(0, Math.max(0, props.maxRows - fixedRows))
   useInput((input, key) => {
+    if (isInkMouseReport(input)) return
     if (props.interaction.readOnly || props.interaction.isEditPrompt) {
       if (key.escape || (props.interaction.readOnly && key.return)) props.onClose()
       return
@@ -330,16 +456,25 @@ function GoalPanel(props: {
     } else if (nav === "escape") props.onGoal({ decision: "cancelled" })
   })
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
-      <Text color="green">{props.interaction.isEditPrompt ? "编辑目标" : props.interaction.readOnly ? "目标详情" : "审核目标"}</Text>
-      <Text>{props.interaction.objective}</Text>
-      {props.interaction.criteria.map((criterion, index) => <Text key={`${index}-${criterion}`} dimColor>{`${index + 1}. ${criterion}`}</Text>)}
+    <InteractionShell
+      title={props.interaction.isEditPrompt ? "编辑目标" : props.interaction.readOnly ? "目标详情" : "审核目标"}
+      borderColor={tuiTheme.success}
+      description={props.interaction.objective}
+      footer={
+        props.interaction.readOnly
+          ? "Esc/Enter 关闭"
+          : editMode !== null
+            ? "Enter 提交 · Esc 取消"
+            : "↑↓ 选择 · Enter 确认 · Esc 取消"
+      }
+    >
+      {visibleCriteria.map((criterion, index) => <Text key={`${index}-${criterion}`} dimColor wrap="truncate">{`${index + 1}. ${criterion}`}</Text>)}
       {editMode
-        ? <Text>{editMode === "criteria" ? "验收标准：" : "反馈："}{draft || " "}▏</Text>
+        ? <Text wrap="truncate-start">{editMode === "criteria" ? "验收标准：" : "反馈："}{draft || " "}▏</Text>
         : props.interaction.readOnly
-          ? <Text dimColor>Esc/Enter 关闭</Text>
-          : <OptionList options={options} selectedIndex={selectedIndex} />}
-    </Box>
+          ? null
+          : <OptionList options={options} selectedIndex={selectedIndex} maxItems={optionRows} />}
+    </InteractionShell>
   )
 }
 
@@ -347,23 +482,26 @@ function GoalPanel(props: {
 export function InteractionBottomArea(props: {
   snapshot: InteractiveSnapshot
   adapter: TuiAdapter
+  maxRows?: number
 }) {
   const interaction = props.snapshot.interaction
+  const maxRows = props.maxRows ?? 24
   const kind = bottomAreaKind(interaction)
   if (kind === "input" || !interaction) return null
   if (interaction.type === "approval") {
-    return <ApprovalPanel interaction={interaction} onApproval={decision => { void props.adapter.dispatch({ type: "approval", decision }) }} />
+    return <ApprovalPanel interaction={interaction} maxRows={maxRows} onApproval={decision => { void props.adapter.dispatch({ type: "approval", decision }) }} />
   }
   if (interaction.type === "directory_trust") {
-    return <DirectoryTrustPanel interaction={interaction} onDirectoryTrust={decision => { void props.adapter.dispatch({ type: "directory-trust", decision }) }} />
+    return <DirectoryTrustPanel interaction={interaction} maxRows={maxRows} onDirectoryTrust={decision => { void props.adapter.dispatch({ type: "directory-trust", decision }) }} />
   }
   if (interaction.type === "question") {
-    return <QuestionPanel interaction={interaction} onQuestion={answers => { void props.adapter.dispatch({ type: "question", answers }) }} />
+    return <QuestionPanel interaction={interaction} maxRows={maxRows} onQuestion={answers => { void props.adapter.dispatch({ type: "question", answers }) }} />
   }
   if (interaction.type === "plan") {
     return (
       <PlanPanel
         interaction={interaction}
+        maxRows={maxRows}
         onPlan={(decision, feedback) => { void props.adapter.dispatch({ type: "plan", decision, feedback }) }}
         onClose={() => { void props.adapter.dispatch({ type: "plan-view-close" }) }}
       />
@@ -373,6 +511,7 @@ export function InteractionBottomArea(props: {
     return (
       <GoalPanel
         interaction={interaction}
+        maxRows={maxRows}
         onGoal={response => { void props.adapter.dispatch({ type: "goal", response }) }}
         onClose={() => { void props.adapter.dispatch({ type: "goal-view-close" }) }}
       />

@@ -4,8 +4,33 @@ import { Box, Text, useInput, type Key } from "ink"
 import React, { useMemo, useState } from "react"
 
 import type { TuiAdapter, TuiAdapterSnapshot } from "../application/adapter"
+import { tuiTheme } from "../presentation/theme"
 
 const PAGE_SIZE = 16
+
+/** 通用覆盖视图容器外壳：统一强边界、标题、分页信息、内容与 Footer。 */
+export function OverlayShell(props: {
+  title: string
+  titleColor?: string
+  borderColor?: string
+  pageInfo?: string
+  footer?: string
+  children: React.ReactNode
+}) {
+  const color = props.borderColor ?? props.titleColor ?? tuiTheme.brand
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} flexGrow={1}>
+      <Box justifyContent="space-between">
+        <Text color={props.titleColor ?? color} bold wrap="truncate">{props.title}</Text>
+        {props.pageInfo ? <Text dimColor>{props.pageInfo}</Text> : null}
+      </Box>
+      <Box flexDirection="column" flexGrow={1}>
+        {props.children}
+      </Box>
+      <Text dimColor wrap="truncate">{props.footer ?? "Esc 关闭"}</Text>
+    </Box>
+  )
+}
 
 function PagedText(props: { title: string; lines: readonly string[]; color?: string }) {
   const [page, setPage] = useState(0)
@@ -19,11 +44,15 @@ function PagedText(props: { title: string; lines: readonly string[]; color?: str
     if (key.end) setPage(pageCount - 1)
   })
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={props.color ?? "cyan"} paddingX={1}>
-      <Text color={props.color ?? "cyan"}>{props.title}{pageCount > 1 ? `  ${current + 1}/${pageCount}` : ""}</Text>
-      {visible.map((line, index) => <Text key={`${current}-${index}-${line.slice(0, 24)}`}>{line || " "}</Text>)}
-      <Text dimColor>PgUp/PgDn 翻页 · Esc 关闭</Text>
-    </Box>
+    <OverlayShell
+      title={props.title}
+      titleColor={props.color ?? tuiTheme.brand}
+      borderColor={props.color ?? tuiTheme.brand}
+      pageInfo={pageCount > 1 ? `${current + 1}/${pageCount}` : undefined}
+      footer="PgUp/PgDn 翻页 · Esc 关闭"
+    >
+      {visible.map((line, index) => <Text key={`${current}-${index}-${line.slice(0, 24)}`} wrap="truncate">{line || " "}</Text>)}
+    </OverlayShell>
   )
 }
 
@@ -63,23 +92,32 @@ function WorkspaceView(props: { snapshot: TuiAdapterSnapshot; adapter: TuiAdapte
     }
   })
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
-      <Text color="green">工作区</Text>
+    <OverlayShell
+      title="工作区"
+      titleColor={tuiTheme.success}
+      borderColor={tuiTheme.success}
+      footer="↑↓ 选择 · ←→ 展开 · Enter 预览 · @ 插入 · Esc 关闭"
+    >
       {tree.status === "loading" ? <Text dimColor>加载中…</Text> : null}
-      {tree.message ? <Text color="yellow">{tree.message}</Text> : null}
+      {tree.message ? <Text color={tuiTheme.warning}>{tree.message}</Text> : null}
       {rows.map((row, offset) => {
         const index = windowStart + offset
+        const isSelected = index === selected
         const prefix = `${"  ".repeat(row.depth)}${row.kind === "directory" ? (row.expanded ? "▼ " : "▶ ") : "  "}`
         return (
-          <Text key={row.path} inverse={index === selected}>
-            {index === selected ? "❯ " : "  "}{prefix}{row.name}{row.kind === "directory" ? "/" : ""}
+          <Text
+            key={row.path}
+            color={isSelected ? tuiTheme.selection : undefined}
+            bold={isSelected}
+            wrap="truncate"
+          >
+            {isSelected ? "❯ " : "  "}{prefix}{row.name}{row.kind === "directory" ? "/" : ""}
           </Text>
         )
       })}
-      {preview && preview.status === "ready" ? <Text dimColor>{preview.file.path}</Text> : null}
-      {preview && preview.status === "error" ? <Text color="red">{preview.message}</Text> : null}
-      <Text dimColor>↑↓ 选择 · ←→ 展开 · Enter 预览 · @ 插入 · Esc 关闭</Text>
-    </Box>
+      {preview && preview.status === "ready" ? <Text dimColor wrap="truncate">{preview.file.path}</Text> : null}
+      {preview && preview.status === "error" ? <Text color={tuiTheme.danger} wrap="truncate">{preview.message}</Text> : null}
+    </OverlayShell>
   )
 }
 
@@ -94,15 +132,28 @@ function ToolInspectorView(props: { snapshot: TuiAdapterSnapshot }) {
     else if (key.downArrow) setSelectedIndex(index => Math.min(tools.length - 1, index + 1))
   })
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text color="yellow">Tool Inspector</Text>
+    <OverlayShell
+      title="Tool Inspector"
+      titleColor={tuiTheme.warning}
+      borderColor={tuiTheme.warning}
+      footer="↑↓ 选择 · Esc 关闭"
+    >
       {tools.length === 0 ? <Text dimColor>暂无工具记录</Text> : tools.slice(Math.max(0, selectedIndex - 6), selectedIndex + 6).map((tool, offset) => {
         const index = Math.max(0, selectedIndex - 6) + offset
-        return <Text key={tool.id} inverse={index === selectedIndex}>{index === selectedIndex ? "❯ " : "  "}{tool.name} · {tool.status}</Text>
+        const isSelected = index === selectedIndex
+        return (
+          <Text
+            key={tool.id}
+            color={isSelected ? tuiTheme.selection : undefined}
+            bold={isSelected}
+            wrap="truncate"
+          >
+            {isSelected ? "❯ " : "  "}{tool.name} · {tool.status}
+          </Text>
+        )
       })}
-      {selected?.output ? <Text dimColor>{selected.output.split("\n").slice(0, 8).join("\n")}</Text> : null}
-      <Text dimColor>↑↓ 选择 · Esc 关闭</Text>
-    </Box>
+      {selected?.output ? <Text dimColor wrap="truncate">{selected.output.split("\n").slice(0, 8).join("\n")}</Text> : null}
+    </OverlayShell>
   )
 }
 
@@ -118,7 +169,7 @@ export function TemporaryView(props: { snapshot: TuiAdapterSnapshot; adapter: Tu
     return (
       <PagedText
         title={btw.status === "loading" ? "BTW 询问中" : "BTW"}
-        color="magenta"
+        color={tuiTheme.modeCompose}
         lines={[btw.question, btw.answer ?? btw.error ?? "", btw.copied ? "已复制" : "按 c 复制"].filter(Boolean)}
       />
     )

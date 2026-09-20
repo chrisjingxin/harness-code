@@ -1111,9 +1111,10 @@ def reasoning_text(message: object) -> str:
     """提取供应商明确返回的思维文本，只用于运行期 reasoning.delta。"""
     kwargs = getattr(message, "additional_kwargs", None)
     if isinstance(kwargs, dict):
-        value = kwargs.get("reasoning_content")
-        if isinstance(value, str) and value:
-            return value
+        for key in ("reasoning_content", "reasoning", "thinking", "thought"):
+            value = kwargs.get(key)
+            if isinstance(value, str) and value:
+                return value
     blocks = getattr(message, "content_blocks", None)
     if not isinstance(blocks, list):
         blocks = getattr(message, "content", None)
@@ -1121,11 +1122,11 @@ def reasoning_text(message: object) -> str:
         return ""
     parts: list[str] = []
     for block in blocks:
-        if not isinstance(block, Mapping) or block.get("type") != "reasoning":
+        if not isinstance(block, Mapping) or block.get("type") not in {"reasoning", "thinking"}:
             continue
         text = block.get("text")
         if not isinstance(text, str) or not text:
-            text = block.get("reasoning")
+            text = block.get("reasoning") or block.get("thinking")
         if isinstance(text, str) and text:
             parts.append(text)
     return "".join(parts)

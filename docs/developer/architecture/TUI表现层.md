@@ -1,132 +1,113 @@
 # TUI 表现层
 
-本文是 TUI 视觉与渲染的长期架构入口。行为细节以对应 Task / Spec 为准；结论直接写在这里，不再另建 ADR。
+本文是 Harness Code TUI 视觉与渲染的长期架构入口。行为细节以对应 Task / Spec 为准；架构结论直接在此维护。
 
-当前实施任务：[HC-145](../task/archive/HC-145-TUI视觉与渲染重构.md)（WP1–WP6 已落地，本文按落地路径维护）。
+当前实施任务：[HC-183 全屏 TUI 视觉重构](../task/HC-183-全屏TUI视觉重构.md)（前置：[HC-182 Node与Ink运行时迁移](../task/HC-182-Node与Ink运行时迁移.md)）。
 
-## 在整仓中的位置
+## 1. 架构定位与依赖关系
 
 ```text
-InteractiveController（共享领域状态）
+InteractiveController（领域模型与业务状态事实）
         │
-        ├─ TuiAdapter     本地：draft / picker / 展开 / 焦点 / 滚动
+        ├─ TuiAdapter（本地 Presentation snapshot 与 Intent 派发）
         │       │
-        │       └─ TUI Presentation（本文）
+        │       ├─ FullscreenProjection（纯函数：Timeline 语义分组、折叠与文案纯投影）
+        │       ├─ TimelineViewport（纯状态：可见窗口、按页/滚轮滚动、跟随与新内容计数）
+        │       └─ FullscreenApp（Ink 6.8.0 / React 19 组件树）
+        │               │
+        │               └─ TerminalSession（唯一终端控制所有者：alternate screen、鼠标、光标与恢复）
         │
-        └─ Web Adapter / Web Presentation   HC-145 不改
+        └─ Web Adapter / Web Presentation（独立原生 Web 渲染器，互不共享组件树）
 ```
 
-TUI 只消费 snapshot 并派发 Intent。像素、色值、绘制窗口、Dock 焦点都属于 TUI。Web 是另一套原生 Renderer，互不共享组件树。
+- **职责边界**：TUI 表现层只消费 snapshot 并派发 Intent；像素、滚动、窗口、终端控制码均属于 TUI 表现层私有状态，不进入 `InteractiveController`、Protocol 或 SQLite。
+- **技术基准**：Node.js `>=20`、npm `10.9.3`、Ink `6.8.0`、React `19.2.6`，不依赖 OpenTUI 或 Bun。
+- **术语规范**：底部交互区域统称 **输入栏（`InputBar`）**，严禁称作 Composer，避免与 Compose 工作模式混淆。
 
-底部打字面叫 **输入栏（`InputBar`）**，不要叫 Composer。Composer 和 Compose 模式只差几个字母，文档和代码里都容易读错。Compose 只表示工作模式。
+## 2. 页面骨架与槽位不变量
 
-## 两套颜色，互不污染
+交互式 TUI 唯一采用全屏 alternate-screen 模式，退出后恢复原 Shell，不保留主屏滚屏 fallback。
 
-- **Mode 色**：Build `#EAB308`，Compose `#A9A5D4`。只说明「这次执行是谁」。用户消息竖条、输入栏、Dock/Overlay 选中可用它。思考标题用独立的青灰色，不跟 Mode。
-- **Semantic 色**：成功、失败、警告、Diff 红绿。永远不跟 Mode 变。
-
-历史用户消息记住创建时的 Run Mode。切换当前 Mode 不得回写旧消息。恢复 Thread 时若消息没有逐条 Mode，退回 `threadMode` 或 `build`。按条持久化 Mode 需要 Protocol / Transcript，单独立项。
-
-Logo 是品牌色，不是 Mode 皮。
-
-## 时间线按类型画，工具按注册表分流
-
-时间线是记录，不是万能卡片槽。
+全屏根布局占用终端 `stdout.columns × stdout.rows`，从上至下固定为四个槽位：
 
 ```text
-item.type
-  message.user        → UserMessage
-  message.assistant   → AssistantText
-  reasoning           → Thinking
-  tool                → resolveToolRenderer(name)
-  interaction(终态)   → 一行结果
-  系统事实            → SystemEvent
-  run / LLM 失败      → ErrorBlock
-  run 终态            → RunFooter
+┌────────────────────────────────────────────────────────┐
+│ Header             0 或 1 行；极短终端可隐藏           │
+├────────────────────────────────────────────────────────┤
+│ TimelineViewport   占据全部剩余高度；唯一主滚动 owner  │
+│ （或 OverlayView） （打开覆盖视图时在内容层替换视口）  │
+├────────────────────────────────────────────────────────┤
+│ BottomArea         InputBar / Interaction / Menu       │
+├────────────────────────────────────────────────────────┤
+│ Footer             0 或 1 行；按终端宽度与高度自适应   │
+└────────────────────────────────────────────────────────┘
 ```
 
-`resolveToolRenderer` 是 TUI 私有、深的小 interface：调用方只给工具名，得到 `inline | block | diff | generic`。未知名必须是 generic。
+- **Header**：单行上下文，按优先级展示 Harness 标识/会话标题、工作模式、模型短名、工作区目录。
+- **TimelineViewport**：应用内历史视口，支持 `PageUp`/`PageDown`、`Ctrl+Home`/`Ctrl+End` 与鼠标滚轮浏览历史。
+- **BottomArea**：单 owner 互斥槽位（未决 Interaction 优先展示 InteractionShell；其次展示命令/补全菜单；常态展示 InputBar）。
+- **Footer**：单行状态栏，展示活动状态、审批模式、输入模式与连接状态。
+- **OverlayView**：覆盖视图（工作区、状态、BTW、Inspect、Tool Inspector 以及 Web 接管提示）在内容层替换 TimelineViewport，不创建平行终端窗口或重复挂载 Header/Footer。
 
-读/搜默认一行；命令有输出块；文件变更走 Diff。`task` 在本阶段按 generic 画，不提供进入子对话。
+## 3. 终端生命周期与恢复（`TerminalSession`）
 
-## 底部只有一个输入面
+`TerminalSession` 是唯一的终端控制序列所有者：
+- **进入（enter）**：切换 alternate screen、清屏、隐藏/交接光标、启用最小鼠标滚轮上报、注册 resize 与退出信号；记录完成步骤以保证失败时严格逆序回滚。
+- **退出与恢复（close）**：恢复鼠标模式、光标、raw mode、退出 alternate screen、清理监听器；恢复操作完全幂等。
+- **统一异常兜底**：正常退出、Ctrl+C、SIGINT、SIGTERM、sidecar 退出与 React ErrorBoundary 均由根 `finally` 调用同一恢复路径。
+- **鼠标与复制安全**：仅解析离散 wheel up/down，不接管点击或 hover，不持有系统剪贴板；文本复制完全依赖终端原生选区机制。
+
+## 4. 纯投影与时间线层级（`FullscreenProjection`）
+
+Core 时间线先经由纯函数投影为语义条目，再交由 Ink 渲染：
 
 ```text
-无 pending Interaction → 输入栏（InputBar）
-审批 pending           → ApprovalDock
-问答 pending           → QuestionDock
+TimelineItem[]
+  → projectFullscreenTimeline()
+  → FullscreenEntry[] (User / Assistant / Reasoning / Tool / ToolGroup / InteractionResult / Compose / Goal)
+  → layoutViewport()
+  → Ink Components
 ```
 
-三者互斥。操作发生在底部，时间线只留事后结果。这是现有 Interaction 的搬家，不是新的 Host 能力。执行中输入栏保持焦点，可提交运行时命令；`Esc` 只关浮层/菜单，取消当前任务用 `Ctrl+C`（无论有无草稿都保留草稿）。
+- **去除内部日志化标签**：不再输出 `You:`、`Harness:`、`Tool:`、`Reasoning:` 等 raw 枚举前缀。
+- **用户消息**：中性文字主体，左侧带对应 Run 工作模式的强调 gutter。
+- **Assistant 正文**：作为视觉主体，纯投影终端 Markdown（支持标题、强调、代码块、列表、引用、链接与表格；窄屏或超宽单元格纵向降级，内容不截断）。
+- **工具活动收敛（Tool Activity Group）**：连续、同 run 且已完成的只读工具（`read_file`、`grep`、`glob`、`ls`）自动合并为折叠摘要；写入、删除、Shell、子代理、失败工具保持独立，且保留原始 Tool 身份用于详情查看。
+- **局部流式反馈**：仅当前运行中的思考或工具行显示固定宽活动 Spinner，完成的历史完全静止，不产生多余重绘。
 
-## 有界绘制
+## 5. 交互面板与覆盖视图统一（`InteractionShell` / `OverlayShell`）
 
-终端重绘整段无上限文本会卡死。思考与长输出只画窗口：
+- **统一 InteractionShell**：Approval、Directory Trust、Question、Plan、Goal 共享一致的强边界外壳、标题、描述、选项列表与 Footer 快捷提示。
+  - 文件变更优先显示操作类型、路径、行数变化与有界 Diff；
+  - Shell 优先展示命令详情与副作用提示；
+  - 目录信任明确警示工作区遮蔽风险；
+  - 决策选项严格与共享 policy 对齐，不发明或重排安全选项。
+- **统一 OverlayShell**：Workspace 文件树、Status、BTW、Inspect、Tool Inspector 共享统一标题、主体和关闭路径（Esc 返回，不丢弃草稿）。
+- **统一选项样式**：所有选项列表统一使用 `❯ ` 与 `selection` 高亮色加粗，不使用裸 inverse。
 
-- 思考进行中：最后 12 行
-- 思考点开：最多 40 行
-- Block / Generic 默认：最多 12 行
+## 6. 视觉语言与响应式门禁
 
-窗口化是 Presentation 职责，不截 Core 里的原文。限额函数是纯的，可放在 `presentation-shared`，但 Web 是否采用另开任务。
+- **唯一 Token 源**：色值仅从 `packages/cli/src/tui/presentation/theme.ts`（`tuiTheme`）读取，禁止生产组件散落裸颜色名。
+- **模式色与语义色正交**：
+  - Mode 色：Build `#EAB308`，Compose `#A9A5D4`；
+  - Semantic 色：成功 `#7FA37A`、警告 `#C88758`、危险 `#C56F6F`、Diff `#6F9A72` / `#B96A6A`。
+- **响应式等级**：
+  - `too-small`（`<40` 列 或 `<12` 行）：全屏展示尺寸过小告警与退出提示，尺寸达标后原地恢复；
+  - `compact`（`40–59` 列）：Header/Footer 隐藏次要字段，表格纵向降级，长单行窗口化；
+  - `standard`（`60–99` 列）：标准完整体验；
+  - `wide`（`>=100` 列）：增加参数与上下文可见量，仍保持单列布局，不恢复常驻 Sidebar。
 
-## 与 Compose 的关系
+## 7. 代码与目录结构
 
-Build 与 Compose 共用这一套组件。差别是 Mode 身份和背后的执行，不是两套 Presentation。
-
-## 侧边栏与文件树预览（Sidebar & File Preview）
-
-HC-149 在 TUI 右侧引入了响应式侧边栏与代码快速预览浮层：
-
-- **响应式断点**：
-  - 宽屏（>120 列）：常驻右侧分栏（40 列），主时间线视口宽度自动扣减 `terminalWidth - 40`；
-  - 窄屏（≤120 列）：默认收起，点击底栏 `[侧栏]` 唤出全屏半透明遮罩抽屉。
-  - 首页（Home）：不展示侧边栏，仅在聊天会话中展示。
-- **状态小部件组合**：
-  - `CwdWidget`：工作区路径与 `$HOME` 简写展示；
-  - `ContextWidget`：Token 消耗进度、窗口利用率、实时 TPS 与累计花费；
-  - `McpWidget`：MCP 服务运行态圆点与错误提示；
-  - `ModifiedFilesWidget`：当前会话修改文件列表与 `+N`/`-M` diff 行数；
-  - `FileTreeWidget`：复用 `WorkspaceExplorer` 领域引擎（支持 `.gitignore`、Git 全量树 `visibleTreeRows` 折叠展开与非 Git 懒加载）。
-- **代码快速预览浮层（FilePreviewModal）**：
-  - 在文件树中按 `Enter`（或鼠标点击）弹出自适应居中代码浮层；
-  - 展示语言、行数、格式化大小、带行号代码正文；
-  - 按 `@` 键一键将 `@path/to/file` 插入主输入框并关闭浮层；
-  - 针对 >1MB 大文件与二进制提供安全提示。
-- **开关与文件树操作**：
-  - 打开或关闭侧栏只用底栏 `[侧栏]` 或检查器内的关闭入口，不设快捷键；
-  - 侧边栏打开时支持 `↑`/`↓`/`←`/`→`/`Enter`/`Space`/`@` 操作文件树。
-
-## 文本选中复制（Selection Copy）
-
-HC-156 在 TUI 表现层落地了文本选区复制与即时反馈链路：
-
-- **分层边界**：完全属于 TUI 表现层，不修改 JSON-RPC Protocol、Python Agent、Thread 持久化或 Timeline 数据。
-- **组成结构**：
-  - `OpenTUI CliRenderer`：管理终端光标选区（`getSelection()` / `clearSelection()`）；
-  - `selection-copy.ts` 纯逻辑模块：接收平台与输入事件，决策是否触发复制，执行选区清除、调用剪贴板并触发 Toast；
-  - `copyToClipboard()`：调用系统剪贴板原生工具；
-  - `TuiAdapter.showToast()`：推送右上角轻量气泡通知。
-- **跨平台与事件冒泡**：
-  - 非 Windows（macOS/Linux）：左键鼠标松开自动复制非空选区；
-  - Windows：有选区时优先响应 `Ctrl+C` 或右键松开复制选区；无选区时不拦截现有快捷键（清空输入/取消运行/退出）；
-  - 根层统一监听处理，抽屉等阻断冒泡的覆盖层在内部转发后停止冒泡，弹窗（如 `/btw`）通过选区起点判断避免拖选误触发按钮动作。
-
-
-## 落地路径
-
-| 职责 | 位置 |
+| 职责 | 文件位置 |
 | --- | --- |
-| Mode / Semantic token | `packages/cli/src/tui/presentation/theme.ts`（`modeAccent`、`thinking`） |
-| 绘制限额 | `packages/cli/src/presentation-shared/paint-budget.ts`（`boundVisibleText`） |
-| 输入栏 | `packages/cli/src/tui/presentation/input-bar.tsx`（无 `Composer` 标识符） |
-| 底部 Dock | `packages/cli/src/tui/presentation/bottom-area.tsx` |
-| 侧边栏与小部件 | `packages/cli/src/tui/presentation/sidebar.tsx` 及 `sidebar/` |
-| 文件预览浮层 | `packages/cli/src/tui/presentation/file-preview-modal.tsx` |
-| 工具分流 | `packages/cli/src/tui/presentation/tools/registry.ts` 与 `renderers.tsx` |
-| 对话页 | `packages/cli/src/tui/presentation/thread.tsx`：时间线 + BottomArea + 底栏 + Sidebar |
-
-`work-item-view.tsx` 源文件保留作后续任务原料，对话页不得再挂载。Overlay / Picker 仍是现有 `SearchPicker` / `DialogShell`，选中色跟当前 Mode。
-
-## 目录约定
-
-主题 token 仍只有一处事实源。工具 Renderer 已拆到 `presentation/tools/`；侧边栏小部件位于 `presentation/sidebar/`；时间线其余类型组件仍可按职责继续下沉，不必为拆文件而拆。
+| 终端生命周期与恢复 | `packages/cli/src/tui/ink/terminal-session.ts` |
+| 时间线纯投影与工具分组 | `packages/cli/src/tui/ink/fullscreen-projection.ts` |
+| 视口滚动与 Anchor 计算 | `packages/cli/src/tui/ink/timeline-viewport.ts` |
+| 全屏外壳与响应式槽位 | `packages/cli/src/tui/ink/fullscreen-shell.tsx` |
+| 终端 Markdown 纯排版 | `packages/cli/src/tui/ink/terminal-markdown.ts` |
+| 底部交互面板与 InteractionShell | `packages/cli/src/tui/ink/bottom-area.tsx` |
+| 覆盖视图与 OverlayShell | `packages/cli/src/tui/ink/temporary-view.tsx` |
+| 内联菜单与选择器 | `packages/cli/src/tui/ink/menus.tsx` |
+| 根应用入口与键盘路由 | `packages/cli/src/tui/ink/app.tsx` |
+| 主题 Token 唯一事实源 | `packages/cli/src/tui/presentation/theme.ts` |
