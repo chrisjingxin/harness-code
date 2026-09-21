@@ -17,20 +17,20 @@ import type { InteractiveIntent, IntentOutcome } from "../interactive/types"
 import type { WebUiServerMessage } from "./contracts"
 import { isHandoffPhase, type PresentationState, type ReturnReason } from "./state"
 
-/** Bun WebSocket 与内存测试 channel 共用的渲染通道 seam。 */
+/** WebSocket 与内存测试 channel 共用的渲染通道 seam。 */
 export type GatewayChannel = {
   readonly messages: AsyncIterable<unknown>
   send(message: WebUiServerMessage): Promise<void>
   close(code: number, reason: string): Promise<void>
   /**
    * 活性探测：true 表示连接仍可用。缺省视为可用（保守：不主动替换主连接）。
-   * Bun 实现返回底层 ws.readyState === 1，供 attachRenderer 区分"失效主连接
+   * ws 实现返回底层 ws.readyState === 1，供 attachRenderer 区分"失效主连接
    * 的同 handoff 重连"（可替换接管）与"第二窗口"（必须拒绝）。
    */
   isOpen?(): boolean
 }
 
-/** 静态 server adapter 的最小 interface；实现不暴露 Bun 对象。 */
+/** 静态 server adapter 的最小 interface；实现不暴露底层的具体 server 对象。 */
 export type PresentationServer = {
   readonly origin: string
   pathFor(handoffId: string): string

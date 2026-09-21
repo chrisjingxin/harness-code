@@ -33,9 +33,11 @@ test("install.ps1 拒绝 Windows ARM 与 musl 同类不支持矩阵", async () =
   expect(src).toMatch(/ARM64|arm64/)
 })
 
-test("install.ps1 PATH 含 bun 与 uv tool bin，便于解析 harness-agent.exe", async () => {
+test("install.ps1 PATH 含 npm 与 uv tool bin，便于解析 harness-agent.exe", async () => {
   const src = await readFile(installer, "utf8")
-  expect(src).toContain(".bun")
+  expect(src).not.toContain(".bun")
+  expect(src).not.toContain("bun install")
+  expect(src).toContain("npm")
   expect(src).toContain(".local")
   expect(src).toMatch(/harness --version/)
   expect(src).toContain("HARNESS_NPM_REGISTRY")

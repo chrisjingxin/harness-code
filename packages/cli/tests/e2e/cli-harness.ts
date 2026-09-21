@@ -39,7 +39,7 @@ export async function startCli(extraEnv: Record<string, string> = {}): Promise<C
 
   const child = spawn(
     agentPython,
-    [ptyBridge, "--", "bun", "run", "src/index.ts"],
+    [ptyBridge, "--", "node", "--import", "tsx", "src/bin.ts"],
     {
       cwd: cliDir,
       env: {

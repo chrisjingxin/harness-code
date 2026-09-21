@@ -75,11 +75,11 @@
 
 依赖：用户确认停点 D。对应 Plan E1～E5。
 
-- [ ] **E1 Unix installer**：先写 Node missing/19/20/22/24、npm、registry、PATH、自检/config fixtures，再把 `install.sh` 改为 Node/npm，保留 uv/Python。验证 V26；完成信号：不下载 Node/Bun，失败不报成功。
-- [ ] **E2 PowerShell installer**：同步 Node/npm 语义，先覆盖宿主、Windows ARM、global prefix、PATH、重复安装、自检。验证 V27；完成信号：Windows x64 fixture/runner 通过，无 Bun path。
+- [x] **E1 Unix installer**：先写 Node missing/19/20/22/24、npm、registry、PATH、自检/config fixtures，再把 `install.sh` 改为 Node/npm，保留 uv/Python。验证 V26；完成信号：不下载 Node/Bun，失败不报成功。
+- [x] **E2 PowerShell installer**：同步 Node/npm 语义，先覆盖宿主、Windows ARM、global prefix、PATH、重复安装、自检。验证 V27；完成信号：Windows x64 fixture/runner 通过，无 Bun path。
 - [ ] **E3 Node/platform matrix**：用同一 lock/tarball 执行 Node 20/22/24、macOS/Linux/Windows 安装/sidecar/TTY/Web smoke。验证 V28；完成信号：支持矩阵证据完整，musl/Windows ARM 只记录拒绝，跳过有明确原因。
-- [ ] **E4a 用户文档**：更新 README、快速开始、交互使用、故障排查，按文档走安装/开发/输入/Workspace/Tool/Web/失败。验证 V29 子集；完成信号：用户路径无 Bun/OpenTUI/鼠标 Sidebar 陈述。
-- [ ] **E4b 开发者/架构文档**：更新开发工作流、依赖清单、架构总览和 TUI 表现层，只保留 Node/npm/Ink canonical path，并引用 HC-145/181 历史。验证 V29；完成信号：文档与代码/依赖/Node20 EOL 口径一致。
+- [x] **E4a 用户文档**：更新 README、快速开始、交互使用、故障排查，按文档走安装/开发/输入/Workspace/Tool/Web/失败。验证 V29 子集；完成信号：用户路径无 Bun/OpenTUI/鼠标 Sidebar 陈述。
+- [x] **E4b 开发者/架构文档**：更新开发工作流、依赖清单、架构总览和 TUI 表现层，只保留 Node/npm/Ink canonical path，并引用 HC-145/181 历史。验证 V29；完成信号：文档与代码/依赖/Node20 EOL 口径一致。
 - [ ] **E5 完整验证/review**：执行 V30，使用 `code-review-and-quality` 对照 Task/Spec；修复 P0/P1 并重跑受影响测试，记录版本影响和精确证据。完成信号：无未解决 P0/P1，Task 证据齐全。
 - [ ] **E 停点交付**：展示安装、Node/平台矩阵、完整 TUI、Web、零 Bun、文档和 review；更新 Task/Todo/handoff，**停止等待用户最终验收**，不自动发布/提交/改版本。
 - [ ] **完成与归档**：仅在用户明确验收、全部实现项/证据/review/架构/版本影响齐全后运行 task completion、移动 Task 到 archive、同步看板并复跑 project check；存在阻塞不得标完成。

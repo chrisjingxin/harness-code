@@ -23,19 +23,26 @@ async function writeExec(path: string, body: string): Promise<void> {
   await chmod(path, 0o755)
 }
 
-async function writeFakes(bin: string, log: string, options?: { bunVersion?: string; harnessFails?: boolean }): Promise<void> {
-  const bunVersion = options?.bunVersion ?? "1.2.19"
+async function writeFakes(bin: string, log: string, options?: { nodeVersion?: string; npmVersion?: string; harnessFails?: boolean }): Promise<void> {
+  const nodeVersion = options?.nodeVersion ?? "v20.20.2"
+  const npmVersion = options?.npmVersion ?? "10.9.3"
   const harnessTemplate = join(bin, "harness-template")
   await writeExec(harnessTemplate, options?.harnessFails
     ? "#!/bin/sh\necho fail >&2\nexit 1\n"
     : "#!/bin/sh\necho 0.1.0\n")
-  await writeExec(join(bin, "bun"), `#!/bin/sh
-echo "bun $*" >> "${log}"
-if [ "$1" = "--version" ]; then echo "${bunVersion}"; exit 0; fi
+  await writeExec(join(bin, "node"), `#!/bin/sh
+echo "node $*" >> "${log}"
+if [ "$1" = "--version" ]; then echo "${nodeVersion}"; exit 0; fi
+exit 1
+`)
+  await writeExec(join(bin, "npm"), `#!/bin/sh
+echo "npm $*" >> "${log}"
+if [ "$1" = "--version" ]; then echo "${npmVersion}"; exit 0; fi
+if [ "$1" = "config" ] && [ "$2" = "get" ] && [ "$3" = "prefix" ]; then echo "$HOME/.npm-global"; exit 0; fi
 if [ "$1" = "install" ]; then
-  mkdir -p "$HOME/.bun/bin"
-  cp "${harnessTemplate}" "$HOME/.bun/bin/harness"
-  chmod +x "$HOME/.bun/bin/harness"
+  mkdir -p "$HOME/.npm-global/bin"
+  cp "${harnessTemplate}" "$HOME/.npm-global/bin/harness"
+  chmod +x "$HOME/.npm-global/bin/harness"
   exit 0
 fi
 exit 1
@@ -117,17 +124,33 @@ test("musl 退出 1 并说明不支持", async () => {
   expect(result.stderr.toString() + result.stdout.toString()).toMatch(/musl/i)
 })
 
-test("已有合格 Bun 时不下载 bun", async () => {
+test("已有合格 Node 与 npm 时不下载，直接调用 npm install", async () => {
   const { home, bin, log } = await makeHome()
   await writeFakes(bin, log)
   const result = runInstaller(home, bin, ["--no-modify-path"])
   expect(result.exitCode).toBe(0)
   const recorded = await readFile(log, "utf8")
   expect(recorded).not.toContain("curl")
-  expect(recorded).toContain("bun install")
+  expect(recorded).toContain("npm install")
   expect(recorded).toContain("--registry https://registry.test.example/npm")
   expect(recorded).toContain("uv tool install")
   expect(recorded).toContain("--index https://pypi.test.example/simple")
+})
+
+test("Node 缺失或版本低于 20 时退出 1 并提示企业渠道", async () => {
+  const { home, bin, log } = await makeHome()
+  await writeFakes(bin, log, { nodeVersion: "v19.9.0" })
+  const result = runInstaller(home, bin, ["--no-modify-path"])
+  expect(result.exitCode).toBe(1)
+  expect(result.stderr.toString()).toContain("Node.js >= 20")
+})
+
+test("npm 缺失或版本低于 10 时退出 1", async () => {
+  const { home, bin, log } = await makeHome()
+  await writeFakes(bin, log, { npmVersion: "9.8.1" })
+  const result = runInstaller(home, bin, ["--no-modify-path"])
+  expect(result.exitCode).toBe(1)
+  expect(result.stderr.toString()).toContain("npm >= 10")
 })
 
 test("harness --version 失败则退出 1 且不宣称成功", async () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Harness Code Unix 安装器：检测并补齐 Bun / uv / Python，再安装界面包与内核包。
+# Harness Code Unix 安装器：检测企业已有 Node >=20 / npm / uv / Python，再安装界面包与内核包。
 set -euo pipefail
 
 usage() {
@@ -17,20 +17,20 @@ Fill DEFAULT_* at the top before hosting so users need no env vars.
 Environment (optional overrides):
   HARNESS_INSTALL_VERSION     Same as --version
   HARNESS_NO_MODIFY_PATH      Set to 1 for --no-modify-path
-  HARNESS_NPM_REGISTRY        bun registry for @za38/cli
+  HARNESS_NPM_REGISTRY        npm registry for @za38/cli
   UV_INDEX_URL                uv index for za38-agent
-  HARNESS_BUN_INSTALL_URL     Override Bun installer
   HARNESS_UV_INSTALL_URL      Override uv installer
   HARNESS_INSTALL_BASE_URL    Host for this script and example config
   HARNESS_EXAMPLE_CONFIG      Local example config.toml to copy
 EOF
 }
 
-MIN_BUN="1.2.19"
+MIN_NODE="20.0.0"
+MIN_NPM="10.0.0"
 CLI_PACKAGE="@za38/cli"
 AGENT_PACKAGE="za38-agent"
 
-# 托管到企业域名之前填写这三行。仓库里不要写死某个域名。
+# 托管到企业域名之前填写这三项。仓库里不要写死某个域名。
 DEFAULT_INSTALL_BASE_URL=""
 DEFAULT_NPM_REGISTRY=""
 DEFAULT_PYPI_INDEX=""
@@ -40,7 +40,6 @@ NO_MODIFY_PATH="${HARNESS_NO_MODIFY_PATH:-0}"
 HARNESS_INSTALL_BASE_URL="${HARNESS_INSTALL_BASE_URL:-$DEFAULT_INSTALL_BASE_URL}"
 HARNESS_NPM_REGISTRY="${HARNESS_NPM_REGISTRY:-$DEFAULT_NPM_REGISTRY}"
 UV_INDEX_URL="${UV_INDEX_URL:-$DEFAULT_PYPI_INDEX}"
-BUN_INSTALL_URL="${HARNESS_BUN_INSTALL_URL:-https://bun.sh/install}"
 UV_INSTALL_URL="${HARNESS_UV_INSTALL_URL:-https://astral.sh/uv/install.sh}"
 
 while [ $# -gt 0 ]; do
@@ -121,12 +120,21 @@ version_ge() {
   [ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" = "$minimum" ]
 }
 
-have_bun() {
-  command -v bun >/dev/null 2>&1 || return 1
+have_node() {
+  command -v node >/dev/null 2>&1 || return 1
   local raw
-  raw="$(bun --version 2>/dev/null || true)"
+  raw="$(node --version 2>/dev/null || true)"
+  raw="${raw#v}"
   raw="${raw%%-*}"
-  [ -n "$raw" ] && version_ge "$raw" "$MIN_BUN"
+  [ -n "$raw" ] && version_ge "$raw" "$MIN_NODE"
+}
+
+have_npm() {
+  command -v npm >/dev/null 2>&1 || return 1
+  local raw
+  raw="$(npm --version 2>/dev/null || true)"
+  raw="${raw%%-*}"
+  [ -n "$raw" ] && version_ge "$raw" "$MIN_NPM"
 }
 
 have_uv() {
@@ -147,15 +155,14 @@ download_install() {
   curl -fsSL "$url"
 }
 
-if ! have_bun; then
-  echo "Installing Bun ${MIN_BUN}..."
-  download_install "$BUN_INSTALL_URL" | BUN_VERSION="$MIN_BUN" bash
-  export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-  if ! have_bun; then
-    echo "error: Bun install finished but bun >= ${MIN_BUN} is not on PATH" >&2
-    exit 1
-  fi
+if ! have_node; then
+  echo "error: Node.js >= 20 is required. Please install Node.js >= 20 from your enterprise portal or package manager." >&2
+  exit 1
+fi
+
+if ! have_npm; then
+  echo "error: npm >= 10 is required. Please update npm or install Node.js >= 20." >&2
+  exit 1
 fi
 
 if ! have_uv; then
@@ -186,13 +193,17 @@ if [ -z "$HARNESS_NPM_REGISTRY" ] || [ -z "$UV_INDEX_URL" ]; then
 fi
 
 echo "Installing ${cli_ref} from ${HARNESS_NPM_REGISTRY}..."
-bun install -g "$cli_ref" --registry "$HARNESS_NPM_REGISTRY"
+npm install -g "$cli_ref" --registry "$HARNESS_NPM_REGISTRY"
 
 echo "Installing ${agent_ref} from ${UV_INDEX_URL}..."
 uv tool install "$agent_ref" --index "$UV_INDEX_URL"
 
-export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
-export PATH="$BUN_INSTALL/bin:$HOME/.local/bin:$PATH"
+npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+npm_bin=""
+if [ -n "$npm_prefix" ]; then
+  npm_bin="$npm_prefix/bin"
+fi
+export PATH="${npm_bin:+$npm_bin:}$HOME/.local/bin:$PATH"
 
 if ! command -v harness >/dev/null 2>&1 || ! harness --version >/dev/null 2>&1; then
   echo "error: harness --version failed after install" >&2
@@ -201,7 +212,7 @@ fi
 
 path_block_begin="# >>> harness installer >>>"
 path_block_end="# <<< harness installer <<<"
-path_export='export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"'
+path_export="export PATH=\"${npm_bin:+$npm_bin:}\$HOME/.local/bin:\$PATH\""
 
 write_path_block() {
   local file="$1"
@@ -233,15 +244,19 @@ if [ "$NO_MODIFY_PATH" != "1" ]; then
     fish)
       mkdir -p "$HOME/.config/fish"
       if ! grep -qs "harness installer" "$HOME/.config/fish/config.fish" 2>/dev/null; then
-        printf '\n# >>> harness installer >>>\nfish_add_path $HOME/.bun/bin\nfish_add_path $HOME/.local/bin\n# <<< harness installer <<<\n' >> "$HOME/.config/fish/config.fish"
+        if [ -n "$npm_bin" ]; then
+          printf '\n# >>> harness installer >>>\nfish_add_path %s\nfish_add_path $HOME/.local/bin\n# <<< harness installer <<<\n' "$npm_bin" >> "$HOME/.config/fish/config.fish"
+        else
+          printf '\n# >>> harness installer >>>\nfish_add_path $HOME/.local/bin\n# <<< harness installer <<<\n' >> "$HOME/.config/fish/config.fish"
+        fi
       fi
       ;;
     *)
       write_path_block "$HOME/.profile"
       ;;
   esac
-  if [ -d "$HOME/.local/bin" ]; then
-    ln -sf "$BUN_INSTALL/bin/harness" "$HOME/.local/bin/harness" 2>/dev/null || true
+  if [ -d "$HOME/.local/bin" ] && [ -n "$npm_bin" ] && [ -f "$npm_bin/harness" ]; then
+    ln -sf "$npm_bin/harness" "$HOME/.local/bin/harness" 2>/dev/null || true
   fi
 fi
 
@@ -275,4 +290,4 @@ elif [ -f "$config_path" ]; then
 fi
 
 echo "Harness ${VERSION} installed. Run: harness"
-echo "If the command is not found, open a new terminal or: export PATH=\"\$HOME/.bun/bin:\$HOME/.local/bin:\$PATH\""
+echo "If the command is not found, open a new terminal or: export PATH=\"${npm_bin:+$npm_bin:}\$HOME/.local/bin:\$PATH\""

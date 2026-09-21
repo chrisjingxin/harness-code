@@ -21,9 +21,8 @@ Fill DEFAULT_* at the top before hosting so users need no env vars.
 Environment (optional overrides):
   HARNESS_INSTALL_VERSION     Same as --version
   HARNESS_NO_MODIFY_PATH      Set to 1 for --no-modify-path
-  HARNESS_NPM_REGISTRY        bun registry for @za38/cli
+  HARNESS_NPM_REGISTRY        npm registry for @za38/cli
   UV_INDEX_URL                uv index for za38-agent
-  HARNESS_BUN_INSTALL_URL     Override Bun installer
   HARNESS_UV_INSTALL_URL      Override uv installer
   HARNESS_INSTALL_BASE_URL    Host for this script and example config
   HARNESS_EXAMPLE_CONFIG      Local example config.toml to copy
@@ -31,7 +30,8 @@ Environment (optional overrides):
 "@
 }
 
-$MinBun = "1.2.19"
+$MinNode = "20.0.0"
+$MinNpm = "10.0.0"
 $CliPackage = "@za38/cli"
 $AgentPackage = "za38-agent"
 # 托管到企业域名之前填写这三项。仓库里不要写死某个域名。
@@ -43,7 +43,6 @@ $NoModifyPath = $env:HARNESS_NO_MODIFY_PATH -eq "1"
 $InstallBaseUrl = if ($env:HARNESS_INSTALL_BASE_URL) { $env:HARNESS_INSTALL_BASE_URL } else { $DefaultInstallBaseUrl }
 $NpmRegistry = if ($env:HARNESS_NPM_REGISTRY) { $env:HARNESS_NPM_REGISTRY } else { $DefaultNpmRegistry }
 $PypiIndex = if ($env:UV_INDEX_URL) { $env:UV_INDEX_URL } else { $DefaultPypiIndex }
-$BunInstallUrl = if ($env:HARNESS_BUN_INSTALL_URL) { $env:HARNESS_BUN_INSTALL_URL } else { "https://bun.sh/install.ps1" }
 $UvInstallUrl = if ($env:HARNESS_UV_INSTALL_URL) { $env:HARNESS_UV_INSTALL_URL } else { "https://astral.sh/uv/install.ps1" }
 
 for ($i = 0; $i -lt $args.Count; $i++) {
@@ -102,13 +101,22 @@ function Test-VersionAtLeast([string]$Current, [string]$Minimum) {
   }
 }
 
-function Test-HasBun {
-  $bun = Get-Command bun -ErrorAction SilentlyContinue
-  if (-not $bun) { return $false }
-  $raw = (bun --version 2>$null | Select-Object -First 1)
+function Test-HasNode {
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $node) { return $false }
+  $raw = (node --version 2>$null | Select-Object -First 1)
+  if (-not $raw) { return $false }
+  $raw = ($raw -replace "^v","" -split "-")[0]
+  return Test-VersionAtLeast $raw $MinNode
+}
+
+function Test-HasNpm {
+  $npm = Get-Command npm -ErrorAction SilentlyContinue
+  if (-not $npm) { return $false }
+  $raw = (npm --version 2>$null | Select-Object -First 1)
   if (-not $raw) { return $false }
   $raw = ($raw -split "-")[0]
-  return Test-VersionAtLeast $raw $MinBun
+  return Test-VersionAtLeast $raw $MinNpm
 }
 
 function Add-UserPath([string]$Directory) {
@@ -121,17 +129,14 @@ function Add-UserPath([string]$Directory) {
 }
 
 $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
-$bunBin = Join-Path $homeDir ".bun\bin"
 $uvBin = Join-Path $homeDir ".local\bin"
-$env:Path = "$bunBin;$uvBin;$env:Path"
 
-if (-not (Test-HasBun)) {
-  Write-Host "Installing Bun $MinBun..."
-  Invoke-RestMethod $BunInstallUrl | Invoke-Expression
-  $env:Path = "$bunBin;$env:Path"
-  if (-not (Test-HasBun)) {
-    Fail 1 "error: Bun install finished but bun >= $MinBun is not on PATH"
-  }
+if (-not (Test-HasNode)) {
+  Fail 1 "error: Node.js >= 20 is required. Please install Node.js >= 20 from your enterprise portal or package manager."
+}
+
+if (-not (Test-HasNpm)) {
+  Fail 1 "error: npm >= 10 is required. Please update npm or install Node.js >= 20."
 }
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -171,12 +176,14 @@ if (-not $NpmRegistry -or -not $PypiIndex) {
 }
 
 Write-Host "Installing $cliRef from $NpmRegistry..."
-bun install -g $cliRef --registry $NpmRegistry
+npm install -g $cliRef --registry $NpmRegistry
 
 Write-Host "Installing $agentRef from $PypiIndex..."
 uv tool install $agentRef --index $PypiIndex
 
-$env:Path = "$bunBin;$uvBin;$env:Path"
+$npmPrefix = try { (npm config get prefix 2>$null).Trim() } catch { "" }
+$npmBin = $npmPrefix
+$env:Path = "$npmBin;$uvBin;$env:Path"
 $harness = Get-Command harness -ErrorAction SilentlyContinue
 if (-not $harness) {
   Fail 1 "error: harness --version failed after install"
@@ -188,7 +195,9 @@ try {
 }
 
 if (-not $NoModifyPath) {
-  Add-UserPath $bunBin
+  if ($npmBin) {
+    Add-UserPath $npmBin
+  }
   Add-UserPath $uvBin
 }
 
