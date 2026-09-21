@@ -10,6 +10,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "overrides": {
+    "vite": "8.0.16"
+  },
   "scripts": {
     "build": "npm run build --workspace @za38/cli",
     "dev": "node --import tsx packages/cli/src/bin.ts",
