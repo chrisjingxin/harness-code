@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,9 @@ from harness_agent.protocol.generated import (
     RunStartParams,
 )
 from harness_agent.protocol.runtime import (
+    EXPECTED_DIGEST,
+    SCHEMA_PATH,
+    read_canonical_bytes,
     validate_interaction_params,
     validate_interaction_result,
     validate_notification_params,
@@ -29,6 +33,12 @@ from harness_agent.protocol.runtime import (
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[3] / "protocol" / "fixtures" / "v3-contract.json"
 )
+
+
+def test_protocol_digest_ignores_windows_newlines(tmp_path: Path) -> None:
+    crlf = tmp_path / "protocol_v3.json"
+    crlf.write_bytes(SCHEMA_PATH.read_bytes().replace(b"\n", b"\r\n"))
+    assert hashlib.sha256(read_canonical_bytes(crlf)).hexdigest() == EXPECTED_DIGEST
 
 
 def test_python_accepts_all_shared_valid_fixtures() -> None:

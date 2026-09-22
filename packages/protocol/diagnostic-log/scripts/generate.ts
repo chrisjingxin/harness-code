@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import Ajv2020 from "ajv/dist/2020.js"
 import standaloneCode from "ajv/dist/standalone/index.js"
+import { withoutCarriageReturn } from "../../scripts/newline.mjs"
 
 type Schema = Record<string, any>
 type EventMetadata = { levels: string[]; fields: string }
@@ -15,7 +16,7 @@ const diagnosticRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const protocolRoot = resolve(diagnosticRoot, "..")
 const repositoryRoot = resolve(protocolRoot, "../..")
 const schemaPath = resolve(diagnosticRoot, "schema/v1.json")
-const schemaText = await readFile(schemaPath, "utf8")
+const schemaText = withoutCarriageReturn(await readFile(schemaPath, "utf8"))
 const schema = JSON.parse(schemaText) as Schema
 const metadata = schema["x-harness-diagnostic"] as Metadata
 const digest = createHash("sha256").update(schemaText).digest("hex")
@@ -30,7 +31,7 @@ const targets = [
 
 if (process.argv.includes("--check")) {
   for (const [path, expected] of targets) {
-    const actual = await readFile(path, "utf8").catch(() => "")
+    const actual = withoutCarriageReturn(await readFile(path, "utf8").catch(() => ""))
     if (actual !== expected) throw new Error(`${path} 已过期，请运行 npm run protocol:generate`)
   }
 } else {

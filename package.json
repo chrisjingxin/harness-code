@@ -17,7 +17,7 @@
     "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",
     "deps:sync": "node scripts/dependencies/sync.mjs",
     "deps:check": "node scripts/dependencies/check_vendored_packages.mjs && node scripts/dependencies/run_python.mjs scripts/dependencies/check_dependencies.py",
-    "deps:test": "node --test scripts/dependencies/node_tooling.test.mjs scripts/dependencies/source_policy.test.mjs scripts/dependencies/vendor_policy.test.mjs",
+    "deps:test": "node --test scripts/dependencies/node_tooling.test.mjs scripts/dependencies/source_policy.test.mjs scripts/dependencies/vendor_policy.test.mjs packages/protocol/scripts/newline.test.mjs",
     "test": "npm run test:project && npm run deps:test && npm run test:ts && npm run test:py",
     "test:project": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs --test scripts/project/project-management.test.ts",
     "typecheck": "npm --workspace @za38/cli run typecheck",

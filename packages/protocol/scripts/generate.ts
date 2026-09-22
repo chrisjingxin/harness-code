@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import Ajv2020 from "ajv/dist/2020.js"
 import standaloneCode from "ajv/dist/standalone/index.js"
+import { withoutCarriageReturn } from "./newline.mjs"
 
 type Schema = Record<string, any>
 type ContractEntry = { params?: string; result?: string; payload?: string; capability?: string; handle?: string; controlled?: boolean; min_minor?: number }
@@ -25,7 +26,7 @@ type Metadata = {
 const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const repositoryRoot = resolve(protocolRoot, "../..")
 const schemaPath = resolve(protocolRoot, "schema/v3.json")
-const schemaText = await readFile(schemaPath, "utf8")
+const schemaText = withoutCarriageReturn(await readFile(schemaPath, "utf8"))
 const schemaDigest = createHash("sha256").update(schemaText).digest("hex")
 const schema = JSON.parse(schemaText) as Schema
 const metadata = schema["x-harness"] as Metadata
@@ -40,7 +41,7 @@ const targets = [
 
 if (process.argv.includes("--check")) {
   for (const [path, expected] of targets) {
-    const actual = await readFile(path, "utf8").catch(() => "")
+    const actual = withoutCarriageReturn(await readFile(path, "utf8").catch(() => ""))
     if (actual !== expected) throw new Error(`${path} 已过期，请运行 npm run protocol:generate`)
   }
 } else {
