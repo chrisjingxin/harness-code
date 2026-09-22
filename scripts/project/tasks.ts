@@ -9,8 +9,9 @@
 
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, join, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
 export const TASK_DIR = "docs/developer/task"
 export const TASK_ARCHIVE_DIR = `${TASK_DIR}/archive`
@@ -264,10 +265,10 @@ export function renderTaskBoard(tasks: readonly TaskRecord[]): string {
     return `| ${value.id} | ${value.priority} | ${value.status} | ${escapeTable(value.title)} | ${escapeTable(feature)} | ${escapeTable(ownership)} | ${escapeTable(value.branch)} | ${escapeTable(documentImpact)} |`
   })
   return [
-    "<!-- 此文件由 `bun run tasks:sync` 生成，请勿手动编辑。 -->",
+    "<!-- 此文件由 `npm run tasks:sync` 生成，请勿手动编辑。 -->",
     "# 任务看板",
     "",
-    `活动任务文件位于 \`${TASK_DIR}/\`（命名 \`HC-XXX-功能简介.md\`）；已完成任务归档于 \`${TASK_ARCHIVE_DIR}/\`，不进入看板。流程：task → spec → plan → todo → implement → review。认领：\`bun run task:claim -- <ID> --owner <名称> --branch <分支>\`；完成：\`bun run task:complete\` 并提供测试证据。`,
+    `活动任务文件位于 \`${TASK_DIR}/\`（命名 \`HC-XXX-功能简介.md\`）；已完成任务归档于 \`${TASK_ARCHIVE_DIR}/\`，不进入看板。流程：task → spec → plan → todo → implement → review。认领：\`npm run task:claim -- <ID> --owner <名称> --branch <分支>\`；完成：\`npm run task:complete\` 并提供测试证据。`,
     "",
     "| ID | 优先级 | 状态 | 标题 | 功能归属 | 责任人 | 分支 | 文档影响 |",
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -289,7 +290,7 @@ export async function checkTasks(projectRoot = root): Promise<void> {
   const tasks = await loadTasks(projectRoot)
   const expected = renderTaskBoard(tasks)
   const board = await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")
-  if (board !== expected) throw new Error("任务看板已过期，请运行 bun run tasks:sync")
+  if (board !== expected) throw new Error("任务看板已过期，请运行 npm run tasks:sync")
 }
 
 /** 认领待办任务并立即重新生成任务看板。 */

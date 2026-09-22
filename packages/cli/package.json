@@ -8,9 +8,9 @@
     "harness": "./dist/index.js"
   },
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target bun --external @opentui/core --external @opentui/react --external react --external react-dom --external react-reconciler && bun run scripts/build-web-assets.ts",
-    "syntax:assets": "bun run scripts/vendor-syntax-assets.ts",
+    "dev": "bun src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun --external @opentui/core --external @opentui/react --external react --external react-dom --external react-reconciler && bun scripts/build-web-assets.ts",
+    "syntax:assets": "node scripts/vendor-syntax-assets.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test tests/acceptance tests/args.test.ts tests/diagnostics tests/gateway.integration.test.ts tests/index.test.ts tests/infrastructure tests/integration.test.ts tests/interactive tests/ipc tests/presentation-coordinator tests/presentation-shared tests/tui tests/web/application tests/web/architecture.test.ts tests/web/browser.test.ts tests/web/bundle.test.ts tests/web/integration.test.ts tests/web/presentation tests/web/presentation.test.tsx tests/web/ready-gate.test.ts tests/web/server.test.ts tests/web/syntax tests/workspace && bun test tests/web/takeover-recovery.test.ts"
   },
@@ -23,7 +23,8 @@
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "react-reconciler": "0.33.0",
-    "shiki": "3.23.0"
+    "shiki": "3.23.0",
+    "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "20.0.11",
@@ -33,7 +34,7 @@
     "@types/react-dom": "19.2.3",
     "@types/react-reconciler": "0.32.0",
     "happy-dom": "^20.11.1",
-    "typescript": "6.0.3",
-    "react-devtools-core": "7.0.1"
+    "react-devtools-core": "7.0.1",
+    "typescript": "6.0.3"
   }
 }

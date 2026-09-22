@@ -90,6 +90,7 @@ function DiffTool(props: { tool: ToolCard; terminalWidth: number }) {
   if (hasDiff) {
     const view = diffViewForWidth(Math.max(1, props.terminalWidth - 10))
     const pathLabel = mutation.path ? shortMutationPath(mutation.path) : toolArgumentSummary(props.tool.arguments)
+    const language = resolveLanguageForPath(mutation.path).tuiParser
     return (
       <box marginTop={1} paddingLeft={3} paddingRight={3} flexDirection="column">
         <box flexDirection="row" gap={1}>
@@ -104,6 +105,7 @@ function DiffTool(props: { tool: ToolCard; terminalWidth: number }) {
           syncScroll
           showLineNumbers
           wrapMode="word"
+          filetype={language === "plaintext" ? undefined : language}
           fg={tuiTheme.text}
           lineNumberFg={tuiTheme.muted}
           lineNumberBg={tuiTheme.toolSurface}

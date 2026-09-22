@@ -1,19 +1,10 @@
-/** 校验临时分支源码化 npm 发布工件、workspace 链路与 Windows x64 目标。 */
+/** 校验源码化 npm 发布工件、workspace 链路与 OpenTUI 跨平台原生包。 */
 
 import { createHash } from "node:crypto"
 import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 
-export interface VendoredPackageSpec {
-  name: string
-  version: string
-  path: string
-  tarball: string
-  integrity: string
-  requiredFiles: readonly string[]
-}
-
-export const VENDORED_PACKAGE_SPECS: readonly VendoredPackageSpec[] = [
+export const VENDORED_PACKAGE_SPECS = [
   {
     name: "@opentui/core",
     version: "0.4.3",
@@ -57,7 +48,7 @@ export const VENDORED_PACKAGE_SPECS: readonly VendoredPackageSpec[] = [
 ]
 
 /** 每个源码包在安装后必须能从这些真实消费者位置解析。 */
-export const VENDORED_PACKAGE_CONSUMERS: Readonly<Record<string, readonly string[]>> = {
+export const VENDORED_PACKAGE_CONSUMERS = {
   "@opentui/core": ["packages/cli", "third_party/npm/@opentui/react"],
   "@opentui/react": ["packages/cli"],
   "@opentui/core-win32-x64": ["third_party/npm/@opentui/core"],
@@ -65,34 +56,52 @@ export const VENDORED_PACKAGE_CONSUMERS: Readonly<Record<string, readonly string
   "react-devtools-core": ["packages/cli", "third_party/npm/@opentui/react"],
 }
 
-const TARGET_PLATFORM = { os: "win32", cpu: "x64" } as const
+export const OPENTUI_NATIVE_PACKAGE_SPECS = [
+  { platform: "darwin", arch: "x64", name: "@opentui/core-darwin-x64", version: "0.4.3", extension: ".dylib" },
+  { platform: "darwin", arch: "arm64", name: "@opentui/core-darwin-arm64", version: "0.4.3", extension: ".dylib" },
+  { platform: "win32", arch: "x64", name: "@opentui/core-win32-x64", version: "0.4.3", extension: ".dll" },
+  { platform: "win32", arch: "arm64", name: "@opentui/core-win32-arm64", version: "0.4.3", extension: ".dll" },
+  { platform: "linux", arch: "x64", libc: "glibc", name: "@opentui/core-linux-x64", version: "0.4.3", extension: ".so" },
+  { platform: "linux", arch: "arm64", libc: "glibc", name: "@opentui/core-linux-arm64", version: "0.4.3", extension: ".so" },
+  { platform: "linux", arch: "x64", libc: "musl", name: "@opentui/core-linux-x64-musl", version: "0.4.3", extension: ".so" },
+  { platform: "linux", arch: "arm64", libc: "musl", name: "@opentui/core-linux-arm64-musl", version: "0.4.3", extension: ".so" },
+]
+
+const VENDORED_TARGET_PLATFORM = { os: "win32", cpu: "x64" }
 const PATCH_SOURCE = "patches/react-devtools-core@7.0.1.patch"
 
-type JsonRecord = Record<string, unknown>
-
-/** 校验只允许在目标 Windows x64 环境执行依赖安装或重新解析。 */
-export function validateExecutionPlatform(platform = process.platform, arch = process.arch): string[] {
-  if (platform === TARGET_PLATFORM.os && arch === TARGET_PLATFORM.cpu) return []
-  return [`依赖安装与重新解析仅允许在 ${TARGET_PLATFORM.os}/${TARGET_PLATFORM.cpu} 执行，当前为 ${platform}/${arch}`]
+function nativePackageSpec(platform, arch, linuxLibc) {
+  const libc = platform === "linux" ? (linuxLibc === "musl" ? "musl" : "glibc") : undefined
+  return OPENTUI_NATIVE_PACKAGE_SPECS.find((spec) =>
+    spec.platform === platform && spec.arch === arch && spec.libc === libc)
 }
 
-function isRecord(value: unknown): value is JsonRecord {
+/** 校验当前目标是否具有 OpenTUI 0.4.3 原生发布包。 */
+export function validateExecutionPlatform(platform = process.platform, arch = process.arch, linuxLibc = process.env.OPENTUI_LIBC) {
+  if (platform === "linux" && ![undefined, "", "glibc", "musl"].includes(linuxLibc)) {
+    return [`Linux 的 OPENTUI_LIBC 只允许为空、glibc 或 musl，当前为 ${linuxLibc}`]
+  }
+  if (nativePackageSpec(platform, arch, linuxLibc)) return []
+  return [`OpenTUI 0.4.3 不支持当前依赖同步平台 ${platform}/${arch}`]
+}
+
+function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function readJson(path: string): unknown {
+function readJson(path) {
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as unknown
+    return JSON.parse(readFileSync(path, "utf-8"))
   } catch {
     return undefined
   }
 }
 
 /** 计算 provenance 使用的无平台差异目录摘要。 */
-export function directorySha256(directory: string): string {
-  const entries: string[] = []
+export function directorySha256(directory) {
+  const entries = []
 
-  function visit(current: string): void {
+  function visit(current) {
     for (const name of readdirSync(current).sort()) {
       // 安装器（Bun/npm）会在各 workspace 包下创建链接；它们是安装产物，
       // 不属于 npm tarball，不得影响目录摘要。
@@ -115,57 +124,57 @@ export function directorySha256(directory: string): string {
   return sha256Hex(entries.join(""))
 }
 
-export function sha256Hex(payload: Uint8Array | string): string {
+export function sha256Hex(payload) {
   return createHash("sha256").update(payload).digest("hex")
 }
 
-function packageRoot(root: string, spec: VendoredPackageSpec): string {
+function packageRoot(root, spec) {
   return resolve(root, spec.path)
 }
 
-function lockJson(path: string): JsonRecord | undefined {
+function lockJson(path) {
   try {
     // package-lock.json 是严格 JSON；解析失败视为锁文件无效。
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown
+    const parsed = JSON.parse(readFileSync(path, "utf-8"))
     return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined
   }
 }
 
-function packageManifest(root: string, spec: VendoredPackageSpec): JsonRecord | undefined {
+function packageManifest(root, spec) {
   const parsed = readJson(join(packageRoot(root, spec), "package.json"))
   return isRecord(parsed) ? parsed : undefined
 }
 
-function stringValue(record: JsonRecord | undefined, key: string): string | undefined {
+function stringValue(record, key) {
   const value = record?.[key]
   return typeof value === "string" ? value : undefined
 }
 
-function objectValue(record: JsonRecord | undefined, key: string): JsonRecord | undefined {
+function objectValue(record, key) {
   const value = record?.[key]
   return isRecord(value) ? value : undefined
 }
 
 /** npm 以精确版本链接 workspace；断言依赖声明精确锁定 vendored 版本。 */
-function hasVendoredDependency(record: JsonRecord | undefined, key: string, version: string): boolean {
+function hasVendoredDependency(record, key, version) {
   return stringValue(record, key) === version
 }
 
-function manifestEntrypoints(manifest: JsonRecord): string[] {
+function manifestEntrypoints(manifest) {
   return ["main", "module", "types"]
     .map((field) => stringValue(manifest, field))
-    .filter((value): value is string => Boolean(value))
+    .filter(Boolean)
     .map((value) => value.replace(/^\.\//, ""))
 }
 
-function requiredFiles(spec: VendoredPackageSpec, manifest: JsonRecord): string[] {
+function requiredFiles(spec, manifest) {
   return [...new Set([...spec.requiredFiles, ...manifestEntrypoints(manifest)])]
 }
 
-function validateRequiredFiles(directory: string, spec: VendoredPackageSpec, manifest: JsonRecord): string[] {
-  const issues: string[] = []
+function validateRequiredFiles(directory, spec, manifest) {
+  const issues = []
   for (const requiredFile of requiredFiles(spec, manifest)) {
     const path = join(directory, requiredFile)
     try {
@@ -177,8 +186,8 @@ function validateRequiredFiles(directory: string, spec: VendoredPackageSpec, man
   return issues
 }
 
-function validatePackageFiles(root: string, spec: VendoredPackageSpec): string[] {
-  const issues: string[] = []
+function validatePackageFiles(root, spec) {
+  const issues = []
   const directory = packageRoot(root, spec)
   const manifest = packageManifest(root, spec)
   if (!existsSync(directory)) {
@@ -214,14 +223,14 @@ function validatePackageFiles(root: string, spec: VendoredPackageSpec): string[]
   return issues
 }
 
-function validateProvenance(root: string): string[] {
-  const issues: string[] = []
+function validateProvenance(root) {
+  const issues = []
   const provenancePath = resolve(root, "third_party/npm/provenance.json")
   const provenance = readJson(provenancePath)
   if (!isRecord(provenance)) return [`missing or invalid provenance ${provenancePath}`]
   if (provenance.schemaVersion !== 1) issues.push("provenance schemaVersion must be 1")
   const target = objectValue(provenance, "target")
-  if (target?.os !== TARGET_PLATFORM.os || target?.cpu !== TARGET_PLATFORM.cpu) {
+  if (target?.os !== VENDORED_TARGET_PLATFORM.os || target?.cpu !== VENDORED_TARGET_PLATFORM.cpu) {
     issues.push("provenance target must be win32/x64")
   }
   const packages = objectValue(provenance, "packages")
@@ -259,8 +268,8 @@ function validateProvenance(root: string): string[] {
   return issues
 }
 
-function validateWorkspaceEdges(root: string): string[] {
-  const issues: string[] = []
+function validateWorkspaceEdges(root) {
+  const issues = []
   const rootManifest = readJson(resolve(root, "package.json"))
   const rootRecord = isRecord(rootManifest) ? rootManifest : undefined
   const workspaces = rootRecord?.workspaces
@@ -313,6 +322,12 @@ function validateWorkspaceEdges(root: string): string[] {
   if (!hasVendoredDependency(objectValue(core, "optionalDependencies"), "@opentui/core-win32-x64", win32Spec.version)) {
     issues.push(`@opentui/core -> @opentui/core-win32-x64 must pin the vendored version ${win32Spec.version}`)
   }
+  for (const nativeSpec of OPENTUI_NATIVE_PACKAGE_SPECS) {
+    if (nativeSpec.name === win32Spec.name) continue
+    if (stringValue(objectValue(core, "optionalDependencies"), nativeSpec.name) !== nativeSpec.version) {
+      issues.push(`${nativeSpec.name}: native optional dependency must be pinned to ${nativeSpec.version}`)
+    }
+  }
   if (!hasVendoredDependency(objectValue(react, "dependencies"), "@opentui/core", coreSpec.version)) {
     issues.push(`@opentui/react -> @opentui/core must pin the vendored version ${coreSpec.version}`)
   }
@@ -325,18 +340,18 @@ function validateWorkspaceEdges(root: string): string[] {
   return issues
 }
 
-function packageSegments(name: string): string[] {
+function packageSegments(name) {
   return name.startsWith("@") ? name.split("/") : [name]
 }
 
-function isWithinPath(parent: string, child: string): boolean {
+function isWithinPath(parent, child) {
   const normalizedParent = process.platform === "win32" ? parent.toLowerCase() : parent
   const normalizedChild = process.platform === "win32" ? child.toLowerCase() : child
   const relativePath = relative(normalizedParent, normalizedChild)
   return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath))
 }
 
-function realPath(path: string): string | undefined {
+function realPath(path) {
   try {
     return realpathSync(path)
   } catch {
@@ -344,11 +359,11 @@ function realPath(path: string): string | undefined {
   }
 }
 
-function samePath(left: string, right: string): boolean {
+function samePath(left, right) {
   return isWithinPath(left, right) && isWithinPath(right, left)
 }
 
-function findInstalledPackage(root: string, consumer: string, spec: VendoredPackageSpec): string | undefined {
+function findInstalledPackage(root, consumer, spec) {
   const rootPath = resolve(root)
   let current = resolve(root, consumer)
   while (isWithinPath(rootPath, current)) {
@@ -362,12 +377,12 @@ function findInstalledPackage(root: string, consumer: string, spec: VendoredPack
 }
 
 function validateInstalledPackage(
-  root: string,
-  spec: VendoredPackageSpec,
-  consumer: string,
-  installedPath: string,
-): string[] {
-  const issues: string[] = []
+  root,
+  spec,
+  consumer,
+  installedPath,
+) {
+  const issues = []
   const expectedPath = realPath(packageRoot(root, spec))
   const actualPath = realPath(installedPath)
   if (!expectedPath || !actualPath || !samePath(expectedPath, actualPath)) {
@@ -401,19 +416,19 @@ function validateInstalledPackage(
   return issues
 }
 
-/** 判断是否已经存在至少一个 Bun 安装生成的源码包解析入口。 */
-export function hasInstalledVendoredWorkspace(root: string): boolean {
+/** 判断是否已经存在至少一个 npm 安装生成的源码包解析入口。 */
+export function hasInstalledVendoredWorkspace(root) {
   return VENDORED_PACKAGE_SPECS.some((spec) =>
     (VENDORED_PACKAGE_CONSUMERS[spec.name] ?? []).some((consumer) => Boolean(findInstalledPackage(root, consumer, spec))))
 }
 
 /** 校验安装后实际解析路径；未安装时默认跳过，避免污染安装前静态门禁。 */
-export function validateInstalledVendoredWorkspace(root: string, requireInstalled = false): string[] {
+export function validateInstalledVendoredWorkspace(root, requireInstalled = false) {
   if (!hasInstalledVendoredWorkspace(root)) {
     return requireInstalled ? ["安装后未找到五个源码化 npm 包的 node_modules 解析入口"] : []
   }
 
-  const issues: string[] = []
+  const issues = []
   for (const spec of VENDORED_PACKAGE_SPECS) {
     for (const consumer of VENDORED_PACKAGE_CONSUMERS[spec.name] ?? []) {
       const installedPath = findInstalledPackage(root, consumer, spec)
@@ -427,15 +442,79 @@ export function validateInstalledVendoredWorkspace(root: string, requireInstalle
   return issues
 }
 
+/** 校验 npm 安装后 OpenTUI 为当前平台选择的原生 optional package。 */
+export function validateInstalledOpenTuiNativePackage(
+  root,
+  platform = process.platform,
+  arch = process.arch,
+  linuxLibc = process.env.OPENTUI_LIBC,
+  requireInstalled = false,
+) {
+  const platformIssues = validateExecutionPlatform(platform, arch, linuxLibc)
+  if (platformIssues.length > 0) return platformIssues
+
+  const spec = nativePackageSpec(platform, arch, linuxLibc)
+  const installedPath = findInstalledPackage(root, "third_party/npm/@opentui/core", spec)
+  const installationExists = existsSync(resolve(root, "node_modules")) || hasInstalledVendoredWorkspace(root)
+  if (!installedPath) {
+    return requireInstalled || installationExists ? [`${spec.name}: installed native package missing`] : []
+  }
+
+  const issues = []
+  const actualPath = realPath(installedPath)
+  const projectPath = realPath(resolve(root)) ?? resolve(root)
+  if (!actualPath || !isWithinPath(projectPath, actualPath)) {
+    return [`${spec.name}: installed native package escapes the project workspace`]
+  }
+  const manifest = readJson(join(actualPath, "package.json"))
+  if (!isRecord(manifest)) return [`${spec.name}: installed native package has no readable package.json`]
+  if (stringValue(manifest, "name") !== spec.name || stringValue(manifest, "version") !== spec.version) {
+    issues.push(`${spec.name}: installed native package has wrong package identity`)
+  }
+
+  // win32/x64 的 workspace 清单为跨平台 npm 安装移除了 os/cpu；其目标由
+  // provenance 与 DLL 门禁证明。其他 registry 包必须保留发布平台 metadata。
+  if (spec.name !== "@opentui/core-win32-x64") {
+    if (!Array.isArray(manifest.os) || !manifest.os.includes(spec.platform)
+      || !Array.isArray(manifest.cpu) || !manifest.cpu.includes(spec.arch)) {
+      issues.push(`${spec.name}: installed native package has wrong platform metadata`)
+    }
+  }
+
+  for (const requiredFile of ["index.js", "index.bun.js", "index.d.ts"]) {
+    const path = join(actualPath, requiredFile)
+    try {
+      if (!lstatSync(path).isFile()) issues.push(`${spec.name}: installed native package missing required file: ${requiredFile}`)
+    } catch {
+      issues.push(`${spec.name}: installed native package missing required file: ${requiredFile}`)
+    }
+  }
+
+  let hasNativeLibrary = false
+  try {
+    hasNativeLibrary = readdirSync(actualPath).some((name) => {
+      if (!name.endsWith(spec.extension)) return false
+      try {
+        const stats = lstatSync(join(actualPath, name))
+        return stats.isFile() && stats.size > 0
+      } catch {
+        return false
+      }
+    })
+  } catch {}
+  if (!hasNativeLibrary) issues.push(`${spec.name}: installed native package is missing non-empty native library ${spec.extension}`)
+  return issues
+}
+
 /** 校验 package-lock.json：五个源码包必须是 workspace link 解析，禁止 registry 回退与嵌套 locator。 */
-function validateLock(root: string): string[] {
+function validateLock(root) {
   const path = resolve(root, "package-lock.json")
   const parsed = lockJson(path)
   if (!parsed) return [`invalid or missing npm lockfile ${path}`]
   const packages = objectValue(parsed, "packages")
   if (!packages) return ["npm lockfile packages must be an object"]
-  const issues: string[] = []
-  const linkRecords = new Set<string>()
+  const issues = []
+  const linkRecords = new Set()
 
   for (const spec of VENDORED_PACKAGE_SPECS) {
     const entry = packages[`node_modules/${spec.name}`]
@@ -464,11 +543,31 @@ function validateLock(root: string): string[] {
   for (const spec of VENDORED_PACKAGE_SPECS) {
     if (!linkRecords.has(spec.name)) issues.push(`${spec.name}: registry fallback in npm lockfile`)
   }
+  for (const nativeSpec of OPENTUI_NATIVE_PACKAGE_SPECS) {
+    if (nativeSpec.name === "@opentui/core-win32-x64") continue
+    const entry = packages[`node_modules/${nativeSpec.name}`]
+    if (!isRecord(entry)) {
+      issues.push(`${nativeSpec.name}: missing native optional package in npm lockfile`)
+      continue
+    }
+    const resolved = typeof entry.resolved === "string" ? entry.resolved : ""
+    const matchesPlatform = Array.isArray(entry.os) && entry.os.includes(nativeSpec.platform)
+      && Array.isArray(entry.cpu) && entry.cpu.includes(nativeSpec.arch)
+    if (entry.version !== nativeSpec.version
+      || entry.link === true
+      || !/^https?:\/\//.test(resolved)
+      || typeof entry.integrity !== "string"
+      || entry.integrity.length === 0
+      || entry.optional !== true
+      || !matchesPlatform) {
+      issues.push(`${nativeSpec.name}: invalid native optional package in npm lockfile`)
+    }
+  }
   return issues
 }
 
 /** 汇总安装前和安装后共用的源码化 npm 门禁。 */
-export function validateVendoredWorkspace(root: string): string[] {
+export function validateVendoredWorkspace(root) {
   const issues = VENDORED_PACKAGE_SPECS.flatMap((spec) => validatePackageFiles(root, spec))
   return [...issues, ...validateProvenance(root), ...validateWorkspaceEdges(root), ...validateLock(root)]
 }

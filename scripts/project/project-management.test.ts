@@ -1,9 +1,10 @@
 /** 仓库协作脚本的回归测试：所有文件系统操作均限定在临时项目目录。 */
 
-import { expect, test } from "bun:test"
+import assert from "node:assert/strict"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import test from "node:test"
 
 import {
   TASK_ARCHIVE_DIR,
@@ -23,7 +24,7 @@ import {
   setVersion,
   syncTasks,
   taskFileName,
-} from "./index"
+} from "./index.ts"
 
 const taskMetadata = {
   id: "HC-001",
@@ -89,10 +90,10 @@ test("任务状态校验拒绝缺少认领信息和完成证据的事项", async
   try {
     const taskPath = join(projectRoot, TASK_DIR, taskFileName("HC-001", "测试任务"))
     await writeFile(taskPath, renderTask({ ...taskMetadata, status: "进行中" }), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("必须填写 owner 和 branch")
+    await assert.rejects(loadTasks(projectRoot), /必须填写 owner 和 branch/)
 
     await writeFile(taskPath, renderTask({ ...taskMetadata, status: "已完成", owner: "agent", branch: "codex/test" }), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("应位于")
+    await assert.rejects(loadTasks(projectRoot), /应位于/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -103,21 +104,21 @@ test("认领和完成任务会同步状态、证据、归档与只读看板", as
   try {
     await claimTask(projectRoot, "HC-001", "codex", "codex/tasks")
     const claimed = (await loadTasks(projectRoot))[0]
-    expect(claimed?.metadata.status).toBe("进行中")
-    expect(claimed?.metadata.owner).toBe("codex")
+    assert.equal(claimed?.metadata.status, "进行中")
+    assert.equal(claimed?.metadata.owner, "codex")
 
-    await completeTask(projectRoot, "HC-001", "bun test scripts/project/project-management.test.ts", "abc123")
-    expect(await loadTasks(projectRoot)).toHaveLength(0)
+    await completeTask(projectRoot, "HC-001", "npm run test:project", "abc123")
+    assert.equal((await loadTasks(projectRoot)).length, 0)
     const archivedPath = join(projectRoot, TASK_ARCHIVE_DIR, taskFileName("HC-001", "测试任务"))
     const archived = await readFile(archivedPath, "utf8")
-    expect(archived).toContain("status: 已完成")
-    expect(archived).toContain("bun test")
-    expect(archived).toContain("abc123")
+    assert.ok(archived.includes("status: 已完成"))
+    assert.ok(archived.includes("npm run test:project"))
+    assert.ok(archived.includes("abc123"))
     // 复核字段已随功能移除，写回时不再生成
-    expect(archived).not.toContain("review_due")
-    expect(archived).not.toContain("reviewed_at")
-    await expect(checkTasks(projectRoot)).resolves.toBeUndefined()
-    expect(await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")).not.toContain("HC-001")
+    assert.ok(!archived.includes("review_due"))
+    assert.ok(!archived.includes("reviewed_at"))
+    await assert.doesNotReject(() => checkTasks(projectRoot))
+    assert.ok(!(await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")).includes("HC-001"))
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -135,9 +136,9 @@ test("任务看板以优先级和任务 ID 稳定排序", async () => {
     }), "utf8")
     await syncTasks(projectRoot)
     const board = await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")
-    expect(board.indexOf("HC-002")).toBeLessThan(board.indexOf("HC-001"))
-    expect(board).toContain("板块：项目协作基础设施")
-    expect(board).toContain("拆解：codex")
+    assert.ok(board.indexOf("HC-002") < board.indexOf("HC-001"))
+    assert.ok(board.includes("板块：项目协作基础设施"))
+    assert.ok(board.includes("拆解：codex"))
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -153,17 +154,17 @@ test("过时任务必须记录替代依据，历史复核字段不再阻断校�
       reviewed_at: "2019-12-01",
       review_due: "2020-01-01",
     }), "utf8")
-    await expect(loadTasks(projectRoot)).resolves.toHaveLength(1)
+    assert.equal((await loadTasks(projectRoot)).length, 1)
 
     await writeFile(taskPath, renderTask({ ...taskMetadata, status: "已过时" }), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("替代 references")
+    await assert.rejects(loadTasks(projectRoot), /替代 references/)
 
     await writeFile(taskPath, renderTask({
       ...taskMetadata,
       status: "已过时",
       references: "HC-002",
     }), "utf8")
-    await expect(loadTasks(projectRoot)).resolves.toHaveLength(1)
+    assert.equal((await loadTasks(projectRoot)).length, 1)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -182,15 +183,15 @@ test("归档任务不进入活动看板，但历史文档引用仍通过校验",
       status: "已完成",
       owner: "codex",
       branch: "codex/archive",
-      test_evidence: "bun test",
+      test_evidence: "npm run test:project",
       completed_at: "2026-07-30",
     }), "utf8")
     await writeFile(join(projectRoot, "README.md"), `提及 HC-000。\n\n[归档](${TASK_ARCHIVE_DIR}/${archivedName})\n`, "utf8")
 
     await syncTasks(projectRoot)
-    expect((await loadTasks(projectRoot)).map(task => task.metadata.id)).toEqual(["HC-001"])
-    expect(await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")).not.toContain("HC-000")
-    await expect(checkDocs(projectRoot)).resolves.toBeUndefined()
+    assert.deepEqual((await loadTasks(projectRoot)).map(task => task.metadata.id), ["HC-001"])
+    assert.ok(!(await readFile(join(projectRoot, TASK_BOARD_PATH), "utf8")).includes("HC-000"))
+    await assert.doesNotReject(() => checkDocs(projectRoot))
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -202,9 +203,9 @@ test("归档研究快照可保留旧任务编号，但本地链接仍需有效",
     const archiveDirectory = join(projectRoot, "docs/developer/research/archive")
     await mkdir(archiveDirectory, { recursive: true })
     await writeFile(join(archiveDirectory, "snapshot.md"), `历史任务 HC-999。\n\n[看板](../../task/任务看板.md)\n`, "utf8")
-    await expect(checkDocs(projectRoot)).resolves.toBeUndefined()
+    await assert.doesNotReject(() => checkDocs(projectRoot))
     await writeFile(join(archiveDirectory, "snapshot.md"), "[失效](../../task/不存在.md)\n", "utf8")
-    await expect(checkDocs(projectRoot)).rejects.toThrow("无效本地链接")
+    await assert.rejects(checkDocs(projectRoot), /无效本地链接/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -213,11 +214,11 @@ test("归档研究快照可保留旧任务编号，但本地链接仍需有效",
 test("文档校验会拒绝失效链接与不存在的任务引用", async () => {
   const projectRoot = await createFixture()
   try {
-    await expect(checkDocs(projectRoot)).resolves.toBeUndefined()
+    await assert.doesNotReject(() => checkDocs(projectRoot))
     await writeFile(join(projectRoot, "README.md"), "[失效](docs/user/不存在.md)\n", "utf8")
-    await expect(checkDocs(projectRoot)).rejects.toThrow("无效本地链接")
+    await assert.rejects(checkDocs(projectRoot), /无效本地链接/)
     await writeFile(join(projectRoot, "README.md"), "提及 HC-999。\n", "utf8")
-    await expect(checkDocs(projectRoot)).rejects.toThrow("不存在的任务")
+    await assert.rejects(checkDocs(projectRoot), /不存在的任务/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -229,11 +230,11 @@ test("任务文件名必须带功能简介且与 id 一致", async () => {
     const validPath = join(projectRoot, TASK_DIR, taskFileName("HC-001", "测试任务"))
     await rm(validPath)
     await writeFile(join(projectRoot, TASK_DIR, "HC-001.md"), renderTask(taskMetadata), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("功能简介")
+    await assert.rejects(loadTasks(projectRoot), /功能简介/)
 
     await rm(join(projectRoot, TASK_DIR, "HC-001.md"))
     await writeFile(join(projectRoot, TASK_DIR, "HC-009-错误简介.md"), renderTask(taskMetadata), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("不一致")
+    await assert.rejects(loadTasks(projectRoot), /不一致/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -247,7 +248,7 @@ const archivedMetadata = {
   status: "已完成",
   owner: "codex",
   branch: "codex/archive",
-  test_evidence: "bun test",
+  test_evidence: "npm run test:project",
   completed_at: "2026-07-30",
 }
 
@@ -255,7 +256,7 @@ test("活动任务目录拒绝非 canonical Markdown，而不是静默忽略", a
   const projectRoot = await createFixture()
   try {
     await writeFile(join(projectRoot, TASK_DIR, "ZC-001.md"), renderTask({ ...taskMetadata, id: "ZC-001" }), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("ZC-001.md")
+    await assert.rejects(loadTasks(projectRoot), /ZC-001\.md/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -265,7 +266,7 @@ test("活动任务目录拒绝缺少 front matter 的畸形 Markdown", async () 
   const projectRoot = await createFixture()
   try {
     await writeFile(join(projectRoot, TASK_DIR, "NOTE.md"), "# 随手笔记\n", "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("NOTE.md")
+    await assert.rejects(loadTasks(projectRoot), /NOTE\.md/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -275,8 +276,8 @@ test("活动任务目录继续接受 README 与生成的看板文件", async () 
   const projectRoot = await createFixture()
   try {
     // 夹具里只有 README.md、任务看板.md 两个非任务 Markdown，二者必须合法。
-    await expect(loadTasks(projectRoot)).resolves.toHaveLength(1)
-    await expect(checkTasks(projectRoot)).resolves.toBeUndefined()
+    assert.equal((await loadTasks(projectRoot)).length, 1)
+    await assert.doesNotReject(() => checkTasks(projectRoot))
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -290,9 +291,9 @@ test("归档目录中重复任务 ID 报错并列出全部冲突路径", async (
     await writeFile(join(archiveDirectory, "HC-000-归档任务.md"), renderTask(archivedMetadata), "utf8")
     await writeFile(join(archiveDirectory, "HC-000-另一归档.md"), renderTask({ ...archivedMetadata, title: "另一归档" }), "utf8")
 
-    await expect(loadArchivedTaskIds(projectRoot)).rejects.toThrow("归档任务 ID 重复：HC-000")
-    await expect(loadArchivedTaskIds(projectRoot)).rejects.toThrow("HC-000-归档任务.md")
-    await expect(loadArchivedTaskIds(projectRoot)).rejects.toThrow("HC-000-另一归档.md")
+    await assert.rejects(loadArchivedTaskIds(projectRoot), /归档任务 ID 重复：HC-000/)
+    await assert.rejects(loadArchivedTaskIds(projectRoot), /HC-000-归档任务\.md/)
+    await assert.rejects(loadArchivedTaskIds(projectRoot), /HC-000-另一归档\.md/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -304,7 +305,7 @@ test("归档目录拒绝非 canonical Markdown", async () => {
     const archiveDirectory = join(projectRoot, TASK_ARCHIVE_DIR)
     await mkdir(archiveDirectory, { recursive: true })
     await writeFile(join(archiveDirectory, "snapshot.md"), "# 说明\n", "utf8")
-    await expect(loadArchivedTaskIds(projectRoot)).rejects.toThrow("snapshot.md")
+    await assert.rejects(loadArchivedTaskIds(projectRoot), /snapshot\.md/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -320,19 +321,19 @@ test("活动与归档使用相同任务 ID 时仍按原错误失败", async () =
       id: "HC-001",
       title: "历史测试任务",
     }), "utf8")
-    await expect(loadTasks(projectRoot)).rejects.toThrow("活动与归档任务 ID 重复：HC-001")
+    await assert.rejects(loadTasks(projectRoot), /活动与归档任务 ID 重复：HC-001/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
 })
 
 test("SemVer 与 Changelog 按预发布规则比较并分类提交", () => {
-  expect(compareSemVer(parseSemVer("1.0.0"), parseSemVer("1.0.0-rc.1"))).toBeGreaterThan(0)
-  expect(compareSemVer(parseSemVer("1.0.0-beta.2"), parseSemVer("1.0.0-beta.11"))).toBeLessThan(0)
+  assert.ok(compareSemVer(parseSemVer("1.0.0"), parseSemVer("1.0.0-rc.1")) > 0)
+  assert.ok(compareSemVer(parseSemVer("1.0.0-beta.2"), parseSemVer("1.0.0-beta.11")) < 0)
   const section = renderChangelogSection("1.2.0", "2026-07-15", ["feat(cli): 新入口", "fix: 修复边界", "chore: 清理"])
-  expect(section).toContain("### 新增")
-  expect(section).toContain("### 修复")
-  expect(section).toContain("### 其他")
+  assert.ok(section.includes("### 新增"))
+  assert.ok(section.includes("### 修复"))
+  assert.ok(section.includes("### 其他"))
 })
 
 test("初次版本初始化同步所有版本文件，并拒绝不一致发布状态", async () => {
@@ -340,14 +341,14 @@ test("初次版本初始化同步所有版本文件，并拒绝不一致发布�
   try {
     await writeFile(join(projectRoot, "VERSION"), "0.1.0\n", "utf8")
     await setVersion(projectRoot, "0.1.0", ["feat: 建立协作基础设施"])
-    expect((await readFile(join(projectRoot, "VERSION"), "utf8")).trim()).toBe("0.1.0")
-    expect(JSON.parse(await readFile(join(projectRoot, "packages/cli/package.json"), "utf8")).version).toBe("0.1.0")
-    expect(await readFile(join(projectRoot, "CHANGELOG.md"), "utf8")).toContain("### 新增")
-    await expect(checkRelease(projectRoot)).resolves.toBeUndefined()
-    await expect(setVersion(projectRoot, "0.1.0", [])).rejects.toThrow("新版本必须高于当前版本")
+    assert.equal((await readFile(join(projectRoot, "VERSION"), "utf8")).trim(), "0.1.0")
+    assert.equal(JSON.parse(await readFile(join(projectRoot, "packages/cli/package.json"), "utf8")).version, "0.1.0")
+    assert.ok((await readFile(join(projectRoot, "CHANGELOG.md"), "utf8")).includes("### 新增"))
+    await assert.doesNotReject(() => checkRelease(projectRoot))
+    await assert.rejects(setVersion(projectRoot, "0.1.0", []), /新版本必须高于当前版本/)
 
     await writeFile(join(projectRoot, "packages/protocol/package.json"), '{"version":"0.2.0"}\n', "utf8")
-    await expect(checkRelease(projectRoot)).rejects.toThrow("版本与 VERSION 不一致")
+    await assert.rejects(checkRelease(projectRoot), /版本与 VERSION 不一致/)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
@@ -355,8 +356,8 @@ test("初次版本初始化同步所有版本文件，并拒绝不一致发布�
 
 test("renderTaskBoard 文案指向新目录", () => {
   const board = renderTaskBoard([])
-  expect(board).toContain("docs/developer/task/")
-  expect(board).toContain("docs/developer/task/archive/")
-  expect(board).not.toContain("docs/developer/tasks/")
-  expect(board).not.toContain("下次复核")
+  assert.ok(board.includes("docs/developer/task/"))
+  assert.ok(board.includes("docs/developer/task/archive/"))
+  assert.ok(!board.includes("docs/developer/tasks/"))
+  assert.ok(!board.includes("下次复核"))
 })

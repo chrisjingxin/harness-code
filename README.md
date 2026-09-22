@@ -6,28 +6,39 @@ Harness Code 是面向企业研发场景的 Coding Agent CLI。终端交互由 B
 
 ## 开始使用
 
-本地开发固定使用 Bun `1.2.19`、Python 3.11+ 和 `uv`。先注入企业 npm/Python 索引，再通过统一入口安装锁定依赖、应用 DeepAgents 补丁并执行零 Anthropic 门禁：
+本地开发固定使用 Bun `1.3.13`（仅 `packages/cli` 的 OpenTUI/FFI 运行、bundler 与 CLI 测试边界）、Python 3.11+ 和 `uv`。根 `package.json` 只使用 npm 做 workspace 编排；依赖安装链路和普通工程工具不会启动 Bun，`npm run dev`、`npm run build` 与 CLI 测试则会转入 `packages/cli` 的上述必要 Bun 边界。依赖安装使用 npm/pip 当前配置：企业外就是公网源，企业内就是企业源。随后通过统一入口安装锁定依赖、应用 DeepAgents 补丁并执行零 Anthropic 门禁：
 
 ```bash
 mkdir -p ~/.harness
-export HARNESS_NPM_REGISTRY='内网 npm registry 地址'
-export HARNESS_PYPI_INDEX='内网 Python simple index 地址'
-bun run deps:install
+npm run deps:sync
 cp docs/user/examples/config.toml ~/.harness/config.toml
 export HARNESS_API_KEY='你的企业网关密钥'
-bun run dev
+npm run dev
 ```
 
-首次在内网重新解析锁文件时使用 `bun run deps:resolve`；它会在显式内网源下重新生成 `package-lock.json` 和 `packages/agent/uv.lock`，通过审查后，后续工作副本只使用 `bun run deps:install` 冻结安装。缺少内网源、工具链版本不符或锁文件仍指向公网时，安装会在联网前失败。
+企业外不需要额外配置源。npm 和 pip 都没写地址时，安装使用 `https://registry.npmjs.org/` 和 `https://pypi.org/simple`。企业内把 npm/pip 配到企业源即可；如果工具配置仍指向公网，可以用 `HARNESS_NPM_REGISTRY`、`HARNESS_PYPI_INDEX` 把这一次安装切到内网。
 
-Windows x64 内网提前验证使用临时分支 `feat_hc_179_内网依赖源码化`：五个关键 npm 发布包（含完整发布入口与 `dist/**`）位于 `third_party/npm/` 并按 workspace 链接，`provenance.json` 记录 tarball integrity 与目录哈希；安装后还会校验实际 realpath，`deps:install`/`deps:resolve` 只允许 win32/x64，其他依赖仍从现有内网源安装。该例外不代表 canonical `master` 的永久发布策略，正式内网包可用并完成目标环境验收后应移除。
+日常只需执行 `npm run deps:sync`，它会按现有锁文件完成 JavaScript 和 Python 依赖的冻结同步、补丁与验证。只有依赖声明或包源发生变化时，才执行 `npm run deps:sync -- --update-lock`；该模式会更新两个锁文件并继续完成同一套同步与验证，不需要再补跑第二条命令。锁文件里的下载地址必须属于这次选中的源：公网安装接受当前公网锁，内网安装仍会拒绝公网下载地址。工具链版本不符时，同步会在联网前失败。
+
+临时分支 `feat_hc_179_内网依赖源码化` 将五个关键 npm 发布包（含 Windows x64 native 包）放在 `third_party/npm/` 并按 workspace 链接；其余平台 native optional package 由当前 npm 企业源提供。`deps:sync` 支持 OpenTUI `0.4.3` 已发布的 macOS、Windows、Linux x64/arm64 目标，安装后会同时校验五个 workspace realpath 和本机 native 包。该例外不代表 canonical `master` 的永久发布策略，正式内网包可用并完成各目标环境验收后应移除。
+
+在 macOS、Windows 或 Linux 上都可从根目录使用 npm 入口运行工程检查：
+
+```bash
+npm run deps:test
+npm run test:project
+npm run project:check
+npm run typecheck
+```
+
+以上四条不启动 Bun。`npm run build`、`npm run test:ts` 和完整 `npm test` 会进入 CLI 的 Bun 边界，因此需要 Bun `1.3.13`；npm 是统一入口，但 OpenTUI CLI 尚未脱离 Bun 运行时。
 
 推荐通过 `api_key_env` 引用环境变量。若本机开发环境无法预先设置环境变量，可在权限为 `0600` 的 `~/.harness/config.toml` 模型 Profile 中设置 `api_key` 作为降级值；环境变量非空时始终优先。
 
-可使用 `bun run dev -- --help` 查看当前 CLI 参数；无头运行示例：
+可使用 `npm run dev -- --help` 查看当前 CLI 参数；无头运行示例：
 
 ```bash
-bun run dev -- --non-interactive --message "解释当前目录的项目结构"
+npm run dev -- --non-interactive --message "解释当前目录的项目结构"
 ```
 
 详细说明：
