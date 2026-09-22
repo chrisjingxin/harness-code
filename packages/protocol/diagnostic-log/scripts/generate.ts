@@ -2,15 +2,16 @@
 
 import { createHash } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
-import Ajv2020 from "ajv/dist/2020"
-import standaloneCode from "ajv/dist/standalone"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import Ajv2020 from "ajv/dist/2020.js"
+import standaloneCode from "ajv/dist/standalone/index.js"
 
 type Schema = Record<string, any>
 type EventMetadata = { levels: string[]; fields: string }
 type Metadata = { version: number; max_record_bytes: number; events: Record<string, EventMetadata> }
 
-const diagnosticRoot = resolve(import.meta.dir, "..")
+const diagnosticRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const protocolRoot = resolve(diagnosticRoot, "..")
 const repositoryRoot = resolve(protocolRoot, "../..")
 const schemaPath = resolve(diagnosticRoot, "schema/v1.json")
@@ -30,7 +31,7 @@ const targets = [
 if (process.argv.includes("--check")) {
   for (const [path, expected] of targets) {
     const actual = await readFile(path, "utf8").catch(() => "")
-    if (actual !== expected) throw new Error(`${path} 已过期，请运行 bun run protocol:generate`)
+    if (actual !== expected) throw new Error(`${path} 已过期，请运行 npm run protocol:generate`)
   }
 } else {
   for (const [path, content] of targets) await writeFile(path, content, "utf8")

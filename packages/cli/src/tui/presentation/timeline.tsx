@@ -8,6 +8,7 @@ import type { InteractiveSnapshot } from "../../interactive/types"
 import { formatContext, formatDuration, formatElapsed, formatUsage } from "../../presentation-shared/formatters"
 import { childTimelineEmptyMessage } from "../../presentation-shared/child-timeline-empty"
 import { diffTextForRenderer, parseFileDiff } from "../../presentation-shared/file-diff"
+import { resolveLanguageForPath } from "../../presentation-shared/language-catalog"
 import {
   COMPOSE_STAGE_LABELS,
   activityGroupSubtitle,
@@ -317,7 +318,32 @@ function renderAssistantMarkdown(content: string, streaming: boolean): ReactNode
 function DiffMessageBlock(props: { diff: string }) {
   const parsed = parseFileDiff(props.diff)
   if (parsed.status === "invalid" || props.diff.trim() === "") return <text content={props.diff} fg={tuiTheme.text} />
-  return <diff width="100%" diff={diffTextForRenderer(props.diff)} view="unified" syncScroll showLineNumbers wrapMode="word" fg={tuiTheme.text} lineNumberFg={tuiTheme.muted} lineNumberBg={tuiTheme.toolSurface} addedBg={tuiTheme.diffAddedBackground} removedBg={tuiTheme.diffRemovedBackground} contextBg={tuiTheme.toolSurface} addedSignColor={tuiTheme.success} removedSignColor={tuiTheme.danger} addedLineNumberBg={tuiTheme.diffAddedBackground} removedLineNumberBg={tuiTheme.diffRemovedBackground} />
+  const pathLine = props.diff.split("\n").find(line => line.startsWith("+++ "))
+  const diffPath = pathLine?.slice(4).trim().replace(/^[ab]\//, "")
+  const language = resolveLanguageForPath(diffPath).tuiParser
+  return (
+    <diff
+      width="100%"
+      diff={diffTextForRenderer(props.diff)}
+      view="unified"
+      syncScroll
+      showLineNumbers
+      wrapMode="word"
+      filetype={language === "plaintext" ? undefined : language}
+      syntaxStyle={markdownSyntax}
+      treeSitterClient={getCommonSyntaxClient()}
+      fg={tuiTheme.text}
+      lineNumberFg={tuiTheme.muted}
+      lineNumberBg={tuiTheme.toolSurface}
+      addedBg={tuiTheme.diffAddedBackground}
+      removedBg={tuiTheme.diffRemovedBackground}
+      contextBg={tuiTheme.toolSurface}
+      addedSignColor={tuiTheme.success}
+      removedSignColor={tuiTheme.danger}
+      addedLineNumberBg={tuiTheme.diffAddedBackground}
+      removedLineNumberBg={tuiTheme.diffRemovedBackground}
+    />
+  )
 }
 
 /** 时间线中的思考条目：标记与正文分列，正文与 Thinking 左对齐。 */

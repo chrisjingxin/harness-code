@@ -60,7 +60,7 @@
         "os",
         "cpu"
       ],
-      "reason": "npm 在平台不符时对带 os/cpu 声明的 workspace 成员直接 notsup（生成与安装皆然，--os/--cpu 配置无法覆盖）；移除平台声明使 macOS 开发机与 Windows 内网共用同一份平台全量 package-lock.json。win32/x64 定位仍由 tarball provenance、opentui.dll 门禁与 deps:install 的 win32/x64 平台门禁保障。原 tarball 值为 os=[win32]、cpu=[x64]。"
+      "reason": "npm 在平台不符时对带 os/cpu 声明的 workspace 成员直接 notsup（生成与安装皆然，--os/--cpu 配置无法覆盖）；移除平台声明使 macOS、Windows、Linux 共用同一份平台全量 package-lock.json。vendored 工件的 win32/x64 定位仍由 tarball provenance 与 opentui.dll 门禁保障，执行平台则由 OpenTUI native package 矩阵校验。原 tarball 值为 os=[win32]、cpu=[x64]。"
     },
     {
       "package": "@opentui/react",

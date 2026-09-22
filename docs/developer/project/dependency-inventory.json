@@ -8,7 +8,7 @@
     "uv_lock_sha256": "d3aeea573138d2b4c9d77363d3e9de11f45fd70a39feaf89c8037919bbe62b24"
   },
   "runtime": {
-    "bun": "1.2.19",
+    "bun": "1.3.13",
     "python": ">=3.11,<4.0",
     "uv": "not pinned"
   },

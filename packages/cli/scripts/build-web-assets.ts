@@ -35,8 +35,8 @@ async function main(): Promise<void> {
   if (!workerOutput) throw new Error("Web syntax Worker 未生成 JavaScript 输出")
   await Bun.write(resolve(distRoot, "web-syntax-worker.js"), workerOutput)
 
-  // Bun 会忽略 entryNaming，入口输出固定命名为 app.js/app.css；固定的
-  // 1.2.19 在使用 outdir 时还会把 CSS output.type 错报为 JavaScript，因此同时
+  // Bun 会忽略 entryNaming，入口输出固定命名为 app.js/app.css；为兼容已确认的
+  // CSS output.type 错报问题，因此同时
   // 依据输出路径后缀识别产物，再显式写入 manifest 的固定文件名。
   const scriptOutput = appResult.outputs.find(output => output.path.endsWith(".js"))
   const styleOutput = appResult.outputs.find(output => output.path.endsWith(".css"))

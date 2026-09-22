@@ -4,10 +4,11 @@
 
 import { readFile } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 
-import { TASK_BOARD_PATH, TASK_DIR, TASK_ID_MATCH_GLOBAL, listMarkdownFiles, loadArchivedTaskIds, loadTasks } from "./tasks"
+import { TASK_BOARD_PATH, TASK_DIR, TASK_ID_MATCH_GLOBAL, listMarkdownFiles, loadArchivedTaskIds, loadTasks } from "./tasks.ts"
 
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
 /** 校验文档入口、任务看板和所有本地 Markdown 链接。 */
 export async function checkDocs(projectRoot = root): Promise<void> {

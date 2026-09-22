@@ -74,7 +74,7 @@ docs/developer/research/140-斜杠命令补全.md
 #### `todo/` — 执行清单（Plan 确认后）
 
 - Plan 的可勾选执行项；每项含明确动作与完成信号（改哪些相邻行为、跑哪条 focused test、期望观察到什么）。
-- 每个可演示停点在 Todo 里单独成节，并写明用户怎么看（例如 `bun run dev` 后观察什么）。
+- 每个可演示停点在 Todo 里单独成节，并写明用户怎么看（例如 `npm run dev` 后观察什么）。
 - 文档命名与 Spec/Plan 一致。
 - 与 Plan 一并使用 `agent-skills:planning-and-task-breakdown` 产出。
 - 一个 Todo 项应能在不中途发明新设计的情况下完成；若仍写着「决定 / 评估 / 选择方案」，说明 Spec/Plan 未完成，不得进入实现。
@@ -197,7 +197,7 @@ Task / Spec / Plan / Todo 必须让不熟悉当前实现的人也能直接检视
 3. 确认当前所处阶段（task/spec/plan/todo/implement/review；快速通道需求无阶段概念），只做该阶段工作，使用该阶段强制 Skill。
 4. 按变更归属选择包：界面和进程管理改 `cli`，跨进程契约改 `protocol`，Agent 与执行逻辑改 `agent`。
 5. 修改前先找到邻近实现与现有测试；协议或生命周期变更必须同时验证 TypeScript 和 Python 两端。
-6. 实现阶段使用最小相关测试快速反馈（TDD）。复杂功能到达 Plan 的可演示停点后停止，向用户说明如何查看阶段性成果（例如 `bun run dev` 后看哪一块）；未经用户要求不得继续后续工作包。快速通道需求可一次完成。整任务交付前再执行本文定义的项目级检查。
+6. 实现阶段使用最小相关测试快速反馈（TDD）。复杂功能到达 Plan 的可演示停点后停止，向用户说明如何查看阶段性成果（例如 `npm run dev` 后看哪一块）；未经用户要求不得继续后续工作包。快速通道需求可一次完成。整任务交付前再执行本文定义的项目级检查。
 7. 任务完成后检视 `docs/developer/architecture/`：大功能新建或对已有文档增量更新。
 
 ## 项目结构与模块职责
@@ -227,16 +227,16 @@ Task / Spec / Plan / Todo 必须让不熟悉当前实现的人也能直接检视
 
 ## 构建、测试与开发命令
 
-- `bun run dev`：开发模式运行 CLI 工作区入口。
-- `bun run build`：构建全部 Bun 工作区包。
-- `bun run typecheck`：检查 OpenTUI/TypeScript 类型。
-- `bun run test`：运行工作区测试脚本。
+- `npm run dev`：开发模式运行 CLI 工作区入口；脚本内部保留 Bun/OpenTUI 运行时。
+- `npm run build`：构建全部工作区包；CLI 构建内部保留 Bun bundler。
+- `npm run typecheck`：检查 OpenTUI/TypeScript 类型。
+- `npm run test`：运行工作区测试脚本；CLI 测试内部仍使用 `bun:test`。
 - `cd packages/cli && bun test`：运行 TypeScript IPC/TUI 测试。
 - `cd packages/agent && .venv/bin/python -m pytest -q`：使用项目虚拟环境运行 Python 测试。
-- `bun run project:check`：同时检查文档链接、任务状态、生成看板和版本/Changelog 一致性。
-- `bun run task:claim -- <ID> --owner <名称> --branch <分支>`：认领 Task。
-- `bun run task:complete -- <ID> --evidence "<命令与结果>"`：记录证据并完成任务（完成后归档至 `task/archive/`）。
-- `bun run version:set <SemVer>`：唯一允许修改根 `VERSION`、各包版本与 `CHANGELOG.md` 的入口。
+- `npm run project:check`：使用 Node 检查 Protocol、文档链接、任务状态、生成看板和版本/Changelog 一致性。
+- `npm run task:claim -- <ID> --owner <名称> --branch <分支>`：认领 Task。
+- `npm run task:complete -- <ID> --evidence "<命令与结果>"`：记录证据并完成任务（完成后归档至 `task/archive/`）。
+- `npm run version:set -- <SemVer>`：唯一允许修改根 `VERSION`、各包版本与 `CHANGELOG.md` 的入口。
 
 ## 代码风格与命名
 
@@ -264,7 +264,7 @@ Codex sandbox 内依赖 loopback 监听、进程枚举或其他被禁宿主能�
 - 活动 Task 只编辑 `docs/developer/task/HC-XXX-….md`；整体状态汇总在 `docs/developer/task/任务看板.md`。
 - 不得手写绕过检查去改看板语义以规避 `tasks:check`；认领、完成后应运行项目提供的 task 同步/完成命令。
 - 状态建议：`待认领`、`进行中`、`阻塞`、`待验收`、`已完成`、`已过时`。
-- `owner` / `branch` 表示当前认领者与实施分支，通过 `bun run task:claim` 写入；未认领固定 `owner: 未认领`、`branch: -`。
+- `owner` / `branch` 表示当前认领者与实施分支，通过 `npm run task:claim` 写入；未认领固定 `owner: 未认领`、`branch: -`。
 - 新功能分支统一命名为 `feat_hc_XXX_功能简介`（下划线分隔，`XXX` 与 Task 编号一致，功能简介可截短），例如 `feat_hc_155_重做Compose流程`；认领时通过 `task:claim` 登记，一个分支对应一个 Task。
 - **已完成** Task：证据与引用写全后移入 `docs/developer/task/archive/`，并从活动看板消失。
 - **已过时** Task：在正文说明替代 Task/Spec，保留文件作历史，不删除。
@@ -325,7 +325,7 @@ completed_at: -
 6. 任务状态、关联提交/PR 与版本影响已记录；无版本变更也须在 Task 中说明；
 7. Task 文件已移入 `docs/developer/task/archive/`，任务看板已同步。
 
-根目录 `VERSION` 是唯一版本来源。禁止手工修改任何分散版本字段或 `CHANGELOG.md` 顶部版本节；必须使用 `bun run version:set <SemVer>`，随后运行 `bun run release:check`。提交前运行 `bun run project:check`、`bun run typecheck` 和 `bun run test`。
+根目录 `VERSION` 是唯一版本来源。禁止手工修改任何分散版本字段或 `CHANGELOG.md` 顶部版本节；必须使用 `npm run version:set -- <SemVer>`，随后运行 `npm run release:check`。提交前运行 `npm run project:check`、`npm run typecheck` 和 `npm run test`。
 
 ## 提交与 Pull Request
 
@@ -348,6 +348,6 @@ PR 必须说明影响层、行为变化、已运行测试、对应 `HC-XXX` 编�
 ## 存量迁移说明
 
 - 目录与脚本已迁到本规范：`tasks/` → `task/`，`designs/` → `spec/`，任务 ID 前缀 `ZC-` → `HC-`，文件名带功能简介。
-- 已完成任务位于 `docs/developer/task/archive/`；活动看板由 `bun run tasks:sync` 生成。
+- 已完成任务位于 `docs/developer/task/archive/`；活动看板由 `npm run tasks:sync` 生成。
 - `docs/developer/architecture/adr/` 仅作历史资料；新架构结论写入对应大功能架构 MD。
 - 新功能一律按「功能开发流程」双轨推进（复杂功能 task → spec → plan → todo → implement → review；简单需求走快速通道），不再在 Task 正文内嵌 Plan/Todo。

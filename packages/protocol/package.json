@@ -12,7 +12,7 @@
     "ajv": "8.17.1"
   },
   "scripts": {
-    "generate": "bun run scripts/generate.ts && bun run diagnostic-log/scripts/generate.ts",
-    "check": "bun run scripts/generate.ts --check && bun run diagnostic-log/scripts/generate.ts --check"
+    "generate": "node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs scripts/generate.ts && node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs diagnostic-log/scripts/generate.ts",
+    "check": "node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs scripts/generate.ts --check && node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs diagnostic-log/scripts/generate.ts --check"
   }
 }

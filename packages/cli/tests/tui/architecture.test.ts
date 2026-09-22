@@ -60,10 +60,9 @@ test("TUI 仅通过 types 依赖 workspace 契约", () => {
 })
 
 test("语法资源维护脚本写入 Platform canonical 路径", () => {
-  const script = readFileSync(resolve(import.meta.dir, "../../scripts/vendor-syntax-assets.ts"), "utf8")
-  expect(script).toContain('resolve(import.meta.dir, "../src/tui/platform")')
+  const script = readFileSync(resolve(import.meta.dir, "../../scripts/vendor-syntax-assets.mjs"), "utf8")
+  expect(script).toContain('resolve(scriptDir, "../src/tui/platform")')
   expect(script).toContain('resolve(platformRoot, "assets/syntax")')
   expect(script).toContain('resolve(platformRoot, "generated-syntax-parsers.ts")')
   expect(script).not.toContain('resolve(tuiRoot, "assets/syntax")')
 })
-

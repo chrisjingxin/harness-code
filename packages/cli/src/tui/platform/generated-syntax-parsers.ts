@@ -1,4 +1,4 @@
-// 此文件由 scripts/vendor-syntax-assets.ts 生成，请勿手动编辑。
+// 此文件由 scripts/vendor-syntax-assets.mjs 生成，请勿手动编辑。
 import type { FiletypeParserOptions } from "@opentui/core"
 
 import bashWasm from "./assets/syntax/bash/tree-sitter-bash.wasm" with { type: "file" }

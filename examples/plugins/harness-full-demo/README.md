@@ -19,12 +19,12 @@ manifest。所有运行脚本只使用 Python 标准库，不需要额外安装 
 
 ## 一、准备模型配置
 
-在仓库根目录执行。源码入口固定使用 Bun `1.2.19`：
+在仓库根目录执行。源码入口固定使用 Bun `1.3.13`：
 
 ```bash
 cd /path/to/hareness-code
 export HARNESS_API_KEY='你的模型 API Key'
-npx --yes bun@1.2.19 run dev -- config show
+npx --yes bun@1.3.13 run dev -- config show
 ```
 
 确认输出中的默认模型 `available` 为 `true`。如果当前配置不是你的服务，先参考
@@ -37,7 +37,7 @@ npx --yes bun@1.2.19 run dev -- config show
 校验不会写入 PluginStore：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- \
+npx --yes bun@1.3.13 run dev -- \
   plugins validate examples/plugins/harness-full-demo
 ```
 
@@ -57,7 +57,7 @@ Hook、LSP、Monitor 显示 `adapted` 是正常结果，表示 Claude 格式已�
 安装：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- \
+npx --yes bun@1.3.13 run dev -- \
   plugins install examples/plugins/harness-full-demo
 ```
 
@@ -71,7 +71,7 @@ plugin.capability_fingerprint
 安装后默认 `enabled: false`。使用刚复制的真实值启用：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- \
+npx --yes bun@1.3.13 run dev -- \
   plugins enable local-4ec36d4bf4835ff4/harness-full-demo \
   --capability-fingerprint bf5cd8f77fbfa7ee2aba60fb3f50de80acf88361f13161ef5a20d9c16123afb8
 ```
@@ -79,15 +79,15 @@ npx --yes bun@1.2.19 run dev -- \
 可再次检查：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- plugins inspect <plugin.id>
-npx --yes bun@1.2.19 run dev -- plugins list
+npx --yes bun@1.3.13 run dev -- plugins inspect <plugin.id>
+npx --yes bun@1.3.13 run dev -- plugins list
 ```
 
 启用结果在下一次 Host 启动生效，因此完成启用后再启动 TUI：
 
 ```bash
 export HARNESS_API_KEY='你的模型 API Key'
-npx --yes bun@1.2.19 run dev
+npx --yes bun@1.3.13 run dev
 ```
 
 ## 四、按顺序体验
@@ -228,7 +228,7 @@ Monitor 不是系统指令，Host 退出时会终止其整个进程组。
 停用：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- plugins disable local-4ec36d4bf4835ff4/harness-full-demo
+npx --yes bun@1.3.13 run dev -- plugins disable local-4ec36d4bf4835ff4/harness-full-demo
 ```
 
 停用、启用和删除都在下一次 Host 启动生效。
@@ -236,13 +236,13 @@ npx --yes bun@1.2.19 run dev -- plugins disable local-4ec36d4bf4835ff4/harness-f
 卸载并保留 Plugin data：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- plugins remove local-4ec36d4bf4835ff4/harness-full-demo
+npx --yes bun@1.3.13 run dev -- plugins remove local-4ec36d4bf4835ff4/harness-full-demo
 ```
 
 同时清理 Plugin data：
 
 ```bash
-npx --yes bun@1.2.19 run dev -- \
+npx --yes bun@1.3.13 run dev -- \
   plugins remove local-4ec36d4bf4835ff4/harness-full-demo --purge-data
 ```
 

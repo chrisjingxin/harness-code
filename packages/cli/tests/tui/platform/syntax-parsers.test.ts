@@ -64,6 +64,9 @@ test("本地 WASM 可高亮全部首版语言，不依赖运行时下载", async
 
   try {
     await client.initialize()
+    const markdown = await client.highlightOnce("## 标题\n**bold** `code`\n", "markdown")
+    expect(markdown.error).toBeUndefined()
+    expect(markdown.highlights?.some(item => item[2].startsWith("markup"))).toBeTrue()
     for (const [filetype, content] of Object.entries(snippets)) {
       const result = await client.highlightOnce(content, filetype)
       expect(result.error).toBeUndefined()

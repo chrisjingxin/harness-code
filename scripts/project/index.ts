@@ -2,19 +2,21 @@
  * 仓库协作命令入口；具体规则按任务、文档和发布职责分离。
  */
 
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-import { checkDocs } from "./docs"
-import { checkRelease, setVersion } from "./release"
-import { checkTasks, claimTask, completeTask, syncTasks } from "./tasks"
+import { checkDocs } from "./docs.ts"
+import { checkRelease, setVersion } from "./release.ts"
+import { checkTasks, claimTask, completeTask, syncTasks } from "./tasks.ts"
 
-export * from "./docs"
-export * from "./release"
-export * from "./tasks"
+export * from "./docs.ts"
+export * from "./release.ts"
+export * from "./tasks.ts"
 
 type CommandOptions = Record<string, string>
 
-const root = resolve(import.meta.dir, "../..")
+const currentFile = fileURLToPath(import.meta.url)
+const root = resolve(dirname(currentFile), "../..")
 
 /** 根据子命令运行项目管理操作，供 package.json 统一调用。 */
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -91,7 +93,7 @@ function requiredOption(options: CommandOptions, key: string): string {
   return value
 }
 
-if (import.meta.main) {
+if (process.argv[1] && resolve(process.argv[1]) === currentFile) {
   main().catch(error => {
     console.error(`project-management: ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1

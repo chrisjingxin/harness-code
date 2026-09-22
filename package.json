@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "npm@11.11.0",
   "engines": {
-    "bun": "1.2.19",
+    "bun": "1.3.13",
     "node": ">=20"
   },
   "workspaces": [
@@ -12,31 +12,32 @@
     "third_party/npm/@opentui/*"
   ],
   "scripts": {
-    "build": "bun run --filter '@za38/cli' build",
-    "dev": "bun packages/cli/src/index.ts",
-    "deps:install": "bun scripts/dependencies/install.ts",
-    "deps:resolve": "bun scripts/dependencies/install.ts --resolve",
-    "deps:check": "bun scripts/dependencies/check_vendored_packages.ts && bun run scripts/dependencies/run_python.ts scripts/dependencies/check_dependencies.py",
-    "deps:test": "bun test scripts/dependencies/source_policy.test.ts scripts/dependencies/vendor_policy.test.ts",
-    "test": "bun run test:project && bun run deps:test && bun run test:ts && bun run test:py",
-    "test:project": "bun test scripts/project",
-    "typecheck": "bun run --filter '@za38/cli' typecheck",
-    "protocol:generate": "bun run --filter '@za38/protocol' generate",
-    "protocol:check": "bun run --filter '@za38/protocol' check",
-    "test:ts": "bun run --filter '@za38/cli' test",
-    "test:py": "bun run deps:check && bun scripts/dependencies/run_python.ts -m pytest -q packages/agent/tests",
-    "docs:check": "bun run scripts/project/index.ts docs:check",
-    "tasks:sync": "bun run scripts/project/index.ts tasks:sync",
-    "tasks:check": "bun run scripts/project/index.ts tasks:check",
-    "task:claim": "bun run scripts/project/index.ts task:claim",
-    "task:complete": "bun run scripts/project/index.ts task:complete",
-    "version:set": "bun run scripts/project/index.ts version:set",
-    "release:check": "bun run scripts/project/index.ts release:check",
-    "project:check": "bun run protocol:check && bun run scripts/project/index.ts project:check",
+    "build": "npm --workspace @za38/cli run build",
+    "dev": "npm --workspace @za38/cli run dev --",
+    "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",
+    "deps:sync": "node scripts/dependencies/sync.mjs",
+    "deps:check": "node scripts/dependencies/check_vendored_packages.mjs && node scripts/dependencies/run_python.mjs scripts/dependencies/check_dependencies.py",
+    "deps:test": "node --test scripts/dependencies/node_tooling.test.mjs scripts/dependencies/source_policy.test.mjs scripts/dependencies/vendor_policy.test.mjs",
+    "test": "npm run test:project && npm run deps:test && npm run test:ts && npm run test:py",
+    "test:project": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs --test scripts/project/project-management.test.ts",
+    "typecheck": "npm --workspace @za38/cli run typecheck",
+    "protocol:generate": "npm --workspace @za38/protocol run generate",
+    "protocol:check": "npm --workspace @za38/protocol run check",
+    "test:ts": "npm --workspace @za38/cli run test",
+    "test:py": "npm run deps:check && node scripts/dependencies/run_python.mjs -m pytest -q packages/agent/tests",
+    "docs:check": "npm run project:tool -- docs:check",
+    "tasks:sync": "npm run project:tool -- tasks:sync",
+    "tasks:check": "npm run project:tool -- tasks:check",
+    "task:claim": "npm run project:tool -- task:claim",
+    "task:complete": "npm run project:tool -- task:complete",
+    "version:set": "npm run project:tool -- version:set",
+    "release:check": "npm run project:tool -- release:check",
+    "project:check": "npm run protocol:check && npm run project:tool -- project:check",
     "test:web:e2e": "npx playwright test -c packages/cli/tests/e2e"
   },
   "devDependencies": {
-    "@playwright/test": "1.59.1"
+    "@playwright/test": "1.59.1",
+    "typescript": "6.0.3"
   },
   "overrides": {
     "fast-uri": "3.1.7"

@@ -3,7 +3,7 @@
   "generated_at": "2026-09-14",
   "purpose": "当前项目直接依赖版本摘要；完整传递闭包以 bun.lock、packages/agent/uv.lock 和内网迁移依赖清单.md 为准。",
   "javascript": {
-    "bun": "1.2.19",
+    "bun": "1.3.13",
     "@za38/protocol": "0.1.0 (local workspace)",
     "@opentui/core": "0.4.3 (local workspace on HC-179 temporary branch)",
     "@opentui/react": "0.4.3 (local workspace on HC-179 temporary branch)",

@@ -1,27 +1,14 @@
 /** 离线语法资源维护脚本：下载、校验并生成可随 CLI 发布的 parser 清单（服务于 TUI）。 */
 
+import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-import config from "./syntax-parsers.config.json" with { type: "json" }
-
-type ParserConfig = {
-  filetype: string
-  aliases?: string[]
-  wasm: string
-  queries: { highlights: string[]; injections?: string[] }
-  injectionMapping?: { nodeTypes?: Record<string, string>; infoStringMap?: Record<string, string> }
-}
-
-type ManifestEntry = {
-  filetype: string
-  wasm: { path: string; sha256: string; source: string }
-  highlights: { path: string; sha256: string; sources: string[] }
-  injections?: { path: string; sha256: string; sources: string[] }
-}
-
-const platformRoot = resolve(import.meta.dir, "../src/tui/platform")
+const scriptDir = dirname(fileURLToPath(import.meta.url))
+const config = JSON.parse(await readFile(resolve(scriptDir, "syntax-parsers.config.json"), "utf8"))
+const platformRoot = resolve(scriptDir, "../src/tui/platform")
 const assetsRoot = resolve(platformRoot, "assets/syntax")
 const outputPath = resolve(platformRoot, "generated-syntax-parsers.ts")
 const manifestPath = resolve(assetsRoot, "manifest.json")
@@ -30,12 +17,12 @@ const manifestPath = resolve(assetsRoot, "manifest.json")
  * 此脚本只在维护 parser 版本时运行。它会重新建立资源目录，避免已删除语言的
  * 二进制继续随 npm 包发布；日常 build 与 CLI 运行均不调用网络。
  */
-async function main(): Promise<void> {
-  const parsers = config.parsers as ParserConfig[]
+async function main() {
+  const parsers = config.parsers
   await rm(assetsRoot, { recursive: true, force: true })
   await mkdir(assetsRoot, { recursive: true })
 
-  const manifest: ManifestEntry[] = []
+  const manifest = []
   for (const parser of parsers) {
     const directory = resolve(assetsRoot, parser.filetype)
     const wasmPath = resolve(directory, basename(new URL(parser.wasm).pathname))
@@ -49,7 +36,7 @@ async function main(): Promise<void> {
       filetype: parser.filetype,
       wasm: { path: relative(assetsRoot, wasmPath), sha256: await sha256(wasmPath), source: parser.wasm },
       highlights: { path: relative(assetsRoot, highlights.path), sha256: await sha256(highlights.path), sources: parser.queries.highlights },
-      ...(injections ? { injections: { path: relative(assetsRoot, injections.path), sha256: await sha256(injections.path), sources: parser.queries.injections! } } : {}),
+      ...(injections ? { injections: { path: relative(assetsRoot, injections.path), sha256: await sha256(injections.path), sources: parser.queries.injections } } : {}),
     })
   }
 
@@ -58,22 +45,29 @@ async function main(): Promise<void> {
 }
 
 /** 下载阶段保留系统 TLS 校验；企业代理异常应在维护环境解决，不能降低 CLI 运行时安全性。 */
-async function download(source: string, destination: string): Promise<void> {
+async function download(source, destination) {
   await mkdir(dirname(destination), { recursive: true })
-  const process = Bun.spawn(["curl", "--fail", "--location", "--silent", "--show-error", "--output", destination, source], {
-    stdout: "inherit",
-    stderr: "inherit",
+  await new Promise((fulfill, reject) => {
+    const child = spawn("curl", ["--fail", "--location", "--silent", "--show-error", "--output", destination, source], {
+      stdio: "inherit",
+    })
+    child.once("error", reject)
+    child.once("exit", (exitCode, signal) => {
+      if (exitCode === 0) {
+        fulfill()
+        return
+      }
+      reject(new Error(`下载失败（${signal ?? exitCode ?? "unknown"}）：${source}`))
+    })
   })
-  const exitCode = await process.exited
-  if (exitCode !== 0) throw new Error(`下载失败（${exitCode}）：${source}`)
 }
 
 /** 合并本地与远程 query 来源，产出单个可离线分发的 scm 文件。 */
-async function materializeQueries(sources: readonly string[], directory: string, filename: string): Promise<{ path: string }> {
-  const queries: string[] = []
+async function materializeQueries(sources, directory, filename) {
+  const queries = []
   for (const [index, source] of sources.entries()) {
     if (source.startsWith("./")) {
-      queries.push(await readFile(resolve(import.meta.dir, source), "utf8"))
+      queries.push(await readFile(resolve(scriptDir, source), "utf8"))
       continue
     }
     const temporary = resolve(directory, `${filename}.${index}.tmp`)
@@ -87,12 +81,12 @@ async function materializeQueries(sources: readonly string[], directory: string,
 }
 
 /** 计算资源内容的 SHA-256，写入 manifest 供离线完整性测试比对。 */
-async function sha256(path: string): Promise<string> {
+async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex")
 }
 
 /** 根据配置生成 TypeScript import 表，避免运行时动态网络解析 parser。 */
-function renderGeneratedParsers(parsers: readonly ParserConfig[]): string {
+function renderGeneratedParsers(parsers) {
   const imports = parsers.flatMap(parser => {
     const id = parser.filetype.replaceAll(/[^a-zA-Z0-9]/g, "_")
     const directory = `./assets/syntax/${parser.filetype}`
@@ -110,7 +104,7 @@ function renderGeneratedParsers(parsers: readonly ParserConfig[]): string {
     const mapping = parser.injectionMapping ? `, injectionMapping: ${JSON.stringify(parser.injectionMapping)}` : ""
     return `  { filetype: "${parser.filetype}", ${aliases}wasm: ${id}Wasm, queries: { highlights: [${id}Highlights]${injections} }${mapping} },`
   }).join("\n")
-  return `// 此文件由 scripts/vendor-syntax-assets.ts 生成，请勿手动编辑。\nimport type { FiletypeParserOptions } from "@opentui/core"\n\n${imports}\n\nexport const bundledSyntaxParsers = [\n${definitions}\n] as const satisfies readonly FiletypeParserOptions[]\n`
+  return `// 此文件由 scripts/vendor-syntax-assets.mjs 生成，请勿手动编辑。\nimport type { FiletypeParserOptions } from "@opentui/core"\n\n${imports}\n\nexport const bundledSyntaxParsers = [\n${definitions}\n] as const satisfies readonly FiletypeParserOptions[]\n`
 }
 
 await main()

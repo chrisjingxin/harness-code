@@ -1,23 +1,25 @@
-#!/usr/bin/env bun
-/** 内网依赖安装入口：校验来源和工具链后用 npm 冻结安装并应用 DeepAgents 补丁。 */
+#!/usr/bin/env node
+/** 依赖同步入口：默认冻结安装，显式模式更新锁文件后完成同一套验证。 */
 
+import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import {
   DependencyPreflightError,
-  expectedBunVersion,
   expectedNpmVersion,
   resolveInternalSources,
   validateLockSources,
   validateToolchainVersions,
-} from "./source_policy"
+} from "./source_policy.mjs"
 import {
   validateExecutionPlatform,
+  validateInstalledOpenTuiNativePackage,
   validateInstalledVendoredWorkspace,
   validateVendoredWorkspace,
-} from "./vendor_policy"
+} from "./vendor_policy.mjs"
 
-const root = resolve(import.meta.dir, "../..")
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const agent = resolve(root, "packages/agent")
 const environment = process.env.UV_PROJECT_ENVIRONMENT
   ? resolve(agent, process.env.UV_PROJECT_ENVIRONMENT)
@@ -26,50 +28,38 @@ const uv = process.env.UV_BIN ?? "uv"
 const pythonCommand = process.env.HARNESS_PYTHON ?? (process.platform === "win32" ? "python" : "python3")
 
 /** Windows 的 npm 是 cmd 脚本，无法被直接 spawn，必须经由 cmd 解析。 */
-function npmCommand(args: string[]): string[] {
+function npmCommand(args) {
   return process.platform === "win32" ? ["cmd", "/c", "npm", ...args] : ["npm", ...args]
 }
 
-type Phase = "freeze" | "resolve"
-
-interface CommandResult {
-  exitCode: number
-  stdout: string
-  stderr: string
-}
-
-function decode(output: Uint8Array | string | null | undefined): string {
-  if (typeof output === "string") return output
-  return output ? new TextDecoder().decode(output) : ""
-}
-
-function capture(command: string[], cwd: string): CommandResult {
-  const result = Bun.spawnSync(command, {
+function capture(command, cwd) {
+  const result = spawnSync(command[0], command.slice(1), {
     cwd,
     env: process.env,
-    stdout: "pipe",
-    stderr: "pipe",
+    encoding: "utf8",
   })
   return {
-    exitCode: result.exitCode,
-    stdout: decode(result.stdout),
-    stderr: decode(result.stderr),
+    exitCode: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.error?.message ?? result.stderr ?? "",
   }
 }
 
-function run(command: string[], cwd: string, env?: Record<string, string>): void {
-  const result = Bun.spawnSync(command, {
+function run(command, cwd, env) {
+  const result = spawnSync(command[0], command.slice(1), {
     cwd,
     env: { ...process.env, ...env },
-    stdout: "inherit",
-    stderr: "inherit",
+    stdio: "inherit",
   })
-  if (result.exitCode !== 0) {
-    throw new Error(`命令失败（${result.exitCode}）：${command.join(" ")}`)
+  if (result.error) {
+    throw new Error(`无法启动命令 ${command[0]}：${result.error.message}`)
+  }
+  if (result.status !== 0) {
+    throw new Error(`命令失败（${result.status ?? "unknown"}）：${command.join(" ")}`)
   }
 }
 
-function versionFromOutput(tool: string, result: CommandResult): string {
+function versionFromOutput(tool, result) {
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || "无输出"
     throw new DependencyPreflightError([`${tool} 不可用：${detail}`])
@@ -79,18 +69,22 @@ function versionFromOutput(tool: string, result: CommandResult): string {
   return match[0]
 }
 
-function phaseFromArgs(): Phase {
-  const args = process.argv.slice(2)
-  if (args.length === 0) return "freeze"
-  if (args.length === 1 && args[0] === "--resolve") return "resolve"
-  throw new DependencyPreflightError(["用法：bun run deps:install（冻结安装）或 bun run deps:resolve（首次内网解析并冻结）"])
+function configuredValue(result) {
+  if (result.exitCode !== 0) return undefined
+  const value = result.stdout.trim()
+  return value && value !== "undefined" && value !== "null" ? value : undefined
 }
 
-function preflight(phase: Phase) {
+function modeFromArgs() {
+  const args = process.argv.slice(2)
+  if (args.length === 0) return "frozen"
+  if (args.length === 1 && args[0] === "--update-lock") return "update-lock"
+  throw new DependencyPreflightError(["用法：npm run deps:sync（冻结同步）或 npm run deps:sync -- --update-lock（更新锁文件后同步）"])
+}
+
+function preflight(mode) {
   const platformIssues = validateExecutionPlatform()
   if (platformIssues.length > 0) throw new DependencyPreflightError(platformIssues)
-  const sources = resolveInternalSources()
-  const expectedBun = expectedBunVersion(root)
   // packageManager 声明的必须是 npm；读取它作为安装器基准，防止入口退化回 Bun。
   expectedNpmVersion(root)
   const npmVersion = versionFromOutput("npm", capture(npmCommand(["--version"]), root))
@@ -98,21 +92,23 @@ function preflight(phase: Phase) {
   const uvVersion = versionFromOutput(uv, capture([uv, "--version"], root))
   const pythonVersion = versionFromOutput(pythonCommand, capture([pythonCommand, "--version"], root))
   const toolchainIssues = validateToolchainVersions({
-    bun: Bun.version,
     npm: npmVersion,
     node: nodeVersion,
     uv: uvVersion,
     python: pythonVersion,
-    expectedBun,
   })
   if (toolchainIssues.length > 0) throw new DependencyPreflightError(toolchainIssues)
+  const sources = resolveInternalSources(process.env, {
+    npmRegistry: configuredValue(capture(npmCommand(["config", "get", "registry"]), root)),
+    pythonIndex: configuredValue(capture([pythonCommand, "-m", "pip", "config", "get", "global.index-url"], root)),
+  })
 
-  if (phase === "freeze") {
+  if (mode === "frozen") {
     const lockIssues = validateLockSources(root, sources)
     if (lockIssues.length > 0) {
       throw new DependencyPreflightError([
         ...lockIssues,
-        "当前锁文件尚未证明来自该内网源；请在内网执行 `bun run deps:resolve`，提交审查重新解析后的锁文件后再冻结安装",
+        "当前锁文件与所选包源不一致；请执行 `npm run deps:sync -- --update-lock` 重新解析。内网源还需审查锁文件后再冻结同步",
       ])
     }
   }
@@ -126,17 +122,20 @@ function preflight(phase: Phase) {
   return { sources }
 }
 
-function validateInstalledVendorOrThrow(): void {
-  const issues = validateInstalledVendoredWorkspace(root, true)
+function validateInstalledVendorOrThrow() {
+  const issues = [
+    ...validateInstalledVendoredWorkspace(root, true),
+    ...validateInstalledOpenTuiNativePackage(root, process.platform, process.arch, process.env.OPENTUI_LIBC, true),
+  ]
   if (issues.length > 0) {
     throw new DependencyPreflightError([
       ...issues,
-      "npm 安装完成后五个目标包必须实际解析到 third_party/npm，禁止接受 registry 或缺失入口",
+      "npm 安装完成后五个目标包必须实际解析到 third_party/npm，且当前平台 OpenTUI 原生包必须完整可用",
     ])
   }
 }
 
-function pythonPath(): string {
+function pythonPath() {
   const candidates = process.platform === "win32"
     ? [resolve(environment, "Scripts/python.exe")]
     : [resolve(environment, "bin/python")]
@@ -146,16 +145,18 @@ function pythonPath(): string {
 }
 
 try {
-  const phase = phaseFromArgs()
-  const { sources } = preflight(phase)
+  const mode = modeFromArgs()
+  const { sources } = preflight(mode)
   const sourceEnv = {
     HARNESS_NPM_REGISTRY: sources.npmRegistry.toString(),
     HARNESS_PYPI_INDEX: sources.pythonIndex.toString(),
+    npm_config_registry: sources.npmRegistry.toString(),
+    PIP_INDEX_URL: sources.pythonIndex.toString(),
     UV_DEFAULT_INDEX: sources.pythonIndex.toString(),
     UV_INDEX_URL: sources.pythonIndex.toString(),
   }
 
-  if (phase === "resolve") {
+  if (mode === "update-lock") {
     // 首次内网副本允许重新解析；完成后仍走冻结安装，确保 lock 与实际安装一致。
     // legacy-peer-deps 与 Bun 行为对齐：不自动安装 peerDependencies。
     run(npmCommand(["install", "--registry", sources.npmRegistry.toString(), "--legacy-peer-deps"]), root, sourceEnv)
