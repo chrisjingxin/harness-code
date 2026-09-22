@@ -12,9 +12,15 @@ from jsonschema import Draft202012Validator
 
 
 SCHEMA_PATH = Path(__file__).with_name("protocol_v3.json")
-# 摘要必须按原始字节计算：生成器对 UTF-8 字节取 sha256，若用 read_text
-# 读取，Windows 检出的 CRLF 会被通用换行规则归一化成 LF，导致摘要漂移。
-SCHEMA_BYTES = SCHEMA_PATH.read_bytes()
+
+
+def read_canonical_bytes(path: Path) -> bytes:
+    """读取文本工件，忽略 Windows 检出带来的回车。"""
+
+    return path.read_bytes().replace(b"\r", b"")
+
+
+SCHEMA_BYTES = read_canonical_bytes(SCHEMA_PATH)
 SCHEMA_TEXT = SCHEMA_BYTES.decode("utf-8")
 EXPECTED_DIGEST = Path(__file__).with_name("protocol_v3.sha256").read_text(encoding="ascii").strip()
 ACTUAL_DIGEST = hashlib.sha256(SCHEMA_BYTES).hexdigest()

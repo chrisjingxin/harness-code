@@ -7,7 +7,6 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   DependencyPreflightError,
-  expectedNpmVersion,
   resolveInternalSources,
   validateLockSources,
   validateToolchainVersions,
@@ -16,7 +15,8 @@ import {
   validateExecutionPlatform,
   validateInstalledOpenTuiNativePackage,
   validateInstalledVendoredWorkspace,
-  validateVendoredWorkspace,
+  validateVendoredInstallInputs,
+  validateVendoredSourceSnapshot,
 } from "./vendor_policy.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -85,10 +85,8 @@ function modeFromArgs() {
 function preflight(mode) {
   const platformIssues = validateExecutionPlatform()
   if (platformIssues.length > 0) throw new DependencyPreflightError(platformIssues)
-  // packageManager 声明的必须是 npm；读取它作为安装器基准，防止入口退化回 Bun。
-  expectedNpmVersion(root)
   const npmVersion = versionFromOutput("npm", capture(npmCommand(["--version"]), root))
-  const nodeVersion = versionFromOutput("node", capture(["node", "--version"], root))
+  const nodeVersion = process.versions.node
   const uvVersion = versionFromOutput(uv, capture([uv, "--version"], root))
   const pythonVersion = versionFromOutput(pythonCommand, capture([pythonCommand, "--version"], root))
   const toolchainIssues = validateToolchainVersions({
@@ -104,19 +102,21 @@ function preflight(mode) {
   })
 
   if (mode === "frozen") {
-    const lockIssues = validateLockSources(root, sources)
+    const lockIssues = validateLockSources(root)
     if (lockIssues.length > 0) {
       throw new DependencyPreflightError([
         ...lockIssues,
-        "当前锁文件与所选包源不一致；请执行 `npm run deps:sync -- --update-lock` 重新解析。内网源还需审查锁文件后再冻结同步",
+        "当前锁文件缺失；请执行 `npm run deps:sync -- --update-lock` 重新解析。",
       ])
     }
   }
-  const vendorIssues = validateVendoredWorkspace(root)
+  const vendorIssues = mode === "update-lock"
+    ? validateVendoredSourceSnapshot(root)
+    : validateVendoredInstallInputs(root)
   if (vendorIssues.length > 0) {
     throw new DependencyPreflightError([
       ...vendorIssues,
-      "五个目标 npm 包必须在安装前通过源码化完整性门禁，禁止回退 registry",
+      "五个目标 npm 包必须保持必需文件与 workspace 依赖边，冻结同步还必须保持本机 lock 解析",
     ])
   }
   return { sources }
@@ -124,6 +124,7 @@ function preflight(mode) {
 
 function validateInstalledVendorOrThrow() {
   const issues = [
+    ...validateVendoredInstallInputs(root),
     ...validateInstalledVendoredWorkspace(root, true),
     ...validateInstalledOpenTuiNativePackage(root, process.platform, process.arch, process.env.OPENTUI_LIBC, true),
   ]
@@ -157,17 +158,23 @@ try {
   }
 
   if (mode === "update-lock") {
-    // 首次内网副本允许重新解析；完成后仍走冻结安装，确保 lock 与实际安装一致。
-    // legacy-peer-deps 与 Bun 行为对齐：不自动安装 peerDependencies。
-    run(npmCommand(["install", "--registry", sources.npmRegistry.toString(), "--legacy-peer-deps"]), root, sourceEnv)
-    validateInstalledVendorOrThrow()
+    // 只改锁、不安装、不跑生命周期脚本。真正安装留给下面唯一的一次 npm ci。
+    run(npmCommand(["install", "--package-lock-only", "--ignore-scripts", "--registry", sources.npmRegistry.toString()]), root, sourceEnv)
+    const updatedLockIssues = validateVendoredInstallInputs(root)
+    if (updatedLockIssues.length > 0) {
+      throw new DependencyPreflightError([
+        ...updatedLockIssues,
+        "更新后的锁必须保持五个目标包的 workspace 解析和当前平台原生包记录",
+      ])
+    }
     run([uv, "lock", "--refresh", "--default-index", sources.pythonIndex.toString(), "--no-python-downloads"], agent, sourceEnv)
-    const lockIssues = validateLockSources(root, sources)
+    const lockIssues = validateLockSources(root)
     if (lockIssues.length > 0) throw new DependencyPreflightError(lockIssues)
   }
 
   // npm ci 等价于冻结安装：lock 与 package.json 不一致即失败，不会改写 lock。
-  run(npmCommand(["ci", "--registry", sources.npmRegistry.toString(), "--legacy-peer-deps"]), root, sourceEnv)
+  // peer 策略由根目录 .npmrc 的 legacy-peer-deps 承担。
+  run(npmCommand(["ci", "--registry", sources.npmRegistry.toString()]), root, sourceEnv)
   validateInstalledVendorOrThrow()
   run(
     [

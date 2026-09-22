@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 from jsonschema import ValidationError
 
-from harness_agent.diagnostic_log.contract import validate_record
+from harness_agent.diagnostic_log.contract import read_canonical_bytes, validate_record
 
 
 FIXTURE_PATH = (
@@ -18,6 +19,14 @@ FIXTURE_PATH = (
     / "fixtures"
     / "v1-contract.json"
 )
+
+
+def test_diagnostic_log_digest_ignores_windows_newlines(tmp_path: Path) -> None:
+    schema = Path(__file__).resolve().parents[2] / "harness_agent" / "diagnostic_log" / "diagnostic_log_v1.json"
+    expected = (schema.parent / "diagnostic_log_v1.sha256").read_text(encoding="ascii").strip()
+    crlf = tmp_path / "diagnostic_log_v1.json"
+    crlf.write_bytes(schema.read_bytes().replace(b"\n", b"\r\n"))
+    assert hashlib.sha256(read_canonical_bytes(crlf)).hexdigest() == expected
 
 
 def test_python_and_typescript_share_v1_contract_fixtures() -> None:

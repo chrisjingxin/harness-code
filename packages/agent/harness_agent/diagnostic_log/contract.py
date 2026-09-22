@@ -14,8 +14,14 @@ from jsonschema import Draft202012Validator
 from harness_agent.diagnostic_log.generated import MAX_DIAGNOSTIC_RECORD_BYTES
 
 
+def read_canonical_bytes(path: Path) -> bytes:
+    """读取文本工件，忽略 Windows 检出带来的回车。"""
+
+    return path.read_bytes().replace(b"\r", b"")
+
+
 _ROOT = Path(__file__).parent
-_SCHEMA_BYTES = (_ROOT / "diagnostic_log_v1.json").read_bytes()
+_SCHEMA_BYTES = read_canonical_bytes(_ROOT / "diagnostic_log_v1.json")
 _EXPECTED_DIGEST = (_ROOT / "diagnostic_log_v1.sha256").read_text(encoding="ascii").strip()
 if hashlib.sha256(_SCHEMA_BYTES).hexdigest() != _EXPECTED_DIGEST:
     raise RuntimeError("Diagnostic Log v1 schema digest mismatch; regenerate protocol")
