@@ -78,9 +78,18 @@ class ClassifierModel(Protocol):
 
 
 #: 分类调用必须与主对话的事件流隔离：分类器运行在模型节点内部，若不显式
-#: 清空 callbacks，langchain 会把它挂为主运行的子事件，分类 JSON 文本会
-#: 被 TUI 当作助手输出渲染。
-_ISOLATED_RUN_CONFIG: dict[str, Any] = {"callbacks": []}
+#: 隔离 callbacks、tags 与 metadata，LangChain / LangGraph 会将其视为正文流，
+#: 分类 JSON 文本会被 TUI 当作助手正文渲染。
+_ISOLATED_RUN_CONFIG: dict[str, Any] = {
+    "callbacks": [],
+    "tags": ["harness:internal", "harness:classifier", "nostream"],
+    "metadata": {
+        "harness_internal": True,
+        "harness_classifier": True,
+        "harness_execution_id": "__harness_classifier_internal__",
+    },
+    "run_name": "SafetyClassifier",
+}
 
 
 def describe_tool_call(tool_name: str, tool_args: dict[str, Any]) -> str:
