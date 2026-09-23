@@ -741,9 +741,10 @@ def translate_stream_event(
     events: list[ExecutionSignal] = []
     content = message_text(chunk)
     if content and type(chunk).__name__ != "ToolMessage":
-        session.content_parts.append(content)
-        if content_visibility == "passthrough":
-            events.append(ExecutionSignal(CONTENT_DELTA, {"text": content}))
+        if not _is_classifier_verdict_content(content):
+            session.content_parts.append(content)
+            if content_visibility == "passthrough":
+                events.append(ExecutionSignal(CONTENT_DELTA, {"text": content}))
     reasoning = reasoning_text(chunk)
     if reasoning:
         events.append(ExecutionSignal(REASONING_DELTA, {"text": reasoning}))
@@ -802,11 +803,79 @@ def translate_stream_event(
     return events
 
 
+_INTERNAL_STREAM_TAGS = frozenset({"harness:internal", "harness:classifier", "nostream"})
+_INTERNAL_EXECUTION_IDS = frozenset({"__harness_classifier_internal__", "__harness_internal__"})
+
+
+def _is_internal_message_event(data: tuple[Any, ...]) -> bool:
+    """检查是否属于分类器或内部运行产生的消息事件，禁止向 TUI 或正文流暴露。"""
+    if not data or not isinstance(data, tuple):
+        return False
+    # 检查 data[1] metadata
+    if len(data) >= 2 and isinstance(data[1], Mapping):
+        meta = data[1]
+        if meta.get("harness_internal") or meta.get("harness_classifier"):
+            return True
+        if meta.get("harness_execution_id") in _INTERNAL_EXECUTION_IDS:
+            return True
+        if meta.get("run_name") == "SafetyClassifier":
+            return True
+        tags = meta.get("tags")
+        if isinstance(tags, (list, tuple, set, frozenset)) and any(t in _INTERNAL_STREAM_TAGS for t in tags):
+            return True
+        # 兼容 nested metadata 字典
+        nested_meta = meta.get("metadata")
+        if isinstance(nested_meta, Mapping):
+            if nested_meta.get("harness_internal") or nested_meta.get("harness_classifier"):
+                return True
+            if nested_meta.get("harness_execution_id") in _INTERNAL_EXECUTION_IDS:
+                return True
+            nested_tags = nested_meta.get("tags")
+            if isinstance(nested_tags, (list, tuple, set, frozenset)) and any(t in _INTERNAL_STREAM_TAGS for t in nested_tags):
+                return True
+
+    # 检查 data[0] chunk 本身
+    chunk = data[0]
+    chunk_tags = getattr(chunk, "tags", None)
+    if isinstance(chunk_tags, (list, tuple, set, frozenset)) and any(t in _INTERNAL_STREAM_TAGS for t in chunk_tags):
+        return True
+    resp_meta = getattr(chunk, "response_metadata", None)
+    if isinstance(resp_meta, Mapping):
+        if resp_meta.get("harness_internal") or resp_meta.get("harness_classifier"):
+            return True
+        if resp_meta.get("harness_execution_id") in _INTERNAL_EXECUTION_IDS:
+            return True
+    return False
+
+
+def _is_classifier_verdict_content(content: str) -> bool:
+    """兜底防御：识别分类器的原始 JSON 判定文本，避免因 metadata 丢失泄漏至用户界面。"""
+    trimmed = content.strip()
+    if not (trimmed.startswith("{") and trimmed.endswith("}")):
+        return False
+    if '"decision"' not in trimmed:
+        return False
+    try:
+        parsed = json.loads(trimmed)
+        return (
+            isinstance(parsed, dict)
+            and "decision" in parsed
+            and parsed["decision"] in ("allow", "block", "deny", "ask")
+            and ("confidence" in parsed or "reason" in parsed)
+        )
+    except Exception:
+        return False
+
+
 def _message_event_matches_execution(data: tuple[Any, ...], execution_id: str) -> bool:
-    """拒绝嵌套 graph 泄漏到外层 callback stream 的跨 execution 消息。"""
+    """拒绝分类器内部调用以及嵌套 graph 泄漏到外层 callback stream 的跨 execution 消息。"""
+    if _is_internal_message_event(data):
+        return False
     if not execution_id or len(data) < 2 or not isinstance(data[1], Mapping):
         return True
     actual = data[1].get("harness_execution_id")
+    if actual is None and isinstance(data[1].get("metadata"), Mapping):
+        actual = data[1]["metadata"].get("harness_execution_id")
     return not isinstance(actual, str) or not actual or actual == execution_id
 
 

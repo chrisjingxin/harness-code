@@ -12,6 +12,7 @@
     "third_party/npm/@opentui/*"
   ],
   "scripts": {
+    "clean": "node scripts/clean.mjs",
     "build": "npm --workspace @za38/cli run build",
     "dev": "npm --workspace @za38/cli run dev --",
     "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",

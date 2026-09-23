@@ -20,6 +20,7 @@ from harness_agent.runtime.execution_stream import (
     StreamSession,
     execute,
     extract_interaction,
+    message_stream_chunk,
     translate_stream_event,
 )
 
@@ -439,3 +440,122 @@ def test_update_usage_with_openai_and_langchain_cached_tokens() -> None:
     })
     translate_stream_event(("messages", (chunk_oai, {})), session, content_visibility="passthrough")
     assert session.usage == {"input_tokens": 1200, "output_tokens": 150, "cached_tokens": 950}
+
+
+def test_classifier_message_events_are_suppressed_by_metadata_and_tags() -> None:
+    """分类器内部事件通过 tags/metadata 识别并被完全静默，不产生任何领域信号与消息块。"""
+    session = StreamSession(run_id="run-suppress")
+    raw_content = '{"decision": "allow", "confidence": "high", "reason": "只读查询"}'
+    chunk = AIMessageChunk(content=raw_content)
+
+    test_cases = [
+        {"tags": ["harness:classifier"]},
+        {"tags": ["harness:internal"]},
+        {"tags": ["nostream"]},
+        {"harness_classifier": True},
+        {"harness_internal": True},
+        {"harness_execution_id": "__harness_classifier_internal__"},
+        {"run_name": "SafetyClassifier"},
+        {"metadata": {"harness_classifier": True}},
+        {"metadata": {"harness_execution_id": "__harness_classifier_internal__"}},
+    ]
+
+    for metadata in test_cases:
+        event = ("messages", (chunk, metadata))
+        # 1. message_stream_chunk 返回 None
+        assert message_stream_chunk(event, execution_id="root") is None
+        assert message_stream_chunk(event, execution_id="") is None
+
+        # 2. translate_stream_event 返回空列表，且不向 session.content_parts 写入
+        signals = list(translate_stream_event(event, session, content_visibility="passthrough", execution_id="root"))
+        assert signals == []
+        assert raw_content not in session.content_parts
+
+
+def test_classifier_verdict_content_fallback_suppression() -> None:
+    """即使 metadata 意外丢失，分类器判定 JSON 也被兜底逻辑丢弃，不向 TUI 派发 CONTENT_DELTA。"""
+    session = StreamSession(run_id="run-fallback")
+    classifier_content = '{"decision": "allow", "confidence": "high", "reason": "只读操作"}'
+    chunk = AIMessageChunk(content=classifier_content)
+
+    # 没有任何 metadata 标记
+    event = ("messages", (chunk, {}))
+    signals = list(translate_stream_event(event, session, content_visibility="passthrough"))
+
+    assert signals == []
+    assert classifier_content not in session.content_parts
+
+    # 普通合法正文正常放行
+    normal_chunk = AIMessageChunk(content="正常助手文本回复")
+    normal_event = ("messages", (normal_chunk, {}))
+    normal_signals = list(translate_stream_event(normal_event, session, content_visibility="passthrough"))
+
+    assert len(normal_signals) == 1
+    assert normal_signals[0].type == CONTENT_DELTA
+    assert normal_signals[0].payload["text"] == "正常助手文本回复"
+    assert "正常助手文本回复" in session.content_parts
+
+
+@pytest.mark.asyncio
+async def test_execute_stream_completely_silences_internal_classifier_chunks() -> None:
+    """端到端验证：主执行流中混入的分类器 chunks 被静默，TUI 不会收到任何分类器决策文本。"""
+    session = StreamSession(run_id="run-e2e")
+    ports = _RecordingPorts()
+
+    classifier_json = '{"decision": "allow", "confidence": "high", "reason": "检查已安装工具"}'
+    events = [
+        (
+            "messages",
+            (
+                AIMessageChunk(content="正在为您查询..."),
+                {"harness_execution_id": "root"},
+            ),
+        ),
+        (
+            "messages",
+            (
+                AIMessageChunk(content=classifier_json),
+                {
+                    "tags": ["harness:classifier", "nostream"],
+                    "harness_classifier": True,
+                    "harness_execution_id": "__harness_classifier_internal__",
+                    "run_name": "SafetyClassifier",
+                },
+            ),
+        ),
+        (
+            "messages",
+            (
+                AIMessageChunk(content="查询完成，共发现 3 个工具。"),
+                {"harness_execution_id": "root"},
+            ),
+        ),
+    ]
+
+    request = ExecutionStreamRequest(
+        agent=_FakeAgent(events),
+        stream_input={"messages": []},
+        graph_config={"metadata": {"harness_execution_id": "root"}},
+        context=SimpleNamespace(execution_id="root"),
+        content_visibility="passthrough",
+        session=session,
+        is_cancelled=lambda: False,
+    )
+
+    result = await execute(request, ports)
+
+    # 验证领域信号中绝不包含分类器文本
+    content_deltas = [
+        sig.payload["text"]
+        for sig in ports.signals
+        if sig.type == CONTENT_DELTA
+    ]
+    assert content_deltas == ["正在为您查询...", "查询完成，共发现 3 个工具。"]
+    assert classifier_json not in content_deltas
+
+    # 验证最终正文与 captured messages 中不含分类器输出
+    assert classifier_json not in result.final_content
+    assert result.final_content == "正在为您查询...查询完成，共发现 3 个工具。"
+    for captured in ports.messages:
+        assert getattr(captured, "content", "") != classifier_json
+

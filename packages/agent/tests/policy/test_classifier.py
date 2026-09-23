@@ -25,6 +25,7 @@ class _FakeClassifierModel:
         """初始化脚本响应序列；Exception 实例会在调用时抛出。"""
         self._responses = list(responses)
         self.bound_tokens: list[int | None] = []
+        self.configs: list[Any] = []
         self.call_count = 0
         self._pending_tokens: int | None = None
 
@@ -35,10 +36,12 @@ class _FakeClassifierModel:
 
     def invoke(self, messages: list[Any], config: Any = None) -> AIMessage:
         """同步返回下一条脚本响应；脚本耗尽视为错误。"""
+        self.configs.append(config)
         return self._next()
 
     async def ainvoke(self, messages: list[Any], config: Any = None) -> AIMessage:
         """异步入口复用同步脚本序列。"""
+        self.configs.append(config)
         return self._next()
 
     def _next(self) -> AIMessage:
@@ -249,3 +252,21 @@ def test_describe_tool_call_clips_long_args():
 def test_stage_accepts_only_objects_with_decision(response: str):
     """空对象或数组输出视为无法解析，进入下一阶段或回退。"""
     assert extract_verdict(response) is None
+
+
+def test_classifier_calls_model_with_isolated_run_config():
+    """分类器调用底层模型时必须附带包含 internal 隔离标记的 config。"""
+    model = _FakeClassifierModel([_ALLOW_HIGH])
+    classifier = SafetyClassifier(model)
+
+    classifier.classify("execute", {"command": "ls"})
+
+    assert len(model.configs) == 1
+    config = model.configs[0]
+    assert config is not None
+    assert "harness:classifier" in config.get("tags", [])
+    assert "nostream" in config.get("tags", [])
+    meta = config.get("metadata", {})
+    assert meta.get("harness_classifier") is True
+    assert meta.get("harness_execution_id") == "__harness_classifier_internal__"
+
