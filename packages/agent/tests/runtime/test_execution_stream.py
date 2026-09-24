@@ -574,4 +574,3 @@ def test_update_usage_keeps_current_round_absolute_values() -> None:
     assert session.usage["input_tokens"] == 20
     assert session.last_call_usage == {"input_tokens": 20, "output_tokens": 2}
     assert session.call_usages == [{"input_tokens": 10, "output_tokens": 1}]
-

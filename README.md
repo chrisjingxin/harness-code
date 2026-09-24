@@ -6,6 +6,7 @@ Harness Code 是面向企业研发场景的 Coding Agent CLI。终端交互由 B
 
 把 `scripts/install/install.sh` 与 `install.ps1` 顶部的企业 npm / PyPI 默认地址填好，托管到企业安装入口后，用户只执行：
 
+
 macOS / Linux：
 
 ```bash
