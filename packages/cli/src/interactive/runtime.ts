@@ -3,7 +3,7 @@
 import type { AgentCommand, InitializeResult } from "@za38/protocol"
 import type { CommandRegistry } from "./commands"
 
-export const CLI_VERSION = "0.1.0"
+export const CLI_VERSION = "0.2.0"
 
 /** 规范审批模式；与协议 approvalMode 枚举保持一致。 */
 export type InteractiveApprovalMode = "plan" | "default" | "auto-edit" | "auto" | "yolo"

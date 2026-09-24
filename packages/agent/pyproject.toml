@@ -1,6 +1,6 @@
 [project]
 name = "za38-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "za38 agent kernel — deepagents + LangChain + LangGraph"
 requires-python = ">=3.11,<4.0"
 dependencies = [

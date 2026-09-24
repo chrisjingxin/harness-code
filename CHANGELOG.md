@@ -1,5 +1,23 @@
 # 更新日志
 
+## [0.2.0] - 2026-09-24
+
+### 新增
+- 内网依赖源码化：在 `third_party/npm/` 完整内嵌 `@opentui/core`、`@opentui/react`、`@opentui/core-win32-x64`、`bun-ffi-structs` 与 `react-devtools-core` 5 个核心包，建立 workspace 本地链接与严格的来源/防篡改门禁
+- npm 工程体系迁移：全面迁移至纯 npm/Node 工作流（`packageManager: npm@11.11.0`），以 `package-lock.json` 替代 `bun.lock`，支持离线与内网安装
+- 依赖同步与验证工具链：新增 `npm run deps:sync`、`npm run deps:check` 及 `npm run deps:test`，支持 macOS、Windows、Linux（glibc/musl）跨平台架构门禁
+- 运行时安全性与清理机制：新增 `npm run clean` 深度清理脚本；为安全分类器（`SafetyClassifier`）引入事件流隔离，杜绝判定 JSON 泄露至 TUI
+- DeepAgents 离线补丁：消除模块导入时对 Anthropic 相关包的强依赖，约束并排除非受信外部依赖
+
+### 修复
+- 修复 Windows CRLF 换行符导致协议合约摘要（Protocol SHA-256）校验失败的问题
+- 修复 64 位 Windows 下 Win32 伪句柄截断导致无法读取用户 SID、Agent 启动报 `SETTINGS_BACKEND_UNAVAILABLE` 的致命缺陷
+- 修复源码包 workspace 归一化来源与安装后 realpath 校验
+
+### 文档
+- 补充 HC-179 内网依赖源码化与离线安装规范文档（`docs/developer/project/内网依赖安装.md`）
+- 更新 HC-179 完整性验收证据与测试记录
+
 ## [0.1.0] - 2026-09-14
 
 ### 新增
