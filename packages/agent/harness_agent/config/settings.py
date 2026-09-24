@@ -3463,37 +3463,56 @@ def _current_user_principal() -> str | int:
 
         advapi = ctypes.WinDLL("Advapi32.dll")
         kernel = ctypes.WinDLL("Kernel32.dll")
+        # ctypes.WinDLL 默认把参数按 32 位 c_int 传递；64 位句柄会被截断，
+        # 必须显式声明签名（与文件内 Credential/Mutex API 的写法一致）。
+        open_token = advapi.OpenProcessToken
+        open_token.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
+        open_token.restype = ctypes.c_bool
+        get_current_process = kernel.GetCurrentProcess
+        get_current_process.argtypes = []
+        get_current_process.restype = ctypes.c_void_p
+        get_token_info = advapi.GetTokenInformation
+        get_token_info.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        get_token_info.restype = ctypes.c_bool
+        convert_sid = advapi.ConvertSidToStringSidW
+        convert_sid.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+        convert_sid.restype = ctypes.c_bool
+        local_free = kernel.LocalFree
+        local_free.argtypes = [ctypes.c_void_p]
+        local_free.restype = ctypes.c_void_p
+        close_handle = kernel.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_bool
+
         token = ctypes.c_void_p()
-        if not advapi.OpenProcessToken(
-            kernel.GetCurrentProcess(),
-            0x0008,  # TOKEN_QUERY
-            ctypes.byref(token),
-        ):
+        if not open_token(get_current_process(), 0x0008, ctypes.byref(token)):  # TOKEN_QUERY
             raise OSError("OpenProcessToken failed")
         try:
             size = ctypes.c_uint32()
-            advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser
+            # 第一次以 NULL buffer 探测所需字节数：按 Win32 语义此时返回
+            # False（缓冲区不足）是预期的，只应通过 size.value 判断是否失败。
+            get_token_info(token, 1, None, 0, ctypes.byref(size))  # TokenUser
             if size.value == 0:
                 raise OSError("GetTokenInformation failed")
             buffer = ctypes.create_string_buffer(size.value)
-            if not advapi.GetTokenInformation(
-                token,
-                1,
-                buffer,
-                size.value,
-                ctypes.byref(size),
-            ):
+            if not get_token_info(token, 1, buffer, size.value, ctypes.byref(size)):
                 raise OSError("GetTokenInformation failed")
             sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents
             sid_text = ctypes.c_wchar_p()
-            if not advapi.ConvertSidToStringSidW(sid, ctypes.byref(sid_text)):
+            if not convert_sid(sid, ctypes.byref(sid_text)):
                 raise OSError("ConvertSidToStringSidW failed")
             try:
                 return str(sid_text.value)
             finally:
-                kernel.LocalFree(sid_text)
+                local_free(sid_text)
         finally:
-            kernel.CloseHandle(token)
+            close_handle(token)
     except Exception as exc:
         raise SettingsError("SETTINGS_BACKEND_UNAVAILABLE", field="scope") from exc
 
