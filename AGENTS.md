@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-Harness Code（命令名 `harness` / `za38`）是一个面向企业研发场景的终端 Coding Agent。用户在 Bun/OpenTUI 界面中发起对话和审批，CLI 通过 stdio 上的 JSON-RPC v3 驱动 Python sidecar，Python 端基于 deepagents、LangChain 和 LangGraph 完成模型调用、工具执行、Skill 加载、上下文管理与 Thread 持久化。
+Harness Code（命令名 `harness`）是一个面向企业研发场景的终端 Coding Agent。用户在 Bun/OpenTUI 界面中发起对话和审批，CLI 通过 stdio 上的 JSON-RPC v3 驱动 Python sidecar，Python 端基于 deepagents、LangChain 和 LangGraph 完成模型调用、工具执行、Skill 加载、上下文管理与 Thread 持久化。
 
 当前仓库处于源码开发阶段，不应将跨平台安装包或生产发布流程视为已交付能力。产品入口是 `README.md` 与 `docs/user/`；**面向开发者的过程文档一律放在 `docs/developer/`**。
 
