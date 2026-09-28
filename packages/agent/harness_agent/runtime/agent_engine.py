@@ -1,7 +1,36 @@
-"""按 AgentEngine Profile 共享的 AgentEngine 生命周期原语。
+"""Agent 引擎池与共享生命周期管理（AgentEnginePool）。
 
-本模块不接入 JSON-RPC；它定义共享编译图的资源所有权、租约、容量/空闲淘汰、
-状态机与脱敏诊断，使 Sidecar 能安全复用、观测或关闭运行时。
+【为什么需要引擎池？】
+编译一张包含几十个工具、多层安全中间件和模型连接的 LangGraph 状态图非常耗时。
+如果每次用户提问都重新构图，会带来严重的卡顿。
+因此本模块引入了“引擎池（AgentEnginePool）”机制：
+1. 缓存复用：根据模型配置、工具列表和提示词计算出唯一的配置指纹（Profile Key）。相同配置的会话直接从池中租用（acquire）现成引擎，毫秒级快速启动；
+2. 平滑热更新（Draining）：当用户修改配置（如开关插件、调整模型）时，旧引擎不会被暴力切断，而是进入“平滑下线（DRAINING）”状态——允许当前正在执行的任务正常跑完，但新任务强制走新配置编译出的新引擎；
+3. 自动回收：维护容量上限与空闲淘汰机制，防止内存无限膨胀。
+
+【AgentEngine 状态流转线框图】
+┌─────────────────────────────────────────────────────────────┐
+│       ┌───────────┐         ┌───────────┐                   │
+│       │  MISSING  │ ──构建──►│ BUILDING  │                   │
+│       └───────────┘         └─────┬─────┘                   │
+│                                   │ 构图完成                │
+│                                   ▼                         │
+│                             ┌───────────┐                   │
+│                   ┌─────────┤   READY   ├─────────┐         │
+│                   │ 租约借出 └─────▲─────┘ 归还空闲 │         │
+│                   ▼               │               ▼         │
+│             ┌───────────┐         │         ┌───────────┐   │
+│             │  ACTIVE   │ ────────┴──────── │   IDLE    │   │
+│             │(执行任务中)│                   │ (空闲待命) │   │
+│             └─────┬─────┘                   └─────┬─────┘   │
+│                   │                               │         │
+│                   │ 配置变更/超时淘汰             │         │
+│                   ▼                               ▼         │
+│             ┌───────────┐                   ┌───────────┐   │
+│             │ DRAINING  │ ────等待任务完成───►│  CLOSED   │   │
+│             │(平滑下线中)│                   │ (彻底关闭) │   │
+│             └───────────┘                   └───────────┘   │
+└─────────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -23,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentEngineState(StrEnum):
-    """一个 Profile AgentEngine 的生命周期状态。"""
+    """AgentEngine 引擎实例的生命周期状态。"""
 
     MISSING = "missing"
     BUILDING = "building"
@@ -514,7 +543,7 @@ class AgentEngine:
                 )
                 self._close_report = report
                 self._set_state_locked(AgentEngineState.CLOSED, "resources_released")
-            return report
+        return report
 
     async def _run_adapters(
         self,

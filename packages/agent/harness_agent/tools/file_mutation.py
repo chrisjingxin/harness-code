@@ -1,8 +1,42 @@
-"""文件 mutation 的 prepare、审批 diff 与 compare-and-commit 服务。
+"""文件变更的两阶段提交服务（准备 Prepare -> 审批 Diff -> 提交 Commit）。
 
-模型工具层只负责把已校验的 ``current``、``proposed`` 和 Snapshot 元数据交给这里。
-本模块不解析模型参数，也不提供第二个文件工具入口；它把同一份拟议内容用于审批描述和
-后续 CAS 提交，避免批准内容与实际落盘内容发生漂移。
+【为什么文件修改需要两阶段（Prepare / Commit）？】
+在 AI 协同编程中，“向用户展示审批卡片”和“实际执行文件写入”之间存在时间差。
+如果像传统实现那样，等用户批准后再根据参数重新读取文件、重新生成内容并写入，就会面临两大风险：
+1. 内容漂移（Drift）：用户在界面上批准的 Diff 是根据时刻 T1 的文件生成的，但在时刻 T2 真正写入时，
+   文件可能已被外部编辑或参数发生微调，导致写入磁盘的内容与用户同意的内容不符；
+2. 批准重放（Replay）：某次工具调用的审批结果被重复执行多次，产生不可预期的脏写入。
+
+为了做到“所见即所签，所签即所写”，本服务实行严格的两阶段提交：
+- 阶段 1 (Prepare)：在发起审批前，固定当前磁盘内容（Current）、拟修改内容（Proposed），
+  生成不可篡改的变更计划（PreparedFileMutation）并渲染出供人类阅读的 Unified Diff 预览；
+- 阶段 2 (Commit)：用户批准后，直接拿阶段 1 冻结好的内容，以原子比对替换（CAS）的方式写入磁盘。
+  无论写入成功与否，该计划立即被消费并注销，绝不允许二次重放。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 文件变更两阶段流程：准备 (Prepare) 与提交 (Commit)      │
+└────────────────────────────────────────────────────────────────────────┘
+
+   SnapshotFileToolContract            FileMutationService                TextBackend (本地磁盘)
+            │                                   │                                 │
+   1. 发起修改 (write/edit/delete)               │                                 │
+            │──── prepare(metadata, proposed) ─>│                                 │
+            │                                   │ 1. 冻结当前内容与拟修改内容      │
+            │                                   │ 2. 生成 Unified Diff 预览       │
+            │                                   │ 3. 记录参数指纹，防止改参偷换   │
+            │<─── 返回 PreparedFileMutation ────│                                 │
+            │                                   │                                 │
+   2. 呈现给用户审批 (HITL)                     │                                 │
+            │── 将 Diff 预览渲染给用户 ─────────│                                 │
+            │── 用户点击「批准 (Approve)」──────│                                 │
+            │                                   │                                 │
+   3. 执行落盘 (Commit)                         │                                 │
+            │──── commit(prepared_plan) ───────>│                                 │
+            │                                   │ 1. 校验版本指纹 (确认磁盘未变)  │
+            │                                   │ 2. 原子写入拟修改内容 ─────────>│
+            │                                   │ 3. 消费并废弃该计划 (不可重放)  │
+            │                                   │ 4. 回读最新磁盘内容 ───────────>│
+            │<─── 返回 CommittedFileMutation ───│<── 返回最新真实文本 ────────────│
 """
 
 from __future__ import annotations
@@ -26,13 +60,13 @@ MutationOperation = Literal["write", "edit", "delete"]
 """当前 canonical 文件工具允许提交的单文件 mutation 类型。"""
 
 MAX_APPROVAL_DIFF_BYTES = 16 * 1024
-"""审批描述中统一 diff 的 UTF-8 字节上限。"""
+"""审批描述中统一 diff 的 UTF-8 字节上限（避免几万行的 Diff 撑爆界面）。"""
 
 MAX_APPROVAL_DIFF_LINES = 200
 """审批描述中统一 diff 的最大显示行数。"""
 
 MAX_PREPARED_MUTATION_BYTES = 8 * 1024 * 1024
-"""跨等待审批保留的 current/proposed 文本总预算。"""
+"""跨等待审批保留的 current/proposed 文本总内存预算（防止过多未审批计划耗尽内存）。"""
 
 MAX_CONSUMED_PLAN_KEYS = 512
 """仅保存指纹的已消费计划上限，防止旧批准因缓存淘汰而被重新 prepare。"""
@@ -118,7 +152,7 @@ class CommittedFileMutation:
 
 
 class FileMutationService:
-    """将 prepare、审批描述和一次性 CAS commit 收敛为单一路径。"""
+    """文件变更服务：负责拟修改计划的准备 (Prepare)、Diff 预览生成与原子提交 (Commit)。"""
 
     def __init__(
         self,
@@ -126,7 +160,12 @@ class FileMutationService:
         *,
         max_prepared_bytes: int = MAX_PREPARED_MUTATION_BYTES,
     ) -> None:
-        """绑定 text/CAS adapter，并限制跨用户审批等待的内存占用。"""
+        """初始化服务，绑定底层文件写入后端，并设置等待审批计划的最大内存预算。
+        
+        为什么需要限制内存预算？
+        如果 Agent 在一次会话中连续生成了许多待审批的文件修改计划，而用户迟迟没有做出决定，
+        这些计划保留的完整文本可能会过度消耗内存。因此通过 LRU 淘汰机制限制总保留字节数。
+        """
         if max_prepared_bytes < 1:
             raise ValueError("PREPARED_MUTATION_LIMIT_INVALID")
         self._backend = backend
@@ -143,7 +182,12 @@ class FileMutationService:
         tool_call_id: str,
         fingerprint: str,
     ) -> PreparedFileMutation | None:
-        """按 Thread、调用 ID 和完整参数指纹取回同一份批准计划。"""
+        """按会话 ID、工具调用 ID 和参数指纹，取回已固定的修改计划。
+        
+        【防偷换参数检查】：
+        如果找到了该调用的待审批计划，但参数指纹与当前传入的不同，说明该调用在用户审批后
+        参数被恶意或意外篡改了。为了防止提交“用户未批准的代码”，会立即作废该计划并报错。
+        """
         key = (thread_id, tool_call_id)
         with self._lock:
             plan = self._prepared.get(key)
@@ -166,7 +210,7 @@ class FileMutationService:
         tool_call_id: str,
         fingerprint: str,
     ) -> bool:
-        """判断相同参数是否已消费，或该调用是否已因待审批改参作废。"""
+        """检查该计划是否已经被提交执行过，或已经因为改参而失效（防止重复提交）。"""
         key = (thread_id, tool_call_id)
         with self._lock:
             consumed = self._consumed_fingerprints.get(key)
@@ -183,7 +227,7 @@ class FileMutationService:
         proposed_content: str | None,
         fingerprint: str,
     ) -> PreparedFileMutation:
-        """从已验证的 current/proposed 创建唯一可审批、可提交的计划。"""
+        """准备文件变更计划：冻结当前内容与拟修改内容，并生成供人类阅读的 Unified Diff。"""
         self._validate_input(metadata, current, proposed_content)
         plan = PreparedFileMutation(
             metadata=metadata,
@@ -202,7 +246,7 @@ class FileMutationService:
         return plan
 
     def approval_description(self, plan: PreparedFileMutation) -> str:
-        """返回供既有 HITL payload 展示且不阻止批准的有界 diff 预览。"""
+        """生成供人类在 TUI 或终端查看的有界文本 Diff 说明。"""
         details = self.approval_details(plan)
         operation = {"write": "创建文件", "edit": "编辑文件", "delete": "删除文件"}[
             plan.metadata.operation
@@ -220,7 +264,7 @@ class FileMutationService:
         )
 
     def approval_details(self, plan: PreparedFileMutation) -> FileMutationApprovalDetails:
-        """从同一批准计划生成短摘要和 Protocol 可消费的展示副本。"""
+        """生成供前端组件渲染富文本高亮对比的结构化详情对象。"""
         return FileMutationApprovalDetails(
             description="文件变更需要审批",
             presentation={
@@ -235,7 +279,7 @@ class FileMutationService:
         )
 
     def commit(self, plan: PreparedFileMutation) -> CommittedFileMutation:
-        """以计划的 expected identity 提交一次，并仅以实际重读内容返回结果。"""
+        """执行实际提交写入，并在执行完毕后强制销毁计划（保证一次批准只执行一次）。"""
         try:
             if plan.metadata.operation == "write":
                 self._commit_create(plan)

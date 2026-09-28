@@ -1,4 +1,25 @@
-"""Harness thread 持久化：以用户级 SQLite 保存 LangGraph checkpoint 和当前 project 的线程索引。"""
+"""会话历史与事实账本持久化中心（ThreadPersistence）。
+
+【这是做什么的？】
+本模块是 Harness 后台的数据持久化底座。它管理用户级 SQLite 数据库（默认位于 ~/.harness/threads.sqlite3），
+负责保存所有对话历史、AI 思考过程、工具调用与结果、上下文压缩检查点以及大模型绑定关系。
+所有项目（Project）共用同一个 SQLite 文件，通过项目绝对路径的哈希值（project_fingerprint）进行严格的数据隔离。
+
+【存储架构三层模型】
+┌─────────────────────────────────────────────────────────────┐
+│ 1. 会话索引层 (harness_threads)                             │
+│    记录会话 ID、标题、创建/更新时间、消息条数、绑定的大模型    │
+├─────────────────────────────────────────────────────────────┤
+│ 2. 事实账本层 (harness_thread_transcript)                   │
+│    ★ 只追加、不修改 (Append-Only) 的完整事件日志               │
+│    按顺序记录：用户提问 -> AI 思考 -> 工具调用 -> 工具结果   │
+│    这是前端重绘聊天界面和恢复历史记录的唯一事实源 (Single Source)│
+├─────────────────────────────────────────────────────────────┤
+│ 3. 压缩检查点层 (harness_compression_checkpoints)           │
+│    当对话过长超过模型窗口时，记录提炼后的阶段性历史摘要        │
+│    供 ContextProjector 拼接为给大模型阅读的精炼提纲          │
+└─────────────────────────────────────────────────────────────┘
+"""
 
 from __future__ import annotations
 
@@ -2734,7 +2755,12 @@ class ProjectScopedAsyncSqliteSaver(AsyncSqliteSaver):
 
 
 class ThreadPersistence:
-    """按 Thread、Run 和 Context 生命周期封装 SQLite 与 checkpoint 细节。"""
+    """会话历史与事实账本持久化管理器。
+
+    【核心职责】
+    在项目绑定的 SQLite 数据库上，提供会话创建、消息记录、历史恢复与上下文检查点管理的生命周期接口。
+    内部所有的状态写入均采用 SQLite 的立即写事务（BEGIN IMMEDIATE），保证多任务执行时的并发安全。
+    """
 
     def __init__(
             self,
@@ -3063,7 +3089,15 @@ class ThreadPersistence:
                 return None
 
     async def accept_run(self, command: AcceptRun) -> RunAcceptance:
-        """原子受理一个 Run，并提交或复用 Context snapshot、索引和绑定。"""
+        """原子受理一次新的 AI 对话回合（Run）。
+
+        【执行步骤】：
+        在一个 SQLite 立即写事务（BEGIN IMMEDIATE）中并发安全地完成：
+        1. 记录本次 Run 所绑定的模型配置与技能快照；
+        2. 更新当前会话的最新活动时间和消息统计；
+        3. 将用户的提问内容记入 Transcript 事实账本；
+        4. 如果会话不存在则自动初始化会话索引记录。
+        """
         started = time.monotonic()
         try:
             acceptance = RunAcceptance(
@@ -3419,7 +3453,13 @@ class ThreadPersistence:
     async def append_transcript_batch(
             self, commands: tuple[TranscriptAppend, ...]
     ) -> tuple[TranscriptRecord, ...]:
-        """在一个事务中追加同一 Thread 的记录，失败时全部回滚。"""
+        """将一批新的消息记录（如 AI 思考、回复、工具调用与结果）原子追加到事实账本。
+
+        【设计考量】
+        1. 必须属于同一个会话（Thread），若混杂不同会话直接报错拦截；
+        2. 在单次 SQLite 事务中完成写入，若发生异常整批回滚，保证账本的连续性与完整性；
+        3. 自动维护自增序号（sequence），保证后续按时序重建对话时间线时绝对有序。
+        """
         started = time.monotonic()
         self._ensure_open()
         if not commands:
@@ -4906,7 +4946,13 @@ class ThreadPersistence:
             raise ThreadPersistenceError(f"THREAD_ACTIVITY_READ_FAILED: {exc}") from exc
 
     async def open_thread(self, thread_id: str) -> OpenThread:
-        """从 Transcript 读取完整 UI 历史；不把 checkpoint 作为 UI fallback。"""
+        """从事实账本（Transcript）中读取并恢复指定会话的完整聊天历史。
+
+        【为什么直接从 Transcript 读，而不是从 LangGraph checkpoint 读？】
+        因为 LangGraph checkpoint 只记录大模型当前的内部工作状态缓存（会随上下文压缩而变化），
+        而 harness_thread_transcript 才是完整保留了用户可见历史的唯一真源（Single Source of Truth）。
+        重新打开会话时，必须使用 Transcript 来重建前端的对话时间线。
+        """
         self._ensure_open()
         try:
             async with self._lock:

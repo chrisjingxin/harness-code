@@ -1,8 +1,35 @@
-"""Harness-owned 文件工具 interposition seam。
+"""Harness 自研文件工具透明拦截与接管中间件。
 
-DeepAgents 0.6.8 的 ``FilesystemMiddleware`` 是受保护的构图脚手架，不能从图中
-排除。本模块不新增同名工具，而是在模型请求阶段去重替换 schema，并在 ToolNode
-阶段交给注入的唯一文件 contract 执行，因而 builtin handler 不会收到已接管调用。
+【为什么需要透明接管（Interposition）？】
+底层 Agent 框架（DeepAgents）内部自带了基础的文件读写工具（FilesystemMiddleware）。
+但原生的工具存在明显的安全缺陷：没有快照防并发校验，没有先读后写门禁，也不支持富文本 Diff 审批。
+同时，框架的构图逻辑强制要求该脚手架存在，不能直接将其从执行图中删除。
+
+因此，本模块扮演了“中间人透明接管”的角色：
+1. 模型请求阶段（wrap_model_call）：拦截要发送给模型的工具描述列表，将框架原生文件工具的 Schema
+   无缝替换为 Harness 增强版定义的 Schema（要求附带 snapshot_id、精确旧文本等）；
+2. 工具执行阶段（wrap_tool_call）：当模型发起文件操作时，拦截该调用并短路分发给
+   Harness 的 SnapshotFileToolContract 执行，完全绕过框架原生的未受控读写逻辑。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 Harness 文件工具接管中间件拦截机制                       │
+└────────────────────────────────────────────────────────────────────────┘
+
+   LLM 请求 / 调用              HarnessFileToolsMiddleware           执行目标
+         │                                 │                             │
+  [模型请求工具定义]                       │                             │
+         │── 包含框架内置工具定义 ────────>│                             │
+         │                                 │ 过滤并替换为 Harness 定义   │
+         │                                 │ (加入 snapshot_id 等强约束) │
+         │<─ 返回经过安全增强的工具列表 ───│                             │
+         │                                 │                             │
+  [模型发起文件调用]                       │                             │
+         │── write_file / edit_file ──────>│                             │
+         │                                 │ 拦截并短路分发              │
+         │                                 │ (完全绕过框架原生处理)      │
+         │                                 │──── 转发给 Harness 契约 ───>│ (SnapshotFileToolContract)
+         │                                 │                             │ [执行严格快照门禁]
+         │<─ 返回结构化 ToolMessage ───────│<─── 返回安全执行结果 ───────│
 """
 
 from __future__ import annotations
@@ -38,17 +65,17 @@ from harness_agent.tools.file_tool_catalog import (
 
 
 class FileToolContractError(RuntimeError):
-    """文件 contract 接管或 dispatch 失败。"""
+    """文件契约接管或分发执行时的受控业务异常。"""
 
     def __init__(self, code: str, message: str | None = None) -> None:
-        """保存可被模型恢复逻辑判断的稳定 code。"""
+        """保存标准化的错误代码（如 EXACT_MATCH_NOT_FOUND），以便大模型理解并自动重试。"""
         self.code = code
         super().__init__(message or code)
 
 
 @runtime_checkable
 class FileToolContract(Protocol):
-    """可注入的 Harness 文件 schema 与执行 contract。"""
+    """可注入的 Harness 文件工具执行契约协议。"""
 
     @property
     def tool_definitions(self) -> Sequence[BaseTool | dict[str, Any]]:
@@ -83,10 +110,10 @@ def _tool_name(tool: object) -> str:
 
 
 class HarnessFileToolsMiddleware(AgentMiddleware):
-    """替换模型可见文件 schema，并短路执行到注入的 Harness contract。"""
+    """Harness 文件工具接管中间件：向模型注入强化后的 Schema，并在执行时短路分发给 Harness 契约。"""
 
     def __init__(self, contract: FileToolContract) -> None:
-        """校验 contract 的名称唯一性；本 middleware 不注册 ``tools`` 属性。"""
+        """初始化中间件并校验契约。本中间件只作为透明拦截层，不自行注册孤立的 tools 属性。"""
         super().__init__()
         definitions = tuple(contract.tool_definitions)
         names = tuple(_tool_name(tool) for tool in definitions)
@@ -102,11 +129,11 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
 
     @property
     def handled_tool_names(self) -> frozenset[str]:
-        """返回当前 middleware 接管的工具集合，供架构测试观察。"""
+        """返回当前中间件接管的所有文件工具名称集合。"""
         return self._handled_tool_names
 
     def _replace_file_tools(self, tools: Sequence[object]) -> list[BaseTool | dict[str, Any]]:
-        """保留上游顺序并把每个已接管名称压成恰好一个 definition。"""
+        """保留上游工具顺序，并将所有被接管的文件工具替换为 Harness 增强版定义。"""
         replaced: list[BaseTool | dict[str, Any]] = []
         emitted: set[str] = set()
         for tool in tools:
@@ -124,7 +151,7 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse | ExtendedModelResponse:
-        """同步模型调用只接收当前上游已授权的 Harness file definitions。"""
+        """拦截同步模型请求：向大模型展示带有快照约束的 Harness 文件工具 Schema。"""
         return handler(request.override(tools=self._replace_file_tools(request.tools)))
 
     async def awrap_model_call(
@@ -132,7 +159,7 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
-        """异步模型调用复用同一去重逻辑。"""
+        """拦截异步模型请求：向大模型展示带有快照约束的 Harness 文件工具 Schema。"""
         return await handler(request.override(tools=self._replace_file_tools(request.tools)))
 
     def wrap_tool_call(
@@ -140,7 +167,7 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Any],
     ) -> Any:
-        """已接管调用直接进入 contract，绝不调用 DeepAgents builtin handler。"""
+        """拦截同步工具执行：文件调用直接分发给 Harness 契约，绝不让调用流入框架默认未受控实现。"""
         name = str(request.tool_call.get("name", ""))
         if name not in self._handled_tool_names:
             return handler(request)
@@ -157,7 +184,7 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[Any]],
     ) -> Any:
-        """异步已接管调用直接进入 contract，builtin handler 不可达。"""
+        """拦截异步工具执行：文件调用直接分发给 Harness 契约，绝不让调用流入框架默认未受控实现。"""
         name = str(request.tool_call.get("name", ""))
         if name not in self._handled_tool_names:
             return await handler(request)
@@ -171,7 +198,7 @@ class HarnessFileToolsMiddleware(AgentMiddleware):
 
     @staticmethod
     def _error(request: ToolCallRequest, code: str) -> ToolMessage:
-        """构造不泄露源码或凭据的稳定错误结果。"""
+        """构造安全的统一错误返回消息，防止泄露系统内部敏感异常。"""
         name = str(request.tool_call.get("name", "filesystem"))
         return ToolMessage(
             content=f"Harness 文件工具接管失败：{code}。",
@@ -198,19 +225,23 @@ def make_file_effect_receipt(document: TextDocument, *, backend_id: str) -> dict
 
 
 class FileMutationEffectVerifier:
-    """文件 effect 的真实对账 seam：重读字节证明执行/未执行/漂移。"""
+    """文件写操作的真实状态对账器：通过读取磁盘实际文件哈希，验证写操作是已执行、未执行还是发生了漂移。
+    
+    在 Agent 执行异常崩溃、会话恢复或自动重试时，单纯看大模型的发言无法证明文件究竟写进去了没有。
+    本对账器直接比对磁盘真实字节哈希与意图中的 expected_digest，为恢复逻辑提供绝对可信的物理事实。
+    """
 
     def __init__(self, backend: TextMutationBackend) -> None:
         self._backend = backend
 
     def classify(self, intent: Mapping[str, object]) -> ToolEffectPolicy:
-        """write/create/delete 可以确定性对账；其他工具不由本 verifier 处理。"""
+        """判断工具调用是否可对账：write、create、delete 等具有确定性磁盘副作用的操作支持对账。"""
         if intent.get("tool") in {"write", "create", "delete"}:
             return ToolEffectPolicy.RECONCILABLE
         return ToolEffectPolicy.UNKNOWN
 
     def verify(self, intent: Mapping[str, object]) -> EffectVerification:
-        """用当前磁盘字节与 intent 中的 base/expected digest 对账。"""
+        """读取磁盘实际内容，与预期哈希（expected_digest）及修改前哈希（base_digest）对账。"""
         tool = intent.get("tool")
         path = intent.get("path")
         if not isinstance(tool, str) or not isinstance(path, str):
@@ -247,7 +278,7 @@ class FileMutationEffectVerifier:
         intent: Mapping[str, object],
         path: str,
     ) -> EffectVerification:
-        """删除的对账：文件消失证明已执行；仍在 base digest 证明未执行。"""
+        """删除操作的物理对账：文件在磁盘上消失证明已执行；文件仍保留原哈希证明尚未执行。"""
         base_digest = intent.get("base_digest")
         try:
             current = self._backend.read_text_document(path)

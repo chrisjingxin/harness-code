@@ -1,8 +1,45 @@
-"""MCP 服务器配置解析、连接管理和工具加载。
+"""MCP (Model Context Protocol) 扩展协议：连接外部工具服务与生命周期管理。
 
-基于 langchain-mcp-adapters 将外部 MCP Server 的工具转换为 LangChain
-BaseTool，通过 create_harness_agent(tools=[...]) 注入 Agent 图。
-连接生命周期由 AgentHost 管理：initialize 后建立，Host 关闭时释放。
+【什么是 MCP，为什么需要它？】
+MCP 是 Anthropic 发起的开放标准协议，用于连接大模型与外部系统（如 GitHub、数据库、浏览器自动化、Docker 等）。
+通过 MCP，开发者无需为每个外部系统编写专有代码，只要启动对应的 MCP Server（本地命令行工具或远程 HTTP/SSE 服务），
+Agent 即可动态发现并调用其提供的工具与数据资源。
+
+【本模块的核心职责】
+1. 配置安全解析（McpServerConfig）：解析并校验本地进程（stdio）或远程服务（http/sse）的配置，
+   严格过滤非法名称与注入风险，并支持 `${ENV}` 环境变量安全求值；
+2. 连接池与生命周期（McpConnectionManager）：基于资源租约（SharedResourceLease）管理长连接，
+   支持并发连接数限制（最多 4 个并发连接，防止瞬间耗尽系统资源）与优雅关闭；
+3. 工具适配与隔离（Tool Wrapping）：通过适配器将 MCP 远端工具无缝转换为 LangChain 标准的 BaseTool，
+   自动添加超时保护（默认 60s）与错误脱敏，保证外部服务的异常不会导致 Agent 进程崩溃。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 Harness MCP (模型上下文协议) 扩展集成架构              │
+└────────────────────────────────────────────────────────────────────────┘
+
+    .harness/settings.json (配置)
+           │
+           ▼
+    [McpServerConfig 校验] ──> 解析 stdio / http / sse 配置，注入安全环境变量
+           │
+           ▼
+    [McpConnectionManager 连接池]
+           │
+     ┌─────┴──────────────────────────────────────────────────────┐
+     │ 并发限制与生命周期管理                                      │
+     │                                                            │
+     ▼ (stdio: 启动子进程)                   ▼ (http/sse: 远程网络) │
+  [本地 MCP 服务: 如 git-mcp]            [远程 MCP 服务: 如 db-mcp]│
+     │ (JSON-RPC over stdio)                │ (HTTP/SSE 流式交互)  │
+     └─────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    [McpToolWrapper 工具适配] ──> 转换为 LangChain BaseTool
+                               │  - 命名空间隔离: mcp__{server}__{tool}
+                               │  - 超时保护 (默认 60s)
+                               │  - 错误安全脱敏
+                               ▼
+    注入 AgentTools 供大模型调用
 """
 
 from __future__ import annotations

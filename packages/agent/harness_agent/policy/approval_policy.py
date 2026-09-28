@@ -1,4 +1,44 @@
-"""在 Agent 工具调用边界执行审批模式，而不是由 TUI 模拟批准。"""
+"""Harness 工具多级安全审批策略与执行中间件。
+
+【为什么审批必须在服务端中间件执行，而不是在前端 TUI 模拟？】
+如果审批逻辑只写在前端 UI 上，那么一旦出现子 Agent 派发、后台多轮运行或外部调用，
+未经验证的危险工具调用就会直接穿透到操作系统。
+因此，Harness 将所有安全策略和人机协作审批（HITL）下沉至 Agent 运行时的边界中间件中，
+由服务端保证无论调用来自何处，都必须走完严密的权限裁决流水线。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 Harness 工具多级安全审批决策流水线 (L1 ~ L6)            │
+└────────────────────────────────────────────────────────────────────────┘
+
+    模型工具调用请求 (ToolCall: name, args)
+           │
+           ▼
+    [L1 工具风险分类] ───> 标记工具类型 (只读/编辑/执行/网络等)
+           │
+           ▼
+    [L2 绝对拒绝规则] ───> 命中 deny 规则? ──[是]──> 【硬拒绝 Deny】(任何模式不可覆盖)
+           │ [否]
+           ▼
+    [L3 只读工具放行] ───> 纯只读工具(ls, read_file)? ──[是]──> 【直接放行 Allow】
+           │ [否]
+           ▼
+    [L3.1 Shell 白名单] ─> 安全只读命令(如 git status)? ──[是]──> 【直接放行 Allow】
+           │ [否]
+           ▼
+    [L3.5 敏感路径保护] ─> 涉及敏感文件(.git/config等)? ──[是]──> 【人工审批 Ask】
+           │ [否]
+           ▼
+    [L4 用户自定义规则] ─> 命中 allow/ask 规则? ───────[命中]──> 【按规则决策 Allow/Ask】
+           │ [未命中]
+           ▼
+    [L5 审批模式档位] ───> 按 plan / default / auto-edit / auto / yolo 查表裁决
+           │
+           ▼
+    [L6 插件扩展钩子] ───> 外部安全插件审查 (只能收紧拒绝，不可放宽)
+           │
+           ▼
+        最终决策结果：Allow (直接执行) / Ask (等待用户确认) / Deny (硬拦截)
+"""
 
 from __future__ import annotations
 
@@ -273,7 +313,12 @@ Harness 不会为工具调用请求人工审批。工作区边界、Shell 白名
 
 
 class PlanModeMiddleware(AgentMiddleware[dict[str, Any], ContextT, ResponseT]):
-    """按初始档位或同一 Run 的运行时 flag 强制计划模式只读。"""
+    """计划模式拦截中间件：强制执行“只做调研、只写方案、禁止改代码”的安全约束。
+    
+    在计划模式下，用户希望 Agent 充分调查并给出周全的技术方案，而不是立即动手改代码。
+    因此除了只读工具（ls/grep/read_file等）、会话规划文件（.harness/plan.md）和向用户追问（ask_user）之外，
+    任何文件写入、代码删除以及可能产生破坏的 Shell 命令均被硬拒绝。
+    """
 
     def __init__(self, approval_mode: ApprovalMode = "plan") -> None:
         """保存非共享图的构图期档位；共享图优先读取 RunContext。"""
@@ -281,7 +326,7 @@ class PlanModeMiddleware(AgentMiddleware[dict[str, Any], ContextT, ResponseT]):
         self._approval_mode = approval_mode
 
     def _constraint_active(self, request: ToolCallRequest) -> bool:
-        """统一读取 Run 计划约束；无 RunContext 时只接受构图期 plan。"""
+        """检查当前运行是否处于生效的计划模式约束下。"""
         from harness_agent.runtime.run_context import (
             RunContextError,
             plan_constraint_active,
@@ -295,7 +340,7 @@ class PlanModeMiddleware(AgentMiddleware[dict[str, Any], ContextT, ResponseT]):
         return plan_constraint_active(context)
 
     def _rejection(self, request: ToolCallRequest) -> ToolMessage:
-        """返回可指导模型继续调研并把动作写进计划的错误结果。"""
+        """返回友好清晰的拒绝提示，引导大模型将动作写入计划文件而非尝试强行执行。"""
         tool_call = request.tool_call
         tool_name = str(tool_call.get("name", "unknown"))
         extra = ""
@@ -762,17 +807,23 @@ def evaluate_permission(
     *,
     auto_filter: Callable[[str, dict[str, Any]], PermissionDecision] | None = None,
 ) -> PermissionDecision:
-    """多级审批流水线：L1 工具风险声明 → L2 deny 硬拦截 → L3 只读放行 → L3.5 敏感路径 → L4 规则评估 → L5 模式覆盖 → L6 Extension 钩子。
-
-    Args:
-        tool_name: 工具名称。
-        tool_args: 工具参数字典。
-        approval_mode: 当前审批模式。
-        rules: 已合并的权限规则列表（session + project + user + system）。
-        auto_filter: AUTO 模式四层过滤器回调（仅 auto 模式时调用）。
+    """多级安全审批流水线裁决总入口。
+    
+    当模型请求调用任何工具时，按照如下严格的 6 层顺序做权限判定：
+    - L1：提取工具风险分类（只读、编辑、命令执行等）；
+    - L2：检查绝对拒绝（deny）黑名单规则，命中则立即硬拒绝（任何模式包括 yolo 均不可覆盖）；
+    - L3：纯只读工具（ls, read_file, grep 等）直接放行；
+    - L3.1：Shell 安全只读命令（如 git status, cargo check 等）在非计划模式下放行；
+    - L3.5：敏感路径保护（如修改 .git/config、密钥、环境变量等），强制弹窗让人类确认；
+    - L4：评估用户与项目自定义规则（用户历史选择过“总是允许”或“需要确认”）；
+    - L5：按当前审批模式档位（plan / default / auto-edit / auto / yolo）查表决定；
+    - L6：执行外部插件安全钩子（只能收紧拒绝，不可放宽权限）。
 
     Returns:
-        "allow" 直接执行，"ask" 需要用户审批，"deny" 硬拒绝。
+        PermissionDecision: 最终裁决结果：
+        - "allow": 具备充分授权，直接执行；
+        - "ask": 存在潜在变更风险，需要向人类用户弹出审批卡片；
+        - "deny": 违反安全策略或黑名单，服务端直接拦截并向模型报错。
     """
     # L1: 工具风险声明提取
     kind = get_tool_kind(tool_name)

@@ -1,4 +1,39 @@
-"""Harness Skill 注册、快照、按需读取和企业市场扩展。"""
+"""Harness Skill (技能) 体系：多源发现、按需渐进加载与企业市场扩展。
+
+【什么是 Skill，为什么需要按需渐进加载？】
+Skill 是面向特定编程任务的专家经验包（如 TDD 测试驱动规程、接口设计原则、代码审查清单等）。
+每个 Skill 包含一份核心规程（`SKILL.md`）以及可选的示例、脚本和参考资料。
+
+如果把所有可用 Skill 的全部说明文字一次性拼接到系统提示词中，会瞬间撑爆大模型的上下文窗口，
+不仅昂贵而且会导致模型“注意力涣散”。
+为此，Harness 实现了渐进式按需披露（Progressive Disclosure）：
+1. 启动初期（轻量索引）：仅抓取每个 Skill 的名称和简短描述，生成一段精炼的索引提示词注入大模型；
+2. 任务执行期（按需读取）：大模型根据任务需要，主动调用 `read_skill` 读取目标技能的完整正文和辅助材料。
+
+【本模块的核心职责】
+- 多源发现：自动扫描内置技能（Builtin）、项目工作区（`.agents/skills/`）、用户家目录与企业私有市场；
+- 安全校验：解析并严格校验 YAML Frontmatter 元数据，限制文件与包体大小，防止恶意注入；
+- 命名消歧：当不同来源出现同名 Skill 时（如项目覆盖全局），通过 canonical ID（如 `project:tdd-workflow`）明确区分。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 Harness Skill 技能发现、按需读取与分发架构              │
+└────────────────────────────────────────────────────────────────────────┘
+
+    【多源发现 (Multi-Source Discovery)】
+    ├── 内置技能 (Builtin Bundle)
+    ├── 项目技能 (./.agents/skills/ 或 ./.harness/skills/)
+    ├── 用户全局 (~/.harness/skills/)
+    └── 企业市场 (Marketplace Provider)
+           │
+           ▼
+    [SkillCatalog 校验与注册] ──> 解析 SKILL.md Frontmatter，消歧与安全校验
+           │
+           ├──────────────────────────────────────────┐
+           ▼ (开机初始化: 极轻量)                      ▼ (按需唤醒: 动态加载)
+    [全局索引注入 System Prompt]              [模型自主调用 read_skill]
+    - 仅输出: name + 简短说明                  - 读取 SKILL.md 详细执行指令
+    - 节省 90%+ 初始上下文 Token               - 读取附带的 scripts/ 和 examples/
+"""
 
 from __future__ import annotations
 

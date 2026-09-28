@@ -1,4 +1,10 @@
-"""``python -m harness_agent`` 入口：启动 Project-scoped v3 Agent Host。"""
+"""Python Agent 后台核心服务启动入口（``python -m harness_agent``）。
+
+【这是做什么的？】
+当用户在命令行执行 za38 时，前端 CLI 会自动在子进程中拉起本入口。
+本模块负责初始化本地诊断日志、读取项目配置文件，并启动 AgentHost 主服务，
+通过标准输入输出（stdio）持续监听来自前端 CLI 的 JSON-RPC 请求并进行调度处理。
+"""
 import asyncio
 import os
 import time

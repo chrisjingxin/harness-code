@@ -1,4 +1,45 @@
-/** Interactive Core 薄协调器：只做 intent 路由、listener 管理、snapshot 组装与 Feature 生命周期编排；具体业务逻辑在 features/ 下按 Feature 拆分。 */
+/**
+ * 交互核心控制器（InteractiveControllerImpl）
+ *
+ * 【这是做什么的？】
+ * 本模块是 CLI 表现层（终端 OpenTUI 与 Web 浏览器工作台）的“控制调度中枢”：
+ * 1. 负责接收用户界面产生的所有操作意图（InteractiveIntent，如发送消息、切换模型、工具审批、执行斜杠命令等）。
+ * 2. 统一调度各个专职业务子模块（Feature），比如运行管理、会话历史、模型管理等。
+ * 3. 汇总最新的完整界面状态快照（InteractiveSnapshot），并主动通知前端刷新视图。
+ *
+ * 【数据流与事件循环线框图】
+ * ┌────────────────────────────────────────────────────────┐
+ * │   前端界面 (终端 OpenTUI / 网页 Web React 工作台)        │
+ * └────────┬───────────────────────────────────────▲───────┘
+ *          │ 1. 提交用户操作意图 (dispatch Intent)   │ 4. 推送最新状态 (Snapshot)
+ *          ▼                                       │
+ * ┌────────────────────────────────────────────────┴───────┐
+ * │             InteractiveControllerImpl                  │
+ * │                                                        │
+ * │  ┌──────────────────────────────────────────────────┐  │
+ * │  │ 2. 路由分发给对应的专职模块 (Feature)             │  │
+ * │  │    ├─ runFeature: 启动 / 取消 AI 对话执行          │  │
+ * │  │    ├─ interactionFeature: 工具审批与人机问答      │  │
+ * │  │    ├─ threadFeature: 创建 / 恢复 / 切换会话历史    │  │
+ * │  │    ├─ modelFeature: 选择与切换 AI 模型            │  │
+ * │  │    ├─ commandFeature: 解析与执行斜杠命令 (/new 等) │  │
+ * │  │    ├─ catalogFeature: 同步模型/Skill/插件清单      │  │
+ * │  │    ├─ timelineFeature: 维护消息时间线与工具卡片   │  │
+ * │  │    ├─ goalFeature: 目标管理与进度跟踪             │  │
+ * │  │    └─ codeIndexFeature: 代码检索状态管理           │  │
+ * │  └────────────────────────┬─────────────────────────┘  │
+ * │                           │                            │
+ * │                           ▼                            │
+ * │  ┌──────────────────────────────────────────────────┐  │
+ * │  │ 3. 提交状态变更 (commit) -> 组装状态快照 (publish) │  │
+ * │  └──────────────────────────────────────────────────┘  │
+ * └────────┬───────────────────────────────────────▲───────┘
+ *          │ 请求 (JSON-RPC)                       │ 响应 / 流式事件
+ *          ▼                                       │
+ * ┌────────────────────────────────────────────────┴───────┐
+ * │              后台 Python 核心 (AgentHost)               │
+ * └────────────────────────────────────────────────────────┘
+ */
 
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
@@ -30,7 +71,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   private closed = false
   private compactInFlight = false
 
-  // 九个 Feature 子模块各管一块业务；Controller 只做路由、状态组装与生命周期。
+  // 专职业务子模块（Feature）：各管一块业务；Controller 只负责统一路由分发、状态汇总与生命周期协同。
   private readonly catalogFeature = new CatalogFeature()
   private readonly skillFeature = new SkillFeature()
   private readonly mcpFeature = new McpFeature()
@@ -49,14 +90,14 @@ export class InteractiveControllerImpl implements InteractiveController {
     return Boolean(this.interactionFeature.pendingInteraction)
   }
 
-  /** 刷新 Model catalog 并把当前 thread 的 selection 收敛到共享选择。 */
+  /** 从后台拉取最新的可用模型列表，并将当前对话所保存的模型设置同步为当前激活的模型。 */
   private refreshModelSelection(): Promise<void> {
     return this.catalogFeature.refreshModelCatalog(this.featureContext, id => this.adoptThreadSelection(id))
   }
 
   /**
-   * 采纳服务端持久化的线程模型选择（重连/切换 Thread 恢复语义）。
-   * 用户本会话已显式 /model 选择时不再采纳，避免陈旧的持久化值覆盖用户意图。
+   * 恢复历史会话中记录的模型选择（如重新打开历史对话时）。
+   * 注意：如果用户在当前界面已经手动执行 /model 切换了模型，则以用户当前明确的选择为准，不被历史记录覆盖。
    */
   private adoptThreadSelection(id: string): void {
     if (this.modelFeature.explicitlySelected) return
@@ -124,6 +165,16 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
+
+  /**
+   * 意图分发器（dispatch）：统一处理前端产生的所有用户操作。
+   *
+   * 【运作机制】
+   * 无论用户是在终端输入文字、点击工具审批"允许"、执行斜杠命令（如 /new、/model），
+   * 还是切换会话、打开子代理时间线，前端都会将操作打包成一个意图（InteractiveIntent）传给本方法。
+   * 本方法根据 intent.type 路由给具体的业务功能模块（Feature）进行校验与执行，
+   * 并返回处理结果（status: accepted | rejected | completed）。
+   */
   async dispatch(intent: InteractiveIntent): Promise<IntentOutcome> {
     if (this.closed) return { status: "rejected", code: "connection-closed", message: "Controller is closed" }
     if (this.state.pendingOperation && blocksPendingOperation(intent)) {

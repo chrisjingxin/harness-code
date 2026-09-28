@@ -1,13 +1,56 @@
-"""ComposeWorkItemEngine：跨 Run 的 Work Item 生命周期与 Turn 路由。
+"""Compose 工作项引擎：驱动跨多轮 Run 的工作项生命周期与标准软件工程流转。
 
-Engine 是 deep module：对外只暴露 execute_turn / inspect / abandon，隐藏
-Work Item 定位、文档 reconcile、readiness 计算、意图澄清和 terminal CAS。
-Host/CLI 不直接调用 run_task_stage 之类的浅 interface。
+【什么是 Compose 模式与工作项 (Work Item)？】
+传统的自由对话模式（Chat）下，AI 往往“想写就写”，缺乏严密的工程规划，极易在编写上千行代码后才发现
+核心需求或架构设计存在根本性偏差。
+Harness 的 Compose 模式将复杂任务标准化为「工作项 (Work Item)」，并通过严密的五阶段软件工程流水线推进：
+1. Task（需求确认）：通过澄清互动（Grill）把用户模糊的想法挖透，生成需求任务书与验收条件；
+2. Spec（行为规格）：制定具体的系统行为规格、公开接口契约与错误语义；
+3. Plan（实施计划）：按真实依赖顺序拆解为包含可验证检查点的 Todo 清单；
+4. Implement（代码实现）：严格遵循 TDD（测试驱动开发），逐项编码并通过单元测试；
+5. Review（质量复核）：对照原始需求检视代码 Diff、架构规范与测试覆盖，生成验收报告。
 
-本模块不依赖 host：交互、side answer、分类与时间都通过 ComposeTurnPorts
-注入，便于 fake 覆盖；意图分类结果永远不能直接造成 abandon、覆盖或创建
-Work Item 的副作用——创建必须经过无未终结项 + 目标非空的确定性检查，
-abandon 必须经过调用方的 typed confirmation 与 revision CAS。
+【引擎核心职责】
+本引擎是对外高内聚的深层模块（Deep Module），统一负责：
+- 意图路由（TurnIntent）：识别用户是想继续推进、补充修改需求、提出旁枝问题（/btw），还是放弃当前任务；
+- 就绪度计算（Readiness）：通过物理文档检查与人类批准（Confirmation Gate），判断当前阶段是否可以流转到下一阶段；
+- 阶段活动执行（Activities）：按序调用 TaskGate、SpecGate、PlanGate、Implement 和 Review 活动闭环任务。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│              Compose 模式工作项生命周期与五阶段引擎架构                  │
+└────────────────────────────────────────────────────────────────────────┘
+
+    用户输入 (TurnRequest: message)
+           │
+           ▼
+    [意图分类与解析 (TurnIntent)] ──> 是追问/补充/继续/放弃?
+           │
+           ▼
+    [工作项定位与准备 (WorkItem)] ──> 获取或创建当前活跃工作项
+           │
+           ▼
+    [阶段就绪度计算 (Readiness)] ───> 检查前序阶段产物与用户确认
+           │
+           ▼
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                      五阶段活动流水线 (Gate Activities)              │
+  │                                                                      │
+  │  [1. Task 阶段] ────> 需求深挖 (Grill Driver) ─────> 生成 Task 说明书 │
+  │         │                                                            │
+  │  [2. Spec 阶段] ────> 行为规格 (Spec Driver) ──────> 产出 Spec 文档   │
+  │         │                                                            │
+  │  [3. Plan 阶段] ────> 任务规划 (Plan Driver) ──────> 拆解 Todo 清单   │
+  │         │                                                            │
+  │  [4. Implement] ────> 代码实现 (Implement Driver) ─> TDD 编码与测试  │
+  │         │                                                            │
+  │  [5. Review]    ────> 代码审查 (Review Driver) ────> 质量复核报告     │
+  └──────────────────────────────────────────────────────────────────────┘
+           │
+           ▼
+    [终态闭环与对账 (CompletionGuard)] ──> 验证所有验收条件已满足
+           │
+           ▼
+    Turn 收敛输出 (ComposeTurnOutcome: waiting_user / completed / blocked)
 """
 
 from __future__ import annotations

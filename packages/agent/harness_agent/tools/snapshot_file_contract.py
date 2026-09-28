@@ -1,9 +1,42 @@
-"""以 Snapshot prior-read 约束的 canonical 文件工具 contract。
+"""Harness 文件操作安全契约（基于 Snapshot 快照与先读后写机制）。
 
-ZC-133 的现有证据只支持 ``exact-string + prior-read``：模型必须先通过
-``read_file`` 获得当前 Thread 的短 Snapshot，再以唯一 ``old_string`` 修改已读
-内容。这里不保留 ``replace_all``，也不接收尚未通过真实模型门槛的 range/edits[]
-候选参数。
+【为什么需要 Snapshot（快照）机制？】
+大语言模型在直接修改代码文件时，通常面临两个容易引发代码灾难的问题：
+1. 凭空幻觉：模型凭记忆猜测文件里有某段代码并尝试替换，若匹配逻辑粗糙，容易改错位置甚至破坏文件；
+2. 并发脏写：在模型思考期间，用户或外部构建工具可能已经改动了文件。若模型仍按旧内容覆盖，会导致最新修改丢失。
+
+为了彻底消除这两类问题，Harness 设计了基于快照（Snapshot）的“先读后写”（Prior-Read）契约：
+- 先读：模型必须先调用 read_file 实际读取目标文件，系统会根据文件当前哈希签发唯一的 snapshot_id；
+- 后写：模型调用 edit_file 时必须附带此 snapshot_id，并提供精确唯一的 old_string；
+- 校验：系统会校验 snapshot_id 是否仍与当前磁盘内容一致、old_string 是否在文件中唯一且处于模型实际读过的行范围内；
+- 原子替换：校验完全通过后，才生成差异预览交由用户/系统审批并写入磁盘。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                   Harness 文件先读后写安全工作流 (Snapshot)            │
+└────────────────────────────────────────────────────────────────────────┘
+
+    大模型 (LLM)                  文件系统契约 (Contract)            本地磁盘 (Disk)
+         │                                   │                             │
+    1. 想改文件，先读代码                     │                             │
+         │──── read_file(path, offset) ─────>│                             │
+         │                                   │──── 读取文件与哈希指纹 ────>│
+         │                                   │<─── 返回磁盘内容与哈希 ─────│
+         │                                   │                             │
+         │                                   │ [生成短期快照 Snapshot]    │
+         │                                   │ (记录当前哈希与已读行范围)  │
+         │<─── {snapshot_id, content} ───────│                             │
+         │                                   │                             │
+    2. 发起精确替换修改                      │                             │
+         │──── edit_file(snapshot_id, ──────>│                             │
+         │               old_str, new_str)   │                             │
+         │                                   │ 严格三重安全门禁校验：      │
+         │                                   │ 1. 快照校验：磁盘文件有无变动│
+         │                                   │ 2. 范围校验：模型是否真读过  │
+         │                                   │ 3. 唯一校验：old_str 是否唯一│
+         │                                   │                             │
+         │                                   │ [通过后写入磁盘并重读验证]  │
+         │                                   │────────────────────────────>│
+         │<─── {ok: true, snapshot_id} ──────│<─── 写入成功，签发新快照 ───│
 """
 
 from __future__ import annotations
@@ -98,11 +131,11 @@ from harness_agent.tools.snapshot_file_support import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS = 1.0
-"""提交后只读 diagnostics 的短超时，超时不能影响已成功写入。"""
+"""写入成功后，只读代码诊断（如语法检查、Linter 提示）的等待超时上限（秒），超时不会影响已成功的写盘。"""
 
 
 class SnapshotFileToolContract:
-    """单一 Harness 文件工具实现，强制 prior-read 与 compare-and-replace。"""
+    """Harness 唯一官方文件工具契约实现，强制实行先读后写与版本一致性校验。"""
 
     def __init__(
         self,
@@ -114,7 +147,7 @@ class SnapshotFileToolContract:
         diagnostics_timeout_seconds: float = DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS,
         metrics: FileToolMetrics | None = None,
     ) -> None:
-        """绑定运行时 backend、可选 diagnostics 与 Host 聚合观测。"""
+        """绑定文件系统底层后端、快照持久化仓库、文本替换服务与指标收集器。"""
         if diagnostics_timeout_seconds <= 0:
             raise ValueError("DIAGNOSTICS_TIMEOUT_INVALID")
         self._backend = backend
@@ -128,27 +161,27 @@ class SnapshotFileToolContract:
 
     @property
     def tool_definitions(self) -> Sequence[BaseTool | dict[str, Any]]:
-        """返回主 Agent、子 Agent 共用的一套模型可见 schema。"""
+        """返回主 Agent 与子 Agent 统一对模型可见的工具参数描述（Schema）。"""
         return self._definitions
 
     @property
     def handled_tool_names(self) -> frozenset[str]:
-        """返回交给 Harness seam 执行的所有文件工具名。"""
+        """返回由当前契约全权接管的所有文件工具名称集合。"""
         return HARNESS_FILE_TOOL_NAMES
 
     @property
     def registration_tools(self) -> Sequence[BaseTool | dict[str, Any]]:
-        """只注册 DeepAgents 不提供的 delete_file placeholder。"""
+        """只注册底层框架原生不提供的占位工具（例如 delete_file）。"""
         return tuple(tool for tool in self._definitions if getattr(tool, "name", "") not in BUILTIN_FILE_TOOL_NAMES)
 
     def dispatch(self, request: ToolCallRequest) -> ToolMessage:
-        """同步执行一项 canonical 文件调用，并将失败收敛为稳定 JSON。"""
+        """同步分发执行一项文件工具调用，将任何异常统一收敛为结构化 JSON 提示。"""
         message = self._dispatch(request)
         self._observe(message)
         return message
 
     def _dispatch(self, request: ToolCallRequest) -> ToolMessage:
-        """执行同步 CAS 路径；异步入口会在此之后补充 diagnostics。"""
+        """根据工具名称分发到具体的读取、创建、编辑或搜索方法。"""
         name, args, tool_call_id = self._call_args(request)
         try:
             _require_canonical_argument_keys(name, args)
@@ -167,18 +200,18 @@ class SnapshotFileToolContract:
             if name == "grep":
                 return self._grep(request, args, tool_call_id)
             raise FileToolContractError("FILE_TOOL_NAME_UNSUPPORTED")
-        except Exception as exc:  # noqa: BLE001 - 工具边界不得泄露 backend 异常
+        except Exception as exc:  # noqa: BLE001 - 工具边界不得泄露原始 backend 异常栈
             return self._error(name, tool_call_id, _error_code(exc))
 
     async def adispatch(self, request: ToolCallRequest) -> ToolMessage:
-        """异步图在提交后限时读取 diagnostics，再记录一次最终结果。"""
+        """异步执行文件工具：落盘完成后可限时收集语法诊断结果并随消息返回。"""
         message = await asyncio.to_thread(self._dispatch, request)
         message = await self._attach_async_diagnostics(request, message)
         self._observe(message)
         return message
 
     def approval_preflight(self, request: ToolCallRequest) -> bool:
-        """在 HITL 前准备 mutation；前置条件失败时不产生无法执行的审批。"""
+        """在弹出用户审批卡片前做预检：若参数本身非法或快照已失效，直接报错而不弹出注定失败的审批卡片。"""
         name = str(request.tool_call.get("name", ""))
         if name not in {"write_file", "edit_file", "delete_file"}:
             return True
@@ -188,18 +221,18 @@ class SnapshotFileToolContract:
             return True
         try:
             self._prepare_mutation(request)
-        except Exception:  # noqa: BLE001 - 失败由实际 ToolMessage 统一说明
+        except Exception:  # noqa: BLE001 - 校验失败由后续真正执行时的 ToolMessage 明确说明
             return False
         return True
 
     def approval_description(self, tool_call: dict[str, Any], _state: Any, runtime: Any) -> str:
-        """把同一份已准备计划的有界 diff 预览交给既有 HITL 审批 payload。"""
+        """从预先准备好的文件变更计划中生成人性化的文本 Diff 摘要，供用户审批界面展示。"""
         request = type("ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime})()
         plan = self._prepare_mutation(request)
         return self._mutation_service.approval_description(plan)
 
     def approval_details(self, tool_call: dict[str, Any], _state: Any, runtime: Any) -> Any:
-        """返回同一计划的短摘要与结构化展示，不从工具参数重算 diff。"""
+        """返回结构化的 Diff 详情对象，便于前端 TUI/Web 渲染高亮对比视图。"""
         request = type("ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime})()
         plan = self._prepare_mutation(request)
         return self._mutation_service.approval_details(plan)
@@ -207,7 +240,12 @@ class SnapshotFileToolContract:
     def _read_file(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
-        """读取完整 identity，但只把请求窗口放进模型上下文。"""
+        """读取文件文本内容并签发快照（Snapshot）。
+        
+        为避免超大文件撑爆上下文，支持分页窗口（offset/limit）。系统会记录模型
+        本次读取的实际行范围，并签发唯一的 snapshot_id。后续模型如果想编辑该文件，
+        只能修改这次“亲眼读过”的有效行范围。
+        """
         path = _path(args, "file_path", "read_file")
         offset = _non_negative_int(args.get("offset", 0), "offset")
         limit = _positive_int(args.get("limit", DEFAULT_READ_LIMIT), "limit")
@@ -249,7 +287,11 @@ class SnapshotFileToolContract:
         limit: int,
         tool_call_id: str,
     ) -> ToolMessage:
-        """保留 Notebook 与 non-text 的普通读取，但绝不签发可写 Snapshot。"""
+        """读取 Notebook (.ipynb) 或二进制等特殊文件，仅供查看，绝不签发可写快照。
+        
+        Notebook 文件由复杂的 JSON 单元格组成，直接当成纯文本让模型替换极易损坏格式；
+        非文本二进制文件同样如此。因此此类文件仅能读取供模型参考，不可通过 edit_file 编辑。
+        """
         result = self._resolve_backend(request).read(path, offset=offset, limit=limit)
         if isinstance(result, str):
             content = result
@@ -376,7 +418,11 @@ class SnapshotFileToolContract:
     def _write_file(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
-        """提交 create-if-absent，并返回实际版本的首个可编辑局部窗口。"""
+        """新建文件并写入内容。
+        
+        仅适用于创建尚不存在的新文件。如果文件已存在，会报错拒绝并引导使用 edit_file，
+        防止模型不小心覆盖现有代码。创建成功后，会立即为该文件签发首个有效快照。
+        """
         path = _path(args, "file_path", "write_file")
         if is_plan_virtual_path(path):
             return self._write_plan_file(request, args, tool_call_id)
@@ -413,7 +459,12 @@ class SnapshotFileToolContract:
     def _edit_file(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
-        """提交 exact replacement，并返回实际重读的变更范围与局部上下文。"""
+        """基于快照的精确局部文本替换。
+        
+        必须传入有效的 snapshot_id 以及在文件中唯一出现的 old_string。
+        在校验快照未过期、文本唯一且在已读范围内之后，执行局部替换并回读磁盘。
+        执行成功后向模型返回修改局部的新内容以及全新签发的 snapshot_id。
+        """
         path = _path(args, "file_path", "edit_file")
         if is_plan_virtual_path(path):
             return self._edit_plan_file(request, args, tool_call_id)
@@ -450,7 +501,11 @@ class SnapshotFileToolContract:
     def _delete_file(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
-        """提交已审批的 compare-delete，保存钩子重建文件时返回实际 Snapshot。"""
+        """安全删除文件。
+        
+        要求必须完整读过该文件并附带有效 snapshot_id。删除成功后，会把该文件关联
+        的所有历史快照标记为失效，防止模型后续拿旧快照进行误操作。
+        """
         plan = self._prepare_mutation(request)
         committed = self._mutation_service.commit(plan)
         path = plan.metadata.path

@@ -1,4 +1,36 @@
-"""Agent 交互式追问中间件：通过 LangGraph interrupt 暂停并等待用户回答。"""
+"""Agent 交互式追问中间件：支持大模型在需求存疑时主动向人类用户提问。
+
+【为什么需要 ask_user？】
+在复杂的软件开发任务中，用户的原始提示词经常存在歧义（例如：“把导出改成异步的”，但未指明是生成下载链接还是通过邮件发送）。
+如果模型盲目揣测并直接写代码，很可能南辕北辙，浪费大量时间和 Token。
+
+因此，Harness 提供了 `ask_user` 工具：
+- 模型可以提出 1~5 个明确的问题，类型支持自由文本输入（text）或单选列表（multiple_choice）；
+- 执行机制：工具内部调用 LangGraph 的 `interrupt()` 挂起当前执行图；
+- 界面交互：CLI/TUI 弹出交互式问答卡片，等待人类用户勾选或输入回答；
+- 恢复流转：用户提交答案后，系统唤醒执行图，将用户的回答组装为 ToolMessage 返回给模型，模型据此继续推进任务。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                 ask_user 交互式追问流程 (基于 LangGraph 中断)           │
+└────────────────────────────────────────────────────────────────────────┘
+
+    大模型 (LLM)                  AskUserMiddleware                前端用户 (TUI/Web)
+         │                                 │                             │
+    1. 遇到歧义，发起追问                  │                             │
+         │── ask_user(questions) ────────>│                             │
+         │                                 │ 校验题目 (最多 5 题，单选/文本)│
+         │                                 │ 触发 interrupt() 挂起执行图 │
+         │                                 │── 发送追问事件 ────────────>│
+         │          [执行暂停等待]         │                             │ 弹窗渲染问题列表
+         │                 │               │                             │ 用户勾选或输入回答
+         │                 │               │<─ 用户提交答案 (run.resume) ─│
+         │                 │               │                             │
+         │                                 │ 恢复执行图，校验并解析答案  │
+         │                                 │ 将 Q&A 拼装为 ToolMessage   │
+         │<─ 返回 ToolMessage (含用户答案)─│                             │
+         │                                 │                             │
+    2. 基于用户确切答复继续推理            │                             │
+"""
 
 from __future__ import annotations
 
@@ -25,9 +57,8 @@ from harness_agent.tools._ask_user_types import AskUserRequest, Question
 
 logger = logging.getLogger(__name__)
 
-
 MAX_ASK_USER_QUESTIONS = 5
-"""一次 ask_user 最多几题；再多用户无法一次答完。"""
+"""一次 ask_user 最多允许提问 5 题（超过此数量用户容易疲劳，应分阶段拆分提问）。"""
 
 ASK_USER_TOOL_DESCRIPTION = """Ask the user one or more related questions when you need clarification or input before proceeding.
 

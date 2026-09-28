@@ -1,8 +1,11 @@
-"""单次 Agent Run 的显式上下文和冻结 RunContextSnapshot 注入。
+"""单次 AI 执行上下文与动态状态注入（RunContext）。
 
-本模块只承载一次调用的 thread、run、提示词与取消状态。它不会写入
-LangGraph checkpoint，也不会被 Agent 图长期持有，因此同一编译图可安全
-服务多个 thread。
+【这是做什么的？】
+在后台，编译好的 Agent 状态图（包含模型连接、工具定义与中间件）是可以被不同会话复用的（存储在 AgentEnginePool 中，避免每轮对话都耗时重新构图）。
+而每一次对话又有它专属的瞬时状态（如当前会话 ID、运行 ID、用户指定的审批级别、取消令牌、上下文快照）。
+本模块定义的 `RunContext` 就是在执行时动态注入给状态图的“单次执行上下文”：
+1. 它随调用的发起而注入，随调用结束而释放，绝不持久化到数据库；
+2. 保证同一张编译好的 Agent 图可以安全并发服务多个会话，数据绝不互相串台。
 """
 
 from __future__ import annotations
@@ -103,7 +106,12 @@ class RunCancellationToken:
 
 @dataclass(frozen=True, slots=True)
 class RunContext:
-    """传给单次图调用的 thread 私有状态，不属于共享 AgentEngine。"""
+    """传给单次 Agent 图调用的会话私有状态。
+
+    【核心作用】
+    封装当前对话回合独占的会话 ID、运行 ID、审批模式、取消令牌与上下文快照。
+    只在单次运行的内存栈中传递，避免共享模型引擎把不同会话的数据混淆。
+    """
 
     thread_id: str
     run_id: str

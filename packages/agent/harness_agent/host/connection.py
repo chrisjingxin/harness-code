@@ -1,4 +1,11 @@
-"""Protocol Connection 状态与反向 Interaction adapter。"""
+"""前端客户端连接状态（ProtocolConnection）与反向交互适配器（ProtocolInteractionAdapter）。
+
+【这是做什么的？】
+1. ProtocolConnection：表示一个连入 Python 后台的前端客户端（例如当前的命令行终端或未来的监控端）。
+   记录该连接的权限能力（capabilities）、能处理哪些弹窗交互（handles），以及正在等待前端答复的请求。
+2. ProtocolInteractionAdapter：反向交互适配器。当 AI 执行工具遇到敏感操作（如写文件、执行 bash）时，
+   负责把后端的审批请求（InteractionRequest）封装为 JSON-RPC 消息反向发给前端界面，并挂起等待用户点击确认。
+"""
 
 from __future__ import annotations
 

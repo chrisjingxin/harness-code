@@ -1,4 +1,13 @@
-/** stdio JSONL adapter：负责 UTF-8 分帧、大小限制、背压和 EOF。 */
+/**
+ * 标准输入输出（stdio）行分隔 JSON-RPC 传输通道（StdioRpcTransport）。
+ *
+ * 【这是做什么的？】
+ * 当前端 CLI 启动后台 Python 核心服务后，两者运行在不同进程中，必须通过管道传递数据。
+ * 本模块把子进程的写入流（stdin）和读取流（stdout）包装为高级的 JSON 消息通道：
+ * 1. 发送（send）：将消息对象转为单行 JSON 并以换行符 `\n` 结尾写入管道，支持背压（缓冲区满时等待 drain）；
+ * 2. 接收与按行分帧（onData）：底层流是以任意大小的字节块到达的，一行 JSON 可能被拆碎，本类使用缓冲区按换行符切分为完整的独立消息对象；
+ * 3. 安全防护：限制单帧最大字节数，防止异常畸形数据耗尽内存。
+ */
 
 import { once } from "node:events"
 import { StringDecoder } from "node:string_decoder"

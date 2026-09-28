@@ -1,5 +1,41 @@
 #!/usr/bin/env bun
-/** za38 CLI 启动层：管理 Python sidecar 生命周期并选择 TUI 或无头执行模式。 */
+/**
+ * Harness Code (za38) CLI 启动入口与主流程调度
+ *
+ * 【这是做什么的？】
+ * 本文件是整个命令行工具的执行起点。负责解析用户输入的命令行参数，
+ * 启动后台的 Python AI 核心进程（sidecar），通过标准输入输出（stdio）
+ * 建立双向 JSON-RPC 通信通道，并根据运行模式进入终端全屏界面（TUI）、
+ * 启动 Web 界面或直接无头执行单次任务。
+ *
+ * 【整体运行流程】
+ * ┌──────────────┐
+ * │ 用户执行命令  │ (例如直接运行 za38，或运行 za38 -n "帮我重构代码")
+ * └──────┬───────┘
+ *        ▼
+ * ┌──────────────┐
+ * │ 1. 参数解析  │ parseArgs(argv) -> 识别出是交互终端、单次对话还是配置管理
+ * └──────┬───────┘
+ *        ▼
+ * ┌──────────────┐
+ * │ 2. 检查工作区│ 确保目标目录存在且是合法文件夹，并计算项目唯一指纹
+ * └──────┬───────┘
+ *        ▼
+ * ┌──────────────┐
+ * │ 3. 启动后台  │ startAgent() -> 拉起 Python 核心进程，建立双向 stdio 管道
+ * └──────┬───────┘
+ *        ▼
+ * ┌──────────────┐
+ * │ 4. 协议握手  │ initialize 握手，告知后台前端支持哪些功能（审批、提问、目录信任等）
+ * └──────┬───────┘
+ *        ▼
+ *    模式分流判断 ───┬───────────────────┬─────────────────────┐
+ *                    │                   │                     │
+ *                    ▼                   ▼                     ▼
+ *             【交互式终端模式】    【无头单次执行】        【配置/插件管理】
+ *             进入 OpenTUI 界面    执行一段对话并流式输出    直接请求并打印结果后退出
+ *             支持随时切换到网页    打印完后优雅退出
+ */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { once } from "node:events"
@@ -60,14 +96,14 @@ type ExecuteDependencies = {
 
 type TerminalStream = { isTTY?: boolean }
 
-/** Plugin consent 所需的三条真实终端流；任何一条被重定向都不能确认安装。 */
+/** 插件安装确认所需的终端输入输出流。只有在真实的终端下才允许用户确认安装，避免脚本静默安装不受信任的插件。 */
 export type PluginConsentTerminalState = {
   stdin: TerminalStream
   stdout: TerminalStream
   stderr: TerminalStream
 }
 
-/** 供 consent 读取器使用的可读/可写终端流。 */
+/** 供插件安装确认读取器使用的可读/可写终端流。 */
 export type PluginConsentTerminal = {
   stdin: NodeJS.ReadableStream & TerminalStream
   stdout: NodeJS.WritableStream & TerminalStream
@@ -82,7 +118,7 @@ function processPluginConsentTerminal(): PluginConsentTerminal {
   }
 }
 
-/** 只有 stdin/stdout/stderr 同时为 TTY 才允许执行一次性 Plugin consent。 */
+/** 检查当前环境是否为真实的交互式终端（非重定向管道），确保安装外部插件时用户能亲眼看到风险提示并手动输入确认。 */
 export function hasPluginConsentTerminal(
   terminal: PluginConsentTerminalState = processPluginConsentTerminal(),
 ): boolean {
@@ -91,7 +127,7 @@ export function hasPluginConsentTerminal(
     && terminal.stderr.isTTY === true
 }
 
-/** 根据命令实际是否存在反向交互处理器，声明最小协议能力集合。 */
+/** 根据本次执行的命令类型，计算并声明前端支持的功能清单（例如是否支持取消运行、多线程、修改配置、工具审批等），并在初始化握手时告知后台 Python。 */
 export function clientCapabilities(command: Command): string[] {
   const capabilities: string[] = [Capability.RUN_CANCEL, Capability.RUN_MULTITHREAD, Capability.CONFIG_READ]
   if (command.kind === "run" && !command.nonInteractive) capabilities.push(
@@ -128,7 +164,7 @@ export function clientCapabilities(command: Command): string[] {
   return capabilities
 }
 
-/** 声明当前表现层能够处理的反向 Interaction。 */
+/** 声明当前界面支持处理的人机交互类型（如：审批工具调用、向用户提问、工作区目录信任、执行计划确认等）。无交互模式下返回空列表。 */
 export function clientInteractionHandles(
   command: Command,
   terminal: PluginConsentTerminalState = processPluginConsentTerminal(),
@@ -140,7 +176,7 @@ export function clientInteractionHandles(
   return command.kind === "run" && !command.nonInteractive ? ["approval", "question", "directory_trust", "plan", "goal"] : []
 }
 
-/** 读取 install/update 的一次性结构化 consent；取消、EOF 和非明确确认均拒绝。 */
+/** 在终端向用户展示插件将要执行的操作并等待用户确认输入（输入 y/yes 继续，其余输入或中断均视为取消）。 */
 export async function readPluginConsent(
   request: Extract<InteractionRequestEnvelope, { type: "plugin_consent" }>,
   terminal: PluginConsentTerminal = processPluginConsentTerminal(),
@@ -179,7 +215,7 @@ export async function readPluginConsent(
   }
 }
 
-/** 启动 Python sidecar、完成 initialize 握手，并返回可关闭的运行句柄。 */
+/** 启动后台 Python 核心进程，通过标准输入输出（stdio）建立 JSON-RPC 消息通道，完成握手初始化，并返回包含通信客户端和清理关闭方法的运行句柄。 */
 async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" }>): Promise<RunningAgent> {
   validateWorkspace(command.cwd)
   const startedAtMs = Date.now()
@@ -442,7 +478,7 @@ function validateSettingValue(value: string): string {
   return value
 }
 
-/** 无头模式下收集单次流式输出，并等待对应运行的终态事件。 */
+/** 无头非交互模式（-n）：向后台发起一轮对话，实时拼接并输出 AI 回复的文本流，直到 AI 完成本轮回答并返回最终 Token 使用量。 */
 async function runTurn(client: AgentClient, message: string, threadId?: string): Promise<{ text: string; threadId: string; runId: string; usage: unknown }> {
   let text = ""
   const run = client.startRun({ input: { kind: "user", message }, mode: "build", threadId })
@@ -464,7 +500,7 @@ async function runTurn(client: AgentClient, message: string, threadId?: string):
   }
 }
 
-/** 将 CLI 语法映射到唯一的 canonical RPC；Settings 的长命名只存在于表现层。 */
+/** 将命令行解析出的动作名，映射为后台 Python 识别的标准 RPC 方法名（如把 plugins.settings.list 映射为 settings.list）。 */
 export function clientMethodForCommand(command: Command): OperationName | undefined {
   if (command.kind === "plugins.settings.list") return "settings.list"
   if (command.kind === "plugins.settings.set") return "settings.set"
@@ -472,7 +508,7 @@ export function clientMethodForCommand(command: Command): OperationName | undefi
   return isClientMethod(command.kind) ? command.kind : undefined
 }
 
-/** 执行一个非 run CLI 管理命令；request 是唯一的 Agent dispatch seam。 */
+/** 执行非对话类的后台管理命令（如查询模型列表、读取配置、管理插件等），直接向后台发起请求并返回结果。 */
 export async function dispatchClientCommand(
   command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" }>,
   request: (method: OperationName, params: Record<string, unknown>) => Promise<unknown>,
@@ -490,7 +526,7 @@ export async function dispatchClientCommand(
   return request(method, params)
 }
 
-/** 根据解析后的命令选择配置查询、无头执行或交互式 TUI。 */
+/** 核心执行流程：根据命令类型分流处理。如果是单次任务就运行一轮对话后退出；如果是普通启动则拉起完整的终端/网页交互界面。 */
 export async function execute(
   command: Command,
   dependencies: ExecuteDependencies = {},
@@ -504,7 +540,7 @@ export async function execute(
     return
   }
   if (command.kind === "logs") {
-    // 完全离线短路：不创建 logger、不启动 sidecar、不打开 SQLite
+    // 日志查询完全离线短路：不创建 logger、不启动 Python 后台、不连接 SQLite
     await runLogsQuery(command)
     return
   }
@@ -534,7 +570,7 @@ export async function execute(
     let workspaceExplorer: WorkspaceExplorer | undefined
     let controller: InteractiveController | undefined
     try {
-      // CLI Composition Root：全生命周期唯一 Controller，TUI/Web 共用（D-01）。
+      // 创建全局唯一的交互控制器（InteractiveController）。整个应用运行期间只有这一个控制器实例，终端界面（TUI）和网页界面（Web）共享它来管理会话状态。
       const gateway = new AgentClientGateway(agent.client)
       controller = createInteractiveController({
         gateway,
@@ -576,7 +612,7 @@ export async function execute(
         openWeb: () => presentationCoordinator!.open(),
       })
     } finally {
-      // 关闭顺序：Web 通道 → WorkspaceExplorer → Coordinator → Controller → agent.stop（外层 finally）。
+      // 退出时按从上到下的顺序依次优雅关闭各层组件：网页网关 -> 文件资源树 -> 多端协调器 -> 交互控制器 -> 停止后台 Python 进程。
       await webUiGateway?.close()
       await workspaceExplorer?.close()
       await presentationCoordinator?.close()

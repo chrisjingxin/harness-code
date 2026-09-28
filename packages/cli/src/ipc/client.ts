@@ -1,7 +1,36 @@
 /**
- * CLI/TUI/Web 与 Python sidecar 通信的统一 JSON-RPC 客户端。
- * 请求配对、参数与结果校验、事件分发、Agent 反向发起的交互（审批/提问）
- * 都收在这里；界面层只管调方法和收事件，不用关心底层走 stdio 还是 WebSocket。
+ * 跨进程 JSON-RPC 核心通信客户端（AgentClient）
+ *
+ * 【这是做什么的？】
+ * 本模块是前端（命令行 CLI、终端 TUI、网页 Web）与后台 Python sidecar 通信的“电话交换机”。
+ * 它在底层的进程管道（stdio）或网络通道之上，负责 JSON-RPC 2.0 格式的双向消息收发、请求配对与数据校验。
+ * 界面层只需调用高层方法或监听事件流，无需关心底层数据帧的序列化与拼接细节。
+ *
+ * 【它处理哪三类核心消息？】
+ * 1. 正向请求（Client -> Server）：前端发起的指令（如 `initialize` 握手、`run.start` 发起对话、`models.list` 查询模型），分配唯一自增 ID 并异步等待后台应答；
+ * 2. 流式事件（Server -> Client）：后台主动推送的执行过程（如 `content.delta` AI文本打字流、`tool.started` 工具启动、`run.completed` 执行完成），封装为异步事件队列；
+ * 3. 反向交互请求（Server -> Client -> Server）：后台执行敏感工具（如修改文件、执行命令）需要用户审批时，向前端反向发起交互请求（如 `interaction.approval`），客户端捕获后交由界面弹窗，并将用户的批准/拒绝决策答复给后台。
+ *
+ * 【双向消息交互线框图】
+ * ┌─────────────────────────┐                     ┌─────────────────────────┐
+ * │  前端界面 / Controller   │                     │  后台 Python AgentHost   │
+ * └────────────┬────────────┘                     └────────────┬────────────┘
+ *              │                                               │
+ *              │ 1. startRun() 发起对话                        │
+ *              ├──────────────────────────────────────────────►│ (检查状态并受理)
+ *              │   ◄── 立即返回受理结果 (accepted: true) ──────┤
+ *              │                                               │
+ *              │ 2. 实时流式事件 (content.delta, tool.*)       │
+ *              │◄──────────────────────────────────────────────┤ (AI 边思考边输出)
+ *              │                                               │
+ *              │ 3. 反向交互请求 (interaction.approval 审批)   │
+ *              │◄──────────────────────────────────────────────┤ (AI 请求修改文件)
+ *              │                                               │
+ *              │ 4. 弹出审批窗口，用户点击"同意"并返回决策     │
+ *              ├──────────────────────────────────────────────►│ (继续执行修改)
+ *              │                                               │
+ *              │ 5. 终态事件 (run.completed 结束本次对话)      │
+ *              │◄──────────────────────────────────────────────┤
  */
 
 import {
@@ -225,7 +254,17 @@ export class AgentClient {
     return this.setRequestHandler(handler)
   }
 
-  /** 在发送请求前建立事件路由，返回拥有取消和唯一终态的 Run handle。 */
+  /**
+   * 发起一轮新的 AI 对话执行（Run）。
+   *
+   * 【为什么必须“先挂监听器，再发请求”？】
+   * 为了防范竞态条件（Race Condition）：如果先向后台发送 run.start 请求，再挂载事件监听器，
+   * 那么当后台极快返回第一条流式事件（如首字 content.delta 或工具启动）时，前端就会漏掉首帧数据。
+   * 因此必须先在本地开辟好异步事件队列（AsyncQueue），挂好监听器，再发起网络请求。
+   *
+   * @param input 包含用户提问内容、工作模式（build/compose）、会话 ID、模型与审批设置
+   * @returns AgentRun 包含用于渲染的事件流（events）、终态结果（completion）以及主动取消方法（cancel）
+   */
   startRun(input: StartRunInput): AgentRun {
     const threadId = input.threadId ?? crypto.randomUUID()
     const runId = crypto.randomUUID()
@@ -705,7 +744,14 @@ export class AgentClient {
     }
   }
 
-  /** 记住最近 256 个超时的请求 ID；它们的迟到响应直接丢弃，不再当成未知响应报错。 */
+  /**
+   * 维护一个最多记录 256 个超时请求 ID 的滑动窗口。
+   *
+   * 【为什么需要它？】
+   * 当某个请求在客户端等待超时并主动报错后，后台 Python 可能在稍后才姗姗来迟返回响应。
+   * 如果不记住这些超时的 ID，客户端收到该响应时会误以为是“未知的协议幽灵消息”从而抛出异常。
+   * 通过记录超时 ID，迟到的响应会被识别并优雅地静默丢弃。
+   */
   private rememberTimedOutRequest(id: string): void {
     this.timedOutRequestIds.add(id)
     while (this.timedOutRequestIds.size > AgentClient.MAX_TIMED_OUT_REQUEST_IDS) {
@@ -715,7 +761,14 @@ export class AgentClient {
     }
   }
 
-  /** 处理 Agent 发起的 request；无处理器或非法结果都返回标准错误响应。 */
+  /**
+   * 处理后台 Python 服务端反向发给前端的交互请求（Interaction）。
+   *
+   * 【运作机制】
+   * 当 AI 打算执行敏感工具（如修改文件、执行 bash 命令、加载插件）时，不能私自运行，
+   * 后台会通过本方法向前端发来反向请求。本方法负责校验入参合法性、通知前端界面弹出审批或问答窗口，
+   * 并将用户的批准、拒绝或填写的内容作为标准响应回传给后台继续执行。
+   */
   private async handleInboundRequest(method: string, id: string, params: Record<string, unknown>): Promise<void> {
     if (!isInteractionMethod(method)) {
       await this.sendError(id, -32601, `Unsupported server request: ${method}`)
