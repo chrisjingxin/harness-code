@@ -86,7 +86,7 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 5. **按变更归属选包**：界面与终端交互改 `cli`，跨进程通讯契约改 `protocol`，Agent 运行时与业务改 `agent`。
 6. **按停点交付（核心底线）**：
    - 每次实现只推进到下一个可演示停点（用户能看见实际效果的工作包）；
-   - 到达停点后勾选对应 Todo、更新 `tmp/handoff.md`，向用户说明如何观察（如 `npm run dev` 看哪块）并**立即停下等待用户确认**；
+   - 到达停点后勾选对应 Todo，向用户说明如何观察（如 `npm run dev` 看哪块）并**立即停下等待用户确认**；
    - **严禁为了清空清单而一次性连做整份 Todo**。
 7. **架构增量同步**：任务完成后检视 `docs/developer/architecture/`，对引入的新边界新建架构文档，或对已有架构文档进行增量修订。
 
@@ -200,8 +200,8 @@ completed_at: -
 6. **版本管理**：若涉及版本变更，唯一通过 `npm run version:set -- <SemVer>` 修改；
 7. **任务归档**：执行 `npm run task:complete -- <ID> --evidence "..."`，Task 自动移入 `docs/developer/task/archive/` 并从活动看板中剔除。
 
-## 提交、安全与交接 (Handoff)
+## 提交、安全与交接规范
 
 - **提交规范**：遵循 Conventional Commit，按包聚焦（如 `feat: Node IPC 客户端`、`fix: handle cancelled agent run`）。合并冲突使用 `mattpocock:resolving-merge-conflicts`。
 - **安全底线**：严禁提交 API Key 或凭据。模型 Key 优先走环境变量引用；工作区路径、MCP 响应、Shell 输出均须按不可信输入防御。
-- **交接记录**：每次停止前必须在项目根目录生成中文 `tmp/handoff.md`（本地忽略文件，不提交）。内容包含：当前 Task 编号与阶段、改动边界、已完成验证、下一步行动与建议 Skill。已有文档只引路径不重复抄录。
+- **交接记录 (Handoff)**：非强制要求，由用户按需在对话中明确要求时生成，或由开发者按需手动维护。若生成 `tmp/handoff.md`（本地忽略文件，不提交），内容包含：当前 Task 编号与阶段、改动边界、已完成验证、下一步行动与建议 Skill。已有文档只引路径不重复抄录。
