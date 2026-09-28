@@ -5225,9 +5225,11 @@ class AgentHost:
         if getattr(parent_spec, "agent_id", "main") != "main":
             return ()
         config = self._config
-        if config is None or config.model_catalog is None:
+        if config is None or getattr(config, "model_catalog", None) is None:
             return ()
-        bound = config.experimental.delegation.bound_models
+        experimental = getattr(config, "experimental", None)
+        delegation = getattr(experimental, "delegation", None)
+        bound = getattr(delegation, "bound_models", None)
         if not bound:
             return ()
         from harness_agent.diagnostic_log.runtime import bind_execution_log
@@ -5537,11 +5539,10 @@ class AgentHost:
                 } != allowed_mcp_names or len(mcp_tools) != len(allowed_mcp_names):
                     raise RuntimeError("RUNTIME_MCP_TOOL_VIEW_UNAVAILABLE")
             execution_context = workspace_lease.value
-            bound_builtin_ids = frozenset(
-                self._config.experimental.delegation.bound_models
-                if self._config is not None
-                else ()
-            )
+            experimental = getattr(self._config, "experimental", None)
+            delegation = getattr(experimental, "delegation", None)
+            bound_models = getattr(delegation, "bound_models", None)
+            bound_builtin_ids = frozenset(bound_models if bound_models else ())
             delegation_targets = (
                 *(await self._plugin_delegation_targets(spec)),
                 *(await self._bound_builtin_delegation_targets(spec)),

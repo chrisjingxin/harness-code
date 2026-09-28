@@ -1217,7 +1217,13 @@ class RunCoordinator:
                     self._starting_runs.pop(command.thread_id, None)
 
     async def cancel(self, run: RunRef, requester: ConnectionRef) -> CancelResult:
-        """只允许 owner 取消 Run，并让执行路径产生唯一取消终态。"""
+        """取消指定正在执行的 AI 运行任务（Run）。
+
+        【安全与权限约束】
+        1. 归属校验：只有最初发起该 Run 的连接客户端（owner）才有权取消，防止其他客户端误关；
+        2. 级联取消：同时取消主运行任务（Python Task）、取消令牌（CancellationToken）、子代理交互注册表（ChildInteractions）以及执行树（ExecutionRegistry）；
+        3. 单一终态：保证在事件流中仅向前端推送一次标准的 cancelled 终态事件。
+        """
         async with self._lock:
             active = self._runs.get(run.thread_id)
             if active is None or active.ref.run_id != run.run_id or active.completion is not None:
@@ -1240,7 +1246,15 @@ class RunCoordinator:
         requester: ConnectionRef,
         approval_mode: ApprovalMode,
     ) -> ApprovalModeResult:
-        """在 Coordinator 临界区提交当前 Run 的审批模式并返回服务端事实。"""
+        """动态修改当前正在运行的 Run 的安全审批模式。
+
+        【执行规则与约束】
+        1. 归属校验：仅允许发起该 Run 的客户端调整审批模式；
+        2. 活跃状态检查：已进入终态（completed / failed / cancelled）的 Run 拒绝修改；
+        3. 交互互斥：如果当前正有弹窗（如待审批工具调用或追问卡片），拒绝切换以防止策略竞态；
+        4. 计划模式锁：如果会话已被计划约束锁在 "plan" 模式，在计划被批准前禁止自行切换回宽松模式；
+        5. 版本递增：成功切换后递增版本号（revision）并记录审计日志。
+        """
         async with self._lock:
             active = self._runs.get(run.thread_id)
             if active is None or active.ref.run_id != run.run_id:
@@ -1287,7 +1301,11 @@ class RunCoordinator:
             )
 
     async def owner_disconnected(self, connection: ConnectionRef) -> None:
-        """取消指定 owner 拥有的 Run；其他 Connection 的 Run 不受影响。"""
+        """处理前端客户端连接断开事件：自动清理该客户端发起的所有运行任务。
+
+        当终端窗口关闭或网络连接中断时，孤儿执行任务继续运行会浪费算力且无法向用户返回结果。
+        本方法安全取消所有由该连接持有的未完成 Run，其他客户端不受影响。
+        """
         async with self._lock:
             run_ids = tuple(
                 active.ref.run_id
@@ -1305,7 +1323,13 @@ class RunCoordinator:
         run: RunRef,
         interaction: InteractionRequest,
     ) -> InteractionResult:
-        """把 child 门禁交给同一 owner channel，并保留原 checkpoint 归属。"""
+        """代理子代理（Delegated Subagent）或嵌套工具的人机交互请求（如审批卡片、追问）。
+
+        【为什么需要由 Coordinator 代理？】
+        子代理没有与终端用户的直接连接通道。当子代理尝试调用需要权限审批的工具时，
+        必须将请求冒泡到父 Run 的 Coordinator，由 Coordinator 借用父 Run 的通道向前端反向发起 RPC，
+        并在用户做出决定（允许/拒绝）后将结果无缝交还给子代理继续执行。
+        """
         active = await self._lookup(run)
         if (
             active.completion is not None
@@ -1335,7 +1359,7 @@ class RunCoordinator:
             self._child_interactions.resolve(interaction.request_id)
 
     async def close(self) -> None:
-        """停止所有 Run，并在关闭持久化和 AgentEngine 前完成清理。"""
+        """优雅关闭 Coordinator：停止所有活动 Run 并释放后台资源。"""
         async with self._lock:
             if self._closed:
                 return
@@ -1356,7 +1380,7 @@ class RunCoordinator:
                 await self._force_cancel(run)
 
     async def is_active(self, thread_id: str) -> bool:
-        """返回 Thread 是否正在受理、执行或被维护操作占用。"""
+        """查询指定会话（Thread）当前是否处于繁忙状态（启动中、运行中或处于维护状态）。"""
         async with self._lock:
             return (
                 thread_id in self._starting_runs
@@ -1365,7 +1389,7 @@ class RunCoordinator:
             )
 
     async def connection_active(self, connection_id: str) -> bool:
-        """返回 Connection 是否持有 starting/active Run，供控制租约读取。"""
+        """查询指定客户端连接是否持有正在启动或运行中的 Run。"""
         async with self._lock:
             return self._connection_has_active_run(
                 connection_id,
@@ -1375,7 +1399,13 @@ class RunCoordinator:
 
     @asynccontextmanager
     async def idle_thread(self, thread_id: str) -> AsyncIterator[None]:
-        """为 watch/compact 保留目标 Thread，不跨耗时 I/O 持有全局锁。"""
+        """为维护性操作（如上下文压缩 Compact 或监听 Watch）临时锁定目标 Thread。
+
+        【设计说明】
+        1. 确保在上下文压缩期间不会有新的用户提问（Run）并发执行，避免两端同时写数据库导致时序混乱；
+        2. 进入上下文管理块后将 thread 登记至 maintenance_threads，退出时自动解除锁定；
+        3. 锁仅在状态登记时极短暂持有，不跨耗时网络/磁盘 I/O，保证高并发性能。
+        """
         async with self._lock:
             if self._closed:
                 raise RunError("HOST_CLOSED", "Host is closed")
@@ -1384,7 +1414,6 @@ class RunCoordinator:
                 or thread_id in self._maintenance_threads
                 or self._is_active(self._runs.get(thread_id))
             ):
-                raise RunError("THREAD_BUSY", retryable=True)
                 raise RunError("THREAD_BUSY", retryable=True)
             self._maintenance_threads.add(thread_id)
         try:
@@ -1484,6 +1513,8 @@ class RunCoordinator:
         services = None
         if self._compose_services_provider is not None:
             services = await self._compose_services_provider(run)
+        return ComposeRunAdapter(services)
+
     async def _execute(self, run: RunState) -> None:
         """后台异步驱动一次 AI 对话执行。
 

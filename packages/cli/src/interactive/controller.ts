@@ -315,6 +315,16 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.catalogFeature.close()
     this.listeners.clear()
   }
+
+  /**
+   * 处理用户在输入框提交的原始文本内容。
+   *
+   * 【执行步骤】
+   * 1. 斜杠命令识别：判断是否为以 `/` 开头的系统命令（如 `/new`、`/model`），是则派发给 CommandFeature 执行；
+   * 2. 文件引用解析：通过 `resolveMentions` 解析文本中的 `@path/to/file` 占位符，将外部文件内容安全引入 Prompt；
+   * 3. 运行状态校验：若当前已有活跃 Run 或正在压缩上下文，拒绝提交并提示等待；
+   * 4. 启动执行：结合当前工作模式（Build 快速构建 / Compose 五阶段流转）和选中的模型配置，调用 `runFeature.startRun`。
+   */
   private async handleSubmit(rawValue: string, modeOverride?: "build" | "compose" | "direct_shell"): Promise<IntentOutcome> {
     const value = rawValue.trim()
     if (!value) return { status: "rejected", code: "invalid-argument", message: "Empty submit value" }
