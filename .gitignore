@@ -46,3 +46,7 @@ tmp/
 
 #todo 临时取消benchmark
 benchmark/
+
+# OpenWiki local agent artifacts; may contain repository excerpts
+conversation_history/
+large_tool_results/

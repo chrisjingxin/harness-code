@@ -351,3 +351,13 @@ PR 必须说明影响层、行为变化、已运行测试、对应 `HC-XXX` 编�
 - 已完成任务位于 `docs/developer/task/archive/`；活动看板由 `npm run tasks:sync` 生成。
 - `docs/developer/architecture/adr/` 仅作历史资料；新架构结论写入对应大功能架构 MD。
 - 新功能一律按「功能开发流程」双轨推进（复杂功能 task → spec → plan → todo → implement → review；简单需求走快速通道），不再在 Task 正文内嵌 Plan/Todo。
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+Run `openwiki code --update --print` after repository changes to refresh affected wiki pages. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->
