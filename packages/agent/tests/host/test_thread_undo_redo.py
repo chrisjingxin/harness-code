@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from harness_agent.threads.thread_persistence import TranscriptAppend, _user_record_id
 from tests.support.thread_fixtures import accept_thread
 
@@ -112,6 +114,59 @@ async def test_list_turns_uses_user_record_ids_and_omits_null_optional_fields(
     assert all(item["has_git_checkpoint"] is True for item in turns)
     assert turns[0]["user_prompt"] == "Turn 1: 创建初始文件"
     await server.close()
+
+
+@pytest.mark.parametrize("operation", ["undo", "redo"])
+async def test_code_restore_rejects_active_fusion_workspace_writer(tmp_path, operation):
+    """其他 Thread 的撤销/重做也不能覆盖 Fusion 正在验收的文件。"""
+    workspace = _git_init(tmp_path / "git_project")
+    server, frames = await _capture_host(tmp_path, workspace)
+    thread_id = "test-undo-thread"
+    turn_1, _ = await _seed_two_turns(server, workspace, thread_id)
+    store = await server._ensure_thread_persistence()
+    if operation == "redo":
+        await server.dispatch(_request("threads.undo", {
+            "thread_id": thread_id, "target_turn_id": turn_1, "mode": "code",
+        }, "prepare"))
+        _result(frames, "prepare")
+    task = await store.fusion_state_store().create(
+        thread_id="fusion-thread", workspace=workspace, source_message="修改代码",
+        profile={"profile_id": "duo", "lead": {}, "sidekick": {}, "config_fingerprint": "a" * 64},
+    )
+    await store.fusion_state_store().acquire_lease(task.task_id, "sidekick")
+    before = (workspace / "file1.txt").read_text()
+    params = {"thread_id": thread_id}
+    if operation == "undo":
+        params.update(target_turn_id=turn_1, mode="code")
+    try:
+        await server.dispatch(_request("threads." + operation, params, "blocked"))
+        response = next(f for f in frames if f.get("id") == "blocked")
+        assert response.get("error", {}).get("message") == "FUSION_LEASE_BUSY", response
+        assert (workspace / "file1.txt").read_text() == before
+    finally:
+        await server.close()
+
+
+async def test_conversation_undo_rejects_same_thread_active_fusion_task(tmp_path):
+    """活动任务绑定原消息，不能回退同一 Thread 的对话来更换任务来源。"""
+    workspace = _git_init(tmp_path / "git_project")
+    server, frames = await _capture_host(tmp_path, workspace)
+    thread_id = "test-undo-thread"
+    turn_1, _ = await _seed_two_turns(server, workspace, thread_id)
+    store = await server._ensure_thread_persistence()
+    await store.fusion_state_store().create(
+        thread_id=thread_id, workspace=workspace, source_message="修改代码",
+        profile={"profile_id": "duo", "lead": {}, "sidekick": {}, "config_fingerprint": "a" * 64},
+    )
+    try:
+        await server.dispatch(_request("threads.undo", {
+            "thread_id": thread_id, "target_turn_id": turn_1, "mode": "conversation",
+        }, "blocked"))
+        response = next(f for f in frames if f.get("id") == "blocked")
+        assert response.get("error", {}).get("message") == "FUSION_TASK_CONFLICT", response
+        assert await store.get_thread_revert_state(thread_id) is None
+    finally:
+        await server.close()
 
 
 async def test_undo_both_restores_files_and_redo_restores_pre_undo_workspace(

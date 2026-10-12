@@ -59,6 +59,10 @@ import {
   type CommandBindingsResult,
   type HostAttachmentCreateResult,
   type HostAttachmentRevokeResult,
+  type FusionTaskStatus,
+  type FusionStatusResult,
+  type FusionRecoverParams,
+  type FusionCancelParams,
   type GoalInspectResult,
   type GoalMutateParams,
   type GoalMutateResult,
@@ -143,6 +147,7 @@ export type StartRunInput = {
   input: RunInput
   mode: InteractionMode
   threadId?: string
+  fusionProfileId?: string
   modelSelection?: ThreadModelSelection
   approvalMode?: ApprovalMode
 }
@@ -304,6 +309,7 @@ export class AgentClient {
       mode: input.mode,
       thread_id: threadId,
       run_id: runId,
+      fusion_profile_id: input.fusionProfileId,
       model_selection: input.modelSelection,
       approval_mode: input.approvalMode,
     }, 0).then(result => {
@@ -455,6 +461,25 @@ export class AgentClient {
   }
 
   /** 读取当前 Thread 的 Goal projection。 */
+  /** 读取可信配置中的组合摘要，不暴露命令或凭据。 */
+  async listFusionProfiles(): Promise<Record<string, { lead_profile_id: string; sidekick_profile_id: string; check_plan_ids: string[] }>> {
+    const config = await this.request(Method.CONFIG_SHOW, {})
+    const fusion = config.fusion as { profiles?: Record<string, { lead_profile_id: string; sidekick_profile_id: string; check_plan_ids: string[] }> } | undefined
+    return fusion?.profiles ?? {}
+  }
+
+  inspectFusion(threadId: string): Promise<FusionStatusResult> {
+    return this.request(Method.FUSION_STATUS, { thread_id: threadId })
+  }
+
+  recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus> {
+    return this.request(Method.FUSION_RECOVER, params)
+  }
+
+  cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus> {
+    return this.request(Method.FUSION_CANCEL, params)
+  }
+
   inspectGoal(threadId: string): Promise<GoalInspectResult> {
     return this.request(Method.GOAL_INSPECT, { thread_id: threadId })
   }

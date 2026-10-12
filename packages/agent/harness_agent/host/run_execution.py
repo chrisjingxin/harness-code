@@ -230,6 +230,8 @@ class BuildRunAdapter:
             "mode": run.start.mode,
             "skills_snapshot_id": run.preparation.skill_snapshot_id,
         }
+        if run.preparation.fusion_binding is not None and run.persistence is not None:
+            started_payload["fusion"] = (await run.persistence.fusion_state_store().get(run.preparation.fusion_binding.task_id)).to_record()
         if loaded is not None and loaded.record.kind == "command":
             started_payload["command_provenance"] = loaded.provenance()
         binding = run.preparation.execution_binding
@@ -265,9 +267,23 @@ class BuildRunAdapter:
                     f"User request:\n{run.message}"
                 )
 
+        fusion_continued = False
+
         async def acquire_runtime():
             """将 Host runtime provider 收敛到 Managed executor 的唯一入口。"""
-            return await port.resolve_runtime(run)
+            nonlocal fusion_continued
+            runtime = await port.resolve_runtime(run)
+            if run.preparation.fusion_binding is not None and not fusion_continued:
+                try:
+                    context = run.run_context
+                    if context is None or context.fusion_service is None:
+                        raise _run_error("FUSION_RUNTIME_UNAVAILABLE")
+                    await context.fusion_service.continue_pending(context)
+                    fusion_continued = True
+                except BaseException:
+                    await runtime.release()
+                    raise
+            return runtime
 
         async def start_execution(_execution_ref: str) -> None:
             """由 executor 触发 root registry 进入 running，adapter 不接触 registry。"""
@@ -298,6 +314,16 @@ class BuildRunAdapter:
                 "messages": [HumanMessage(content=run.message)],
                 "rubric": canonical_rubric(goal_binding.criteria),
             }
+        fusion_gate_impl = None
+        async def fusion_gate(output):
+            nonlocal fusion_gate_impl
+            if fusion_gate_impl is None:
+                context = run.run_context
+                if context is None or context.fusion_service is None:
+                    raise _run_error("FUSION_RUNTIME_UNAVAILABLE")
+                fusion_gate_impl = context.fusion_service.final_gate(context)
+            return await fusion_gate_impl(output)
+
         request = ManagedAgentRequest(
             execution_ref=run.root_execution_ref.execution_id,
             parent_execution_ref=None,
@@ -320,6 +346,7 @@ class BuildRunAdapter:
             diagnostic_log=getattr(run, "diagnostic_log", None),
             timing=getattr(run, "timing", None),
             on_resume_consumed=on_resume_consumed,
+            final_output_gate=fusion_gate if run.preparation.fusion_binding is not None else None,
             usage_ledger=getattr(run, "usage_ledger", None),
             model_profile_id=(
                 run.execution_binding.actual_primary.profile_id
@@ -333,6 +360,14 @@ class BuildRunAdapter:
             if exc.code == "RUN_CANCELLED":
                 raise asyncio.CancelledError from exc
             raise _run_error(exc.code, exc.message, retryable=exc.retryable) from exc
+        finally:
+            if run.preparation.fusion_binding is not None and run.persistence is not None:
+                store = run.persistence.fusion_state_store()
+                task = await store.get(run.preparation.fusion_binding.task_id)
+                if run.cancellation_token.cancelled or task.phase in {"WORKER_RUNNING", "CHECKING", "READY"}:
+                    await asyncio.shield(store.pause(task.task_id))
+                elif task.phase == "COMPLETED" and task.data.get("checkpoint_id"):
+                    await run.persistence.delete_execution_checkpoint(task.data["checkpoint_id"])
 
 
 class DirectShellRunAdapter:
@@ -380,6 +415,22 @@ class DirectShellRunAdapter:
         if binding is not None and getattr(binding, "workspace_path", None):
             workspace = binding.workspace_path
 
+        lock = run.preparation.workspace_write_lock
+        if lock is not None:
+            await lock.acquire_write()
+        try:
+            if run.preparation.workspace_write_guard is not None:
+                run.preparation.workspace_write_guard()
+            await self._run_command(run, port, command, workspace, tool_call_id)
+        finally:
+            if lock is not None:
+                await lock.release_write()
+
+    async def _run_command(
+        self, run: RunState, port: RunLifecyclePort, command: str,
+        workspace: str, tool_call_id: str,
+    ) -> None:
+        """写锁保护从创建到进程退出；取消先杀进程组，再等待停止。"""
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=workspace,
@@ -435,6 +486,9 @@ class DirectShellRunAdapter:
             else:
                 process.kill()
             raise
+        finally:
+            await process.wait()
+            await asyncio.gather(task, return_exceptions=True)
 
         if timed_out:
             output = f"Error: Command timed out after {timeout} seconds."

@@ -12,7 +12,8 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -283,6 +284,8 @@ ATTACHMENT_CAPABILITY_ALLOWLIST = frozenset(
         CAPABILITY["MCP_MANAGE"],
         CAPABILITY["MODELS_READ"],
         CAPABILITY["MODELS_SELECT"],
+        CAPABILITY["FUSION_READ"],
+        CAPABILITY["FUSION_MANAGE"],
         CAPABILITY["CODE_INDEX_READ"],
         CAPABILITY["CODE_INDEX_MANAGE"],
     }
@@ -518,6 +521,7 @@ class AgentHost:
         self._workspace_execution_resources: Any | None = None
         # Profile key 只索引构建时解析出的同一个 spec，避免再次解释配置。
         self._resolved_agent_specs: dict[str, ResolvedAgentSpec] = {}
+        self._fusion_runtime: Any | None = None
         self._agent_engine_artifacts: dict[str, _AgentEngineArtifacts] = {}
         self._provider_client_pool = ProviderClientPool()
         self._owner_connection = ProtocolConnection(
@@ -572,6 +576,9 @@ class AgentHost:
             METHOD["THREADS_UNDO"]: self._handle_threads_undo,
             METHOD["THREADS_REDO"]: self._handle_threads_redo,
             METHOD["THREADS_SET_TITLE"]: self._handle_threads_set_title,
+            METHOD["FUSION_STATUS"]: self._handle_fusion_status,
+            METHOD["FUSION_RECOVER"]: self._handle_fusion_recover,
+            METHOD["FUSION_CANCEL"]: self._handle_fusion_cancel,
             METHOD["GOAL_INSPECT"]: self._handle_goal_inspect,
             METHOD["GOAL_REQUEST"]: self._handle_goal_request,
             METHOD["GOAL_MUTATE"]: self._handle_goal_mutate,
@@ -1376,6 +1383,16 @@ class AgentHost:
         """把协议输入转换成 StartRun，并让 Coordinator 先完成受理再启动事件流。"""
         parsed = RunStartParams.model_validate(params)
         run_input = parsed.input
+        from harness_agent.runtime.fusion.tools import validate_fusion_ingress
+        from harness_agent.runtime.fusion.store import FusionError
+        try:
+            validate_fusion_ingress(profile_id=parsed.fusion_profile_id,
+                protocol_minor=self._current_connection().protocol_minor, mode=parsed.mode,
+                input_kind=run_input.kind, requested_skill=getattr(run_input, "requested_skill", None),
+                requested_primary_profile=parsed.model_selection.primary_profile if parsed.model_selection else None,
+                approval_mode=parsed.approval_mode, capabilities=self._connection_capabilities())
+        except FusionError as exc:
+            raise RpcError(-32000, exc.code) from exc
         if run_input.kind == "user":
             if not run_input.message.strip():
                 raise RpcError(-32602, "message must be non-empty")
@@ -1427,6 +1444,7 @@ class AgentHost:
             command_binding_snapshot_id=connection.command_binding_snapshot_id,
             command_bindings=connection.command_bindings,
             protocol_minor=connection.protocol_minor,
+            fusion_profile_id=parsed.fusion_profile_id,
             requested_primary_profile=(
                 parsed.model_selection.primary_profile
                 if parsed.model_selection is not None
@@ -1461,6 +1479,7 @@ class AgentHost:
             )
         except (
             ConfigError,
+            FusionError,
             ContextRefreshError,
             ExecutionBindingError,
             ThreadPersistenceError,
@@ -1527,6 +1546,14 @@ class AgentHost:
         persistence: ThreadPersistence | None,
     ) -> RunPreparation:
         """在登记 Run 前解析模型、Profile、Skill 和 Context 快照。"""
+        if command.fusion_profile_id is not None:
+            if persistence is None:
+                raise ConfigError("FUSION_RUNTIME_UNAVAILABLE")
+            return await (await self._ensure_fusion_runtime(persistence)).prepare(command)
+        if persistence is not None:
+            fusion = await self._ensure_fusion_runtime(persistence)
+            if await fusion.store.active(command.thread_id) is not None:
+                raise ConfigError("FUSION_TASK_CONFLICT")
         if persistence is None:
             reservation = await self._reserve_agent_engine_snapshot()
             try:
@@ -1694,6 +1721,8 @@ class AgentHost:
                 provider_retry_attempts=max_retries + 1,
                 snapshot_reservation=reservation,
                 code_index_lease=code_index_lease,
+                workspace_write_guard=(lambda: self._fusion_runtime.guard.check_command(None)) if self._fusion_runtime is not None else None,
+                workspace_write_lock=self._tool_concurrency_lock,
             )
         except BaseException:
             lease = locals().get("code_index_lease")
@@ -1778,7 +1807,7 @@ class AgentHost:
         """把领域事件广播给 owner 和已 watch 该 Thread 的连接。"""
         try:
             async for event in execution.events:
-                await self._fanout_agent_event(execution.owner, event)
+                await self._fanout_agent_event(execution.owner, event, minimum_minor=execution.minimum_minor)
         finally:
             await self._record_workspace_git_checkpoint(execution.ref.thread_id, execution.ref.run_id)
 
@@ -1795,7 +1824,7 @@ class AgentHost:
         except Exception:
             logger.warning("Failed to record git checkpoint for thread %s turn %s", thread_id, run_id, exc_info=True)
 
-    async def _fanout_agent_event(self, owner: ConnectionRef, event: AgentEvent) -> None:
+    async def _fanout_agent_event(self, owner: ConnectionRef, event: AgentEvent, *, minimum_minor: int = 0) -> None:
         """将不携带 transport 的 AgentEvent 映射成现有 event notification。"""
         message = {
             "jsonrpc": "2.0",
@@ -1806,6 +1835,7 @@ class AgentHost:
             connection
             for connection in self._connections.values()
             if not connection.closed
+            and connection.protocol_minor >= minimum_minor
             and (
                 connection.connection_id == owner.connection_id
                 or event.thread_id in self._connection_watches(connection)
@@ -2563,6 +2593,26 @@ class AgentHost:
             result["reverted_turn_id"] = reverted_turn_id
         return result
 
+    @asynccontextmanager
+    async def _thread_history_change(
+        self, persistence: ThreadPersistence, thread_id: str, *, writes_workspace: bool,
+    ) -> AsyncIterator[None]:
+        """历史回退与派单共享短期写锁，防止改写活动任务的来源或验收文件。"""
+        from harness_agent.runtime.fusion.store import FusionError
+
+        await self._tool_concurrency_lock.acquire_write()
+        try:
+            runtime = await self._ensure_fusion_runtime(persistence)
+            if await runtime.store.active(thread_id):
+                raise RpcError(-32000, "FUSION_TASK_CONFLICT")
+            if writes_workspace:
+                runtime.guard.check_command(None)
+            yield
+        except FusionError as exc:
+            raise RpcError(-32000, exc.code) from exc
+        finally:
+            await self._tool_concurrency_lock.release_write()
+
     async def _handle_threads_undo(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """将当前 Thread 回退到指定历史回合，可选择还原代码、对话或两者。"""
         self._require_threads_capability()
@@ -2570,7 +2620,9 @@ class AgentHost:
         persistence = await self._ensure_thread_persistence()
 
         try:
-            async with self._run_coordinator.idle_thread(parsed.thread_id):
+            async with self._run_coordinator.idle_thread(parsed.thread_id), self._thread_history_change(
+                persistence, parsed.thread_id, writes_workspace=parsed.mode in ("both", "code"),
+            ):
                 transcript = await persistence.load_transcript(parsed.thread_id)
                 user_ids = {rec.record_id for rec in transcript if rec.kind == "user"}
                 if parsed.target_turn_id not in user_ids:
@@ -2626,7 +2678,9 @@ class AgentHost:
         persistence = await self._ensure_thread_persistence()
 
         try:
-            async with self._run_coordinator.idle_thread(parsed.thread_id):
+            async with self._run_coordinator.idle_thread(parsed.thread_id), self._thread_history_change(
+                persistence, parsed.thread_id, writes_workspace=True,
+            ):
                 revert_state = await persistence.get_thread_revert_state(parsed.thread_id)
                 if revert_state is None:
                     raise RpcError(-32602, "THREAD_NOT_IN_REVERTED_STATE")
@@ -2650,6 +2704,59 @@ class AgentHost:
                 }
         except RunError as exc:
             raise self._run_rpc_error(exc) from exc
+
+    async def _ensure_fusion_runtime(self, persistence: ThreadPersistence) -> Any:
+        """复用一个 Host 服务，任务私有状态只保存在 RunContext 和 SQLite。"""
+        if self._fusion_runtime is None:
+            from harness_agent.host.fusion_runtime import FusionRuntime
+            self._fusion_runtime = FusionRuntime(self, persistence)
+        return self._fusion_runtime
+
+    async def _handle_fusion_status(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """重连后读取任务状态，不运行模型或重放工具。"""
+        persistence = await self._ensure_thread_persistence()
+        store = persistence.fusion_state_store()
+        task = await store.latest(params["thread_id"])
+        if task and task.active and not await self._run_coordinator.is_active(task.thread_id):
+            # 短维护锁阻止查询恢复过程中有新 Run 启动；这里不重放操作。
+            try:
+                async with self._run_coordinator.idle_thread(task.thread_id):
+                    task = await store.reconcile(task.task_id)
+            except RunError as exc:
+                if exc.code != "THREAD_BUSY":
+                    raise
+        return {"task": task.to_record() if task else None}
+
+    async def _handle_fusion_recover(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """空闲 Thread 上保存人工核查，仍需显式继续原任务。"""
+        persistence = await self._ensure_thread_persistence()
+        store = persistence.fusion_state_store()
+        task = await store.get(params["task_id"])
+        async with self._run_coordinator.idle_thread(task.thread_id):
+            try:
+                return (await store.recover(task.task_id, params["expected_version"], params["inspection_note"], params["effects_stopped"])).to_record()
+            except ValueError as exc:
+                raise RpcError(-32000, str(exc)) from exc
+
+    async def _handle_fusion_cancel(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """先取消当前 Run，再由持久化停止事实决定能否结束任务。"""
+        persistence = await self._ensure_thread_persistence()
+        store = persistence.fusion_state_store()
+        task = await store.get(params["task_id"])
+        if task.version != params["expected_version"]:
+            raise RpcError(-32000, "FUSION_TASK_CONFLICT")
+        stopped_run = await self._run_coordinator.stop_fusion_run(
+            task.thread_id, task.task_id, ConnectionRef(self._current_connection().connection_id),
+        )
+        async with self._run_coordinator.idle_thread(task.thread_id):
+            try:
+                current = await store.get(task.task_id)
+                result = await store.cancel(task.task_id, current.version if stopped_run else params["expected_version"])
+                if current.data.get("checkpoint_id"):
+                    await persistence.delete_execution_checkpoint(current.data["checkpoint_id"])
+                return result.to_record()
+            except ValueError as exc:
+                raise RpcError(-32000, str(exc)) from exc
 
     async def _handle_goal_inspect(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """读取 Goal 的 current/pending/latest evaluation。
@@ -4463,22 +4570,27 @@ class AgentHost:
         max_iterations: int = 3,
         grader_model_fingerprint: str | None = None,
         code_index_generation: int | None = None,
+        fusion: bool = False,
     ) -> ResolvedAgentSpec:
         """截取一次角色解析快照，Profile、审批策略和 builder 都从它派生。"""
         persistence = persistence or await self._ensure_thread_persistence()
-        await self._ensure_mcp_connected()
-        async with self._mcp_state_lock:
-            mcp_snapshot = self._mcp_snapshot or build_mcp_snapshot([], "missing")
-            mcp_tools = tuple(self._mcp_manager.get_tools()) if self._mcp_manager else ()
+        if fusion:
+            mcp_snapshot = build_mcp_snapshot([], "fusion-v1")
+            mcp_tools = ()
+        else:
+            await self._ensure_mcp_connected()
+            async with self._mcp_state_lock:
+                mcp_snapshot = self._mcp_snapshot or build_mcp_snapshot([], "missing")
+                mcp_tools = tuple(self._mcp_manager.get_tools()) if self._mcp_manager else ()
         execution = (
             replace(config.execution, approval_mode=approval_mode)
             if approval_mode is not None
             else config.execution
         )
-        mcp_owner = self._mcp_owner
+        mcp_owner = None if fusion else self._mcp_owner
         agent_catalog = (
             self._require_agent_catalog(config)
-            if config.model_catalog is not None
+            if config.model_catalog is not None and not fusion
             else None
         )
         spec = resolve_builtin_main_agent_spec(
@@ -4497,7 +4609,7 @@ class AgentHost:
                 else ()
             ),
             delegation_binding=tuple(
-                sorted(config.experimental.delegation.bound_models.items())
+                sorted(config.experimental.delegation.bound_models.items()) if not fusion else ()
             ),
             goal_backed=goal_backed,
             max_iterations=max_iterations,
@@ -4753,7 +4865,7 @@ class AgentHost:
             logger.exception("Compose services unavailable")
             return None
         from harness_agent.compose.engine_services import EngineDriverServices
-        from harness_agent.compose.verification import ManagedVerificationPort
+        from harness_agent.runtime.verification import ManagedVerificationPort
         from harness_agent.policy.permission_rules import load_rules, merge_rules
 
         def compose_rules() -> list[Any]:
@@ -4787,6 +4899,7 @@ class AgentHost:
                 rules_provider=compose_rules,
                 rwlock=self._tool_concurrency_lock,
                 now_ms=lambda: int(time.time() * 1000),
+                write_guard=(lambda: self._fusion_runtime.guard.check_command(None)) if self._fusion_runtime is not None else None,
             ),
             # 组装发生在 adapter 执行前，run.agent_engine_profile_key 尚未由
             # runtime 获取填充；直接使用受理阶段解析出的 AgentEngineProfile key，
@@ -5450,10 +5563,12 @@ class AgentHost:
 
     async def _build_default_agent_engine(self, profile: AgentEngineProfile) -> AgentEngine:
         """按 Profile key 取回同一 ResolvedAgentSpec，再构建共享图。"""
-        await self._ensure_plugin_runtime_started()
         spec = self._resolved_agent_specs.get(profile.profile_key)
         if spec is None:
             raise RuntimeError("RUNTIME_RESOLVED_AGENT_SPEC_MISSING")
+        fusion_role = {"fusion-lead": "lead", "fusion-sidekick": "sidekick"}.get(spec.agent_id)
+        if fusion_role is None:
+            await self._ensure_plugin_runtime_started()
         if profile.profile_key != spec.runtime_profile.profile_key:
             raise RuntimeError("RUNTIME_PROFILE_SPEC_MISMATCH")
         if profile.mcp_config_fingerprint != spec.mcp_snapshot.digest:
@@ -5542,8 +5657,8 @@ class AgentHost:
             experimental = getattr(self._config, "experimental", None)
             delegation = getattr(experimental, "delegation", None)
             bound_models = getattr(delegation, "bound_models", None)
-            bound_builtin_ids = frozenset(bound_models if bound_models else ())
-            delegation_targets = (
+            bound_builtin_ids = frozenset(bound_models if bound_models and fusion_role is None else ())
+            delegation_targets = () if fusion_role else (
                 *(await self._plugin_delegation_targets(spec)),
                 *(await self._bound_builtin_delegation_targets(spec)),
             )
@@ -5593,7 +5708,11 @@ class AgentHost:
                 dynamic=True,
             )
 
+            fusion_runtime = await self._ensure_fusion_runtime(persistence)
             extra_root_tools: tuple[Any, ...] = ()
+            if fusion_role:
+                from harness_agent.runtime.fusion.tools import create_fusion_tools
+                extra_root_tools = create_fusion_tools(fusion_role)
             rubric_middleware = None
             if getattr(spec, "goal_backed", False):
                 from harness_agent.goals.rubric_adapter import create_rubric_middleware
@@ -5638,10 +5757,10 @@ class AgentHost:
                 execution_registry=self._run_coordinator.execution_registry,
                 delegation_model=spec.model_view,
                 delegation_targets=delegation_targets,
-                plugin_runtime=self._plugin_runtime_manager,
+                plugin_runtime=None if fusion_role else self._plugin_runtime_manager,
                 workspace_root_registry=self._workspace_root_registry,
                 rules_provider=_get_current_rules,
-                defer_tools=(
+                defer_tools=False if fusion_role else (
                     self._config.tools.defer if self._config is not None else "auto"
                 ),
                 snapshot_store=self._snapshot_store,
@@ -5649,6 +5768,8 @@ class AgentHost:
                 extra_root_tools=extra_root_tools,
                 rubric_middleware=rubric_middleware,
                 managed_builtin_ids=bound_builtin_ids,
+                mutation_guard=fusion_runtime.guard,
+                effect_middleware=fusion_runtime.effect_middleware,
             )
             self._agent_engine_artifacts[profile.profile_key] = _AgentEngineArtifacts(
                 execution_context=execution_context,
@@ -5837,6 +5958,9 @@ class AgentHost:
             record_approval=record_approval,
             diagnostic_log=run.diagnostic_log,
             usage_ledger=getattr(run, "usage_ledger", None),
+            fusion_task_id=run.preparation.fusion_binding.task_id if run.preparation.fusion_binding else None,
+            fusion_role="lead" if run.preparation.fusion_binding else None,
+            fusion_service=self._fusion_runtime.service if run.preparation.fusion_binding else None,
             goal_binding=run.preparation.goal_binding,
             code_index_query_lease=run.preparation.code_index_lease,
             goal_store=(

@@ -12,3 +12,5 @@ export * from "./timeline-feature"
 export * from "./run-feature"
 export * from "./goal-feature"
 export * from "./code-index-feature"
+
+export * from "./fusion-feature"

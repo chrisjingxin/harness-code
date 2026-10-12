@@ -72,10 +72,12 @@ class SafeModelProfile:
     source: str
 
     @classmethod
-    def from_profile(cls, profile: ModelProfile) -> "SafeModelProfile":
+    def from_profile(
+        cls, profile: ModelProfile, *, environ: Mapping[str, str] | None = None,
+    ) -> "SafeModelProfile":
         """从可信配置 Profile 创建脱敏快照。"""
         settings = profile.settings
-        available = settings.api_key_source() != "missing"
+        available = settings.api_key_source(environ) != "missing"
         return cls(
             profile_id=profile.profile_id,
             model=settings.name,
@@ -521,7 +523,7 @@ def resolve_execution_binding(
             profile_id = config.model_catalog.default_profile
             origin = SelectionOrigin.CONFIG_DEFAULT
         profile = config.model_catalog.require_profile(profile_id)
-    _validate_model_profile(profile)
+    validate_model_profile(profile)
     selection = ThreadExecutionSelection(root_model_profile_id=profile.profile_id)
     return ResolvedExecutionBinding(
         selection=selection,
@@ -540,9 +542,11 @@ def describe_thread_binding(persisted: PersistedBindingState) -> ThreadBindingVi
     return ThreadBindingView(state="unbound")
 
 
-def _validate_model_profile(profile: ModelProfile) -> None:
-    """验证当前根 Agent 启动模型的凭据与必要能力。"""
-    if profile.settings.api_key_source() == "missing":
+def validate_model_profile(
+    profile: ModelProfile, *, environ: Mapping[str, str] | None = None,
+) -> None:
+    """统一验证根 Agent、子 Agent 与 Fusion 模型的凭据和必要能力。"""
+    if profile.settings.api_key_source(environ) == "missing":
         raise ConfigError("MODEL_PROFILE_UNAVAILABLE: API_KEY_MISSING")
     missing_capabilities = DEFAULT_MODEL_CAPABILITIES - profile.settings.capabilities
     if missing_capabilities:
@@ -558,7 +562,7 @@ def validate_experimental_delegation_for_run(config: Za38Config) -> None:
     for role, profile_id in delegation.models.items():
         try:
             profile = config.require_model_profile(profile_id)
-            _validate_model_profile(profile)
+            validate_model_profile(profile)
         except ConfigError as exc:
             raise ConfigError(
                 f"experimental.delegation.models.{role} is unavailable: {exc} ({profile_id})"

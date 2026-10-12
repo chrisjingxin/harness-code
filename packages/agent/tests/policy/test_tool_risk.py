@@ -131,4 +131,7 @@ def test_permission_matrix_covers_all_kinds_and_modes():
 
 def test_tool_kind_map_covers_all_expected_tools():
     """TOOL_KIND_MAP 应包含全部已定义工具。"""
-    assert len(TOOL_KIND_MAP) == 20
+    assert len(TOOL_KIND_MAP) == 26
+    assert TOOL_KIND_MAP["fusion_delegate"] == ToolKind.AGENT
+    assert TOOL_KIND_MAP["fusion_rework"] == ToolKind.AGENT
+    assert TOOL_KIND_MAP["fusion_status"] == ToolKind.READ

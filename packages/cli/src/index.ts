@@ -141,6 +141,8 @@ export function clientCapabilities(command: Command): string[] {
     Capability.AGENTS_READ,
     Capability.TEAMS_READ,
     Capability.TEAMS_MANAGE,
+    Capability.FUSION_READ,
+    Capability.FUSION_MANAGE,
     Capability.GOAL_READ,
     Capability.GOAL_MANAGE,
     Capability.CODE_INDEX_READ,

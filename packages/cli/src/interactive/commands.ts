@@ -119,6 +119,8 @@ export const builtinCommandCapabilities = [
   Capability.TEAMS_READ,
   Capability.TEAMS_MANAGE,
   Capability.HOST_ATTACH,
+  Capability.FUSION_READ,
+  Capability.FUSION_MANAGE,
   Capability.GOAL_READ,
   Capability.GOAL_MANAGE,
 ] as const
@@ -242,6 +244,7 @@ export const builtinCommandDefinitions: readonly CommandDefinition[] = [
   { id: "assist.btw", name: "btw", description: "向 Agent 提出一个与当前任务无关的问题", source: { type: "builtin" }, presentation: "action", argumentHint: "[question]", requirements: { workModes: ["build", "compose"] }, safety: { runtime: "allowed" } },
   { id: "approval.plan", name: "plan", description: "进入计划模式，只调查并写计划，不改项目文件", source: { type: "builtin" }, presentation: "action", argumentHint: "[exit | <目标>]", suggested: true, requirements: { workModes: ["build"], unavailableNotice: "`/plan` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
   { id: "approval.plan-view", name: "plan-view", description: "查看当前 thread 的计划", source: { type: "builtin" }, presentation: "viewer", suggested: true, requirements: { capabilities: [Capability.THREADS_READ], workModes: ["build"], requiresThread: true, unavailableNotice: "`/plan-view` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
+  { id: "fusion.manage", name: "fusion", description: "选择双模型协作、查询状态或恢复任务", source: { type: "builtin" }, presentation: "action", argumentHint: "[<组合>|status|off|cancel|recover --stopped <说明>]", requirements: { capabilities: [Capability.FUSION_READ], workModes: ["build"] }, safety: { runtime: "allowed" } },
   { id: "goal.manage", name: "goal", description: "设置并验收当前 Build 目标", source: { type: "builtin" }, presentation: "viewer", argumentHint: "[<目标>|edit|pause|resume|clear]", suggested: true, requirements: { capabilities: [Capability.GOAL_READ], workModes: ["build"], unavailableNotice: "`/goal` 仅在 Build 工作模式可用。" }, safety: { runtime: "allowed" } },
   {
     id: "code-index.manage",

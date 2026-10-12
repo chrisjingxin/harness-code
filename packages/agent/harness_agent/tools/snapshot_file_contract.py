@@ -142,6 +142,7 @@ class SnapshotFileToolContract:
         backend: Any,
         *,
         snapshot_store: ThreadSnapshotStore | None,
+        mutation_guard: Any | None = None,
         text_backend: TextMutationBackend,
         diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]] | None = None,
         diagnostics_timeout_seconds: float = DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS,
@@ -153,7 +154,8 @@ class SnapshotFileToolContract:
         self._backend = backend
         self._snapshot_store = snapshot_store or ThreadSnapshotStore()
         self._text_backend = text_backend
-        self._mutation_service = FileMutationService(text_backend)
+        self._mutation_guard = mutation_guard
+        self._mutation_service = FileMutationService(text_backend, mutation_guard=mutation_guard)
         self._diagnostics_provider = diagnostics_provider
         self._diagnostics_timeout_seconds = diagnostics_timeout_seconds
         self._metrics = metrics or FileToolMetrics()
@@ -608,6 +610,10 @@ class SnapshotFileToolContract:
                 float(latency_ms) if isinstance(latency_ms, (int, float)) else None,
             )
 
+    def _authorize_metadata(self, metadata: MutationMetadata) -> MutationMetadata:
+        """文件准备先核对范围；提交由 FileMutationService 再次核对。"""
+        return self._mutation_guard.prepare(metadata) if self._mutation_guard else metadata
+
     def _prepare_mutation(self, request: ToolCallRequest) -> PreparedFileMutation:
         """把已通过 canonical schema 的工具调用转换为不含原始参数的提交计划。"""
         name, args, tool_call_id = self._call_args(request)
@@ -650,12 +656,12 @@ class SnapshotFileToolContract:
             _require_mutation_size(existing)
             raise FileToolContractError("FILE_ALREADY_EXISTS")
         return self._mutation_service.prepare(
-            metadata=MutationMetadata(
+            metadata=self._authorize_metadata(MutationMetadata(
                 operation="write",
                 path=path,
                 thread_id=thread_id,
                 tool_call_id=tool_call_id,
-            ),
+            )),
             current=None,
             proposed_content=content,
             fingerprint=fingerprint,
@@ -714,13 +720,13 @@ class SnapshotFileToolContract:
             raise FileToolContractError("NO_CHANGES")
         _require_mutation_text_size(proposed)
         return self._mutation_service.prepare(
-            metadata=MutationMetadata(
+            metadata=self._authorize_metadata(MutationMetadata(
                 operation="edit",
                 path=path,
                 thread_id=thread_id,
                 tool_call_id=tool_call_id,
                 snapshot_id=snapshot_id,
-            ),
+            )),
             current=current,
             proposed_content=proposed,
             fingerprint=fingerprint,
@@ -753,13 +759,13 @@ class SnapshotFileToolContract:
         if record.line_count and not self._snapshot_store.has_seen(record, 0, record.line_count):
             raise FileToolContractError("UNREAD_RANGE")
         return self._mutation_service.prepare(
-            metadata=MutationMetadata(
+            metadata=self._authorize_metadata(MutationMetadata(
                 operation="delete",
                 path=path,
                 thread_id=thread_id,
                 tool_call_id=tool_call_id,
                 snapshot_id=snapshot_id,
-            ),
+            )),
             current=current,
             proposed_content=None,
             fingerprint=fingerprint,
@@ -912,6 +918,7 @@ def create_snapshot_file_tool_contract(
     backend: Any,
     *,
     snapshot_store: ThreadSnapshotStore | None,
+    mutation_guard: Any | None = None,
     text_backend: TextMutationBackend,
     diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]] | None = None,
     diagnostics_timeout_seconds: float = DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS,
@@ -921,6 +928,7 @@ def create_snapshot_file_tool_contract(
     return SnapshotFileToolContract(
         backend,
         snapshot_store=snapshot_store,
+        mutation_guard=mutation_guard,
         text_backend=text_backend,
         diagnostics_provider=diagnostics_provider,
         diagnostics_timeout_seconds=diagnostics_timeout_seconds,

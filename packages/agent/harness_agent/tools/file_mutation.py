@@ -41,13 +41,14 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import difflib
 import hashlib
 import json
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from harness_agent.threads.text_backend import (
     ContentIdentity,
@@ -84,6 +85,7 @@ class MutationMetadata:
     thread_id: str
     tool_call_id: str
     snapshot_id: str | None = None
+    fusion_authorization: tuple[str, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +161,7 @@ class FileMutationService:
         backend: TextMutationBackend,
         *,
         max_prepared_bytes: int = MAX_PREPARED_MUTATION_BYTES,
+        mutation_guard: Any | None = None,
     ) -> None:
         """初始化服务，绑定底层文件写入后端，并设置等待审批计划的最大内存预算。
         
@@ -166,6 +169,7 @@ class FileMutationService:
         如果 Agent 在一次会话中连续生成了许多待审批的文件修改计划，而用户迟迟没有做出决定，
         这些计划保留的完整文本可能会过度消耗内存。因此通过 LRU 淘汰机制限制总保留字节数。
         """
+        self._mutation_guard = mutation_guard
         if max_prepared_bytes < 1:
             raise ValueError("PREPARED_MUTATION_LIMIT_INVALID")
         self._backend = backend
@@ -281,15 +285,10 @@ class FileMutationService:
     def commit(self, plan: PreparedFileMutation) -> CommittedFileMutation:
         """执行实际提交写入，并在执行完毕后强制销毁计划（保证一次批准只执行一次）。"""
         try:
-            if plan.metadata.operation == "write":
-                self._commit_create(plan)
-            elif plan.metadata.operation == "edit":
-                self._commit_replace(plan)
-            else:
-                self._commit_delete(plan)
-            actual = self._read_after_commit(plan.metadata.path)
+            with self._mutation_guard.commit(plan.metadata) if self._mutation_guard else nullcontext():
+                self._commit_guarded(plan)
+                actual = self._read_after_commit(plan.metadata.path)
         finally:
-            # 一次批准只能驱动一次提交尝试；冲突或 I/O 失败也不能重放旧计划。
             self.discard(plan)
 
         expected_content = plan.proposed_content
@@ -310,6 +309,15 @@ class FileMutationService:
             ),
             changed_range=changed_range,
         )
+
+    def _commit_guarded(self, plan: PreparedFileMutation) -> None:
+        """在可选的写者事务内执行原有单文件 CAS。"""
+        if plan.metadata.operation == "write":
+            self._commit_create(plan)
+        elif plan.metadata.operation == "edit":
+            self._commit_replace(plan)
+        else:
+            self._commit_delete(plan)
 
     def discard(self, plan: PreparedFileMutation) -> None:
         """删除已消费或失败计划，确保批准不可重放。"""

@@ -680,3 +680,22 @@ function peer(limit?: number) {
 function envelope(type: string, sequence: number, payload: Record<string, unknown>) {
   return { event_id: `e-${sequence}`, type, thread_id: "t", run_id: "r", sequence, timestamp_ms: 1, payload }
 }
+
+
+test("Peer sends Fusion selection and queries safe status on canonical RPC", async () => {
+  const {client, stdin, stdout} = peer()
+  const requests: any[] = []
+  stdin.on("data", data => {
+    const request = JSON.parse(data.toString())
+    requests.push(request)
+    stdout.write(JSON.stringify({jsonrpc: "2.0", id: request.id, result:
+      request.method === "run.start" ? {thread_id: "t", run_id: request.params.run_id, accepted: true} : {task: null}
+    }) + "\n")
+  })
+  const run = client.startRun({input: {kind: "user", message: "修改实现"}, mode: "build", threadId: "t", fusionProfileId: "duo"})
+  await run.accepted
+  expect(requests[0]).toMatchObject({method: "run.start", params: {fusion_profile_id: "duo"}})
+  expect(requests[0].params.model_selection).toBeUndefined()
+  expect(await client.inspectFusion("t")).toEqual({task: null})
+  expect(requests[1]).toMatchObject({method: "fusion.status", params: {thread_id: "t"}})
+})

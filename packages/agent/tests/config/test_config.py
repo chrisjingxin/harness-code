@@ -468,6 +468,7 @@ def test_execution_defaults_to_local_and_redacts_security_summary(tmp_path: Path
         "diagnostics": "default",
         "goal": "default",
         "experimental": "default",
+        "fusion": "default",
     }
 
 

@@ -886,6 +886,8 @@ def _migration_validate_legacy_source_schema_sync(
     # Team 状态表由 TeamStateStore 在较新的扩展分支中提前创建；它不改变
     # Thread schema 版本，但迁移时必须作为已知用户数据原样保留。
     allowed_tables.add("harness_team_runs")
+    from harness_agent.runtime.fusion.store import TABLE_SQL
+    allowed_tables.update(TABLE_SQL)
     # Compose 审计表由 v12 迁移创建；降级测试库或新版本库被误标旧版本时
     # 必须按已知扩展对象保留，而不是当成未知表拒绝。
     allowed_tables.add("harness_compose_runs")
@@ -2921,6 +2923,7 @@ class ThreadPersistence:
                 operation_lock=operation_lock,
             )
             await persistence._prepare()
+            await persistence.fusion_state_store().ensure_schema()
             return persistence
         except asyncio.CancelledError:
             if connection is not None:
@@ -3009,6 +3012,14 @@ class ThreadPersistence:
             project_fingerprint=self._project_fingerprint,
             lock=self._lock,
         )
+
+    def fusion_state_store(self) -> "FusionStateStore":
+        """返回借用同一 SQLite 连接和事务锁的双模型任务存储。"""
+        self._ensure_open()
+        from harness_agent.runtime.fusion.store import FusionStateStore
+
+        return FusionStateStore(self._connection, project_fingerprint=self._project_fingerprint,
+                                lock=self._lock, database_path=self._path)
 
     def goal_store(self) -> "GoalStore":
         """返回借用同一连接和事务锁的 project-scoped GoalStore。"""
@@ -6174,6 +6185,8 @@ class ThreadPersistence:
         allowed_tables = set(required)
         # 见同步校验：Team 状态表是已知扩展对象，不参与 Thread schema 版本。
         allowed_tables.add("harness_team_runs")
+        from harness_agent.runtime.fusion.store import TABLE_SQL
+        allowed_tables.update(TABLE_SQL)
         allowed_tables.add("harness_compose_runs")
         allowed_tables.add("harness_compose_artifacts")
         allowed_tables.add("harness_compose_activities")

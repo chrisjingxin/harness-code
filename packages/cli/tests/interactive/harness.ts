@@ -181,7 +181,7 @@ function createPort(options: {
     setCompactContextImpl: (impl: AgentGateway["compactContext"]) => void
     setCodeIndexStatusImpl: (impl: AgentGateway["codeIndexStatus"]) => void
     setListAgentsImpl: (impl: AgentGateway["listAgents"]) => void
-    lastRunSelection: () => { message: string; threadId: string; runId: string; mode: "build" | "compose"; modelSelection?: { primary_profile: string }; requestedSkill?: { id: string; args?: string } } | undefined
+    lastRunSelection: () => { message: string; threadId: string; runId: string; mode: "build" | "compose"; fusionProfileId?: string; modelSelection?: { primary_profile: string }; requestedSkill?: { id: string; args?: string } } | undefined
   } = {
     onProtocolError(listener) {
       protocolErrorListener = listener
@@ -265,6 +265,10 @@ function createPort(options: {
       calls.push("threads.open")
       return openThreadImpl(threadId)
     },
+    async listFusionProfiles() { return { duo: { lead_profile_id: "pro", sidekick_profile_id: "fast", check_plan_ids: [] } } },
+    async inspectFusion() { return { task: null } },
+    async recoverFusion() { throw new Error("No unknown Fusion task") },
+    async cancelFusion() { throw new Error("No active Fusion task") },
     async inspectGoal() {
       calls.push("goal.inspect")
       return { goal: null, pending: null, latest_evaluation: null }
@@ -474,6 +478,7 @@ function createPort(options: {
         threadId: run.threadId,
         runId: run.runId,
         mode: runStates.get(keyOf(run))?.input.mode ?? "build",
+        fusionProfileId: runStates.get(keyOf(run))?.input.fusionProfileId,
         modelSelection: runSelection(run),
         requestedSkill: runSkill(run),
         approvalMode: runStates.get(keyOf(run))?.input.approvalMode,

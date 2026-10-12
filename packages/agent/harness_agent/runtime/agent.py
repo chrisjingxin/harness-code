@@ -828,6 +828,8 @@ def create_harness_agent(
     extra_root_tools: Sequence[BaseTool | Any] = (),
     rubric_middleware: Any | None = None,
     managed_builtin_ids: frozenset[str] = frozenset(),
+    mutation_guard: Any | None = None,
+    effect_middleware: Any | None = None,
 ) -> Any:
     """组装并编译 Harness Code 智能体执行状态图。
 
@@ -1082,6 +1084,7 @@ def create_harness_agent(
             text_backend=text_backend,
             diagnostics_provider=diagnostics_provider,
             metrics=file_tool_metrics,
+            mutation_guard=mutation_guard,
         )
 
     # 4. ShellAllowListMiddleware（shell 白名单）
@@ -1351,6 +1354,8 @@ def create_harness_agent(
     if plugin_runtime is not None:
         agent_middleware.append(plugin_runtime.middleware)
     agent_middleware.append(ConcurrencyGuardMiddleware(concurrency_lock or AsyncRWLock()))
+    if effect_middleware is not None:
+        agent_middleware.append(effect_middleware)
     # 必须位于 WorkspaceBoundary 和并发守卫之后：边界先完成 canonical
     # path/virtual route 校验，并发锁再覆盖实际 dispatch，最后由 seam 短路
     # DeepAgents builtin handler。

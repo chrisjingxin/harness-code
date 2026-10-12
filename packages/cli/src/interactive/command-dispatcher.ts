@@ -62,6 +62,7 @@ export type CommandResult =
   | { type: "restore-approval-mode" }
   | { type: "focus-plan" }
   | { type: "view-plan"; threadId: string; markdown: string; virtualPath: string; displayPath: string }
+  | { type: "fusion"; argument?: string }
   | { type: "goal"; argument?: string }
   | { type: "code-index"; argument?: string }
   | CommandRpcResult
@@ -209,6 +210,7 @@ const builtinHandlers: Readonly<Record<string, CommandHandler>> = {
   },
   "approval.plan": handlePlanCommand,
   "approval.plan-view": handlePlanViewCommand,
+  "fusion.manage": context => ({ type: "fusion", argument: context.command.argument }),
   "goal.manage": context => ({ type: "goal", argument: context.command.argument }),
   "code-index.manage": handleCodeIndexCommand,
   "thread.undo": context => {

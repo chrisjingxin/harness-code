@@ -7,6 +7,10 @@ import type {
   CodeIndexApplyParams,
   ConfigChange,
   ContextCompactResult,
+  FusionTaskStatus,
+  FusionStatusResult,
+  FusionRecoverParams,
+  FusionCancelParams,
   GoalInspectResult,
   GoalMutateParams,
   GoalMutateResult,
@@ -184,6 +188,22 @@ export class AgentClientGateway implements AgentGateway {
     } catch (error) {
       throw this.wrapError(error)
     }
+  }
+
+  async listFusionProfiles() {
+    try { return await this.client.listFusionProfiles() } catch(error) { throw this.wrapError(error) }
+  }
+
+  async inspectFusion(threadId: string): Promise<FusionStatusResult> {
+    try { return await this.client.inspectFusion(threadId) } catch(error) { throw this.wrapError(error) }
+  }
+
+  async recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus> {
+    try { return await this.client.recoverFusion(params) } catch(error) { throw this.wrapError(error) }
+  }
+
+  async cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus> {
+    try { return await this.client.cancelFusion(params) } catch(error) { throw this.wrapError(error) }
   }
 
   async inspectGoal(threadId: string): Promise<GoalInspectResult> {

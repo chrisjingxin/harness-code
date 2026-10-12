@@ -1559,6 +1559,96 @@
       }
     },
     {
+      "kind": "operation.params",
+      "name": "fusion.status",
+      "case": "valid",
+      "value": {
+        "thread_id": "x"
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.status",
+      "case": "valid",
+      "value": {
+        "task": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x"
+        }
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.recover",
+      "case": "valid",
+      "value": {
+        "task_id": "x",
+        "expected_version": 1,
+        "inspection_note": "x",
+        "effects_stopped": false
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.recover",
+      "case": "valid",
+      "value": {
+        "task_id": "x",
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x"
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.cancel",
+      "case": "valid",
+      "value": {
+        "task_id": "x",
+        "expected_version": 1
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.cancel",
+      "case": "valid",
+      "value": {
+        "task_id": "x",
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x"
+      }
+    },
+    {
       "kind": "event",
       "name": "run.started",
       "case": "valid",
@@ -1890,6 +1980,34 @@
             "updated_at_ms": 1,
             "completed_at_ms": 1
           }
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.progress",
+      "case": "valid",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x"
         }
       }
     },
@@ -2801,6 +2919,213 @@
       "case": "valid",
       "value": {
         "code": "CODE_INDEX_PATH_UNSAFE",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PROFILE_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_PROFILE_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TASK_CONFLICT",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_TASK_CONFLICT",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_ROLE_DENIED",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_ROLE_DENIED",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_LEASE_BUSY",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_LEASE_BUSY",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_REPORT_STALE",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_REPORT_STALE",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_EVIDENCE_INCOMPLETE",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_EVIDENCE_INCOMPLETE",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_OUTCOME_UNKNOWN",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_OUTCOME_UNKNOWN",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_INPUT_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_INPUT_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_CAPABILITY_REQUIRED",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_CAPABILITY_REQUIRED",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TASK_NOT_FOUND",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_TASK_NOT_FOUND",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SCHEMA_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_SCHEMA_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PHASE_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_PHASE_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PATH_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_PATH_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_CHECK_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_CHECK_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_REQUIREMENT_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_REQUIREMENT_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_COMMAND_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_COMMAND_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TEST_REVIEW_REQUIRED",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_TEST_REVIEW_REQUIRED",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_UNAVAILABLE",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_SNAPSHOT_UNAVAILABLE",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_CHANGED",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_SNAPSHOT_CHANGED",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_SNAPSHOT_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_DELIVERY_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_DELIVERY_INVALID",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_RUNTIME_UNAVAILABLE",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_RUNTIME_UNAVAILABLE",
+        "retryable": false
+      }
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_WORKER_CHECKPOINT_INVALID",
+      "case": "valid",
+      "value": {
+        "code": "FUSION_WORKER_CHECKPOINT_INVALID",
         "retryable": false
       }
     }
@@ -6179,6 +6504,206 @@
       }
     },
     {
+      "kind": "operation.params",
+      "name": "fusion.status",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.status",
+      "case": "extra_field",
+      "value": {
+        "thread_id": "x",
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.status",
+      "case": "missing_field",
+      "value": {}
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.status",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.status",
+      "case": "extra_field",
+      "value": {
+        "task": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.status",
+      "case": "missing_field",
+      "value": {}
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.recover",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.recover",
+      "case": "extra_field",
+      "value": {
+        "task_id": "x",
+        "expected_version": 1,
+        "inspection_note": "x",
+        "effects_stopped": false,
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.recover",
+      "case": "missing_field",
+      "value": {
+        "expected_version": 1,
+        "inspection_note": "x",
+        "effects_stopped": false
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.recover",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.recover",
+      "case": "extra_field",
+      "value": {
+        "task_id": "x",
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x",
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.recover",
+      "case": "missing_field",
+      "value": {
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x"
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.cancel",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.cancel",
+      "case": "extra_field",
+      "value": {
+        "task_id": "x",
+        "expected_version": 1,
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.cancel",
+      "case": "missing_field",
+      "value": {
+        "expected_version": 1
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.cancel",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.cancel",
+      "case": "extra_field",
+      "value": {
+        "task_id": "x",
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x",
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.cancel",
+      "case": "missing_field",
+      "value": {
+        "thread_id": "x",
+        "version": 1,
+        "phase": "READY",
+        "active": false,
+        "profile": {},
+        "worker_session_id": "x",
+        "revision": 1,
+        "round": 1,
+        "verification": "verified",
+        "reason": "x",
+        "report_id": "x",
+        "ticket_id": "x"
+      }
+    },
+    {
       "kind": "event",
       "name": "run.started",
       "case": "wrong_type",
@@ -6947,6 +7472,68 @@
             "updated_at_ms": 1,
             "completed_at_ms": 1
           }
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.progress",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "event",
+      "name": "fusion.progress",
+      "case": "extra_field",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.progress",
+      "case": "missing_field",
+      "value": {
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x"
         }
       }
     },
@@ -7931,6 +8518,144 @@
     {
       "kind": "error",
       "name": "CODE_INDEX_PATH_UNSAFE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PROFILE_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TASK_CONFLICT",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_ROLE_DENIED",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_LEASE_BUSY",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_REPORT_STALE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_EVIDENCE_INCOMPLETE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_OUTCOME_UNKNOWN",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_INPUT_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_CAPABILITY_REQUIRED",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TASK_NOT_FOUND",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SCHEMA_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PHASE_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_PATH_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_CHECK_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_REQUIREMENT_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_COMMAND_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_TEST_REVIEW_REQUIRED",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_UNAVAILABLE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_CHANGED",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_SNAPSHOT_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_DELIVERY_INVALID",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_RUNTIME_UNAVAILABLE",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "error",
+      "name": "FUSION_WORKER_CHECKPOINT_INVALID",
       "case": "wrong_type",
       "value": null
     }

@@ -504,7 +504,7 @@ def test_python_validates_code_index_v310_contract() -> None:
         "stats": None,
         "error": None,
     }
-    assert PROTOCOL_MINOR == 10
+    assert PROTOCOL_MINOR == 11
     assert "code_index.read" in SERVER_CAPABILITIES
     assert "code_index.manage" in SERVER_CAPABILITIES
     assert OPERATION_MIN_MINOR["code_index.status"] == 10

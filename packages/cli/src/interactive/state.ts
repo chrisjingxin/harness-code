@@ -1,6 +1,7 @@
+import {fusionSummary} from './fusion-summary'
 /** Interactive Core 的纯 reducer：把 sidecar 流事件折叠为稳定领域状态。 */
 
-import { EventType, type CodeIndexSnapshot, type EventEnvelope, type GoalActivityProjection, type GoalEvaluationProjection, type GoalPendingProjection, type GoalProjection, type InteractionRequestEnvelope } from "@za38/protocol"
+import { EventType, type FusionTaskStatus, type CodeIndexSnapshot, type EventEnvelope, type GoalActivityProjection, type GoalEvaluationProjection, type GoalPendingProjection, type GoalProjection, type InteractionRequestEnvelope } from "@za38/protocol"
 import type { IdGenerator } from "./ports/id-generator"
 
 export type MessageRole = "user" | "assistant" | "system"
@@ -233,6 +234,8 @@ export type InteractiveState = {
   /** 当前工作区代码索引状态；独立于 Run 与 pendingOperation。 */
   codeIndex: CodeIndexSnapshot | null
   /** 当前 Thread 的持久 Goal 与独立审计投影。 */
+  fusionProfileId: string | null
+  fusionTask: FusionTaskStatus | null
   goal: GoalProjection | null
   goalPending: GoalPendingProjection | null
   goalEvaluation: GoalEvaluationProjection | null
@@ -262,6 +265,8 @@ export function createInitialState(threadId: string | null = null, workMode: Wor
     composeState: null,
     workItem: null,
     codeIndex: null,
+    fusionProfileId: null,
+    fusionTask: null,
     goal: null,
     goalPending: null,
     goalEvaluation: null,
@@ -607,6 +612,8 @@ export function restoreThread(
     composeState: null,
     workItem: null,
     codeIndex: null,
+    fusionProfileId: null,
+    fusionTask: null,
     goal: null,
     goalPending: null,
     goalEvaluation: null,
@@ -832,6 +839,7 @@ export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, i
       const mode: WorkMode | undefined = startedMode === "build" || startedMode === "compose" ? startedMode : undefined
       return {
         ...next,
+        fusionTask: event.payload.fusion ?? next.fusionTask,
         activity: { kind: "running" },
         runProgress: next.runProgress ?? { phase: "preparing", elapsedMs: 0 },
         timeline: mode
@@ -932,6 +940,12 @@ export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, i
     }
     case EventType.COMPOSE_PROGRESS: {
       return applyComposeState(next, event.payload)
+    }
+    case EventType.FUSION_PROGRESS: {
+      const task = event.payload
+      if (next.fusionTask?.task_id === task.task_id && next.fusionTask.version >= task.version) return next
+      return appendNotice({ ...next, fusionTask: task, fusionProfileId: task.active ? String(task.profile.profile_id) : next.fusionProfileId },
+        fusionSummary(task))
     }
     case EventType.GOAL_CHANGED: {
       return { ...next, goal: event.payload.goal }

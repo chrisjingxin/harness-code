@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import {
   assertEventEnvelope,
+  Capability,
   OPERATION_MIN_MINOR,
   PROTOCOL_VERSION,
   SERVER_CAPABILITIES,
@@ -32,7 +33,7 @@ const fixtures = JSON.parse(
 ) as { valid: Fixture[]; invalid: Fixture[] }
 
 test("Settings、Plugin、Goal 与审批 RPC 在 canonical v3 contract 中要求 minor 8；set_title 要求 9；代码索引要求 10", () => {
-  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 10 })
+  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 11 })
   expect(OPERATION_MIN_MINOR["commands.bind"]).toBe(6)
   expect(OPERATION_MIN_MINOR["goal.inspect"]).toBe(8)
   expect(OPERATION_MIN_MINOR["run.set_approval_mode"]).toBe(8)
@@ -69,7 +70,7 @@ test("代码索引使用独立 v3.10 Host 操作与 notification", () => {
     stats: null,
     error: null,
   }
-  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 10 })
+  expect(PROTOCOL_VERSION).toEqual({ major: 3, minor: 11 })
   expect(SERVER_CAPABILITIES).toContain("code_index.read")
   expect(SERVER_CAPABILITIES).toContain("code_index.manage")
   expect(() => validateOperationParams("code_index.status" as OperationName, {})).not.toThrow()
@@ -489,3 +490,12 @@ function validate(fixture: Fixture): void {
     validateProtocolErrorData(fixture.value)
   }
 }
+
+
+test("Fusion uses v3.11 capabilities and rejects missing recovery confirmation", () => {
+  expect(Capability.FUSION_READ).toBe("fusion.read")
+  expect(Capability.FUSION_MANAGE).toBe("fusion.manage")
+  expect(() => validateOperationParams("run.start", {thread_id:"t", run_id:"r", mode:"build", input:{kind:"user", message:"修改"}, fusion_profile_id:"duo"})).not.toThrow()
+  expect(() => validateOperationParams("fusion.recover", {task_id:"f", expected_version:1, inspection_note:"已停止"})).toThrow()
+  expect(() => validateOperationParams("fusion.recover", {task_id:"f", expected_version:1, inspection_note:"已停止", effects_stopped:true})).not.toThrow()
+})

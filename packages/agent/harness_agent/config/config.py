@@ -26,6 +26,12 @@ from harness_agent.config.config_manifest import (
     ConfigSource,
 )
 from harness_agent.extensions.mcp import McpServerConfig, parse_mcp_config
+from harness_agent.config.fusion import (
+    FusionConfigError,
+    FusionSettings,
+    merge_fusion_values,
+    parse_fusion_settings,
+)
 
 
 class ConfigError(ValueError):
@@ -440,6 +446,7 @@ class Za38Config:
     diagnostics: DiagnosticsSettings = field(default_factory=DiagnosticsSettings)
     goal: GoalSettings = field(default_factory=GoalSettings)
     experimental: ExperimentalSettings = field(default_factory=ExperimentalSettings)
+    fusion: FusionSettings = field(default_factory=FusionSettings)
 
     def require_model(self, profile_id: str | None = None) -> ModelSettings:
         """返回指定或默认模型；保留单 Profile 调用方的兼容入口。"""
@@ -485,6 +492,7 @@ class Za38Config:
             "diagnostics": self.diagnostics.redacted(),
             "goal": self.goal.redacted(),
             "experimental": self.experimental.redacted(),
+            "fusion": self.fusion.redacted(),
         }
 
 
@@ -528,6 +536,7 @@ def load_config(
         diagnostics_values,
         goal_values,
         experimental_values,
+        fusion_values,
         sources,
     ) = _merge_documents(documents)
     _apply_environment_overrides(
@@ -544,6 +553,13 @@ def load_config(
     model_profile = model_catalog.default_profile if model_catalog else None
     model = model_catalog.require_profile().settings if model_catalog else None
     mcp_servers = tuple(parse_mcp_config(mcp_values))  # type: ignore[arg-type]
+    try:
+        fusion = parse_fusion_settings(
+            fusion_values,
+            model_profile_ids=frozenset(model_catalog.profiles) if model_catalog else frozenset(),
+        )
+    except FusionConfigError as exc:
+        raise ConfigError(f"FUSION_PROFILE_INVALID: {exc}") from exc
 
     return Za38Config(
         model=model,
@@ -561,6 +577,7 @@ def load_config(
         diagnostics=_parse_diagnostics(diagnostics_values),
         goal=_parse_goal(goal_values),
         experimental=_parse_experimental(experimental_values, model_catalog),
+        fusion=fusion,
     )
 
 
@@ -653,6 +670,7 @@ def _merge_documents(
     dict[str, object],
     dict[str, object],
     dict[str, object],
+    dict[str, object],
     dict[str, str],
 ]:
     """按用户到显式配置的顺序合并已验证字段，并记录最后贡献来源。"""
@@ -667,6 +685,7 @@ def _merge_documents(
     diagnostics_values: dict[str, object] = {}
     goal_values: dict[str, object] = {}
     experimental_values: dict[str, object] = {}
+    fusion_values: dict[str, object] = {}
     sources = {
         "models": "default",
         "approval": "default",
@@ -679,6 +698,7 @@ def _merge_documents(
         "diagnostics": "default",
         "goal": "default",
         "experimental": "default",
+        "fusion": "default",
     }
     for _, source, document in documents:
         if "models" in document:
@@ -718,6 +738,12 @@ def _merge_documents(
                 experimental_values, document["experimental"]
             )
             sources["experimental"] = source.value
+        if "fusion" in document:
+            try:
+                fusion_values = merge_fusion_values(fusion_values, document["fusion"])
+            except FusionConfigError as exc:
+                raise ConfigError(f"FUSION_PROFILE_INVALID: {exc}") from exc
+            sources["fusion"] = source.value
     return (
         models,
         approval_values,
@@ -730,6 +756,7 @@ def _merge_documents(
         diagnostics_values,
         goal_values,
         experimental_values,
+        fusion_values,
         sources,
     )
 

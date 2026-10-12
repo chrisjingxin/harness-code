@@ -23,6 +23,8 @@ from harness_agent.policy.permission_rules import PermissionRule
 from harness_agent.runtime.run_context import ApprovalModeState, RunPlanConstraint
 
 _ALL_HITL_TOOLS = {
+    "fusion_delegate",
+    "fusion_rework",
     "execute",
     "write_file",
     "edit_file",

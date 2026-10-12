@@ -92,6 +92,7 @@ from harness_agent.runtime.interactions import (
     InteractionResult,
 )
 from harness_agent.policy.approval_mode import DEFAULT_APPROVAL_MODE, ApprovalMode
+from harness_agent.policy.concurrency import AsyncRWLock
 from harness_agent.policy.bash_parser import extract_command_rule as _extract_command_rule
 
 # 工作模式在 Run 受理时冻结；Compose 是代码状态机驱动的研发流程，Build 保持现有直接协作。
@@ -349,6 +350,7 @@ class StartRun:
     # Plugin Command 的 provenance 属于当前未发布 v3.7 契约；旧 minor
     # 连接不能在已协商成功后收到它，因此在准备阶段先 fail closed。
     protocol_minor: int = PROTOCOL_MINOR
+    fusion_profile_id: str | None = None
     requested_primary_profile: str | None = None
     requested_approval_mode: ApprovalMode | None = None
 
@@ -402,6 +404,7 @@ class StartRun:
             if skill is not None and self.command_bindings is not None
             else None,
             self.protocol_minor,
+            self.fusion_profile_id,
             self.requested_primary_profile,
             self.requested_approval_mode,
         )
@@ -433,6 +436,11 @@ class RunPreparation:
     # Coordinator 只透传不使用，快照协议归 Host 所有。
     snapshot_reservation: Any | None = None
     experimental_delegation: bool = False
+    fusion_binding: Any | None = None
+    # Shell 等绕过 Agent 图的入口仍须在实际执行前核对工作区写者。
+    workspace_write_guard: Callable[[], None] | None = None
+    # 直出 Shell 持有 Host 写锁直到命令停止，Fusion 取基线前等待它交还工作区。
+    workspace_write_lock: AsyncRWLock | None = None
     code_index_lease: Any | None = None
 
     def __post_init__(self) -> None:
@@ -535,6 +543,8 @@ class RunExecution:
     owner: ConnectionRef
     accepted: bool
     events: AsyncIterator[AgentEvent]
+    # 整条 Fusion Run 事件流只发送给理解 v3.11 的观察者，避免跳帧破坏序号。
+    minimum_minor: int = 0
 
 
 class InteractionPort(Protocol):
@@ -1080,7 +1090,7 @@ class RunCoordinator:
 
     def _log_delegation_usage(self, run: RunState) -> None:
         """实验开启时把主/子用量合计写入诊断日志，不进入协议或 UI。"""
-        if not run.experimental_delegation or run.usage_ledger is None:
+        if run.usage_ledger is None:
             return
         root_id = (
             run.root_execution.ref.execution_id
@@ -1197,7 +1207,7 @@ class RunCoordinator:
                     }
                 ),
                 experimental_delegation=experimental,
-                usage_ledger=DelegationUsageLedger() if experimental else None,
+                usage_ledger=DelegationUsageLedger() if experimental or preparation.fusion_binding is not None else None,
             )
             self._log_run_started(run)
             await self._execution_registry.accept(root_execution)
@@ -1208,7 +1218,7 @@ class RunCoordinator:
                 name=f"harness-run-{command.run_id}",
             )
             reservation_transferred = True
-            return RunExecution(command.ref, owner, True, self._read_events(run))
+            return RunExecution(command.ref, owner, True, self._read_events(run), minimum_minor=11 if preparation.fusion_binding is not None else 0)
         finally:
             if preparation is not None and not reservation_transferred:
                 await self._release_snapshot_reservation(preparation)
@@ -1239,6 +1249,28 @@ class RunCoordinator:
         if task is not None and not task.done() and status != "accepted":
             task.cancel()
         return CancelResult(True, run.run_id)
+
+    async def stop_fusion_run(self, thread_id: str, task_id: str, requester: ConnectionRef) -> bool:
+        """取消此 Fusion 任务的活动 Run 并等到清理结束，保留既有 owner 校验。
+
+        不确认后台操作是否停止；副作用记录由 FusionStore 检查。若清理超时，
+        返回繁忙错误，调用方不得释放写者。
+        """
+        async with self._lock:
+            active = self._runs.get(thread_id)
+            if not self._is_active(active):
+                return False
+            binding = active.preparation.fusion_binding
+            if binding is None or binding.task_id != task_id:
+                raise RunError('THREAD_BUSY', retryable=True)
+            ref, task = active.ref, active.task
+        await self.cancel(ref, requester)
+        if task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(asyncio.gather(task, return_exceptions=True)), timeout=30)
+            except TimeoutError as exc:
+                raise RunError('THREAD_BUSY', retryable=True) from exc
+        return True
 
     async def set_approval_mode(
         self,
@@ -1357,6 +1389,24 @@ class RunCoordinator:
             return await self._lifecycle_port.request_interaction(active, interaction)
         finally:
             self._child_interactions.resolve(interaction.request_id)
+
+    async def collect_child_approvals(self, run: RunRef, interaction: InteractionRequest) -> dict[str, object]:
+        """给持续 Sidekick 使用同一串行审批、规则暂存和取消登记。"""
+        active = await self._lookup(run)
+        namespace = (interaction.serial_context or {}).get('checkpoint_namespace')
+        if active.completion is not None or active.cancel_requested or not interaction.execution_id or not interaction.agent_id or not isinstance(namespace, str) or not namespace:
+            raise RunError('RUN_CANCELLED')
+        self._child_interactions.register(request_id=interaction.request_id, run_id=run.run_id,
+            execution_id=interaction.execution_id, parent_execution_id=interaction.parent_execution_id,
+            agent_id=interaction.agent_id, checkpoint_namespace=namespace)
+        try:
+            return await self._lifecycle_port.collect_serial_approvals(active, interaction)
+        finally:
+            self._child_interactions.resolve(interaction.request_id)
+
+    async def child_resume_consumed(self, run: RunRef) -> None:
+        """子图恢复成功后提交同一父 Run 中暂存的审批规则。"""
+        await self._lifecycle_port.commit_staged_approval_rules(await self._lookup(run))
 
     async def close(self) -> None:
         """优雅关闭 Coordinator：停止所有活动 Run 并释放后台资源。"""
@@ -2165,6 +2215,10 @@ class RunCoordinator:
                 payload=payload,
                 interrupt_id=interrupt_id,
                 action_count=1,
+                execution_id=first_spec.execution_id,
+                parent_execution_id=first_spec.parent_execution_id,
+                agent_id=first_spec.agent_id,
+                compose_scope=first_spec.compose_scope,
             )
             async with self._lock:
                 run.status = "interacting"

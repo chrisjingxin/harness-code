@@ -7,6 +7,10 @@ import {
   type ConfigChange,
   type ContextCompactResult,
   type EventEnvelope,
+  type FusionTaskStatus,
+  type FusionStatusResult,
+  type FusionRecoverParams,
+  type FusionCancelParams,
   type GoalInspectResult,
   type GoalMutateParams,
   type GoalMutateResult,
@@ -72,6 +76,7 @@ export type AgentGatewayStartRunInput = {
   readonly mode: InteractionMode
   readonly threadId?: string
   readonly runId?: string
+  readonly fusionProfileId?: string
   readonly modelSelection?: ThreadModelSelection
   readonly approvalMode?: ApprovalMode
 }
@@ -110,6 +115,10 @@ export interface AgentGateway {
   /** 服务端超时或终态后停止回写已经失效的交互响应。 */
   abandonInteraction(requestId: string): void
   /** 启动一次 Run；事件流只包含该 Run 的 Event。 */
+  listFusionProfiles(): Promise<Record<string, { lead_profile_id: string; sidekick_profile_id: string; check_plan_ids: string[] }>>
+  inspectFusion(threadId: string): Promise<FusionStatusResult>
+  recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus>
+  cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus>
   startRun(input: AgentGatewayStartRunInput): InteractiveAgentRun
   cancel(threadId: string, runId: string): Promise<RunCancelResult>
   /** 提交活动 Run 的审批模式；返回 Host 实际 mode/revision。 */
@@ -157,6 +166,10 @@ export interface AgentGateway {
 
 export function createFallbackNoopGateway(): AgentGateway {
   return {
+    async listFusionProfiles() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
+    async inspectFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
+    async recoverFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
+    async cancelFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
     startRun() {
       return {
         ref: { runId: "fallback-run", threadId: "fallback-thread" },

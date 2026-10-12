@@ -17,7 +17,10 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 from harness_agent.compose.models import VerificationEvidence
 
 if TYPE_CHECKING:
-    from harness_agent.runtime.execution import ExecutionSettings, WorkspaceExecutionResourcePool
+    from harness_agent.runtime.execution import (
+        ExecutionSettings,
+        WorkspaceExecutionResourcePool,
+    )
 
 DEFAULT_VERIFY_TIMEOUT_SECONDS = 180.0
 MAX_OUTPUT_SUMMARY_CHARS = 2_000
@@ -35,7 +38,7 @@ _SECRET_PATTERNS = (
 )
 
 
-def _redact_secrets(text: str) -> str:
+def redact_verification_text(text: str) -> str:
     """把常见凭据形态替换为占位符，避免验证输出摘要落盘敏感值。"""
     import re
 
@@ -72,6 +75,8 @@ class VerificationRequest:
     resource_key: str
     timeout_seconds: float = DEFAULT_VERIFY_TIMEOUT_SECONDS
     approve: Callable[[str], Awaitable[bool]] | None = None
+    before_execute: Callable[[], None] | None = None
+    approval_mode_provider: Callable[[], str | None] | None = None
 
     def __post_init__(self) -> None:
         """拒绝空命令、空标签、空资源键和非法超时。"""
@@ -115,6 +120,7 @@ class ManagedVerificationPort:
         rules_provider: Callable[[], list[Any]],
         rwlock: Any,
         now_ms: Callable[[], int],
+        write_guard: Callable[[], None] | None = None,
     ) -> None:
         """注入与 Agent 相同的资源池、策略、规则与 Host 并发锁。"""
         self._pool = pool
@@ -123,6 +129,7 @@ class ManagedVerificationPort:
         self._rules_provider = rules_provider
         self._rwlock = rwlock
         self._now_ms = now_ms
+        self._write_guard = write_guard
 
     async def capture_workspace_changes(
         self, resource_key: str
@@ -235,6 +242,18 @@ class ManagedVerificationPort:
         from harness_agent.policy.safe_commands import is_safe_command
         from harness_agent.policy.shell_access import evaluate_shell_file_access
 
+        def recheck() -> None:
+            mode = request.approval_mode_provider() if request.approval_mode_provider else "default"
+            if mode == "plan":
+                raise VerificationError("POLICY_DENIED")
+            if evaluate_tool_rules("execute", {"command": request.command}, self._rules_provider()) == "deny":
+                raise VerificationError("POLICY_DENIED")
+            if request.before_execute is not None:
+                request.before_execute()
+            elif self._write_guard is not None:
+                self._write_guard()
+
+        recheck()
         rules = self._rules_provider()
         effect = evaluate_tool_rules("execute", {"command": request.command}, rules)
         if effect == "deny":
@@ -261,6 +280,8 @@ class ManagedVerificationPort:
         )
         if not needs_approval and floors.get("any_floor_triggered"):
             needs_approval = True
+        if request.approval_mode_provider is not None and request.approval_mode_provider() == "yolo":
+            needs_approval = False
         if needs_approval:
             if request.approve is None:
                 raise VerificationError(
@@ -268,7 +289,7 @@ class ManagedVerificationPort:
                     "verification command requires user approval",
                 )
             description = (
-                f"Compose 验证命令需要审批：{request.label}\n"
+                f"验证命令需要审批：{request.label}\n"
                 f"命令：{request.command[:500]}"
             )
             approved = await request.approve(description)
@@ -279,6 +300,7 @@ class ManagedVerificationPort:
 
         # 验证命令可能修改工作区，与 Agent 写工具一致：整个执行期间持有
         # Host 独占写锁，防止其他 Thread 的写操作与验证命令交错。
+        recheck()
         await self._rwlock.acquire_write()
         lease = None
         try:
@@ -294,6 +316,7 @@ class ManagedVerificationPort:
                     f"execution resource unavailable: {type(exc).__name__}",
                 ) from exc
             started_at_ms = self._now_ms()
+            recheck()
             try:
                 backend = lease.value.backend
                 # backend.execute 的 timeout 是终止进程的权威超时；外层
@@ -336,7 +359,7 @@ class ManagedVerificationPort:
         finished_at_ms = self._now_ms()
         encoded = output.encode("utf-8")
         truncated = len(encoded) > MAX_OUTPUT_SUMMARY_CHARS * 4
-        summary = _redact_secrets(output[:MAX_OUTPUT_SUMMARY_CHARS])
+        summary = redact_verification_text(output[:MAX_OUTPUT_SUMMARY_CHARS])
         return VerificationEvidence(
             command=request.command,
             working_dir=_working_dir_identity(lease.value.workspace_path, self._workspace),

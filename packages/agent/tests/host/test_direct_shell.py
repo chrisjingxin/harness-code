@@ -207,3 +207,36 @@ async def test_direct_shell_with_persistence_resume(tmp_path: Path) -> None:
     assert "run.completed" in event_types
 
     await store.close()
+
+
+async def test_direct_shell_checks_workspace_writer_before_process(tmp_path):
+    def blocked():
+        raise ValueError('FUSION_LEASE_BUSY')
+    command = StartRun('t', 'r', 'direct_shell', UserRunInput('echo unsafe'))
+    run = RunState(start=command, owner=ConnectionRef('c'), persistence=None,
+                   preparation=RunPreparation(workspace_write_guard=blocked), message=command.message)
+    with pytest.raises(ValueError, match='FUSION_LEASE_BUSY'):
+        await DirectShellRunAdapter().execute(run, _MockPort())
+
+
+async def test_direct_shell_holds_host_writer_lock_until_process_stops(tmp_path):
+    """取 Fusion 基线前，必须等普通直出 Shell 完整结束。"""
+    from dataclasses import replace
+    from harness_agent.policy.concurrency import AsyncRWLock
+
+    lock = AsyncRWLock()
+    target = tmp_path / "shell.txt"
+    command = StartRun('t', 'r', 'direct_shell', UserRunInput(f"sleep 0.3; printf done > '{target}'"))
+    run = RunState(
+        start=command, owner=ConnectionRef('c'), persistence=None,
+        preparation=replace(RunPreparation(), workspace_write_lock=lock), message=command.message,
+    )
+    pending = asyncio.create_task(DirectShellRunAdapter().execute(run, _MockPort()))
+    await asyncio.sleep(0.1)
+    write = asyncio.create_task(lock.acquire_write())
+    await asyncio.sleep(0.05)
+    assert not write.done() and not target.exists()
+    await pending
+    await asyncio.wait_for(write, 2)
+    assert target.read_text() == "done"
+    await lock.release_write()

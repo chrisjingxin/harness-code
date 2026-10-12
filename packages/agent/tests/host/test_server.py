@@ -1697,6 +1697,7 @@ async def test_skill_text_only_changes_skill_prompt_not_tools_or_effective_polic
 ):
     """Skill 正文是低可信上下文，不能改变 Profile 的安全能力。"""
     from dataclasses import fields
+    from types import SimpleNamespace
 
     from harness_agent.runtime.agent_engine_profile import component_fingerprint
     from harness_agent.config.config import (
@@ -1774,6 +1775,11 @@ async def test_skill_text_only_changes_skill_prompt_not_tools_or_effective_polic
     server._config = config
     server._load_config = lambda: None  # type: ignore[method-assign]
     server._thread_persistence = Store()  # type: ignore[assignment]
+    from unittest.mock import AsyncMock
+    server._fusion_runtime = SimpleNamespace(
+        store=SimpleNamespace(active=AsyncMock(return_value=None)),
+        guard=SimpleNamespace(check_command=lambda _context: None),
+    )
     first: Any | None = None
     second: Any | None = None
 
@@ -2059,6 +2065,7 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
     def profile(profile_key: str) -> SimpleNamespace:
         view_fingerprint = component_fingerprint({"view": profile_key})
         return SimpleNamespace(
+            agent_id="primary",
             profile_key=profile_key,
             mcp_config_fingerprint=mcp_snapshot.digest,
             sandbox_config_fingerprint="sandbox",
@@ -2071,6 +2078,7 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
 
     def spec(runtime_profile: SimpleNamespace) -> SimpleNamespace:
         return SimpleNamespace(
+            agent_id="primary",
             runtime_profile=runtime_profile,
             mcp_snapshot=mcp_snapshot,
             execution=SimpleNamespace(approval_mode="yolo"),
@@ -2097,6 +2105,9 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
     server._mcp_manager = McpConnectionManager(mcp_snapshot)
     server._provider_client_pool = ProviderClients()  # type: ignore[assignment]
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
+    server._fusion_runtime = SimpleNamespace(
+        guard=object(), effect_middleware=lambda: object(),
+    )
     first_profile = profile("profile-first")
     second_profile = profile("profile-second")
     server._resolved_agent_specs = {
@@ -2197,10 +2208,11 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
         policy_fingerprint=component_fingerprint({"policy": "empty"}),
         middleware_fingerprint=component_fingerprint({"middleware": "empty"}),
         prompt_template_fingerprint=component_fingerprint({"prompt": "empty"}),
-        agent_id="za38-frontend-executor",
+        agent_id="fusion-custom-plugin",
         definition_fingerprint=component_fingerprint({"definition": "empty"}),
     )
     spec = SimpleNamespace(
+        agent_id="fusion-custom-plugin",
         runtime_profile=profile,
         mcp_snapshot=snapshot,
         execution=ExecutionSettings(),
@@ -2229,6 +2241,9 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
         return SimpleNamespace(checkpointer=object())
 
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
+    server._fusion_runtime = SimpleNamespace(
+        guard=object(), effect_middleware=lambda: object(),
+    )
     server._resolved_agent_specs[profile.profile_key] = spec
     pool = AgentEnginePool(server._build_default_agent_engine)
     server._agent_engine_pool = pool
@@ -2236,6 +2251,7 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
     try:
         lease = await pool.acquire(profile)
         assert captured["tools"] is None
+        assert captured["extra_root_tools"] == ()
         assert captured["mcp_server_info"] is None
         await lease.release()
     finally:
@@ -2350,6 +2366,7 @@ async def test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view(
         definition_fingerprint=component_fingerprint({"definition": "filtered"}),
     )
     spec = SimpleNamespace(
+        agent_id="primary",
         runtime_profile=profile,
         mcp_snapshot=child_snapshot,
         execution=ExecutionSettings(),
@@ -2379,6 +2396,9 @@ async def test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view(
         return SimpleNamespace(checkpointer=object())
 
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
+    server._fusion_runtime = SimpleNamespace(
+        guard=object(), effect_middleware=lambda: object(),
+    )
     server._mcp_manager = manager
     server._resolved_agent_specs[profile.profile_key] = spec
     pool = AgentEnginePool(server._build_default_agent_engine)

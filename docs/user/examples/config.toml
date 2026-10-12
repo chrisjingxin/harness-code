@@ -58,6 +58,20 @@ X-Enterprise-Tenant = "HARNESS_TENANT"
 # explore = "fast"
 # general-purpose = "fast"
 #
+# Fusion 双模型协作：Lead 派单/审阅，Sidekick 修改/返工，Host 运行检查。
+# 先取消上方 pro Profile 的注释，再启用以下配置。修改后重启 Host。
+# 本地 Build 中用 /fusion default 选择；runtime_pool.max_profiles 至少为 2。
+# 没有检查时只能标为人工审阅；检查命令仍需按当前策略审批。
+# [fusion.profiles.default]
+# lead_profile_id = "pro"
+# sidekick_profile_id = "fast"
+# check_plan_ids = ["unit"]
+# max_rework_rounds = 3
+# [fusion.check_plans.unit]
+# command = "python -m pytest"
+# cwd = "."
+# timeout_seconds = 300
+#
 # 实验性代码索引，默认关闭。修改后重启 AgentHost。
 # 界面只显示“代码索引”；详见 docs/user/代码索引.md。
 # [experimental.code_index]

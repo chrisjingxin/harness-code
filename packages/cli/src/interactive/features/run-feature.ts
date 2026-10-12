@@ -276,6 +276,9 @@ export class RunFeature {
     }
 
     const currentThreadId = ctx.getState().currentThreadId
+    if (ctx.getState().fusionProfileId && (options.mode !== "build" || input.kind !== "user" || input.requested_skill || this.currentApprovalMode(ctx.baseRuntime.approvalMode) === "plan")) {
+      return { status: "rejected", code: "invalid-argument", message: "Fusion 只支持 Build 普通需求；先退出 Skill/Plan，或用 /fusion off。" }
+    }
 
     try {
       const startedAtMs = ctx.clock.now()
@@ -284,7 +287,8 @@ export class RunFeature {
         mode: options.mode,
         threadId: currentThreadId ?? undefined,
         runId: options.runId,
-        modelSelection: options.requestedModelProfileId ? { primary_profile: options.requestedModelProfileId } : undefined,
+        fusionProfileId: ctx.getState().fusionProfileId ?? undefined,
+        modelSelection: !ctx.getState().fusionProfileId && options.requestedModelProfileId ? { primary_profile: options.requestedModelProfileId } : undefined,
         approvalMode: this.currentApprovalMode(ctx.baseRuntime.approvalMode),
       })
 

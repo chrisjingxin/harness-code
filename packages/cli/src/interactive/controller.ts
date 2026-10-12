@@ -41,6 +41,7 @@
  * └────────────────────────────────────────────────────────┘
  */
 
+import { FusionFeature } from "./features"
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
 import { builtinCommandCapabilities } from "./commands"
@@ -82,6 +83,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   private readonly timelineFeature = new TimelineFeature()
   private readonly runFeature = new RunFeature()
   private readonly goalFeature = new GoalFeature()
+  private readonly fusionFeature = new FusionFeature()
   private readonly codeIndexFeature = new CodeIndexFeature()
   private get featureContext(): FeatureContext {
     return { gateway: this.gateway, clock: this.clock, scheduler: this.scheduler, idGenerator: this.idGenerator, baseRuntime: this.baseRuntime, getState: () => this.state, commit: u => this.commit(u), publish: () => this.publish() }
@@ -150,9 +152,20 @@ export class InteractiveControllerImpl implements InteractiveController {
       void this.threadFeature.restoreInitialThread(options.initialThreadId, this.featureContext, {
         onSuccess: () => {
           void this.refreshModelSelection()
-          void this.goalFeature.resumePending(this.featureContext, this.goalRunCallbacks())
+          void this.restoreThreadWork(this.state.currentThreadId!)
         },
       })
+    }
+  }
+  /** 先恢复 Fusion 选择，再判断能否自动继续 Goal，避免两个工作流同时启动。 */
+  private async restoreThreadWork(threadId: string): Promise<void> {
+    try {
+      await this.fusionFeature.refresh(threadId, this.featureContext)
+      if (this.state.currentThreadId === threadId && !this.state.fusionProfileId) {
+        await this.goalFeature.resumePending(this.featureContext, this.goalRunCallbacks())
+      }
+    } catch (error) {
+      this.commit(current => appendNotice(current, `任务状态恢复失败：${error instanceof Error ? error.message : String(error)}`))
     }
   }
   getSnapshot(): InteractiveSnapshot {
@@ -212,7 +225,7 @@ export class InteractiveControllerImpl implements InteractiveController {
           hasPendingInteraction: this.hasPendingInteraction, onBeforeOpen: () => this.resetThreadState(), onSuccess: () => {
             void this.refreshModelSelection()
             void this.catalogFeature.refreshThreadCatalog(this.featureContext)
-            void this.goalFeature.resumePending(this.featureContext, this.goalRunCallbacks())
+            void this.restoreThreadWork(this.state.currentThreadId!)
           },
         })
 
@@ -223,6 +236,7 @@ export class InteractiveControllerImpl implements InteractiveController {
         return this.threadFeature.redo(intent.threadId, this.featureContext)
 
       case "model.select":
+        if (this.state.fusionProfileId) return { status: "rejected", code: "busy", message: "先用 /fusion off 退出组合，再切换主模型。" }
         if (this.state.activeRun || this.hasPendingInteraction) {
           return { status: "rejected", code: "busy", message: "任务运行中或存在待处理交互，暂不能切换模型" }
         }
@@ -379,6 +393,10 @@ export class InteractiveControllerImpl implements InteractiveController {
     void this.refreshModelSelection()
     void this.catalogFeature.refreshThreadCatalog(this.featureContext)
     const threadId = this.state.currentThreadId
+    if (this.state.fusionProfileId && threadId) {
+      void this.fusionFeature.refresh(threadId, this.featureContext)
+      return
+    }
     const goalEnabled = (this.baseRuntime.capabilities ?? []).includes(Capability.GOAL_READ)
     const hasGoalTerminalWork = Boolean(
       this.state.goal
@@ -600,7 +618,16 @@ export class InteractiveControllerImpl implements InteractiveController {
         }
         this.interactionFeature.openPlanViewer(result, this.featureContext)
         return { status: "accepted" }
+      case "fusion": {
+        const outcome = await this.fusionFeature.execute(result.argument, this.featureContext)
+        if (outcome.status === "accepted" && this.state.fusionProfileId) {
+          this.modelFeature.requestedModelProfileId = null
+          this.modelFeature.explicitlySelected = false
+        }
+        return outcome
+      }
       case "goal":
+        if (this.state.fusionProfileId) return { status: "rejected", code: "busy", message: "先结束 Fusion 任务并退出组合，再设置 Goal。" }
         return this.goalFeature.execute(result.argument, this.featureContext, this.goalRunCallbacks())
       case "code-index": {
         const outcome = await this.codeIndexFeature.execute(result.argument, this.featureContext)

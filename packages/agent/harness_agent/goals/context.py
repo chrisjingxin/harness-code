@@ -61,14 +61,14 @@ def resolve_goal_grader_identity(
     """
     from harness_agent.config.config import ConfigError
     from harness_agent.runtime.agent_engine_profile import model_settings_fingerprint
-    from harness_agent.runtime.execution_binding import _validate_model_profile
+    from harness_agent.runtime.execution_binding import validate_model_profile
 
     grader_model = getattr(getattr(config, "goal", None), "grader_model", None)
     if not grader_model:
         return "inherit", actual_primary_profile_id, actual_primary_fingerprint
     try:
         profile = config.require_model_profile(grader_model)
-        _validate_model_profile(profile)
+        validate_model_profile(profile)
         fingerprint = model_settings_fingerprint(
             profile_name=profile.profile_id,
             model=profile.settings,
