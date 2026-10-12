@@ -1,0 +1,42 @@
+# Fusion 首次验收配置。通过 --config 明确加载。
+# 模型和密钥沿用 ~/.harness/config.toml 中的 lead、sidekick。
+# 演示项目需要由 Sidekick 创建 calculator.py 和 tests/test_calculator.py。
+[config]
+version = 1
+
+[fusion.profiles.verify]
+lead_profile_id = "lead"
+sidekick_profile_id = "sidekick"
+check_plan_ids = ["calculator-tests"]
+max_rework_rounds = 3
+
+[fusion.check_plans.calculator-tests]
+cwd = "."
+timeout_seconds = 60
+# 先运行 Sidekick 编写的测试，再用固定的 8 项检查独立核对实现。
+# -B 避免生成 __pycache__，使演示改动范围保持清楚。
+command = """
+python3 -B -m unittest discover -s tests -p 'test_*.py' -v &&
+python3 -B - <<'PY'
+from calculator import add, divide
+
+assert add(1, 2) == 3
+assert add(-3, 1) == -2
+assert add(0, 0) == 0
+assert abs(add(1.5, 2.25) - 3.75) < 1e-9
+assert divide(6, 3) == 2
+assert divide(-6, 3) == -2
+assert abs(divide(1, 2) - 0.5) < 1e-9
+try:
+    divide(1, 0)
+except ValueError:
+    pass
+else:
+    raise AssertionError("divide(a, 0) 必须抛出 ValueError")
+
+print("独立验收：8 项通过")
+PY
+"""
+
+[diagnostics]
+level = "info"

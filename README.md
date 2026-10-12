@@ -79,6 +79,7 @@ npm run dev -- --non-interactive --message "解释当前目录的项目结构"
 
 - [快速开始](docs/user/快速开始.md)
 - [模型配置](docs/user/模型配置.md)
+- [Fusion 双模型使用指南](docs/user/fusion-guide.md)
 - [交互使用](docs/user/交互使用.md)
 - [代码索引](docs/user/代码索引.md)
 - [插件管理](docs/user/插件管理.md)
