@@ -26,6 +26,9 @@ const REASON_LABELS: Record<string, string> = {
   inspection_recorded: "已保存人工核查记录",
   direct_answer: "直接问答",
   lead_stopped_without_completion: "Lead 尚未完成派单或审阅",
+  workspace_busy: "工作区被另一任务占用",
+  workspace_available: "工作区占用已解除，发送新消息继续原任务",
+  owner_unavailable: "占用来源需要人工核查",
 }
 function modelId(profile: unknown): string {
   return typeof profile === "object" &&
@@ -71,5 +74,17 @@ export function fusionSummary(task: FusionTaskStatus): string {
           "、",
         )}${operations.length > 8 ? `，共 ${operations.length} 项` : ""}`
     : ""
-  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；第 ${task.round} 轮${reason}${pending}`
+  const blocker = task.workspace_blocker
+  let owner = ""
+  if (blocker) {
+    const phase = PHASE_LABELS[blocker.phase ?? ""] ?? "需要核查"
+    const cause = blocker.reason ? `（${REASON_LABELS[blocker.reason] ?? "需要处理"}）` : ""
+    const inspection = blocker.requires_inspection
+      ? "先核查相关操作已停止，再按原恢复流程处理；"
+      : ""
+    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；${inspection}`
+      + "用 /resume 返回该会话，查看 /fusion status；需要结束旧任务时在旧会话执行 /fusion cancel。处理后回本对话发送继续。"
+  }
+  const round = task.round === 0 ? "尚未派单" : `第 ${task.round} 轮`
+  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}`
 }

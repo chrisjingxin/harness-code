@@ -191,3 +191,56 @@ async def test_schema_rejects_same_name_index_with_wrong_unique_columns(persiste
         await store.connection.commit()
     with pytest.raises(FusionError, match="FUSION_SCHEMA_INVALID"):
         await store.ensure_schema()
+
+
+async def test_workspace_blocker_shows_only_owner_and_stop_facts(persistence):
+    store = persistence.fusion_state_store()
+    owner = await create(persistence, "owner-thread")
+    waiting = await create(persistence, "waiting-thread")
+    lease = await store.acquire_lease(owner.task_id, "sidekick")
+    effect = await store.begin_effect(
+        owner.task_id, lease.generation, "worker", "execute", "private-command-digest"
+    )
+    blocker = await store.workspace_blocker(waiting.task_id)
+    assert blocker == {
+        "task_id": owner.task_id,
+        "thread_id": owner.thread_id,
+        "phase": "READY",
+        "round": 0,
+        "reason": None,
+        "requires_inspection": True,
+    }
+    assert "source_message" not in blocker and "profile" not in blocker
+    with pytest.raises(ValueError, match="FUSION_OUTCOME_UNKNOWN"):
+        await store.cancel(owner.task_id, owner.version)
+    assert await store.workspace_blocker(waiting.task_id) == blocker
+    await store.finish_effect(effect, succeeded=True, stopped=True)
+    assert (await store.workspace_blocker(waiting.task_id))[
+        "requires_inspection"
+    ] is False
+    await store.cancel(owner.task_id, owner.version)
+    assert await store.workspace_blocker(waiting.task_id) is None
+
+
+async def test_cancelling_waiter_never_releases_other_task_writer(persistence):
+    store = persistence.fusion_state_store()
+    owner = await create(persistence, "owner-thread")
+    waiting = await create(persistence, "waiting-thread")
+    lease = await store.acquire_lease(owner.task_id, "sidekick")
+    waiting = await store.update(
+        waiting.task_id,
+        waiting.version,
+        phase="WAITING_USER",
+        data={
+            "reason": "workspace_busy",
+            "workspace_blocker": await store.workspace_blocker(waiting.task_id),
+        },
+    )
+    cancelled = await store.cancel(waiting.task_id, waiting.version)
+    assert (
+        cancelled.phase == "CANCELLED"
+        and cancelled.to_record()["workspace_blocker"] is None
+    )
+    assert (
+        await store.acquire_lease(owner.task_id, "sidekick")
+    ).generation == lease.generation

@@ -27,6 +27,8 @@ allowed_paths 使用项目相对路径，如 calc.py、tests/test_calc.py；目�
 读取工具的 /calc.py 是虚拟路径，派单时应填写 calc.py。目标文件或目录可以不存在，由 Sidekick 创建。
 不要要求用户先建文件，也不要自行扩大可改范围。check_plan_ids 只能选组合已配置的 ID，空列表使用全部配置检查。
 若上下文已有派单、报告或暂停任务，先调用 fusion_status 读取现状，再审阅或返工，不重新派首轮。
+若状态为 workspace_busy，当前任务尚未取得写权限；说明占用会话后等待用户处理，不反复派单、不改走返工，也不通过问答或直接完成宣称问题已解决。
+没有首轮任务单时必须使用 fusion_delegate。只有已有任务单的后续修改才使用 fusion_rework，尚无审阅票据并不等于可以重派首轮。
 给 Sidekick 明确目标、步骤、允许路径和检查计划。失败时用 fusion_rework 继续同一 Sidekick。
 收到票据后逐项审阅要求，用 file:项目相对路径 或 check:检查ID 指明证据；测试改动必须填写 test_review_reason。
 调用 fusion_review_result 接受后才可宣告完成。不得自己改码、执行命令、再次委派或绕过检查。fusion_status 可找回任务。"""

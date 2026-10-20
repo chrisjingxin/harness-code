@@ -121,6 +121,99 @@ async def test_delegate_rework_same_session_and_review_only(tmp_path):
         await p.close()
 
 
+async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path):
+    """旧任务的占用保留；当前任务不反复派发，取消旧任务后仍能首轮执行。"""
+    from harness_agent.runtime.fusion.store import FusionError
+
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    try:
+        owner = await store.create(
+            thread_id="older-thread",
+            profile=task.data["profile"],
+            workspace=root,
+            source_message="保留旧任务",
+        )
+        lease = await store.acquire_lease(owner.task_id, "sidekick")
+        owner = await store.update(
+            owner.task_id,
+            owner.version,
+            phase="WAITING_USER",
+            data={"round": 4, "reason": "rework_limit"},
+        )
+        result = await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持兼容",
+            user_requirements=["保持兼容"],
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        assert result["phase"] == "WAITING_USER"
+        assert result["reason"] == "workspace_busy"
+        assert result["round"] == result["revision"] == 0
+        assert result["workspace_blocker"] == {
+            "task_id": owner.task_id,
+            "thread_id": owner.thread_id,
+            "phase": "WAITING_USER",
+            "round": 4,
+            "reason": "rework_limit",
+            "requires_inspection": False,
+        }
+        before = (await store.get(task.task_id)).to_record()
+        assert not rounds
+        with pytest.raises(FusionError, match="FUSION_EVIDENCE_INCOMPLETE"):
+            await store.load_record(task.task_id, "order", "1")
+        # 不能用直接完成或改走返工把这次占用误认为已解决。
+        with pytest.raises(FusionError):
+            await service.finish_direct(ctx, summary="已解决")
+        repeated = await service.rework(
+            ctx, feedback="重试", allowed_paths=[], reason=""
+        )
+        assert repeated["reason"] == "workspace_busy" and not rounds
+        assert (await store.get(task.task_id)).to_record() == before
+        assert (
+            await store.acquire_lease(owner.task_id, "sidekick")
+        ).generation == lease.generation
+        still_waiting = await service.resume(task.task_id)
+        assert still_waiting.phase == "WAITING_USER" and not rounds
+        await store.cancel(owner.task_id, owner.version)
+        visible = await store.reconcile(task.task_id)
+        assert (
+            visible.phase == "PAUSED"
+            and visible.data["reason"] == "workspace_available"
+        )
+        assert visible.to_record()["workspace_blocker"] is None
+        ready = await service.resume(task.task_id)
+        assert (
+            ready.phase == "READY" and ready.worker_session_id == task.worker_session_id
+        )
+        result = await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持兼容",
+            user_requirements=["保持兼容"],
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        assert result["phase"] == "REVIEWING" and result["round"] == 1
+        assert len(rounds) == 1
+    finally:
+        await p.close()
+
+
+async def test_rework_before_first_order_explains_delegate(tmp_path):
+    from harness_agent.runtime.fusion.store import FusionError
+
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    ctx.fusion_service = service
+    try:
+        with pytest.raises(FusionError, match="FUSION_FIRST_ORDER_REQUIRED"):
+            await service.rework(ctx, feedback="开始", allowed_paths=[], reason="")
+        assert not rounds and (await store.get(task.task_id)).data["round"] == 0
+    finally:
+        await p.close()
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -307,16 +400,16 @@ async def test_busy_workspace_does_not_partially_register_order(tmp_path):
             source_message="other",
         )
         await store.acquire_lease(other.task_id, "sidekick")
-        with pytest.raises(ValueError, match="FUSION_LEASE_BUSY"):
-            await service.delegate(
-                ctx,
-                goal="修改",
-                brief="保持接口",
-                user_requirements=["保持兼容"],
-                allowed_paths=["a.py"],
-                check_plan_ids=[],
-            )
-        assert (await store.get(task.task_id)).phase == "READY" and not rounds
+        result = await service.delegate(
+            ctx,
+            goal="修改",
+            brief="保持接口",
+            user_requirements=["保持兼容"],
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        assert result["reason"] == "workspace_busy"
+        assert (await store.get(task.task_id)).phase == "WAITING_USER" and not rounds
         with pytest.raises(ValueError, match="FUSION_EVIDENCE_INCOMPLETE"):
             await store.load_record(task.task_id, "order", "1")
     finally:
@@ -689,5 +782,44 @@ async def test_new_files_complete_real_guarded_write_and_review(
             effect["state"] == "succeeded"
             for effect in await store.effects(task.task_id)
         )
+    finally:
+        await p.close()
+
+
+async def test_first_order_tool_gives_actionable_error(monkeypatch, tmp_path):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    ctx.fusion_service = service
+    try:
+        response = await _lead_tool(monkeypatch, ctx, "fusion_rework").ainvoke(
+            {
+                "feedback": "继续",
+                "allowed_paths": [],
+                "reason": "",
+            }
+        )
+        detail = json.loads(response)
+        assert detail["error"] == "FUSION_FIRST_ORDER_REQUIRED"
+        assert "fusion_delegate" in detail["message"]
+        assert not rounds
+    finally:
+        await p.close()
+
+
+async def test_rework_with_order_does_not_require_first_ticket(tmp_path):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path, submitted=False)
+    try:
+        result = await service.delegate(
+            ctx,
+            goal="g",
+            brief="b",
+            user_requirements=["保持兼容"],
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        assert result["phase"] == "WAITING_USER" and not result["ticket_id"]
+        result = await service.rework(
+            ctx, feedback="补交报告", allowed_paths=[], reason=""
+        )
+        assert result["round"] == 2 and len(rounds) == 2
     finally:
         await p.close()

@@ -89,7 +89,7 @@ export function interactionStatusLabel(status: InteractionCard["status"]): strin
     case "cancelled":
       return "已超时"
     case "resolved":
-      return "已解决"
+      return "已处理"
     case "pending":
       return "等待中"
   }

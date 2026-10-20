@@ -28,6 +28,7 @@ from harness_agent.runtime.fusion.store import (
     FusionLease,
     FusionStateStore,
     FusionTask,
+    FusionWorkspaceBusy,
     encode,
     new_id,
 )
@@ -121,13 +122,18 @@ class FusionService:
         task = await self.store.reconcile(task_id)
         if task.phase == "OUTCOME_UNKNOWN":
             raise FusionError("FUSION_OUTCOME_UNKNOWN")
+        if task.data.get("reason") == "workspace_busy":
+            return task
         if task.phase not in {"PAUSED", "WAITING_USER"}:
             return task
         ticket_id = task.data.get("ticket_id")
         if not ticket_id:
             if not task.data.get("revision"):
                 return await self.store.update(
-                    task.task_id, task.version, phase="READY", data={"reason": None}
+                    task.task_id,
+                    task.version,
+                    phase="READY",
+                    data={"reason": None, "workspace_blocker": None},
                 )
             return task
         ticket = await self.store.load_record(task.task_id, "ticket", ticket_id)
@@ -236,6 +242,8 @@ class FusionService:
         task = await self._task(context, "lead")
         async with self._locks.setdefault(task.task_id, asyncio.Lock()):
             task = await self._task(context, "lead")
+            if task.data.get("reason") == "workspace_busy":
+                return task.to_record()
             if task.phase != "READY":
                 raise FusionError("FUSION_TASK_CONFLICT")
             source = " ".join(task.data["source_message"].split())
@@ -291,9 +299,12 @@ class FusionService:
         task = await self._task(context, "lead")
         async with self._locks.setdefault(task.task_id, asyncio.Lock()):
             task = await self._task(context, "lead")
+            if task.data.get("reason") == "workspace_busy":
+                return task.to_record()
+            if not task.data.get("revision"):
+                raise FusionError("FUSION_FIRST_ORDER_REQUIRED")
             if (
                 task.phase not in {"REVIEWING", "WAITING_USER", "PAUSED"}
-                or not task.data.get("revision")
                 or not feedback.strip()
             ):
                 raise FusionError("FUSION_TASK_CONFLICT")
@@ -363,6 +374,15 @@ class FusionService:
             task, lease = await self.store.start_round(
                 task.task_id, task.version, order, operation_id, message
             )
+        except FusionWorkspaceBusy as exc:
+            task = await self.store.update(
+                task.task_id,
+                task.version,
+                phase="WAITING_USER",
+                data={"reason": "workspace_busy", "workspace_blocker": exc.blocker},
+            )
+            self._emit(context, task)
+            return task.to_record()
         finally:
             if self.rwlock is not None:
                 await self.rwlock.release_write()

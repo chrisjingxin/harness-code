@@ -566,3 +566,16 @@ def _validate(fixture: dict[str, Any]) -> None:
         validate_notification_params(fixture["name"], fixture["value"])
     else:
         validate_protocol_error_data(fixture["value"])
+
+
+def test_fusion_workspace_blocker_is_strict_safe_state():
+    fixtures = json.loads(FIXTURE_PATH.read_text())
+    original = next(item for item in fixtures["valid"] if item["kind"] == "operation.result" and item["name"] == "fusion.status")
+    value = json.loads(json.dumps(original["value"]))
+    blocker = {"task_id": "owner", "thread_id": "older-thread", "phase": "WAITING_USER", "round": 4, "reason": "rework_limit", "requires_inspection": False}
+    value["task"]["workspace_blocker"] = blocker
+    validate_operation_result("fusion.status", value)
+    for invalid in ({**blocker, "round": -1}, {**blocker, "command": "private"}):
+        value["task"]["workspace_blocker"] = invalid
+        with pytest.raises((ValidationError, ValueError)):
+            validate_operation_result("fusion.status", value)

@@ -22,8 +22,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.messages import ToolMessage
+from langchain.agents.middleware.types import AgentMiddleware, hook_config
+from langchain_core.messages import AIMessage, ToolMessage
 
 from harness_agent.runtime.fusion.roles import LEAD_CONTROLS, WORKER_CONTROLS
 from harness_agent.runtime.fusion.snapshot import normalize_paths, path_allowed
@@ -243,6 +243,39 @@ class FusionEffectMiddleware(AgentMiddleware):
         super().__init__()
         self.guard = guard
         self.store = store
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        """占用已明确时由程序结束本轮；不再让模型选择重试、返工或追问。"""
+        context = getattr(runtime, "context", None)
+        task_id = getattr(context, "fusion_task_id", None)
+        if not task_id or getattr(context, "fusion_role", None) != "lead":
+            return None
+        task = await self.store.get(task_id)
+        if not task.active or task.data.get("reason") != "workspace_busy":
+            return None
+        blocker = task.data.get("workspace_blocker") or {}
+        thread_id = blocker.get("thread_id")
+        source = f"会话 {thread_id}" if thread_id else "另一任务"
+        message = (
+            f"工作区被{source}占用。当前 Fusion 任务尚未取得写权限，已暂停派单，本轮不会继续重试。"
+            "\n请用 /resume 返回占用会话，查看 /fusion status；"
+            "需要结束旧任务时，在旧会话执行 /fusion cancel，已修改文件会保留。"
+        )
+        if blocker.get("requires_inspection"):
+            message += "\n旧任务有结果不明的操作，请先核查是否停止，再按原恢复流程处理，不能强行释放写权限。"
+        message += (
+            "\n处理占用后，回到本对话发送继续。没有首轮任务单时应使用首次派单入口。"
+        )
+        return {
+            "messages": [
+                AIMessage(
+                    content=message,
+                    id=f"fusion-workspace-wait-{task.task_id}-{task.version}",
+                )
+            ],
+            "jump_to": "end",
+        }
 
     async def awrap_tool_call(self, request: Any, handler: Callable[..., Any]) -> Any:
         """审批恢复后登记 Shell；取消无法证明停止时保留未知操作。"""

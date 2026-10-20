@@ -172,6 +172,13 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
             try:
                 return encode(await getattr(service, method)(context, **arguments))
             except FusionError as exc:
+                if exc.code == "FUSION_FIRST_ORDER_REQUIRED":
+                    return encode(
+                        {
+                            "error": exc.code,
+                            "message": "尚无首轮任务单，不能返工。请先用 fusion_delegate 派单；工作区被占用时先处理占用任务，不要反复重试。",
+                        }
+                    )
                 return exc.code
             except ValueError as exc:
                 # 仅解释已知路径错误；未知异常原文可能包含内部路径或凭据。

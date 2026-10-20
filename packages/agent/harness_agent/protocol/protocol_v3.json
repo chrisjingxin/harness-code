@@ -7082,6 +7082,16 @@
           "items": {
             "$ref": "#/$defs/jsonObject"
           }
+        },
+        "workspace_blocker": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fusionWorkspaceBlocker"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -7117,6 +7127,61 @@
       },
       "required": [
         "task"
+      ],
+      "additionalProperties": false
+    },
+    "fusionWorkspaceBlocker": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "phase": {
+          "enum": [
+            "READY",
+            "WORKER_RUNNING",
+            "CHECKING",
+            "REVIEWING",
+            "PAUSED",
+            "WAITING_USER",
+            "OUTCOME_UNKNOWN",
+            "COMPLETED",
+            "CANCELLED",
+            null
+          ]
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requires_inspection": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task_id",
+        "thread_id",
+        "phase",
+        "round",
+        "reason",
+        "requires_inspection"
       ],
       "additionalProperties": false
     }

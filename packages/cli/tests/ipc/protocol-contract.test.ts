@@ -499,3 +499,16 @@ test("Fusion uses v3.11 capabilities and rejects missing recovery confirmation",
   expect(() => validateOperationParams("fusion.recover", {task_id:"f", expected_version:1, inspection_note:"已停止"})).toThrow()
   expect(() => validateOperationParams("fusion.recover", {task_id:"f", expected_version:1, inspection_note:"已停止", effects_stopped:true})).not.toThrow()
 })
+
+
+test("Fusion 占用摘要受 canonical 协议校验，不允许泄露路径或命令", () => {
+  const original = fixtures.valid.find(item => item.kind === "operation.result" && item.name === "fusion.status")!
+  const value = structuredClone(original.value) as any
+  const blocker = { task_id: "owner", thread_id: "older-thread", phase: "WAITING_USER", round: 4, reason: "rework_limit", requires_inspection: false }
+  value.task.workspace_blocker = blocker
+  expect(() => validateOperationResult("fusion.status", value)).not.toThrow()
+  value.task.workspace_blocker = { ...blocker, round: -1 }
+  expect(() => validateOperationResult("fusion.status", value)).toThrow()
+  value.task.workspace_blocker = { ...blocker, command: "private" }
+  expect(() => validateOperationResult("fusion.status", value)).toThrow()
+})

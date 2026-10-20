@@ -2,7 +2,7 @@
 
 export const PROTOCOL_MAJOR = 3 as const
 export const PROTOCOL_MINOR = 11 as const
-export const PROTOCOL_SCHEMA_SHA256 = "c662b3f941e271374a3d4fe15d25c7406141c2c59f78d91c35088dc476795b4b" as const
+export const PROTOCOL_SCHEMA_SHA256 = "7b1487a64241f88c8e388080355f8f17ae22530256bfee0f8b62c3d70b265fca" as const
 export const MAX_FRAME_BYTES = 8388608 as const
 export const MAX_TOOL_PAYLOAD_BYTES = 1048576 as const
 export const CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate","fusion.status","fusion.recover","fusion.cancel"] as const
@@ -297,8 +297,9 @@ export type GoalInteractionResponse = ({ "decision": "accepted"; "feedback"?: st
 export type FusionStatusParams = { "thread_id": string }
 export type FusionCancelParams = { "task_id": string; "expected_version": number }
 export type FusionRecoverParams = { "task_id": string; "expected_version": number; "inspection_note": string; "effects_stopped": boolean }
-export type FusionTaskStatus = { "task_id": string; "thread_id": string; "version": number; "phase": "READY" | "WORKER_RUNNING" | "CHECKING" | "REVIEWING" | "PAUSED" | "WAITING_USER" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED"; "active": boolean; "profile": JsonObject; "worker_session_id": string; "revision": number; "round": number; "verification": "verified" | "review_only" | "unverified"; "reason": string | null; "report_id": string | null; "ticket_id": string | null; "pending_operations"?: Array<JsonObject> }
+export type FusionTaskStatus = { "task_id": string; "thread_id": string; "version": number; "phase": "READY" | "WORKER_RUNNING" | "CHECKING" | "REVIEWING" | "PAUSED" | "WAITING_USER" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED"; "active": boolean; "profile": JsonObject; "worker_session_id": string; "revision": number; "round": number; "verification": "verified" | "review_only" | "unverified"; "reason": string | null; "report_id": string | null; "ticket_id": string | null; "pending_operations"?: Array<JsonObject>; "workspace_blocker"?: (FusionWorkspaceBlocker) | (null) }
 export type FusionStatusResult = { "task": (FusionTaskStatus) | (null) }
+export type FusionWorkspaceBlocker = { "task_id": string | null; "thread_id": string | null; "phase": "READY" | "WORKER_RUNNING" | "CHECKING" | "REVIEWING" | "PAUSED" | "WAITING_USER" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED" | null; "round": number; "reason": string | null; "requires_inspection": boolean }
 
 export type CommandsBindParams = CommandBindingsParams
 export type CommandsBindResult = CommandBindingsResult

@@ -264,3 +264,39 @@ test("unknown status shows operation identities for manual inspection", async ()
   expect(text).toContain("effect-test-1")
   expect(text).toContain("执行命令")
 })
+
+
+test("工作区占用显示原会话与处理方式，未派单不能当作完成", async () => {
+  const { fusionSummary } = await import("../../src/interactive/fusion-summary")
+  const task: any = {
+    task_id: "waiting", thread_id: "t", version: 2,
+    profile: { profile_id: "duo", lead: { id: "pro" }, sidekick: { id: "fast" } },
+    phase: "WAITING_USER", active: true, round: 0, revision: 0, verification: "unverified", reason: "workspace_busy",
+    workspace_blocker: { task_id: "owner", thread_id: "older-thread", phase: "WAITING_USER", round: 4, reason: "rework_limit", requires_inspection: false },
+  }
+  const text = fusionSummary(task)
+  expect(text).toContain("工作区被另一任务占用")
+  expect(text).toContain("older-thread")
+  expect(text).toContain("已达到返工上限")
+  expect(text).toContain("/resume")
+  expect(text).toContain("/fusion cancel")
+  expect(text).toContain("尚未派单")
+  expect(text).not.toContain("检查及审阅通过")
+  const unknown = fusionSummary({ ...task, workspace_blocker: { ...task.workspace_blocker, requires_inspection: true } })
+  expect(unknown).toContain("先核查")
+})
+
+
+test("较早发出的状态查询不能覆盖新进度中的占用状态", async () => {
+  const { ctx } = context()
+  const old: any = { task_id: "f", thread_id: "t", version: 1, phase: "READY", active: true, profile: { profile_id: "duo" } }
+  let resolve: (value: any) => void = () => {}
+  ctx.gateway.inspectFusion = () => new Promise<any>(reply => { resolve = reply })
+  const waiting = new FusionFeature().refresh("t", ctx)
+  const latest = { ...old, version: 2, phase: "WAITING_USER", reason: "workspace_busy" }
+  ctx.commit(state => ({ ...state, fusionTask: latest }))
+  resolve({ task: old })
+  await waiting
+  expect(ctx.getState().fusionTask?.version).toBe(2)
+  expect(ctx.getState().fusionTask?.reason).toBe("workspace_busy")
+})

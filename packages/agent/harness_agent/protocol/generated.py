@@ -7,7 +7,7 @@ from harness_agent.protocol.runtime import event_model, schema_model
 
 PROTOCOL_MAJOR = 3
 PROTOCOL_MINOR = 11
-PROTOCOL_SCHEMA_SHA256 = "c662b3f941e271374a3d4fe15d25c7406141c2c59f78d91c35088dc476795b4b"
+PROTOCOL_SCHEMA_SHA256 = "7b1487a64241f88c8e388080355f8f17ae22530256bfee0f8b62c3d70b265fca"
 MAX_FRAME_BYTES = 8388608
 MAX_TOOL_PAYLOAD_BYTES = 1048576
 CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate","fusion.status","fusion.recover","fusion.cancel"]
@@ -1105,9 +1105,18 @@ class FusionTaskStatusWire(TypedDict):
     report_id: str | None
     ticket_id: str | None
     pending_operations: NotRequired[list[JsonObjectWire]]
+    workspace_blocker: NotRequired[FusionWorkspaceBlockerWire | None]
 
 class FusionStatusResultWire(TypedDict):
     task: FusionTaskStatusWire | None
+
+class FusionWorkspaceBlockerWire(TypedDict):
+    task_id: str | None
+    thread_id: str | None
+    phase: Literal["READY", "WORKER_RUNNING", "CHECKING", "REVIEWING", "PAUSED", "WAITING_USER", "OUTCOME_UNKNOWN", "COMPLETED", "CANCELLED", None]
+    round: int
+    reason: str | None
+    requires_inspection: bool
 
 CommandsBindParamsWire = CommandBindingsParamsWire
 CommandsBindResultWire = CommandBindingsResultWire

@@ -74,6 +74,15 @@ class FusionError(ValueError):
         super().__init__(code)
 
 
+class FusionWorkspaceBusy(FusionError):
+    """派单未落库时携带占用者的安全摘要；不包含原话、路径或工具参数。"""
+
+    def __init__(self, blocker: Mapping[str, object]) -> None:
+        """复制事务内确认的占用事实，外层只读取诊断信息。"""
+        super().__init__("FUSION_LEASE_BUSY")
+        self.blocker = dict(blocker)
+
+
 def workspace_key(workspace: Path) -> str:
     """同一真实工作目录在不同 Host 中使用同一个键。"""
     return hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()
@@ -119,6 +128,7 @@ class FusionTask:
             "report_id": self.data.get("report_id"),
             "ticket_id": self.data.get("ticket_id"),
             "pending_operations": self.data.get("pending_operations", []),
+            "workspace_blocker": self.data.get("workspace_blocker"),
         }
 
 
@@ -251,6 +261,66 @@ class FusionStateStore:
             row = await cursor.fetchone()
             return await self._get(row[0]) if row else None
 
+    async def _workspace_blocker(self, task: FusionTask) -> dict[str, object] | None:
+        cursor = await self.connection.execute(
+            "SELECT task_id,project_fingerprint FROM fusion_leases WHERE workspace_key=?",
+            (task.workspace_key,),
+        )
+        lease = await cursor.fetchone()
+        if not lease or not lease["task_id"]:
+            return None
+        if (
+            lease["task_id"] == task.task_id
+            and lease["project_fingerprint"] == self.project
+        ):
+            return None
+        if lease["project_fingerprint"] != self.project:
+            # 只能公开本项目内的会话身份，未知来源不能自动抢占。
+            return {
+                "task_id": None,
+                "thread_id": None,
+                "phase": None,
+                "round": 0,
+                "reason": "owner_unavailable",
+                "requires_inspection": True,
+            }
+        owner = await self._get(lease["task_id"])
+        return {
+            "task_id": owner.task_id,
+            "thread_id": owner.thread_id,
+            "phase": owner.phase,
+            "round": owner.data.get("round", 0),
+            "reason": owner.data.get("reason"),
+            "requires_inspection": owner.phase == "OUTCOME_UNKNOWN"
+            or await self._pending(owner.task_id)
+            or await self._pending_delivery(owner.task_id),
+        }
+
+    async def workspace_blocker(self, task_id: str) -> dict[str, object] | None:
+        """读取实际写者，不按进程、时间或模型声明推断占用已解除。"""
+        async with self.lock:
+            return await self._workspace_blocker(await self._get(task_id))
+
+    async def _refresh_workspace_wait(self, task_id: str) -> FusionTask:
+        async def action() -> FusionTask:
+            current = await self._get(task_id)
+            if not current.active or current.data.get("reason") != "workspace_busy":
+                return current
+            blocker = await self._workspace_blocker(current)
+            reason = "workspace_busy" if blocker else "workspace_available"
+            if (
+                current.data.get("workspace_blocker") == blocker
+                and current.data.get("reason") == reason
+            ):
+                return current
+            return await self._update(
+                current,
+                phase="WAITING_USER" if blocker else "PAUSED",
+                data={"reason": reason, "workspace_blocker": blocker},
+            )
+
+        return await self._transaction(action)
+
     async def create(
         self,
         *,
@@ -353,7 +423,9 @@ class FusionStateStore:
                 row["task_id"] != task.task_id
                 or row["project_fingerprint"] != self.project
             ):
-                raise FusionError("FUSION_LEASE_BUSY")
+                blocker = await self._workspace_blocker(task)
+                assert blocker is not None
+                raise FusionWorkspaceBusy(blocker)
             if await self._pending(task.task_id) or await self._pending_delivery(
                 task.task_id
             ):
@@ -579,7 +651,13 @@ class FusionStateStore:
                 "resume_phase": task.data.get("resume_phase", task.phase)
                 if task.phase in {"PAUSED", "OUTCOME_UNKNOWN"}
                 else task.phase,
-                "reason": "effects_unconfirmed" if unknown else "run_paused",
+                "reason": "effects_unconfirmed"
+                if unknown
+                else (
+                    "workspace_busy"
+                    if task.data.get("reason") == "workspace_busy"
+                    else "run_paused"
+                ),
                 "pending_operations": pending_operations,
             }
             if unknown:
@@ -593,6 +671,8 @@ class FusionStateStore:
     async def reconcile(self, task_id: str) -> FusionTask:
         """重启只核对事实；未收敛的派发或写入不自动重放。"""
         task = await self.get(task_id)
+        if task.active and task.data.get("reason") == "workspace_busy":
+            return await self._refresh_workspace_wait(task_id)
         async with self.lock:
             delivery_pending = await self._pending_delivery(task_id)
         if (
@@ -656,7 +736,9 @@ class FusionStateStore:
             task.task_id
         ):
             raise FusionError("FUSION_OUTCOME_UNKNOWN")
-        task = await self._update(task, phase=phase, data=data)
+        task = await self._update(
+            task, phase=phase, data={**data, "workspace_blocker": None}
+        )
         await self.connection.execute(
             "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=?",
             (task.task_id, self.project),

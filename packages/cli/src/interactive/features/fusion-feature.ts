@@ -14,8 +14,13 @@ export class FusionFeature {
     notice = false,
   ): Promise<void> {
     if (!ctx.baseRuntime.capabilities?.includes(Capability.FUSION_READ)) return
+    const requestedTask = ctx.getState().fusionTask
     const { task } = await ctx.gateway.inspectFusion(threadId)
     if (ctx.getState().currentThreadId !== threadId) return
+    const latest = ctx.getState().fusionTask
+    // 查询等待期间可能已收到更高版本的进度，或同一对话已启动了新任务。
+    if (latest && task && latest.task_id === task.task_id && latest.version > task.version) return
+    if (latest !== requestedTask && latest?.task_id !== task?.task_id) return
     ctx.commit((current) => ({
       ...current,
       fusionTask: task,

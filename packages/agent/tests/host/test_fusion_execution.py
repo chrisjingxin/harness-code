@@ -134,6 +134,74 @@ class FusionModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=answer)])
 
 
+class LeaseRetryModel(FusionModel):
+    """即使模型总想重试，程序也必须在占用后结束本轮。"""
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        ctx = get_runtime().context
+        self.calls.append((self.role, ctx.execution_id, ctx.checkpoint_thread_id))
+        latest = messages[-1]
+        tool = latest if isinstance(latest, ToolMessage) else None
+        args = {}
+        if self.role == "strong-test":
+            if tool and tool.name == "fusion_review_result":
+                return ChatResult(
+                    generations=[
+                        ChatGeneration(message=AIMessage(content="已完成并审阅。"))
+                    ]
+                )
+            result = (
+                json.loads(tool.content)
+                if tool and str(tool.content).startswith("{")
+                else {}
+            )
+            if result.get("ticket_id"):
+                name = "fusion_review_result"
+                args = {
+                    "ticket_id": result["ticket_id"],
+                    "decision": "accept",
+                    "requirements": [
+                        {
+                            "id": "r1",
+                            "satisfied": True,
+                            "evidence": ["file:created.py", "check:unit"],
+                        }
+                    ],
+                    "test_review_reason": "",
+                }
+            else:
+                name = "fusion_delegate"
+                args = {
+                    "goal": "新建文件",
+                    "brief": "新建 created.py",
+                    "user_requirements": ["新建 created.py"],
+                    "allowed_paths": ["created.py"],
+                    "check_plan_ids": [],
+                }
+        elif tool and tool.name == "fusion_submit_result":
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="本轮完成。"))]
+            )
+        elif tool and tool.name == "write_file":
+            name = "fusion_submit_result"
+            args = {"status": "completed", "summary": "已创建文件", "unresolved": []}
+        else:
+            name = "write_file"
+            args = {"file_path": "/created.py", "content": "answer = 42\n"}
+        answer = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": name,
+                    "args": args,
+                    "id": f"lease-{len(self.calls)}",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        return ChatResult(generations=[ChatGeneration(message=answer)])
+
+
 async def test_two_models_real_tools_same_worker_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_FUSION_LEAD", "fake")
     monkeypatch.setenv("TEST_FUSION_WORKER", "fake")
@@ -584,5 +652,113 @@ async def test_real_run_resumes_prepared_order_and_reviews_without_new_round(
         )
         assert len({item[1] for item in calls if item[0] == "cheap-test"}) == 1
         assert (tmp_path / "a.py").read_text() == "one"
+    finally:
+        await host.close()
+
+
+async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
+    tmp_path, monkeypatch
+):
+    """真实图、文件工具与检查：阻塞后没有第二次模型调用，解除后完整完成。"""
+    monkeypatch.setenv("TEST_FUSION_LEAD", "fake")
+    monkeypatch.setenv("TEST_FUSION_WORKER", "fake")
+    calls = []
+    import harness_agent.extensions.providers.harness_gateway as gateway
+
+    def factory(settings, **kwargs):
+        model = LeaseRetryModel(role=settings.name, calls=[])
+        model.calls = calls
+        return model
+
+    monkeypatch.setattr(gateway, "create_openai_compatible_model", factory)
+    host = await make_host(tmp_path)
+    with (tmp_path / "trusted.toml").open("a") as config:
+        command = "python3 -B -c \"from pathlib import Path; assert Path('created.py').read_text() == 'answer = 42\\n'\""
+        config.write(
+            'check_plan_ids=["unit"]\n[fusion.check_plans.unit]\ncommand='
+            + json.dumps(command)
+            + '\ncwd="."\n'
+        )
+    frames = []
+
+    async def send(frame):
+        frames.append(frame)
+
+    host.send = send
+    try:
+        store = (await host._ensure_thread_persistence()).fusion_state_store()
+        owner = await store.create(
+            thread_id="older-thread",
+            profile={"profile_id": "old"},
+            workspace=tmp_path,
+            source_message="旧任务",
+        )
+        lease = await store.acquire_lease(owner.task_id, "sidekick")
+        owner = await store.update(
+            owner.task_id,
+            owner.version,
+            phase="WAITING_USER",
+            data={"round": 4, "reason": "rework_limit"},
+        )
+
+        async def run(run_id):
+            await host.dispatch(
+                {
+                    "jsonrpc": "2.0",
+                    "id": run_id,
+                    "method": "run.start",
+                    "params": {
+                        "thread_id": "t",
+                        "run_id": run_id,
+                        "mode": "build",
+                        "input": {"kind": "user", "message": "新建 created.py"},
+                        "fusion_profile_id": "duo",
+                        "approval_mode": "yolo",
+                    },
+                }
+            )
+            response = next(frame for frame in frames if frame.get("id") == run_id)
+            assert "error" not in response, response
+            current = host._run_coordinator._runs["t"]
+            await asyncio.wait_for(current.task, 30)
+            return await store.get(current.preparation.fusion_binding.task_id)
+
+        first = await run("blocked-run")
+        assert (
+            first.phase == "WAITING_USER" and first.data["reason"] == "workspace_busy"
+        ), first.to_record()
+        assert first.data["round"] == 0 and not (tmp_path / "created.py").exists()
+        assert len(calls) == 1 and calls[0][0] == "strong-test", calls
+        assert (
+            await store.acquire_lease(owner.task_id, "sidekick")
+        ).generation == lease.generation
+        second = await run("still-blocked-run")
+        assert second.task_id == first.task_id and second.phase == "WAITING_USER"
+        assert len(calls) == 1, "占用未解除时不得再次请求模型或追问用户"
+        persistence = await host._ensure_thread_persistence()
+        history = (await persistence.load_context("t")).messages
+        assert isinstance(history[-1], AIMessage), (
+            "本次等待说明应追加在本次用户消息之后"
+        )
+        await store.cancel(owner.task_id, owner.version)
+        completed = await run("available-run")
+        assert completed.task_id == first.task_id
+        assert (
+            completed.phase == "COMPLETED"
+            and completed.data["verification"] == "verified"
+        ), completed.to_record()
+        assert (
+            completed.data["round"] == 1
+            and (tmp_path / "created.py").read_text() == "answer = 42\n"
+        )
+        assert any(call[0] == "cheap-test" for call in calls)
+        text = "".join(
+            frame.get("params", {}).get("payload", {}).get("text", "")
+            for frame in frames
+            if frame.get("method") == "event"
+            and frame.get("params", {}).get("type") == "content.delta"
+        )
+        assert "占用" in text and "older-thread" in text
+        assert "fusion_rework" not in text
     finally:
         await host.close()

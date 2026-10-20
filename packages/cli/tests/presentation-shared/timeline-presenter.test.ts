@@ -38,6 +38,6 @@ test("interactionStatusLabel：历史交互结果标签", () => {
   expect(interactionStatusLabel("rejected")).toBe("已拒绝")
   expect(interactionStatusLabel("answered")).toBe("已回答")
   expect(interactionStatusLabel("cancelled")).toBe("已超时")
-  expect(interactionStatusLabel("resolved")).toBe("已解决")
+  expect(interactionStatusLabel("resolved")).toBe("已处理")
   expect(interactionStatusLabel("pending")).toBe("等待中")
 })
