@@ -6,18 +6,21 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping
+from contextlib import aclosing
 from typing import Any
 
 import httpx
 import openai
+from langchain_core.callbacks.manager import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
-from langchain_core.callbacks.manager import AsyncCallbackManagerForLLMRun
 from langchain_openai.chat_models.base import (
     _handle_openai_api_error,
     _handle_openai_bad_request,
 )
+from pydantic import Field
+
 try:  # pragma: no cover - packaging guard
     from langchain_openai import ChatOpenAI
 except ImportError as exc:  # pragma: no cover - packaging guard
@@ -47,7 +50,9 @@ class ProviderClientPool:
         self._resources: dict[str, SharedResourceHandle[httpx.AsyncClient]] = {}
         self._lock = asyncio.Lock()
 
-    async def acquire(self, settings: ModelSettings) -> SharedResourceLease[httpx.AsyncClient]:
+    async def acquire(
+        self, settings: ModelSettings
+    ) -> SharedResourceLease[httpx.AsyncClient]:
         """按 endpoint 与超时取得带引用计数的 Host 级 transport 租约。"""
         key = self._transport_key(settings)
         async with self._lock:
@@ -79,10 +84,15 @@ class ProviderClientPool:
     @staticmethod
     def _transport_key(settings: ModelSettings) -> str:
         """计算不含凭据、模型名或 Header 的共享 transport 身份。"""
-        return hashlib.sha256(json.dumps({
-            "base_url": settings.base_url,
-            "timeout_seconds": settings.timeout_seconds,
-        }, sort_keys=True).encode("utf-8")).hexdigest()
+        return hashlib.sha256(
+            json.dumps(
+                {
+                    "base_url": settings.base_url,
+                    "timeout_seconds": settings.timeout_seconds,
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
 
 
 def create_openai_compatible_model(
@@ -108,7 +118,9 @@ def create_openai_compatible_model(
         # ChatOpenAI 的 reasoning_effort 是 Chat Completions 参数；不能传
         # Responses 专属 reasoning/output_version，以免兼容网关改走 /responses。
         kwargs["reasoning_effort"] = settings.reasoning.effort
-    model = _ReasoningAwareChatOpenAI(**kwargs)
+    model = _ReasoningAwareChatOpenAI(
+        response_timeout_seconds=settings.timeout_seconds, **kwargs
+    )
     # LangChain/DeepAgents 的预算中间件读取 profile；企业网关不会可靠地返回
     # 模型窗口，因此使用经配置校验后的保守显式值。
     model.profile = {"max_input_tokens": settings.context_window_tokens}
@@ -126,7 +138,41 @@ class _ReasoningAwareChatOpenAI(ChatOpenAI):
     Responses API 与结构化输出路径保持父类原样。
     """
 
+    response_timeout_seconds: float = Field(gt=0)
+    """一次响应从请求到流结束的时限；SSE 心跳不能延长它。"""
+
     async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        *,
+        stream_usage: bool | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """既限制响应总时长，也确保超时、取消或提前停止时关闭原始流。"""
+        deadline = asyncio.timeout(self.response_timeout_seconds)
+        try:
+            async with deadline:
+                async with aclosing(
+                    self._astream_response(
+                        messages,
+                        stop=stop,
+                        run_manager=run_manager,
+                        stream_usage=stream_usage,
+                        **kwargs,
+                    )
+                ) as stream:
+                    async for chunk in stream:
+                        yield chunk
+        except TimeoutError as exc:
+            if deadline.expired():
+                # 网络读超时会被持续心跳刷新。响应期限只从配置读取一次，
+                # 不在这里重试；executor 仍是唯一的重试及公开输出保护方。
+                raise TimeoutError("MODEL_RESPONSE_TIMEOUT") from exc
+            raise
+
+    async def _astream_response(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
@@ -144,8 +190,11 @@ class _ReasoningAwareChatOpenAI(ChatOpenAI):
         # 保持父类原样，避免 raw 解析破坏这些路径。
         if "response_format" in payload or self._use_responses_api(payload):
             async for chunk in super()._astream(
-                messages, stop=stop, run_manager=run_manager,
-                stream_usage=stream_usage, **kwargs,
+                messages,
+                stop=stop,
+                run_manager=run_manager,
+                stream_usage=stream_usage,
+                **kwargs,
             ):
                 yield chunk
             return
@@ -153,24 +202,28 @@ class _ReasoningAwareChatOpenAI(ChatOpenAI):
         stream = await self.async_client.create(**payload)
         try:
             async for chunk_dict in _iter_sse_json(stream.response):
-                    generation_chunk = self._convert_chunk_to_generation_chunk(
-                        chunk_dict,
-                        default_chunk_class,
-                        {},
+                generation_chunk = self._convert_chunk_to_generation_chunk(
+                    chunk_dict,
+                    default_chunk_class,
+                    {},
+                )
+                if generation_chunk is None:
+                    continue
+                default_chunk_class = generation_chunk.message.__class__
+                reasoning = _delta_reasoning_content(chunk_dict)
+                if reasoning:
+                    generation_chunk.message.additional_kwargs["reasoning_content"] = (
+                        reasoning
                     )
-                    if generation_chunk is None:
-                        continue
-                    default_chunk_class = generation_chunk.message.__class__
-                    reasoning = _delta_reasoning_content(chunk_dict)
-                    if reasoning:
-                        generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning
-                    if run_manager:
-                        await run_manager.on_llm_new_token(
-                            generation_chunk.text,
-                            chunk=generation_chunk,
-                            logprobs=(generation_chunk.generation_info or {}).get("logprobs"),
-                        )
-                    yield generation_chunk
+                if run_manager:
+                    await run_manager.on_llm_new_token(
+                        generation_chunk.text,
+                        chunk=generation_chunk,
+                        logprobs=(generation_chunk.generation_info or {}).get(
+                            "logprobs"
+                        ),
+                    )
+                yield generation_chunk
         except openai.BadRequestError as e:
             _handle_openai_bad_request(e)
         except openai.APIError as e:

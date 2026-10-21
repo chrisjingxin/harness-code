@@ -2012,6 +2012,26 @@
       }
     },
     {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "valid",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.execution",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "role": "sidekick",
+          "round": 1,
+          "model": "x",
+          "status": "running"
+        }
+      }
+    },
+    {
       "kind": "interaction.params",
       "name": "interaction.approval",
       "case": "valid",
@@ -7534,6 +7554,52 @@
           "reason": "x",
           "report_id": "x",
           "ticket_id": "x"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "extra_field",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.execution",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "role": "sidekick",
+          "round": 1,
+          "model": "x",
+          "status": "running"
+        },
+        "__extra": true
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "missing_field",
+      "value": {
+        "type": "fusion.execution",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "role": "sidekick",
+          "round": 1,
+          "model": "x",
+          "status": "running"
         }
       }
     },

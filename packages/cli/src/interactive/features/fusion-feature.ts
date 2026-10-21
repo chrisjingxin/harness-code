@@ -4,7 +4,7 @@ import type { FeatureContext } from "./types"
 import type { IntentOutcome } from "../ports"
 import { appendNotice } from "../state"
 
-import { fusionSummary } from "../fusion-summary"
+import { FUSION_RECOVERY_GUIDANCE, fusionSummary } from "../fusion-summary"
 
 export class FusionFeature {
   /** 重连或切换 Thread 后刷新，活动任务自动带回原组合。 */
@@ -157,10 +157,13 @@ export class FusionFeature {
       )
       return { status: "accepted" }
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Fusion 操作失败。"
       return {
         status: "rejected",
         code: "agent-error",
-        message: error instanceof Error ? error.message : "Fusion 操作失败。",
+        message: value === "cancel" && message === "FUSION_OUTCOME_UNKNOWN"
+          ? `暂时无法取消：任务结果仍待核查（FUSION_OUTCOME_UNKNOWN）。${FUSION_RECOVERY_GUIDANCE}`
+          : message,
       }
     }
   }

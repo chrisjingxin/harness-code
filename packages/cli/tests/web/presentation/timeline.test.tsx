@@ -15,9 +15,52 @@ import type {
 } from "../../../src/interactive/state"
 import { makeInteractive, makeSnapshot } from "./fixtures"
 import { registerTestDom, render, type RenderHandle } from "./render"
+import { liveFusionTimeline, workerEvent, fusionEvent } from "../../fixtures/fusion-timeline"
+import { applyAgentEvent } from "../../../src/interactive/state"
+import { EventType } from "@za38/protocol"
+import { scopeTimeline } from "../../../src/presentation-shared/timeline-scope"
 
 const unregisterTestDom = registerTestDom()
 afterAll(() => unregisterTestDom())
+
+test("Fusion 两角色过程直接可见，折叠 Sidekick 后新输出不会强制展开", () => {
+  let state = liveFusionTimeline()
+  const snapshot = () => makeSnapshot({ interactive: makeInteractive({
+    timeline: scopeTimeline(state.timeline, "root"), activeRun: state.activeRun, activity: state.activity,
+  }) })
+  const handle = render(createElement(Timeline, { snapshot: snapshot(), dispatch: () => {} }))
+  try {
+    expect(handle.container.querySelector('[data-fusion-role="lead"]')?.textContent).toContain("Lead 正在检查代码")
+    const child = handle.container.querySelector('[data-fusion-role="sidekick"][data-fusion-round="1"]')!
+    expect(child.textContent).toContain("Sidekick 正在修改文件")
+    expect(child.textContent).toContain("fast-model")
+    const header = child.querySelector<HTMLButtonElement>(".timeline-activity-header")!
+    act(() => header.click())
+    expect(header.getAttribute("aria-expanded")).toBe("false")
+    expect(child.textContent).not.toContain("Sidekick 正在修改文件")
+    state = applyAgentEvent(state, fusionEvent(EventType.CONTENT_DELTA, { text: "新增输出" }, 7, "worker-1", "root-r"))
+    act(() => handle.root.render(createElement(Timeline, { snapshot: snapshot(), dispatch: () => {} })))
+    expect(header.getAttribute("aria-expanded")).toBe("false")
+    act(() => header.click())
+    expect(child.textContent).toContain("新增输出")
+    expect(handle.container.textContent).toContain("Lead 正在检查代码")
+  } finally { handle.unmount() }
+})
+
+test("Fusion 取消后停止子执行动画，并能回看模型已返回的过程说明", () => {
+  let state = liveFusionTimeline()
+  state = applyAgentEvent(state, fusionEvent(EventType.REASONING_DELTA, { text: "Sidekick 过程说明" }, 7, "worker-1", "root-r"))
+  state = applyAgentEvent(state, workerEvent("cancelled", 8))
+  const interactive = makeInteractive({ timeline: scopeTimeline(state.timeline, "root") })
+  const handle = render(createElement(Timeline, { snapshot: makeSnapshot({ interactive }), dispatch: () => {} }))
+  try {
+    const child = handle.container.querySelector('[data-fusion-role="sidekick"]')!
+    expect(child.textContent).toContain("已取消")
+    expect(child.textContent).toContain("Sidekick 过程说明")
+    expect(child.querySelector('.reasoning[data-active="false"]')).not.toBeNull()
+    expect(child.querySelector(".spinning")).toBeNull()
+  } finally { handle.unmount() }
+})
 
 
 function message(item: Partial<ConversationMessage> & { id: string; role: ConversationMessage["role"]; content: string }): TimelineItem {

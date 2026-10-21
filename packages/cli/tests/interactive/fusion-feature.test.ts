@@ -87,6 +87,74 @@ test("recover requires explicit inspection note and carries expected version", a
   })
 })
 
+test("cancel with unknown effects explains recover before cancel without recovering automatically", async () => {
+  const { ctx, calls } = context({
+    task_id: "f", thread_id: "t", profile: { profile_id: "duo" },
+    version: 3, phase: "OUTCOME_UNKNOWN", active: true,
+  })
+  ctx.gateway.cancelFusion = async () => { throw new Error("FUSION_OUTCOME_UNKNOWN") }
+  const result = await new FusionFeature().execute("cancel", ctx)
+  expect(result.status).toBe("rejected")
+  if (result.status !== "rejected") throw new Error("expected rejected")
+  expect(result.message).toContain("/fusion recover --stopped")
+  expect(result.message).toContain("核查已记录")
+  expect(result.message.indexOf("/fusion recover")).toBeLessThan(result.message.indexOf("/fusion cancel"))
+  expect(calls).toEqual([])
+  expect(ctx.getState().fusionTask?.active).toBe(true)
+})
+
+test("unrelated cancel failures keep the original error", async () => {
+  const { ctx } = context({
+    task_id: "f", thread_id: "t", profile: { profile_id: "duo" },
+    version: 3, phase: "PAUSED", active: true,
+  })
+  ctx.gateway.cancelFusion = async () => { throw new Error("FUSION_TASK_CONFLICT") }
+  const result = await new FusionFeature().execute("cancel", ctx)
+  expect(result).toMatchObject({ status: "rejected", message: "FUSION_TASK_CONFLICT" })
+})
+
+test("unknown task status names the recovery command and its success message", async () => {
+  const { fusionSummary } = await import("../../src/interactive/fusion-summary")
+  const text = fusionSummary({
+    profile: { profile_id: "duo" }, phase: "OUTCOME_UNKNOWN",
+    verification: "unverified", round: 3, reason: "effects_unconfirmed",
+    pending_operations: [{ kind: "dispatch", operation_id: "dispatch-pending" }],
+  } as any)
+  expect(text).toContain("dispatch-pending")
+  expect(text).toContain("/fusion recover --stopped")
+  expect(text).toContain("核查已记录")
+  expect(text).toContain("单独输入")
+  expect(text.indexOf("/fusion recover")).toBeLessThan(text.indexOf("/fusion cancel"))
+})
+
+test("workspace blocker with unknown effects shows recovery before cancellation", async () => {
+  const { fusionSummary } = await import("../../src/interactive/fusion-summary")
+  const text = fusionSummary({
+    profile: { profile_id: "duo" }, phase: "WAITING_USER", round: 0,
+    workspace_blocker: {
+      thread_id: "old-thread", phase: "OUTCOME_UNKNOWN", round: 3,
+      reason: "effects_unconfirmed", requires_inspection: true,
+    },
+  } as any)
+  expect(text).toContain("old-thread")
+  expect(text).toContain("/resume")
+  expect(text).toContain("/fusion recover --stopped")
+  expect(text.indexOf("/fusion recover")).toBeLessThan(text.indexOf("/fusion cancel"))
+})
+
+test("a stopped workspace owner keeps the ordinary cancellation instructions", async () => {
+  const { fusionSummary } = await import("../../src/interactive/fusion-summary")
+  const text = fusionSummary({
+    profile: { profile_id: "duo" }, phase: "WAITING_USER", round: 0,
+    workspace_blocker: {
+      thread_id: "old-thread", phase: "PAUSED", round: 1,
+      reason: "run_paused", requires_inspection: false,
+    },
+  } as any)
+  expect(text).toContain("/fusion cancel")
+  expect(text).not.toContain("/fusion recover")
+})
+
 test("shared reducer projects Fusion progress for both frontends", () => {
   const task: any = {
     task_id: "f",
@@ -283,7 +351,7 @@ test("工作区占用显示原会话与处理方式，未派单不能当作完�
   expect(text).toContain("尚未派单")
   expect(text).not.toContain("检查及审阅通过")
   const unknown = fusionSummary({ ...task, workspace_blocker: { ...task.workspace_blocker, requires_inspection: true } })
-  expect(unknown).toContain("先核查")
+  expect(unknown).toContain("/fusion recover --stopped")
 })
 
 

@@ -519,13 +519,20 @@ def strip_wrappers(command: str, max_depth: int = 3) -> str:
             return strip_wrappers(inner, max_depth - 1)
         return command
 
-    # -- bash -c '...' / sh -c '...' --
-    if cmd_name in ("bash", "sh") and len(arg_values) >= 2:
-        if arg_values[0] == "-c":
-            # 提取 -c 后面的命令字符串（去除引号）
-            inner_cmd = _arg_inner_text(cmd_children[arg_indices[1]], source)
-            if inner_cmd:
-                return strip_wrappers(inner_cmd, max_depth - 1)
+    # -lc/-ec 等组合选项同样执行紧随其后的脚本；不能把引号内的真实
+    # 后台命令误当成普通参数，也不能漏掉 --noprofile -c 这类前置选项。
+    if cmd_name in ("bash", "sh", "dash", "zsh", "ksh") and len(arg_values) >= 2:
+        for index, flag in enumerate(arg_values[:-1]):
+            if flag in {"--noprofile", "--norc", "--posix", "--login"}:
+                continue
+            # 脚本路径或 -- 之后的 -c 属于脚本参数，不能当成 Shell 选项。
+            if not flag.startswith("-") or flag.startswith("--"):
+                break
+            if "c" in flag[1:]:
+                inner_cmd = _arg_inner_text(cmd_children[arg_indices[index + 1]], source)
+                if inner_cmd:
+                    return strip_wrappers(inner_cmd, max_depth - 1)
+                break
 
     # -- 前导环境变量赋值 --
     if env_assignments:

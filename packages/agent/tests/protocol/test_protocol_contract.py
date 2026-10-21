@@ -579,3 +579,17 @@ def test_fusion_workspace_blocker_is_strict_safe_state():
         value["task"]["workspace_blocker"] = invalid
         with pytest.raises((ValidationError, ValueError)):
             validate_operation_result("fusion.status", value)
+
+
+def test_fusion_execution_event_has_strict_safe_lifecycle():
+    frame = {
+        "event_id": "evt", "type": "fusion.execution", "thread_id": "t", "run_id": "r",
+        "sequence": 1, "timestamp_ms": 1, "execution_id": "worker-1",
+        "parent_execution_id": "root-r", "agent_id": "fusion-sidekick",
+        "payload": {"task_id": "fusion-test", "role": "sidekick", "round": 1,
+                    "model": "fast-model", "status": "running"},
+    }
+    EventEnvelope.model_validate(frame)
+    for extra in ({"round": 0}, {"status": "unknown"}, {"api_key": "private"}, {"base_url": "http://private"}):
+        with pytest.raises((ValidationError, ValueError)):
+            EventEnvelope.model_validate({**frame, "payload": {**frame["payload"], **extra}})

@@ -1,11 +1,12 @@
-/** Compose Timeline 活动分组：纯函数，TUI/Web 共用，不持有 reducer 状态。 */
+/** Compose/Fusion 活动分组：保持时间顺序，TUI/Web 共用，不持有 reducer 状态。 */
 
 import type {
-  ComposeScopeMeta,
   ComposeStageId,
   ComposeSummaryCard,
   TimelineItem,
 } from "../interactive/state"
+import { itemScopeFields } from "../interactive/timeline-identity"
+import { fusionExecutionIndex, itemFusionExecution, type FusionExecution } from "../interactive/fusion-execution"
 
 export const COMPOSE_STAGE_LABELS: Record<string, string> = {
   grill: "需求",
@@ -18,15 +19,6 @@ export const COMPOSE_STAGE_LABELS: Record<string, string> = {
   understand: "理解",
   build: "构建",
   review: "检视",
-}
-
-/** 时间线条目上的可选 Compose 归属字段。 */
-type ScopedFields = {
-  runId?: string
-  executionId?: string
-  activityId?: string
-  agentId?: string
-  composeScope?: ComposeScopeMeta
 }
 
 /** 一段连续 timeline：要么是无 scope 的扁平项，要么是同一 activity 的分组。 */
@@ -50,53 +42,9 @@ export type TimelineActivityGroup = {
   summary?: ComposeSummaryCard
   /** 有终态摘要时默认折叠。 */
   terminal: boolean
-}
-
-/** 从 TimelineItem 提取归属字段。 */
-export function itemScopeFields(item: TimelineItem): ScopedFields {
-  if (item.type === "tool") {
-    return {
-      runId: item.tool.runId,
-      executionId: item.tool.executionId,
-      activityId: item.tool.activityId,
-      agentId: item.tool.agentId,
-    }
-  }
-  if (item.type === "reasoning") {
-    return {
-      runId: item.reasoning.runId,
-      executionId: item.reasoning.executionId,
-      activityId: item.reasoning.activityId,
-      agentId: item.reasoning.agentId,
-    }
-  }
-  if (item.type === "message") {
-    return {
-      runId: item.message.runId,
-      executionId: item.message.executionId,
-      activityId: item.message.activityId,
-      agentId: item.message.agentId,
-    }
-  }
-  if (item.type === "interaction") {
-    return {
-      runId: item.interaction.runId,
-      executionId: item.interaction.executionId,
-      activityId: item.interaction.activityId,
-      agentId: item.interaction.agentId,
-      composeScope: item.interaction.composeScope,
-    }
-  }
-  if (item.type === "goal-evaluation") {
-    return { runId: item.evaluation.runId }
-  }
-  return {
-    runId: item.summary.runId,
-    executionId: item.summary.executionId,
-    activityId: item.summary.activityId,
-    agentId: item.summary.agentId,
-    composeScope: item.summary.composeScope,
-  }
+  /** Fusion 执行事实，角色与轮次来自 Host 的开始记录。 */
+  fusion?: FusionExecution
+  waitingForSidekick?: boolean
 }
 
 /** 无 Compose activity 时返回 null，表示按扁平项渲染（Build 路径）。 */
@@ -128,6 +76,10 @@ export function withoutSupersededGoalChecking(timeline: readonly TimelineItem[])
  */
 export function segmentTimeline(timeline: readonly TimelineItem[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
+  const fusion = fusionExecutionIndex(timeline)
+  const activeWorkers = new Set(timeline.flatMap(item => item.type === "message"
+    && item.message.fusionExecution?.role === "sidekick" && item.message.fusionExecution.status === "running"
+    ? [item.message.runId] : []))
   let current: TimelineActivityGroup | null = null
 
   const flush = () => {
@@ -138,7 +90,9 @@ export function segmentTimeline(timeline: readonly TimelineItem[]): TimelineSegm
   }
 
   for (const item of withoutSupersededGoalChecking(timeline)) {
-    const key = itemActivityKey(item)
+    const execution = itemFusionExecution(item, fusion)
+    const fields = itemScopeFields(item)
+    const key = execution ? JSON.stringify([fields.runId, "fusion", fields.executionId ?? "root"]) : itemActivityKey(item)
     if (key === null) {
       flush()
       segments.push({ kind: "flat", item })
@@ -147,6 +101,10 @@ export function segmentTimeline(timeline: readonly TimelineItem[]): TimelineSegm
     if (!current || current.key !== key) {
       flush()
       current = startGroup(item, key)
+      if (execution) {
+        current.fusion = execution
+        current.waitingForSidekick = execution.role === "lead" && activeWorkers.has(current.runId)
+      }
     } else {
       appendToGroup(current, item)
     }
@@ -155,13 +113,18 @@ export function segmentTimeline(timeline: readonly TimelineItem[]): TimelineSegm
   return segments
 }
 
-/** 默认展开策略：终态分组折叠，进行中展开。 */
+/** Compose 终态默认折叠；Fusion 保留过程可见，用户可手动折叠。 */
 export function isGroupExpandedByDefault(group: TimelineActivityGroup): boolean {
+  // 同一次会话中不在结束瞬间隐藏用户正在看的过程；用户仍可主动折叠。
+  if (group.fusion) return true
   return !group.terminal
 }
 
 /** 分组标题文案：阶段 · Task · Agent · attempt。 */
 export function activityGroupTitle(group: TimelineActivityGroup): string {
+  if (group.fusion) {
+    return fusionTitle(group.fusion)
+  }
   const stageLabel = group.stage ? (COMPOSE_STAGE_LABELS[group.stage] ?? group.stage) : "活动"
   const parts = [stageLabel]
   if (group.taskTitle) parts.push(group.taskTitle)
@@ -171,8 +134,28 @@ export function activityGroupTitle(group: TimelineActivityGroup): string {
   return parts.join(" · ")
 }
 
+function fusionTitle(execution: FusionExecution): string {
+  const title = `${execution.role === "lead" ? "Lead" : "Sidekick"} · ${execution.model}`
+  return execution.role === "sidekick" ? `${title} · 第 ${execution.round} 轮` : title
+}
+
+/** 状态行说明当前正在执行的角色；耗时明确属于本次 Run。 */
+export function fusionLiveStatusLine(timeline: readonly TimelineItem[], runId: string | undefined, elapsedLabel: string): string | null {
+  const live = timeline.flatMap(item => item.type === "message" && item.message.runId === runId
+    && item.message.fusionExecution?.status === "running" ? [item.message.fusionExecution] : [])
+  const execution = live.findLast(item => item.role === "sidekick") ?? live.findLast(item => item.role === "lead")
+  return execution ? `${fusionTitle(execution)} · 执行中 · 本次已运行 ${elapsedLabel}` : null
+}
+
 /** 折叠头副标题：摘要或状态。 */
 export function activityGroupSubtitle(group: TimelineActivityGroup): string {
+  if (group.fusion) {
+    const execution = group.fusion
+    if (execution.status === "cancelled") return "已取消"
+    if (execution.status === "failed") return "执行失败"
+    if (execution.status === "completed") return execution.role === "sidekick" ? "本轮执行结束" : "本次运行结束"
+    return group.waitingForSidekick ? "等待 Sidekick" : "执行中"
+  }
   if (group.summary?.text) return group.summary.text
   if (group.summary?.status) return group.summary.status
   if (group.terminal) return "已结束"
@@ -229,6 +212,20 @@ function applySummary(group: TimelineActivityGroup, summary: ComposeSummaryCard)
 }
 
 function finalizeGroup(group: TimelineActivityGroup): TimelineActivityGroup {
+  if (group.fusion) {
+    const first = group.items[0]
+    const firstId = first?.type === "message" ? first.message.id
+      : first?.type === "tool" ? first.tool.id
+        : first?.type === "reasoning" ? first.reasoning.id
+          : first?.type === "interaction" ? first.interaction.id : "start"
+    return {
+      ...group,
+      // Lead 可能在 Sidekick 之后继续输出。各段保留原位置，且不能共用 React key。
+      key: JSON.stringify([group.key, firstId]),
+      items: group.items.filter(item => item.type !== "message" || !item.message.fusionExecution),
+      terminal: group.fusion.status !== "running",
+    }
+  }
   const hasTerminalSummary = Boolean(
     group.summary
     && (group.summary.status === "passed"

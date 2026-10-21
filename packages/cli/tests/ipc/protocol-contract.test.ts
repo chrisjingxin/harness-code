@@ -512,3 +512,16 @@ test("Fusion 占用摘要受 canonical 协议校验，不允许泄露路径或�
   value.task.workspace_blocker = { ...blocker, command: "private" }
   expect(() => validateOperationResult("fusion.status", value)).toThrow()
 })
+
+test("Fusion 每轮执行事件有严格身份和状态，不允许携带连接密钥", () => {
+  const frame = {
+    event_id: "evt", type: "fusion.execution", thread_id: "t", run_id: "r", sequence: 1, timestamp_ms: 1,
+    execution_id: "worker-1", parent_execution_id: "root-r", agent_id: "fusion-sidekick",
+    payload: { task_id: "fusion-test", role: "sidekick", round: 1, model: "fast-model", status: "running" },
+  }
+  expect(() => assertEventEnvelope(frame)).not.toThrow()
+  for (const payload of [
+    { ...frame.payload, round: 0 }, { ...frame.payload, status: "unknown" },
+    { ...frame.payload, api_key: "private" }, { ...frame.payload, base_url: "http://private" },
+  ]) expect(() => assertEventEnvelope({ ...frame, payload })).toThrow()
+})

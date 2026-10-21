@@ -16,7 +16,7 @@ import shlex
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from langgraph.runtime import get_runtime
 
@@ -33,7 +33,11 @@ from harness_agent.runtime.execution_binding import (
     SelectionOrigin,
     ThreadExecutionSelection,
 )
-from harness_agent.runtime.execution_stream import StreamInteractionRequest
+from harness_agent.runtime.execution_stream import (
+    CONTENT_DELTA,
+    ExecutionSignal,
+    StreamInteractionRequest,
+)
 from harness_agent.runtime.fusion.guard import FusionEffectMiddleware, FusionWriteGuard
 from harness_agent.runtime.fusion.profile import (
     FrozenFusionCheckPlan,
@@ -54,6 +58,7 @@ from harness_agent.runtime.managed_agent_executor import (
     ManagedAgentExecutionError,
     ManagedAgentExecutor,
     ManagedAgentRequest,
+    ManagedAgentResult,
     ManagedAgentRuntime,
     ManagedChildObserver,
     acquire_pooled_agent_runtime,
@@ -87,10 +92,17 @@ class FusionRunBinding:
 
 
 class FusionWorkerObserver(ManagedChildObserver):
-    """转发子图事件和真实审批；禁止 Sidekick 主动向用户提问。"""
+    """实时转发 Sidekick 过程和真实审批；不写父 Transcript，不主动提问。"""
 
     def __init__(
-        self, host: AgentHost, parent: RunContext, ref: ExecutionRef, namespace: str
+        self,
+        host: AgentHost,
+        parent: RunContext,
+        ref: ExecutionRef,
+        namespace: str,
+        *,
+        task: FusionTask,
+        model: str,
     ) -> None:
         """固定本轮执行来源及持续 checkpoint，审批由父 Run 接收。"""
         super().__init__(
@@ -103,6 +115,29 @@ class FusionWorkerObserver(ManagedChildObserver):
         self.parent = parent
         self.ref = ref
         self.namespace = namespace
+        self._execution_payload = {
+            "task_id": task.task_id,
+            "role": "sidekick",
+            "round": task.data["round"],
+            "model": model,
+        }
+
+    def emit(self, signal: ExecutionSignal) -> None:
+        """正文与主 Agent 一样实时转发；身份始终使用本轮冻结值。"""
+        if signal.type == CONTENT_DELTA:
+            self._emit(signal.type, signal.payload)
+        else:
+            super().emit(signal)
+
+    async def on_execution_complete(self, result: ManagedAgentResult) -> None:
+        """正文已经实时显示，结束时不再重复追加最终内容。"""
+        return None
+
+    def emit_status(
+        self, status: Literal["running", "completed", "cancelled", "failed"]
+    ) -> None:
+        """一轮开始前及释放前公布起止事实，不把执行结束当作任务验收。"""
+        self._emit("fusion.execution", {**self._execution_payload, "status": status})
 
     async def interact(self, request: StreamInteractionRequest) -> object:
         """通过父 Run 的串行审批生成 LangGraph 恢复值，不自动批准。"""
@@ -355,8 +390,10 @@ class FusionRuntime:
             approval_mode_provider=lambda: current_approval_mode(
                 parent, fallback=parent.approval_mode
             ),
-            interaction_port=lambda interaction: host._run_coordinator.request_child_interaction(
-                RunRef(ref.thread_id, ref.run_id), interaction
+            interaction_port=lambda interaction: (
+                host._run_coordinator.request_child_interaction(
+                    RunRef(ref.thread_id, ref.run_id), interaction
+                )
             ),
             event_port=parent.event_port,
             record_approval=parent.record_approval,
@@ -405,7 +442,7 @@ class FusionRuntime:
             run_id=ref.run_id,
             input=message,
             checkpoint_namespace=task.worker_session_id,
-            output_policy="capture_only",
+            output_policy="passthrough",
             runtime_provider=acquire,
             is_cancelled=lambda: parent.cancellation_token.cancelled,
             idempotency_key=task.data["operation_id"],
@@ -422,10 +459,12 @@ class FusionRuntime:
                 RunRef(parent.thread_id, parent.run_id)
             ),
         )
+        observer = FusionWorkerObserver(
+            host, parent, ref, stable_id, task=task, model=spec.model_view.model
+        )
+        observer.emit_status("running")
         try:
-            await ManagedAgentExecutor().execute(
-                request, FusionWorkerObserver(host, parent, ref, stable_id)
-            )
+            await ManagedAgentExecutor().execute(request, observer)
             saved = await self.persistence.checkpointer.aget_tuple(
                 self.persistence.graph_config(stable_id)
             )
@@ -437,13 +476,18 @@ class FusionRuntime:
                     data={"completed_checkpoint_id": saved.checkpoint["id"]},
                 )
             await registry.finalize(ref, status=ExecutionStatus.COMPLETED)
+            observer.emit_status("completed")
         except BaseException as exc:
+            cancelled = parent.cancellation_token.cancelled or isinstance(
+                exc, asyncio.CancelledError
+            )
             await registry.finalize(
                 ref,
                 status=ExecutionStatus.CANCELLED
-                if parent.cancellation_token.cancelled
+                if cancelled
                 else ExecutionStatus.FAILED,
             )
+            observer.emit_status("cancelled" if cancelled else "failed")
             if (
                 isinstance(exc, ManagedAgentExecutionError)
                 and exc.code == "RUN_CANCELLED"

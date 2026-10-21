@@ -425,6 +425,9 @@
       },
       "fusion.progress": {
         "payload": "#/$defs/fusionTaskStatus"
+      },
+      "fusion.execution": {
+        "payload": "#/$defs/fusionExecutionPayload"
       }
     },
     "notifications": {
@@ -7128,6 +7131,19 @@
       "required": [
         "task"
       ],
+      "additionalProperties": false
+    },
+    "fusionExecutionPayload": {
+      "description": "Sidekick 每轮执行的安全开始/结束事实；执行和父执行身份来自事件信封。",
+      "type": "object",
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "role": { "const": "sidekick" },
+        "round": { "type": "integer", "minimum": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["running", "completed", "cancelled", "failed"] }
+      },
+      "required": ["task_id", "role", "round", "model", "status"],
       "additionalProperties": false
     },
     "fusionWorkspaceBlocker": {

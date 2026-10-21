@@ -1,6 +1,7 @@
 /** 按 execution 切时间线：父视图丢掉 child 项，子视图只留该 execution。 */
 
 import type { TimelineItem } from "../interactive/state"
+import { fusionExecutionIndex, itemFusionExecution } from "../interactive/fusion-execution"
 
 export const ROOT_EXECUTION_ID = "root"
 
@@ -32,7 +33,9 @@ export function scopeTimeline(
   executionId: string,
 ): readonly TimelineItem[] {
   if (isRootExecutionId(executionId)) {
-    return items.filter(item => isRootExecutionId(timelineItemExecutionId(item)))
+    const fusion = fusionExecutionIndex(items)
+    return items.filter(item => isRootExecutionId(timelineItemExecutionId(item))
+      || itemFusionExecution(item, fusion)?.role === "sidekick")
   }
   return items.filter(item => timelineItemExecutionId(item) === executionId)
 }

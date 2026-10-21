@@ -298,3 +298,54 @@ timeout_seconds = 300
 - `fusion_rework` 在没有任务单时返回 `FUSION_FIRST_ORDER_REQUIRED`；已有任务单而尚无票据仍允许按原规则返工。
 - TUI/Web 共用占用文案及会话引导；较早发出的状态查询不能覆盖较新的进度。问答历史的“已处理”不表示任务完成。
 - 测试覆盖真实 Host、Pool、图、Snapshot 文件工具、可信检查及审阅：占用只产生一次 Lead 请求，仍占用时的新消息产生零模型请求；旧任务正常取消后，同一任务完成首轮创建和验证。
+
+## 六、两角色实时过程（2026-10-21）
+
+Lead 和 Sidekick 共用一页时间线，按执行顺序显示独立的角色过程区。返工产生新的 Sidekick 执行和轮次；Lead 随后审阅时显示在其后，不能为排版把记录重新排序。
+
+```text
+FusionRuntime.run_worker
+  → FusionWorkerObserver.emit_status(running)
+  → ManagedAgentExecutor(passthrough) → 实时正文 / 工具事件
+  → emit_status(completed / failed / cancelled)
+  → 父 Run 的统一事件通道与 JSON-RPC event
+  → applyFusionExecutionEvent → scopeTimeline → segmentTimeline
+  → 原有 TUI / Web Timeline
+```
+
+### 事件与执行隔离
+
+- `run.started.fusion` 建立 Lead 的角色记录，模型名来自冻结配置。
+- 新的 `fusion.execution` 只公布 Sidekick 的安全任务 ID、角色、轮次、模型名及起止状态。信封中的执行、父执行、Run 和 Thread 身份不由模型文本决定。
+- `FusionWorkerObserver` 单独开放实时正文，结束时不再重复 final content；普通 `ManagedChildObserver`、Plugin 和 Compose 的捕获策略保持原规则。Sidekick 的文字不注入父模型 Transcript，审批仍交给父 Run。
+- UI 仅在同一 Run、任务和父 Lead 明确匹配时建立 Sidekick 过程。普通子代理即使名字相同，也不能因此混入主时间线。
+
+### 共享投影与两端展示
+
+- `interactive/fusion-execution.ts` 保存展示用的角色记录并处理结束、取消、失败；连接中断也复用同一收尾规则。结束后的迟到帧不能重新激活执行。
+- `interactive/timeline-identity.ts` 统一提取条目身份，分组、过滤与收尾共用；同名工具仍按 Run / execution / activity / tool ID 区分。
+- `timeline-scope.ts` 只放行已绑定的 Fusion 子执行。`timeline-activity-groups.ts` 复用原有分组结构和折叠控件，给出角色、真实模型、轮次和状态；Lead 的多个连续片段使用不同 key，保持时间顺序。
+- TUI/Web 原有 Timeline 负责输出、工具详情和滚动。当前角色显示在状态行；每项任务的 Fusion 状态说明原位更新一条，避免状态版本增长造成重复长消息。
+- 过程只保留在当前 Controller 及 Web 接管状态里，不新增过程持久表；重启后的历史恢复沿用原 Transcript。该展示状态不参与权限授予、写者释放或任务验收。
+
+## 七、模型长等待和重复拒绝的收尾（2026-10-21）
+
+`models.profiles.<ID>.timeout_seconds` 同时用于 HTTP 网络等待与一次流式响应的总时长。前者会被数据或心跳刷新，后者不会。统一模型适配器 `_ReasoningAwareChatOpenAI._astream` 从请求开始计时，经 `_astream_response` 保持原解析、工具与 usage 路径；响应到期抛 `MODEL_RESPONSE_TIMEOUT` 并关闭流，用户取消原样传播。Lead、Sidekick 和使用该适配器的普通模型遵守同一配置，非流式调用仍沿原 HTTP 超时。
+
+重试仍由 `ManagedAgentExecutor` 唯一拥有。空输出按 `max_retries` 限次重试；已经公开正文则返回原有 `PROVIDER_OUTPUT_INTERRUPTED`，不重放内容与副作用。本次不增加整个开发任务的总时限，也不根据超时清除写者或未知操作。
+
+Sidekick 在 `FusionEffectMiddleware.abefore_model` 进入下一次请求前检查：
+
+```text
+报告已保存？ → 是：结束本轮 → 原派单流程检查报告 → Host 检查 / Lead 处理
+     否
+连续三次同工具、同拒绝码？ → 是：现有 submit_result 保存 blocked → 结束本轮
+     否
+继续原模型和工具执行
+```
+
+计数读取当前图中的真实 `ToolMessage`，不放进共享 Engine 或新增数据库字段。成功工具结果、不同拒绝以及新的人类消息打断计数。blocked 只表示这一轮受阻，不允许验收成功；未知副作用、取消及写者规则继续生效。
+
+命令约束复用 `policy/bash_parser.py` 的语法树与 `strip_wrappers`：识别真实 `&` 后台节点，允许普通 Python 参数和 here-doc 的位运算；展开 `bash -lc`、`sh -ec` 等脚本后再检查。选项解析遇到脚本路径或 `--` 即停止，避免把脚本参数误当成 Shell 选项。不能可靠展开的 Shell 载荷含后台语法时仍拒绝，Git 修改与内部目录限制保留。`WORKER_PROMPT` 同时提示优先使用文件工具，以及受阻时提交报告。
+
+对应回归为 `test_model_response_deadline.py`、`test_fusion_execution_limits.py`、`test_fusion_stall.py`；原 `test_fusion_streaming.py` 在报告提交前验证实时正文，不再依赖报告后的冗余模型请求。

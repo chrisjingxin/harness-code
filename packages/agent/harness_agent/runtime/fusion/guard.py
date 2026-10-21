@@ -16,7 +16,7 @@ import json
 import re
 import shlex
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -25,6 +25,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, hook_config
 from langchain_core.messages import AIMessage, ToolMessage
 
+from harness_agent.policy.bash_parser import parse_bash, strip_wrappers
 from harness_agent.runtime.fusion.roles import LEAD_CONTROLS, WORKER_CONTROLS
 from harness_agent.runtime.fusion.snapshot import normalize_paths, path_allowed
 from harness_agent.runtime.fusion.store import (
@@ -74,6 +75,89 @@ def _mutates_git(command: str) -> bool:
         ):
             return True
     return False
+
+
+def _invalid_command(command: str, *, depth: int = 0) -> bool:
+    """检查真实 Shell 操作；Python 字符串和 here-doc 内的 & 不是后台。"""
+    if (
+        depth >= 8
+        or _mutates_git(command)
+        or re.search(
+            r"\b(nohup|disown|setsid)\b|\.git(?:/|\b)|\.harness-index", command
+        )
+    ):
+        return True
+    tree = parse_bash(command)
+    if tree is None:
+        return True
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        if node["type"] in {"&", "ERROR"}:
+            return True
+        if node["type"] == "command":
+            text = node["text"]
+            inner = strip_wrappers(text)
+            if inner != text and _invalid_command(inner, depth=depth + 1):
+                return True
+            if inner == text:
+                try:
+                    words = shlex.split(text, posix=True)
+                except ValueError:
+                    return True
+                shells = {
+                    "bash",
+                    "sh",
+                    "dash",
+                    "zsh",
+                    "ksh",
+                    "fish",
+                    "cmd",
+                    "powershell",
+                    "pwsh",
+                }
+                # find -exec / busybox 等尚未能展开的 Shell 载荷仍保守拒绝；
+                # 放行普通 Python 数据参数不意味着放开嵌套脚本的后台语法。
+                if re.search(r"(?<!&)&(?!&)", text) and any(
+                    Path(word).name.lower().removesuffix(".exe") in shells
+                    for word in words
+                ):
+                    return True
+        pending.extend(node.get("children", ()))
+    return False
+
+
+def _repeated_rejection(state: Any) -> tuple[str, str] | None:
+    """只在本轮连续三次相同工具拒绝时收尾；成功结果或新任务中断计数。"""
+    if not isinstance(state, Mapping):
+        return None
+    previous = None
+    count = 0
+    codes = {
+        "FUSION_COMMAND_INVALID",
+        "FUSION_LEASE_BUSY",
+        "FUSION_ROLE_DENIED",
+        "FUSION_TASK_CONFLICT",
+        "FUSION_PATH_INVALID",
+    }
+    for message in reversed(state.get("messages", ())):
+        if getattr(message, "type", None) == "human":
+            break
+        if not isinstance(message, ToolMessage):
+            continue
+        if message.status != "error" or not isinstance(message.content, str):
+            return None
+        code = message.content.split("：", 1)[0].split(":", 1)[0].strip()
+        if code not in codes:
+            return None
+        key = (message.name or "工具", code)
+        if previous is not None and key != previous:
+            return None
+        previous = key
+        count += 1
+        if count == 3:
+            return key
+    return None
 
 
 class FusionWriteGuard:
@@ -246,12 +330,30 @@ class FusionEffectMiddleware(AgentMiddleware):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        """占用已明确时由程序结束本轮；不再让模型选择重试、返工或追问。"""
+        """已提交或反复受阻的 Worker 直接结束；Lead 占用等待保持原规则。"""
         context = getattr(runtime, "context", None)
         task_id = getattr(context, "fusion_task_id", None)
-        if not task_id or getattr(context, "fusion_role", None) != "lead":
+        role = getattr(context, "fusion_role", None)
+        if not task_id or role not in {"lead", "sidekick"}:
             return None
         task = await self.store.get(task_id)
+        if role == "sidekick":
+            if task.data.get("report_id"):
+                return {"jump_to": "end"}
+            rejection = _repeated_rejection(state)
+            if task.phase == "WORKER_RUNNING" and rejection is not None:
+                tool, code = rejection
+                summary = f"Host 已暂停本轮：{tool} 连续三次返回 {code}，未取得进展。"
+                await context.fusion_service.submit_result(
+                    context,
+                    status="blocked",
+                    summary=summary,
+                    unresolved=[
+                        "请 Lead 检查失败原因并调整任务；不要原样重复遭拒绝的调用。"
+                    ],
+                )
+                return {"jump_to": "end"}
+            return None
         if not task.active or task.data.get("reason") != "workspace_busy":
             return None
         blocker = task.data.get("workspace_blocker") or {}
@@ -309,10 +411,7 @@ class FusionEffectMiddleware(AgentMiddleware):
             task_id = getattr(context, "fusion_task_id", None)
             if name == "execute" and task_id:
                 command = str(request.tool_call.get("args", {}).get("command", ""))
-                if _mutates_git(command) or re.search(
-                    r"(?<!&)&(?!&)|\b(nohup|disown|setsid)\b|\.git(?:/|\b)|\.harness-index",
-                    command,
-                ):
+                if _invalid_command(command):
                     raise FusionError("FUSION_COMMAND_INVALID")
                 effect = await self.store.begin_effect(
                     task_id,

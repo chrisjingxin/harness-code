@@ -1,4 +1,4 @@
-import {fusionSummary} from './fusion-summary'
+import { applyFusionExecutionEvent, settleFusionRun, type FusionExecution } from "./fusion-execution"
 /** Interactive Core 的纯 reducer：把 sidecar 流事件折叠为稳定领域状态。 */
 
 import { EventType, type FusionTaskStatus, type CodeIndexSnapshot, type EventEnvelope, type GoalActivityProjection, type GoalEvaluationProjection, type GoalPendingProjection, type GoalProjection, type InteractionRequestEnvelope } from "@za38/protocol"
@@ -63,6 +63,8 @@ export type ConversationMessage = {
   executionId?: string
   activityId?: string
   agentId?: string
+  /** Host 确认的双角色执行起止记录；只用于过程展示。 */
+  fusionExecution?: FusionExecution
 }
 
 export type ToolCard = {
@@ -818,7 +820,7 @@ export function markRunFailed(state: InteractiveState, runId: string, message: s
     runProgress: null,
     composeState: null,
     lastRun: { runId, outcome: "failed", composeSummary: composeSummaryOf(state) },
-    timeline: freezeReasoning(finishAssistant(settlePendingInteractions(state.timeline, runId), runId, `error: ${message}`, idGenerator), runId),
+    timeline: freezeReasoning(finishAssistant(settlePendingInteractions(settleFusionRun(state.timeline, runId, "failed"), runId), runId, `error: ${message}`, idGenerator), runId),
   }
 }
 
@@ -826,8 +828,14 @@ export function markRunFailed(state: InteractiveState, runId: string, message: s
 export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, idGenerator: IdGenerator = defaultIdGenerator): InteractiveState {
   const active = state.activeRun
   if (!active || active.threadId !== event.thread_id || active.runId !== event.run_id) return state
-  const next = acceptSequence(state, event.thread_id, event.run_id, event.sequence)
-  if (!next) return state
+  const accepted = acceptSequence(state, event.thread_id, event.run_id, event.sequence)
+  if (!accepted) return state
+  // 旧任务进度不能覆盖新状态，也不能把说明记录更新回旧版本。
+  if (event.type === EventType.FUSION_PROGRESS && accepted.fusionTask?.task_id === event.payload.task_id
+    && accepted.fusionTask.version >= event.payload.version) return accepted
+  const projected = applyFusionExecutionEvent(accepted.timeline, event)
+  if (projected === null) return accepted
+  const next = projected === accepted.timeline ? accepted : { ...accepted, timeline: projected }
   const runId = event.run_id
   // 非法 compose_scope：sequence 已前进，丢弃内容且不污染其他 activity。
   const identity = resolveEventIdentity(event)
@@ -944,8 +952,7 @@ export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, i
     case EventType.FUSION_PROGRESS: {
       const task = event.payload
       if (next.fusionTask?.task_id === task.task_id && next.fusionTask.version >= task.version) return next
-      return appendNotice({ ...next, fusionTask: task, fusionProfileId: task.active ? String(task.profile.profile_id) : next.fusionProfileId },
-        fusionSummary(task))
+      return { ...next, fusionTask: task, fusionProfileId: task.active ? String(task.profile.profile_id) : next.fusionProfileId }
     }
     case EventType.GOAL_CHANGED: {
       return { ...next, goal: event.payload.goal }

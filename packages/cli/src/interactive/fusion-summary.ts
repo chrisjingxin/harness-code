@@ -1,6 +1,9 @@
 /** TUI/Web 共用的 Fusion 任务说明；仅展示 Host 已脱敏的状态。 */
 import type { FusionTaskStatus } from "@za38/protocol"
 
+/** 状态说明和取消错误共用操作顺序；核查成功后才能结束未知任务。 */
+export const FUSION_RECOVERY_GUIDANCE = "先检查已改文件，并确认相关命令和进程全部停止；在占用会话单独输入 /fusion recover --stopped <核查说明>。看到“核查已记录”后，可以发送消息继续任务；需要结束任务时，再单独输入 /fusion cancel，已修改文件会保留。"
+
 const PHASE_LABELS: Record<string, string> = {
   READY: "等待派单",
   WORKER_RUNNING: "Sidekick 执行中",
@@ -79,12 +82,13 @@ export function fusionSummary(task: FusionTaskStatus): string {
   if (blocker) {
     const phase = PHASE_LABELS[blocker.phase ?? ""] ?? "需要核查"
     const cause = blocker.reason ? `（${REASON_LABELS[blocker.reason] ?? "需要处理"}）` : ""
-    const inspection = blocker.requires_inspection
-      ? "先核查相关操作已停止，再按原恢复流程处理；"
-      : ""
-    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；${inspection}`
-      + "用 /resume 返回该会话，查看 /fusion status；需要结束旧任务时在旧会话执行 /fusion cancel。处理后回本对话发送继续。"
+    const instructions = blocker.requires_inspection
+      ? FUSION_RECOVERY_GUIDANCE
+      : "需要结束旧任务时，在旧会话执行 /fusion cancel；已修改文件会保留。"
+    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；`
+      + `用 /resume 返回该会话，查看 /fusion status。${instructions}处理后回本对话发送继续。`
   }
+  const recovery = task.phase === "OUTCOME_UNKNOWN" ? `；${FUSION_RECOVERY_GUIDANCE}` : ""
   const round = task.round === 0 ? "尚未派单" : `第 ${task.round} 轮`
-  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}`
+  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}${recovery}`
 }

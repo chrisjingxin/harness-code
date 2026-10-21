@@ -60,6 +60,7 @@ import {
   activityGroupSubtitle,
   activityGroupTitle,
   composeLiveStatusLine,
+  fusionLiveStatusLine,
   isGroupExpandedByDefault,
   segmentTimeline,
   type TimelineActivityGroup,
@@ -82,6 +83,7 @@ import type {
 } from "../../interactive/state"
 import type { WebAdapterSnapshot, WebIntent, WebScrollRequest } from "../application/adapter"
 import { toolKey } from "../application/adapter"
+import { fusionExecutionIndex, itemFusionExecution } from "../../interactive/fusion-execution"
 import { Markdown } from "./markdown"
 
 /** 自动滚动判定阈值：用户视口底部离容器底部的距离小于该值即视为靠近底部。 */
@@ -193,9 +195,10 @@ export function Timeline({
     [dispatch],
   )
 
+  const fusion = fusionExecutionIndex(timeline)
   const visibleItems = timeline.filter(item => {
     if (isPendingLive(item, pendingRequestId)) return false
-    if (item.type === "reasoning" && !item.reasoning.active) return false
+    if (item.type === "reasoning" && !item.reasoning.active && !itemFusionExecution(item, fusion)) return false
     if (item.type === "message" && item.message.role === "assistant" && !item.message.streaming && !item.message.content.trim()) {
       return false
     }
@@ -240,7 +243,8 @@ export function Timeline({
 
   const compose = snapshot.interactive.composeState
   const phaseLabel = progressPhaseLabel(snapshot.interactive.runProgress?.phase ?? "preparing")
-  const liveLine = compose
+  const fusionLine = fusionLiveStatusLine(timeline, activeRun?.runId, formatElapsed(elapsedMs))
+  const liveLine = fusionLine ? `${fusionLine} · 点停止取消` : compose
     ? `${composeLiveStatusLine({
       stage: compose.currentStage,
       taskTitle: null,
@@ -381,7 +385,8 @@ function ActivityGroup({
     }
   }
   return (
-    <section className="timeline-activity-group" data-terminal={group.terminal ? "true" : "false"}>
+    <section className="timeline-activity-group" data-terminal={group.terminal ? "true" : "false"}
+      data-fusion-role={group.fusion?.role} data-fusion-round={group.fusion?.role === "sidekick" ? group.fusion.round : undefined}>
       <button
         type="button"
         className="timeline-activity-header"

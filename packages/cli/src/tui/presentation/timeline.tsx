@@ -14,6 +14,7 @@ import {
   activityGroupSubtitle,
   activityGroupTitle,
   composeLiveStatusLine,
+  fusionLiveStatusLine,
   isGroupExpandedByDefault,
   segmentTimeline,
   type TimelineActivityGroup,
@@ -386,9 +387,10 @@ function TimelineActivity(props: { interactive: InteractiveSnapshot }) {
     : activityLabel(interactive.activity.kind)
   const compose = interactive.composeState
   const isChild = Boolean(interactive.childTimelineExecutionId)
+  const fusion = fusionLiveStatusLine(interactive.timeline, interactive.activeRun?.runId, formatElapsed(elapsed))
   const line = isChild
     ? `${phase} · 已运行 ${formatElapsed(elapsed)}`
-    : compose
+    : fusion ? `${fusion} · Ctrl+C 取消` : compose
       ? `${composeLiveStatusLine({
         stage: compose.currentStage,
         taskTitle: null,
