@@ -134,7 +134,7 @@ def test_middleware_rejects_non_virtual_paths_without_calling_handler(
         "ls": {"path": "relative"},
         "read_file": {"file_path": "relative.txt"},
         "write_file": {"file_path": "relative.txt", "content": "blocked"},
-        "edit_file": {"file_path": "relative.txt", "old_string": "a", "new_string": "b"},
+        "edit_file": {"file_path": "relative.txt", "edits": [{"old_string": "a", "new_string": "b"}]},
         "delete_file": {"file_path": "relative.txt"},
         "glob": {"pattern": "**/*.py", "path": "relative"},
         "grep": {"pattern": "secret", "path": "relative"},

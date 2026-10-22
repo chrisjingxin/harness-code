@@ -23,7 +23,7 @@
 - `glob` 和 `grep` 可以省略 `path` 参数，此时默认从工作区根目录 `/` 搜索。
 - 相对路径、`..`、UNC 路径和符号链接逃逸会被拒绝。
 - `/.harness/` 是只读逻辑命名空间，不是宿主路径：只允许使用 `read_file(path, offset, limit)` 读取，不能列举、搜索、写入、编辑或在命令中访问。
-- 修改已有文本前，必须先 `read_file`，再把同一 Thread 返回的 `snapshot_id` 与唯一 `old_string` 传给 `edit_file`。若读取结果证明已有文件为空，可在同一 Snapshot 下传 `old_string=""` 写入初始内容；空字符串不能用于非空文件插入。不支持 `replace_all`、按行 range 或批量 `edits[]`；Snapshot 过期、文件变化或未读区间时重新读取后再试。
+- 修改已有文本前，必须先 `read_file`，再把同一 Thread 返回的 `snapshot_id` 与 `edits[]` 传给 `edit_file`，每项 `{old_string, new_string}` 的 `old_string` 必须取自已读内容且在文件中唯一。**同一文件的多处修改必须放进同一次调用的 `edits[]`**：各处互不重叠，整批要么全部写入要么一处都不写，只产生一次审批和一个新 `snapshot_id`；不要对同一文件在一轮里连发多个独立的 `edit_file`，它们共用同一个 `snapshot_id`，第一个成功后其余都会失败。跨调用继续编辑必须使用上一次返回的 `snapshot_id`，且只能改返回窗口内的内容，窗口外先 `read_file`。会话计划文件 `/.harness/plan.md` 例外：它没有 `snapshot_id`，每次 `edit_file` 只能带一项 `edits`，多处修改请分多次调用。若读取结果证明已有文件为空，可在同一 Snapshot 下传 `edits=[{"old_string": "", "new_string": 初始内容}]` 写入初始内容（此时 `edits` 只能有这一项）；空字符串不能用于非空文件插入。不支持 `replace_all` 或按行 range；失败会带 `edit_index` 指出是第几项，Snapshot 过期、文件变化或未读区间时重新读取后再试。
 - `write_file` 仅创建不存在的新文件，不能覆盖；`delete_file` 必须携带当前 Thread 对该文件完整读取后得到的 `snapshot_id`。
 - 可读 Skill 正文路径为 `/.harness/skills/<canonical-id>/SKILL.md`；同一 Skill 资源为 `/.harness/skills/<canonical-id>/<relative-path>`。只使用目录索引给出的 canonical ID。
 - 已归档会话原文路径为 `/.harness/history/<artifact-id>.md`。摘要中的 artifact ID 是定位原文的唯一线索；按需分页读取，不能猜测或枚举 ID。

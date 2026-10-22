@@ -175,8 +175,7 @@ test("edit_file 成功且参数含 old/new 时渲染 diff：公共行 context、
   const args = JSON.stringify({
     file_path: "/src/a.ts",
     snapshot_id: "snap_1",
-    old_string: "const b = 1",
-    new_string: "const b = 2\nconst b2 = 3",
+    edits: [{ old_string: "const b = 1", new_string: "const b = 2\nconst b2 = 3" }],
   })
   const view = toolOutputView("edit_file", EDIT_OUTPUT, args)
   expect(view.kind).toBe("diff")
@@ -193,7 +192,7 @@ test("edit_file 成功且参数含 old/new 时渲染 diff：公共行 context、
 })
 
 test("edit_file diff 保留公共上下文行", () => {
-  const args = JSON.stringify({ file_path: "/a.txt", old_string: "a\nb\nc", new_string: "a\nX\nc" })
+  const args = JSON.stringify({ file_path: "/a.txt", edits: [{ old_string: "a\nb\nc", new_string: "a\nX\nc" }] })
   const view = toolOutputView("edit_file", EDIT_OUTPUT, args)
   expect(view.diff?.rows).toEqual([
     { type: "context", text: "a" },
@@ -201,6 +200,39 @@ test("edit_file diff 保留公共上下文行", () => {
     { type: "add", text: "X" },
     { type: "context", text: "c" },
   ])
+})
+
+test("edit_file 多处 edits 合并为一份 diff，各段之间用 ⋯ 分隔", () => {
+  const args = JSON.stringify({
+    file_path: "/src/a.ts",
+    snapshot_id: "snap_1",
+    edits: [
+      { old_string: "const a = 1", new_string: "const a = 10" },
+      { old_string: "const c = 3", new_string: "" },
+    ],
+  })
+  const view = toolOutputView("edit_file", EDIT_OUTPUT, args)
+  expect(view.kind).toBe("diff")
+  expect(view.diff?.rows).toEqual([
+    { type: "remove", text: "const a = 1" },
+    { type: "add", text: "const a = 10" },
+    { type: "context", text: "⋯" },
+    { type: "remove", text: "const c = 3" },
+  ])
+  expect(view.diff?.added).toBe(1)
+  expect(view.diff?.removed).toBe(2)
+})
+
+test("edit_file 的 edits 畸形或旧的扁平参数时不伪造 diff", () => {
+  const bad = [
+    JSON.stringify({ file_path: "/a", edits: [] }),
+    JSON.stringify({ file_path: "/a", edits: "oops" }),
+    JSON.stringify({ file_path: "/a", edits: [{ old_string: "x" }] }),
+    JSON.stringify({ file_path: "/a", old_string: "x", new_string: "y" }),
+  ]
+  for (const args of bad) {
+    expect(toolOutputView("edit_file", EDIT_OUTPUT, args).kind).toBe("file-content")
+  }
 })
 
 test("write_file 新建文件渲染全新增 diff", () => {
@@ -215,7 +247,7 @@ test("write_file 新建文件渲染全新增 diff", () => {
 
 test("edit/write 失败（ok 非 true）或缺参数时不伪造 diff，回退 file-content/json", () => {
   const failed = JSON.stringify({ ok: false, error: "SNAPSHOT_STALE" })
-  const args = JSON.stringify({ file_path: "/a", old_string: "x", new_string: "y" })
+  const args = JSON.stringify({ file_path: "/a", edits: [{ old_string: "x", new_string: "y" }] })
   expect(toolOutputView("edit_file", failed, args).kind).toBe("json")
   // 缺 arguments 时回退到输出的 file-content（编辑后上下文窗口）。
   expect(toolOutputView("edit_file", EDIT_OUTPUT).kind).toBe("file-content")

@@ -18,7 +18,7 @@ import { toolArgumentSummary } from "../../../presentation-shared/tool-output-po
 import { getCommonSyntaxClient } from "../../platform/syntax-parsers"
 import { useSpinner } from "../input-bar"
 import { markdownSyntax, tuiTheme } from "../theme"
-import { parseFileMutationArgs, parseToolResultPreview, shortMutationPath, unifiedDiffFromReplacement } from "./file-mutation-args"
+import { parseFileMutationArgs, parseToolResultPreview, shortMutationPath, unifiedDiffFromEdits } from "./file-mutation-args"
 import { canonicalizeToolName, resolveToolRenderer } from "./registry"
 import { currentTodo, parseWriteTodos, todoMarker, todoProgressLabel, type TodoItem } from "./write-todos"
 
@@ -128,7 +128,7 @@ function DiffTool(props: { tool: ToolCard; terminalWidth: number }) {
   return <GenericTool tool={props.tool} />
 }
 
-/** edit_file 专用：用 old/new 生成 Diff，绝不铺 JSON 参数或结果。 */
+/** edit_file 专用：用 edits[] 的 old/new 生成多段 Diff，绝不铺 JSON 参数或结果。 */
 function EditTool(props: { tool: ToolCard; terminalWidth: number }) {
   const mutation = parseFileMutationArgs(props.tool.arguments)
   const result = parseToolResultPreview(props.tool.output)
@@ -137,9 +137,9 @@ function EditTool(props: { tool: ToolCard; terminalWidth: number }) {
   const frame = useSpinner(running, 80)
   const outputDiff = parseFileDiff(props.tool.output)
   const hasOutputDiff = outputDiff.status === "parsed" && props.tool.output.trim() !== ""
-  if (mutation.oldString !== null && mutation.newString !== null) {
+  if (mutation.edits !== null) {
     const path = mutation.path ?? "file"
-    const unified = unifiedDiffFromReplacement(path, mutation.oldString, mutation.newString)
+    const unified = unifiedDiffFromEdits(path, mutation.edits)
     const view = diffViewForWidth(Math.max(1, props.terminalWidth - 10))
     const language = resolveLanguageForPath(mutation.path).tuiParser
     const tone = failed ? tuiTheme.danger : running ? tuiTheme.thinking : tuiTheme.success

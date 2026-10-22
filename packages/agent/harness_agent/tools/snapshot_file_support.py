@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from langchain_core.messages import ToolMessage
@@ -18,6 +19,8 @@ from harness_agent.tools.snapshot_file_schema import MAX_READ_LIMIT
 
 MAX_READ_RESULT_BYTES = 32 * 1024
 MAX_EDIT_TEXT_BYTES = 64 * 1024
+MAX_EDIT_BATCH_BYTES = 256 * 1024
+"""一次 edit_file 全部 old_string + new_string 的 UTF-8 字节总和上限。"""
 MAX_MUTATION_BYTES = 2 * 1024 * 1024
 LOCAL_CONTEXT_PADDING_LINES = 3
 
@@ -124,10 +127,65 @@ def _logical_line_break_count(value: str) -> int:
     return value.count("\n") + value.replace("\r\n", "").count("\r")
 
 
-def require_text_size(value: str) -> None:
+def require_text_size(value: str, *, edit_index: int | None = None) -> None:
     """限制单个 exact-string 参数。"""
     if len(value.encode("utf-8")) > MAX_EDIT_TEXT_BYTES:
+        raise FileToolContractError("EDIT_TEXT_TOO_LARGE", edit_index=edit_index)
+
+
+def require_edit_batch_size(edits: Sequence[tuple[str, str]]) -> None:
+    """限制 edits[] 的单串与总量；总量保护审批预览与内存，单串沿用 64 KiB。"""
+    total = 0
+    for index, (old_string, new_string) in enumerate(edits):
+        require_text_size(old_string, edit_index=index)
+        require_text_size(new_string, edit_index=index)
+        total += len(old_string.encode("utf-8")) + len(new_string.encode("utf-8"))
+    if total > MAX_EDIT_BATCH_BYTES:
         raise FileToolContractError("EDIT_TEXT_TOO_LARGE")
+
+
+def apply_exact_edits(
+    content: str,
+    edits: Sequence[tuple[str, str]],
+    *,
+    has_seen: Callable[[int, int], bool],
+    allow_empty_initialization: bool,
+) -> str:
+    """把一批精确替换合成一份新全文；任何一处不满足就整批拒绝，不产生部分结果。
+
+    输入 → 每处在同一份提交前内容里精确匹配且唯一 → 落在已读行范围内 → 各处区间互不重叠
+    → 从后往前一次性替换。所有匹配都针对原始 content，前一处的 new_string 不会影响后一处
+    的匹配，所以模型不必推算替换后的位置。edits 里的换行风格须已统一为文件风格。
+
+    只会抛出 FileToolContractError，错误带 edit_index（指向 edits 数组下标）。
+    """
+    empty = [index for index, (old_string, _new) in enumerate(edits) if old_string == ""]
+    if empty:
+        # 空 old_string 只允许单独初始化零行空文件，绝不在非空文件里猜插入位置。
+        if len(edits) > 1 or not allow_empty_initialization:
+            raise FileToolContractError("INVALID_EDIT", edit_index=empty[0])
+        return edits[0][1]
+    spans: list[tuple[int, int, int, str]] = []
+    for index, (old_string, new_string) in enumerate(edits):
+        start = content.find(old_string)
+        if start < 0:
+            raise FileToolContractError("EXACT_MATCH_NOT_FOUND", edit_index=index)
+        # 从首个起点的下一字符继续搜索，才能把 `aaa` 中的两个 `aa` 判为歧义。
+        if content.find(old_string, start + 1) >= 0:
+            raise FileToolContractError("AMBIGUOUS_MATCH", edit_index=index)
+        start_line, end_line = source_line_range(content, start, old_string)
+        if not has_seen(start_line, end_line):
+            raise FileToolContractError("UNREAD_RANGE", edit_index=index)
+        spans.append((start, start + len(old_string), index, new_string))
+    # 按文件位置排序后只需比较相邻两项；首尾相接（后.start == 前.end）不算重叠。
+    spans.sort(key=lambda span: (span[0], span[2]))
+    for previous, following in zip(spans, spans[1:]):
+        if following[0] < previous[1]:
+            raise FileToolContractError("OVERLAPPING_EDITS", edit_index=following[2])
+    proposed = content
+    for start, end, _index, new_string in reversed(spans):
+        proposed = proposed[:start] + new_string + proposed[end:]
+    return proposed
 
 
 def require_mutation_text_size(value: str) -> None:
@@ -190,10 +248,16 @@ def error_message(code: str) -> str:
         "POST_WRITE_DRIFT": "提交后文件被外部保存钩子改变，无法生成可用 Snapshot。",
         "PATH_SYMLINK_UNSUPPORTED": "文件路径不能包含符号链接。",
         "EXACT_MATCH_NOT_FOUND": "已读原文本不再存在。",
-        "AMBIGUOUS_MATCH": "old_string 在文件中不是唯一匹配。",
-        "INVALID_EDIT": "空 old_string 只允许初始化当前 Snapshot 对应的空文件。",
+        "AMBIGUOUS_MATCH": "edits 中该处的 old_string 在文件中不是唯一匹配。",
+        "INVALID_EDIT": "空 old_string 只允许单独初始化当前 Snapshot 对应的空文件。",
+        "OVERLAPPING_EDITS": "edits 中有两处匹配到的文本区间重叠。",
+        "TOO_MANY_EDITS": "edits 的项数超过单次调用上限，或该文件只允许单次修改。",
+        "EDIT_TEXT_TOO_LARGE": "edits 的单个字符串或总大小超过上限。",
         "VIRTUAL_READONLY": "虚拟文件只允许读取。",
-        "FILE_TOOL_SCHEMA_INVALID": "文件工具参数不属于当前 canonical schema。",
+        "FILE_TOOL_SCHEMA_INVALID": (
+            "文件工具参数不属于当前 canonical schema；edit_file 必须使用 edits[]，"
+            "每项恰好包含 old_string 与 new_string。"
+        ),
     }
     return messages.get(code, "文件工具无法安全完成该操作。")
 
@@ -207,15 +271,23 @@ def next_action(code: str) -> str:
     if code == "FILE_ALREADY_EXISTS":
         return "先读取现有文件，再使用 edit_file。"
     if code in {"EXACT_MATCH_NOT_FOUND", "AMBIGUOUS_MATCH"}:
-        return "重新读取目标区间并提交唯一的 old_string。"
+        return "重新读取目标区间，修正 edit_index 指向的那一处为唯一的 old_string 后整批重试；本次没有写入任何内容。"
     if code == "INVALID_EDIT":
-        return "从已读非空内容复制唯一的 old_string 后重试。"
+        return "非空文件请从已读内容复制唯一的 old_string；空文件初始化只能在 edits 中单独一项。"
+    if code == "OVERLAPPING_EDITS":
+        return "合并或拆开重叠的两处，使各处 old_string 的文本区间互不重叠后整批重试。"
+    if code == "TOO_MANY_EDITS":
+        return "拆成多次 edit_file 调用：普通文件使用上一次返回的 snapshot_id；会话计划文件没有 snapshot_id，每次只改一处。"
+    if code == "EDIT_TEXT_TOO_LARGE":
+        return "缩小 old_string/new_string，或拆成多次调用。"
     if code == "BACKEND_CAS_UNSUPPORTED":
         return "切换到支持安全文本 mutation 的执行模式。"
     return "检查参数后重试。"
 
 
 __all__ = [
+    "MAX_EDIT_BATCH_BYTES",
+    "apply_exact_edits",
     "attach_post_write_drift",
     "error_code",
     "error_message",
@@ -226,6 +298,7 @@ __all__ = [
     "render_changed_context",
     "render_window",
     "require_actual_document",
+    "require_edit_batch_size",
     "require_mutation_size",
     "require_mutation_text_size",
     "require_text_size",

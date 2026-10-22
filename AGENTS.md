@@ -205,3 +205,13 @@ completed_at: -
 - **提交规范**：遵循 Conventional Commit，按包聚焦（如 `feat: Node IPC 客户端`、`fix: handle cancelled agent run`）。合并冲突使用 `mattpocock:resolving-merge-conflicts`。
 - **安全底线**：严禁提交 API Key 或凭据。模型 Key 优先走环境变量引用；工作区路径、MCP 响应、Shell 输出均须按不可信输入防御。
 - **交接记录 (Handoff)**：非强制要求，由用户按需在对话中明确要求时生成，或由开发者按需手动维护。若生成 `tmp/handoff.md`（本地忽略文件，不提交），内容包含：当前 Task 编号与阶段、改动边界、已完成验证、下一步行动与建议 Skill。已有文档只引路径不重复抄录。
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+Run `openwiki code --update --print` after repository changes to refresh affected wiki pages. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->

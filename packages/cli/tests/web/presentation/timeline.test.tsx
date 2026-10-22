@@ -675,7 +675,7 @@ describe("Timeline", () => {
 
   test("edit_file 展开渲染 diff 视图：路径 meta + 红绿行", () => {
     const output = JSON.stringify({ ok: true, path: "/src/a.ts", content: "1\tx", total_lines: 1 })
-    const args = JSON.stringify({ file_path: "/src/a.ts", old_string: "const b = 1", new_string: "const b = 2" })
+    const args = JSON.stringify({ file_path: "/src/a.ts", edits: [{ old_string: "const b = 1", new_string: "const b = 2" }] })
     const interactive = makeInteractive({
       timeline: [toolItem({ id: "t1", name: "edit_file", arguments: args, output })],
     })

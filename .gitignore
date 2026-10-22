@@ -38,6 +38,7 @@ tmp/
 .codegraph/
 .rtk/
 .agents/
+.kiro/
 
 # WorkBuddy 本地数据（技能、记忆等，不入库）
 .workbuddy/
@@ -47,3 +48,7 @@ tmp/
 
 #todo 临时取消benchmark
 benchmark/
+
+# OpenWiki local agent artifacts; may contain repository excerpts
+conversation_history/
+large_tool_results/

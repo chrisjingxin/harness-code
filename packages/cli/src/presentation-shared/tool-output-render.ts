@@ -302,7 +302,7 @@ function parseGrep(output: string): ToolOutputView | null {
 const DIFF_LCS_CELL_LIMIT = 250_000
 
 /**
- * 编辑/写入的红绿 diff 来自 arguments（old_string → new_string / content），
+ * 编辑/写入的红绿 diff 来自 arguments（edits[] 的 old_string → new_string / content），
  * 因为只有成功结果（output JSON `ok: true`）才能证明变更已落盘；
  * 其余情况返回 null，让调用方回退 file-content/json。
  */
@@ -321,14 +321,19 @@ function parseMutationDiff(toolName: string, output: string, argumentsText?: str
   if ((result as Record<string, unknown>).ok !== true) return null
   const record = args as Record<string, unknown>
   const path = typeof record.file_path === "string" ? record.file_path : null
-  const oldText = toolName === "edit_file"
-    ? (typeof record.old_string === "string" ? record.old_string : null)
-    : ""
-  const newText = toolName === "edit_file"
-    ? (typeof record.new_string === "string" ? record.new_string : null)
-    : (typeof record.content === "string" ? record.content : null)
-  if (oldText === null || newText === null) return null
-  const rows = diffLines(oldText, newText)
+  let rows: ToolDiffRow[]
+  if (toolName === "edit_file") {
+    const edits = editPairs(record.edits)
+    if (edits === null) return null
+    // 多处修改之间插一行“⋯”，表示中间有未展示的未改动内容。
+    rows = edits.flatMap(([oldText, newText], index): ToolDiffRow[] => [
+      ...(index > 0 ? [{ type: "context", text: "⋯" } as const] : []),
+      ...diffLines(oldText, newText),
+    ])
+  } else {
+    if (typeof record.content !== "string") return null
+    rows = diffLines("", record.content)
+  }
   const added = rows.filter(row => row.type === "add").length
   const removed = rows.filter(row => row.type === "remove").length
   return {
@@ -339,6 +344,19 @@ function parseMutationDiff(toolName: string, output: string, argumentsText?: str
     collapsible: rows.length > TOOL_OUTPUT_COLLAPSE_LINES,
     diff: { path, added, removed, rows },
   }
+}
+
+/** edit_file 的 edits[]：每项必须是 old_string/new_string 字符串；有任何一项畸形则整体不可用。 */
+function editPairs(value: unknown): Array<[string, string]> | null {
+  if (!Array.isArray(value) || value.length === 0) return null
+  const pairs: Array<[string, string]> = []
+  for (const item of value) {
+    if (item === null || typeof item !== "object") return null
+    const { old_string: oldText, new_string: newText } = item as Record<string, unknown>
+    if (typeof oldText !== "string" || typeof newText !== "string") return null
+    pairs.push([oldText, newText])
+  }
+  return pairs
 }
 
 /** 行级 diff：LCS 对齐公共行；超规模退化为全删全增。空文本按 0 行计。 */

@@ -21,7 +21,7 @@ def _presentation(path: str) -> dict[str, object]:
 def test_store_binds_tool_name_and_complete_args_without_retaining_mutable_input() -> None:
     """改参或改工具名不能命中，返回值也不能修改缓存内部副本。"""
     store = ApprovalPresentationStore()
-    args = {"file_path": "/a.py", "new_string": "new"}
+    args = {"file_path": "/a.py", "edits": [{"old_string": "old", "new_string": "new"}]}
     presentation = _presentation("/a.py")
     assert store.remember("edit_file", args, presentation)
     presentation["path"] = "/changed.py"
@@ -31,7 +31,7 @@ def test_store_binds_tool_name_and_complete_args_without_retaining_mutable_input
     assert found["path"] == "/a.py"
     found["path"] = "/mutated.py"
     assert store.lookup("edit_file", args)["path"] == "/a.py"
-    assert store.lookup("edit_file", {**args, "new_string": "changed"}) is None
+    assert store.lookup("edit_file", {**args, "edits": [{"old_string": "old", "new_string": "changed"}]}) is None
     assert store.lookup("write_file", args) is None
 
 

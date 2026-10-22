@@ -250,7 +250,7 @@ class TestSerialApprovals:
         coordinator = _coordinator_with_port(port)
         action = {
             "name": "edit_file",
-            "args": {"file_path": "/src/a.py", "old_string": "x", "new_string": "y"},
+            "args": {"file_path": "/src/a.py", "edits": [{"old_string": "x", "new_string": "y"}]},
             "description": "文件变更需要审批",
         }
         run = _serial_run()
@@ -286,7 +286,7 @@ class TestSerialApprovals:
         run = _serial_run()
         assert run.approval_presentations.remember(
             "edit_file",
-            {"file_path": "/src/a.py", "new_string": "approved"},
+            {"file_path": "/src/a.py", "edits": [{"old_string": "x", "new_string": "approved"}]},
             {
                 "kind": "file_diff",
                 "operation": "edit",
@@ -299,7 +299,7 @@ class TestSerialApprovals:
         )
         action = {
             "name": "edit_file",
-            "args": {"file_path": "/src/a.py", "new_string": "changed"},
+            "args": {"file_path": "/src/a.py", "edits": [{"old_string": "x", "new_string": "changed"}]},
         }
 
         self._collect(coordinator, run, _serial_spec([action], [], [0]))

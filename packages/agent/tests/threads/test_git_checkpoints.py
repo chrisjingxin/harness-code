@@ -101,6 +101,35 @@ def test_restore_does_not_change_head_or_index(temp_git_repo: Path) -> None:
     assert not (temp_git_repo / "extra.txt").exists()
 
 
+def test_git_commands_never_inherit_sidecar_stdin(temp_git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """sidecar 的 stdin 是 JSON-RPC 管道且有线程阻塞读取；Windows 上子进程继承它会卡死启动。"""
+    calls: list[dict[str, object]] = []
+    real_run = subprocess.run
+    real_check_output = subprocess.check_output
+
+    def recording_run(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return real_run(*args, **kwargs)
+
+    def recording_check_output(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return real_check_output(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_run)
+    monkeypatch.setattr(subprocess, "check_output", recording_check_output)
+
+    service = GitCheckpointService()
+    assert service.is_git_repository(temp_git_repo) is True
+    tree_1 = service.create_tree_snapshot(temp_git_repo)
+    (temp_git_repo / "extra.txt").write_text("extra\n", encoding="utf-8")
+    tree_2 = service.create_tree_snapshot(temp_git_repo)
+    service.compute_diff_stats(temp_git_repo, tree_1, tree_2)
+    service.restore_tree_snapshot(temp_git_repo, tree_1)
+
+    assert calls
+    assert all(call.get("stdin") is subprocess.DEVNULL for call in calls)
+
+
 def test_create_tree_snapshot_empty_repo_without_commits(tmp_path: Path) -> None:
     """测试尚无初始 commit 的全新 Git 仓库（HEAD 为空）依然能正确创建快照。"""
     repo = tmp_path / "empty_repo"

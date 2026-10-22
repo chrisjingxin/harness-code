@@ -110,8 +110,7 @@ def test_default_tool_schema_exposes_only_canonical_snapshot_file_mutations():
     assert schemas["edit_file"] == {
         "file_path": "string",
         "snapshot_id": "string",
-        "old_string": "string",
-        "new_string": "string",
+        "edits": "array",
     }
     assert schemas["delete_file"] == {"file_path": "string", "snapshot_id": "string"}
 
@@ -122,8 +121,11 @@ def test_main_and_inline_prompts_describe_the_same_restricted_empty_file_edit() 
 
     main_prompt = _PROMPT_PATH.read_text(encoding="utf-8")
     for prompt in (main_prompt, _LOCAL_SUBAGENT_BOUNDARY_PROMPT):
-        assert 'old_string=""' in prompt
+        assert '""' in prompt and "old_string" in prompt
         assert "空字符串不能用于非空文件插入" in prompt
+        assert "只能有这一项" in prompt
+        assert "同一文件的多处修改必须放进" in prompt
+        assert "不支持 `replace_all`" in prompt
 
 
 async def test_auto_mode_preflight_uses_classifier_cache_end_to_end():
@@ -408,8 +410,7 @@ async def test_default_hitl_registers_prepared_file_diff_for_host_approval(tmp_p
                 "args": {
                     "file_path": "/approval.txt",
                     "snapshot_id": record.snapshot_id,
-                    "old_string": "before\n",
-                    "new_string": "approved\n",
+                    "edits": [{"old_string": "before\n", "new_string": "approved\n"}],
                 },
                 "id": "prepared-edit",
             }
