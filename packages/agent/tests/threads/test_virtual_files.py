@@ -437,7 +437,7 @@ def test_workspace_boundary_allows_plan_file_write_and_edit(tmp_path: Path):
         tool_call={"name": "write_file", "id": "write-plan", "args": {"file_path": "/.harness/plan.md", "content": "# 计划"}},
     )
     edit_plan = SimpleNamespace(
-        tool_call={"name": "edit_file", "id": "edit-plan", "args": {"file_path": "/.harness/plan.md", "old_string": "a", "new_string": "b"}},
+        tool_call={"name": "edit_file", "id": "edit-plan", "args": {"file_path": "/.harness/plan.md", "edits": [{"old_string": "a", "new_string": "b"}]}},
     )
     delete_plan = SimpleNamespace(
         tool_call={"name": "delete_file", "id": "delete-plan", "args": {"file_path": "/.harness/plan.md"}},

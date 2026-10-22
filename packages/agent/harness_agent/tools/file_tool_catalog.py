@@ -51,8 +51,7 @@ FILE_TOOL_SPECS = (
         (
             ("file_path", "string"),
             ("snapshot_id", "string"),
-            ("old_string", "string"),
-            ("new_string", "string"),
+            ("edits", "array"),
         ),
         "file_path",
         "write",

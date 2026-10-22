@@ -1,9 +1,45 @@
 """以 Snapshot prior-read 约束的 canonical 文件工具 contract。
 
-ZC-133 的现有证据只支持 ``exact-string + prior-read``：模型必须先通过
-``read_file`` 获得当前 Thread 的短 Snapshot，再以唯一 ``old_string`` 修改已读
-内容。这里不保留 ``replace_all``，也不接收尚未通过真实模型门槛的 range/edits[]
-候选参数。
+【为什么需要 Snapshot（快照）机制？】
+大语言模型在直接修改代码文件时，通常面临两个容易引发代码灾难的问题：
+1. 凭空幻觉：模型凭记忆猜测文件里有某段代码并尝试替换，若匹配逻辑粗糙，容易改错位置甚至破坏文件；
+2. 并发脏写：在模型思考期间，用户或外部构建工具可能已经改动了文件。若模型仍按旧内容覆盖，会导致最新修改丢失。
+
+为了彻底消除这两类问题，Harness 设计了基于快照（Snapshot）的“先读后写”（Prior-Read）契约：
+- 先读：模型必须先调用 read_file 实际读取目标文件，系统会根据文件当前哈希签发唯一的 snapshot_id；
+- 后写：模型调用 edit_file 时必须附带此 snapshot_id，并在 edits[] 中提供各自精确唯一的 old_string
+  （同一文件的多处修改放进同一次调用，整批原子提交）；
+- 校验：系统会校验 snapshot_id 是否仍与当前磁盘内容一致、old_string 是否在文件中唯一且处于模型实际读过的行范围内；
+- 原子替换：校验完全通过后，才生成差异预览交由用户/系统审批并写入磁盘。
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                   Harness 文件先读后写安全工作流 (Snapshot)            │
+└────────────────────────────────────────────────────────────────────────┘
+
+    大模型 (LLM)                  文件系统契约 (Contract)            本地磁盘 (Disk)
+         │                                   │                             │
+    1. 想改文件，先读代码                     │                             │
+         │──── read_file(path, offset) ─────>│                             │
+         │                                   │──── 读取文件与哈希指纹 ────>│
+         │                                   │<─── 返回磁盘内容与哈希 ─────│
+         │                                   │                             │
+         │                                   │ [生成短期快照 Snapshot]    │
+         │                                   │ (记录当前哈希与已读行范围)  │
+         │<─── {snapshot_id, content} ───────│                             │
+         │                                   │                             │
+    2. 发起精确替换修改                      │                             │
+         │──── edit_file(snapshot_id, ──────>│                             │
+         │        edits[{old,new}, ...])     │                             │
+         │                                   │ 严格四重安全门禁校验：      │
+         │                                   │ 1. 快照校验：磁盘文件有无变动│
+         │                                   │ 2. 范围校验：每处是否真读过  │
+         │                                   │ 3. 唯一校验：每处是否唯一    │
+         │                                   │ 4. 重叠校验：各处区间不相交  │
+         │                                   │                             │
+         │                                   │ [通过后合成一份新全文，     │
+         │                                   │  审批后一次写入并重读验证]  │
+         │                                   │────────────────────────────>│
+         │<─── {ok: true, snapshot_id} ──────│<─── 写入成功，签发新快照 ───│
 """
 
 from __future__ import annotations
@@ -70,6 +106,7 @@ from harness_agent.tools.snapshot_file_schema import (
     is_harness_virtual_path as _is_virtual,
     non_negative_int_argument as _non_negative_int,
     optional_path_argument as _optional_path,
+    edits_argument as _edits_argument,
     path_argument as _path,
     positive_int_argument as _positive_int,
     require_canonical_argument_keys as _require_canonical_argument_keys,
@@ -77,6 +114,7 @@ from harness_agent.tools.snapshot_file_schema import (
     string_argument as _string_arg,
 )
 from harness_agent.tools.snapshot_file_support import (
+    apply_exact_edits as _apply_exact_edits,
     attach_post_write_drift as _attach_post_write_drift,
     error_code as _error_code,
     error_message as _error_message,
@@ -87,11 +125,10 @@ from harness_agent.tools.snapshot_file_support import (
     render_changed_context as _render_changed_context,
     render_window as _render_window,
     require_actual_document as _require_actual_document,
+    require_edit_batch_size as _require_edit_batch_size,
     require_mutation_size as _require_mutation_size,
     require_mutation_text_size as _require_mutation_text_size,
-    require_text_size as _require_text_size,
     shown_lines as _shown_lines,
-    source_line_range as _source_line_range,
     tool_payload as _tool_payload,
 )
 
@@ -167,8 +204,13 @@ class SnapshotFileToolContract:
             if name == "grep":
                 return self._grep(request, args, tool_call_id)
             raise FileToolContractError("FILE_TOOL_NAME_UNSUPPORTED")
-        except Exception as exc:  # noqa: BLE001 - 工具边界不得泄露 backend 异常
-            return self._error(name, tool_call_id, _error_code(exc))
+        except Exception as exc:  # noqa: BLE001 - 工具边界不得泄露原始 backend 异常栈
+            return self._error(
+                name,
+                tool_call_id,
+                _error_code(exc),
+                edit_index=getattr(exc, "edit_index", None),
+            )
 
     async def adispatch(self, request: ToolCallRequest) -> ToolMessage:
         """异步图在提交后限时读取 diagnostics，再记录一次最终结果。"""
@@ -348,10 +390,13 @@ class SnapshotFileToolContract:
     ) -> ToolMessage:
         """按 exact replacement 改会话计划文件；不签发工作区 Snapshot。"""
         path = _path(args, "file_path", "edit_file")
-        old_string = _string_arg(args, "old_string")
-        new_string = _string_arg(args, "new_string")
-        _require_text_size(old_string)
-        _require_text_size(new_string)
+        edits = _edits_argument(args)
+        _require_edit_batch_size(edits)
+        if len(edits) != 1:
+            # 计划文件没有 Snapshot，连续单次编辑不会互相作废，批量没有收益；
+            # 因此只接受一处，避免为虚拟 backend 另造一套原子回滚。
+            raise FileToolContractError("TOO_MANY_EDITS")
+        old_string, new_string = edits[0]
         result = self._resolve_backend(request).edit(path, old_string, new_string)
         error = getattr(result, "error", None)
         if error:
@@ -413,7 +458,12 @@ class SnapshotFileToolContract:
     def _edit_file(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
-        """提交 exact replacement，并返回实际重读的变更范围与局部上下文。"""
+        """基于快照的同文件批量精确替换。
+
+        必须传入有效的 snapshot_id 以及 edits[]，每处 old_string 在文件中唯一出现。
+        在校验快照未过期、每处文本唯一且在已读范围内、各处互不重叠之后，一次性合成新全文
+        并提交一次，再回读磁盘。执行成功后向模型返回整批改动附近的新内容和全新的 snapshot_id。
+        """
         path = _path(args, "file_path", "edit_file")
         if is_plan_virtual_path(path):
             return self._edit_plan_file(request, args, tool_call_id)
@@ -435,7 +485,7 @@ class SnapshotFileToolContract:
             "ok": True,
             "path": plan.metadata.path,
             "snapshot_id": new_record.snapshot_id,
-            "replaced": 1,
+            "replaced": plan.metadata.edit_count,
             "changed_range": committed.changed_range.payload(),
             "shown_lines": _shown_lines(offset, shown_count),
             "total_lines": new_record.line_count,
@@ -609,13 +659,15 @@ class SnapshotFileToolContract:
     def _prepare_edit(
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> PreparedFileMutation:
-        """验证 prior-read 唯一替换后，固定当前内容、拟议内容和 expected identity。"""
+        """验证整批 prior-read 精确替换后，固定当前内容、拟议内容和 expected identity。
+
+        输入（edits[]）→ 形状/数量/大小 → Snapshot 身份 → 每处唯一且已读 → 互不重叠 →
+        合成一份新全文。所有校验都在审批卡片出现之前完成，审批与提交共用这份冻结的计划。
+        """
         path = _path(args, "file_path", "edit_file")
         snapshot_id = _snapshot_id(args)
-        old_string = _string_arg(args, "old_string")
-        new_string = _string_arg(args, "new_string")
-        _require_text_size(old_string)
-        _require_text_size(new_string)
+        edits = _edits_argument(args)
+        _require_edit_batch_size(edits)
         thread_id = self._thread_id(request)
         fingerprint = mutation_fingerprint("edit_file", args)
         if cached := self._mutation_service.prepared(
@@ -634,27 +686,18 @@ class SnapshotFileToolContract:
         current = self._text_backend.read_text_document(path)
         _require_mutation_size(current)
         self._require_current(record, current)
-        old_source = _normalize_line_endings(old_string, current)
-        new_source = _normalize_line_endings(new_string, current)
-        if not old_source:
-            # 空文档没有可登记的源行。只有 Snapshot 与当前完整 identity 都证明
-            # 文档仍为零行空文本时，空 old_string 才表示替换整个空文档；绝不
-            # 交给 str.find("") 猜测非空文件中的插入位置。
-            if record.line_count != 0 or current.content != "":
-                raise FileToolContractError("INVALID_EDIT")
-            proposed = new_source
-        else:
-            start = current.content.find(old_source)
-            if start < 0:
-                raise FileToolContractError("EXACT_MATCH_NOT_FOUND")
-            # str.count 只统计不重叠匹配；从首个起点的下一字符继续
-            # 搜索，才能把 `aaa` 中的两个 `aa` 正确判为歧义。
-            if current.content.find(old_source, start + 1) >= 0:
-                raise FileToolContractError("AMBIGUOUS_MATCH")
-            start_line, end_line = _source_line_range(current.content, start, old_source)
-            if not self._snapshot_store.has_seen(record, start_line, end_line):
-                raise FileToolContractError("UNREAD_RANGE")
-            proposed = current.content[:start] + new_source + current.content[start + len(old_source) :]
+        normalized = [
+            (_normalize_line_endings(old, current), _normalize_line_endings(new, current))
+            for old, new in edits
+        ]
+        # 空文档没有可登记的源行。只有 Snapshot 与当前完整 identity 都证明文档仍为零行
+        # 空文本时，空 old_string 才表示替换整个空文档（且必须是 edits 唯一一项）。
+        proposed = _apply_exact_edits(
+            current.content,
+            normalized,
+            has_seen=lambda start, end: self._snapshot_store.has_seen(record, start, end),
+            allow_empty_initialization=record.line_count == 0 and current.content == "",
+        )
         if proposed == current.content:
             raise FileToolContractError("NO_CHANGES")
         _require_mutation_text_size(proposed)
@@ -665,6 +708,7 @@ class SnapshotFileToolContract:
                 thread_id=thread_id,
                 tool_call_id=tool_call_id,
                 snapshot_id=snapshot_id,
+                edit_count=len(edits),
             ),
             current=current,
             proposed_content=proposed,
@@ -836,21 +880,19 @@ class SnapshotFileToolContract:
         return name, args, str(request.tool_call.get("id") or "file-tool")
 
     @staticmethod
-    def _error(name: str, tool_call_id: str, code: str) -> ToolMessage:
-        """输出不含源码、路径外信息或 backend 异常文本的 JSON 错误。"""
-        return _message(
-            name or "filesystem",
-            tool_call_id,
-            {
-                "ok": False,
-                "error": {
-                    "code": code,
-                    "message": _error_message(code),
-                    "next_action": _next_action(code),
-                },
-            },
-            status="error",
-        )
+    def _error(name: str, tool_call_id: str, code: str, *, edit_index: int | None = None) -> ToolMessage:
+        """输出不含源码、路径外信息或 backend 异常文本的 JSON 错误。
+
+        edit_index 仅在批量 edits[] 的某一项出错时出现（从 0 开始），让模型只修正那一项。
+        """
+        error: dict[str, Any] = {
+            "code": code,
+            "message": _error_message(code),
+            "next_action": _next_action(code),
+        }
+        if edit_index is not None:
+            error["edit_index"] = edit_index
+        return _message(name or "filesystem", tool_call_id, {"ok": False, "error": error}, status="error")
 
 
 def create_snapshot_file_tool_contract(

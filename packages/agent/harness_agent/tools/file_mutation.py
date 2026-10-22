@@ -50,6 +50,8 @@ class MutationMetadata:
     thread_id: str
     tool_call_id: str
     snapshot_id: str | None = None
+    edit_count: int = 1
+    """edit_file 一次调用合并的修改处数，仅用于审批文案；不含任何原始参数。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +215,7 @@ class FileMutationService:
                 details.description,
                 f"操作：{operation}",
                 f"文件：{plan.metadata.path}",
+                *((f"修改处数：{plan.metadata.edit_count}",) if plan.metadata.operation == "edit" else ()),
                 f"变更：+{plan.diff.added_lines} / -{plan.diff.removed_lines} 行 {diff_note}".rstrip(),
                 "以下是拟议内容的有界 diff 预览；批准将提交本次调用已固定的完整拟议内容：",
                 plan.diff.text or "（空文件内容变更）",

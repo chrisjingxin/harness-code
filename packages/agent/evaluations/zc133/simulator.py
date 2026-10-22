@@ -36,6 +36,8 @@ class SimulationOutcome:
     writes: int
     schema_valid: bool
     content: str
+    edit_index: int | None = None
+    """批内失败时指向 `edits` 的下标；非批量调用或与某一项无关的失败为 None。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,10 @@ class _LineEdit:
     end_line: int
     new_text: str
     insertion: bool = False
+
+
+MAX_EDITS_PER_CALL = 20
+"""与 HC-185 Spec §2.1 一致的单次调用 edits 数量上限。"""
 
 
 def content_hash(content: str) -> str:
@@ -107,6 +113,7 @@ def _failure(
     content: str,
     *,
     schema_valid: bool = True,
+    edit_index: int | None = None,
 ) -> SimulationOutcome:
     """构造不写盘的稳定失败结果。"""
 
@@ -117,6 +124,7 @@ def _failure(
         writes=0,
         schema_valid=schema_valid,
         content=content,
+        edit_index=edit_index,
     )
 
 
@@ -198,6 +206,8 @@ class InMemoryEditSimulator:
 
         if candidate == "exact-string":
             return self._execute_exact(args, thread_id=thread_id, commit_content=commit_content)
+        if candidate == "exact-string-edits":
+            return self._execute_exact_edits(args, thread_id=thread_id, commit_content=commit_content)
         if candidate.startswith("snapshot-"):
             return self._execute_snapshot(candidate, args, thread_id=thread_id, commit_content=commit_content)
         return _failure("UNKNOWN_CANDIDATE", self.current_content, schema_valid=False)
@@ -247,6 +257,86 @@ class InMemoryEditSimulator:
             proposed = self.baseline_content.replace(old_text, new_text, 1)
         if proposed == self.current_content:
             return _failure("NO_CHANGES", self.current_content)
+        if commit_content is not None:
+            self.current_content = commit_content
+            return _failure("COMMIT_CONFLICT", self.current_content)
+        self.current_content = proposed
+        return SimulationOutcome(True, None, True, 1, True, self.current_content)
+
+    def _execute_exact_edits(
+        self,
+        args: dict[str, Any],
+        *,
+        thread_id: str,
+        commit_content: str | None,
+    ) -> SimulationOutcome:
+        """执行 HC-185 的同文件批量 exact-string 候选（对照 Spec §3，独立于生产实现）。
+
+        输入 → 形状/数量 → Snapshot 身份 → 每项在同一份提交前内容里精确唯一匹配并落在
+        已读范围内 → 区间互不重叠 → 一次性合成新全文并只写一次。任何一步失败都零写入。
+        """
+
+        content = self.current_content
+        snapshot_id = args.get("snapshot_id")
+        if not isinstance(snapshot_id, str):
+            return _failure("INVALID_TOOL_ARGS", content, schema_valid=False)
+        edits = args.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return _failure("FILE_TOOL_SCHEMA_INVALID", content, schema_valid=False)
+        if len(edits) > MAX_EDITS_PER_CALL:
+            return _failure("TOO_MANY_EDITS", content)
+        for index, item in enumerate(edits):
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"old_string", "new_string"}
+                or not isinstance(item["old_string"], str)
+                or not isinstance(item["new_string"], str)
+            ):
+                return _failure("FILE_TOOL_SCHEMA_INVALID", content, schema_valid=False, edit_index=index)
+        snapshot = self.snapshot
+        if snapshot is None:
+            return _failure("SNAPSHOT_EXPIRED", content)
+        if (
+            snapshot_id != snapshot.snapshot_id
+            or thread_id != snapshot.thread_id
+            or args.get("file_path") != snapshot.path
+        ):
+            return _failure("SNAPSHOT_SCOPE_MISMATCH", content)
+        if content_hash(content) != snapshot.content_hash:
+            return _failure("STALE_FILE", content)
+
+        empty_indexes = [index for index, item in enumerate(edits) if item["old_string"] == ""]
+        if empty_indexes:
+            # 空 old_string 只允许单独初始化零字节的空文件，绝不在非空文件里猜插入位置。
+            if len(edits) > 1 or content != "":
+                return _failure("INVALID_EDIT", content, edit_index=empty_indexes[0])
+            proposed = edits[0]["new_string"]
+        else:
+            spans: list[tuple[int, int, int, str]] = []
+            for index, item in enumerate(edits):
+                old = item["old_string"]
+                start = content.find(old)
+                if start < 0:
+                    return _failure("EXACT_MATCH_NOT_FOUND", content, edit_index=index)
+                if content.find(old, start + 1) >= 0:
+                    return _failure("AMBIGUOUS_MATCH", content, edit_index=index)
+                first_line = content[:start].count("\n") + 1
+                touched = max(1, old.count("\n") + (0 if old.endswith("\n") else 1))
+                if not any(
+                    seen_start <= first_line and first_line + touched - 1 <= seen_end
+                    for seen_start, seen_end in snapshot.seen_lines
+                ):
+                    return _failure("UNREAD_RANGE", content, edit_index=index)
+                spans.append((start, start + len(old), index, item["new_string"]))
+            spans.sort(key=lambda span: (span[0], span[2]))
+            for previous, following in zip(spans, spans[1:]):
+                if following[0] < previous[1]:
+                    return _failure("OVERLAPPING_EDITS", content, edit_index=following[2])
+            proposed = content
+            for start, end, _index, new in reversed(spans):
+                proposed = proposed[:start] + new + proposed[end:]
+        if proposed == content:
+            return _failure("NO_CHANGES", content)
         if commit_content is not None:
             self.current_content = commit_content
             return _failure("COMMIT_CONFLICT", self.current_content)

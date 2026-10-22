@@ -7,7 +7,7 @@ import json
 import pytest
 
 from evaluations.zc133.cli import main
-from evaluations.zc133.fixtures import fixture_catalog
+from evaluations.zc133.fixtures import batch_fixture_catalog, fixture_catalog
 from evaluations.zc133.runner import (
     CANDIDATE_SPECS,
     build_replay_calls,
@@ -208,3 +208,118 @@ def test_report_json_has_no_attempt_payloads() -> None:
     assert "args" not in encoded
     data = json.loads(encoded)
     assert all("fixture_id" not in summary for summary in data["candidates"])
+
+
+# ---------------------------------------------------------------------------
+# HC-185：同文件批量编辑（exact-string-edits）
+# ---------------------------------------------------------------------------
+
+
+def _batch(fixture_id: str):
+    return next(item for item in batch_fixture_catalog() if item.fixture_id == fixture_id)
+
+
+def _run_batch_call(fixture_id: str):
+    """读一次、回放 exact-string-edits 的单次调用，返回 (simulator, outcome)。"""
+    fixture = _batch(fixture_id)
+    spec = next(item for item in CANDIDATE_SPECS if item.name == "exact-string-edits")
+    simulator = InMemoryEditSimulator(fixture)
+    assert simulator.read(
+        thread_id=fixture.thread_id,
+        path=fixture.path,
+        start_line=fixture.read_start,
+        end_line=fixture.read_end,
+    ) is not None
+    call = build_replay_calls(fixture, spec)[0]
+    return fixture, simulator, simulator.execute(spec.name, call, thread_id=fixture.call_thread_id)
+
+
+def test_exact_string_edits_is_appended_after_the_existing_candidates() -> None:
+    """新候选追加在末尾，不打乱按位置取候选的既有断言。"""
+    assert CANDIDATE_SPECS[-1].name == "exact-string-edits"
+    assert CANDIDATE_SPECS[0].name == "exact-string"
+
+
+def test_same_turn_baseline_reproduces_stale_file_and_edits_candidate_finishes_in_one_call() -> None:
+    """线上失败的复现：基线连发扁平调用且不重读，第二个起 STALE_FILE；新候选一次完成。"""
+    report = run_mock_evaluation(repetitions=1)
+    for fixture_id in ("same-turn-2-edits", "same-turn-8-edits"):
+        baseline = next(
+            a for a in report.batch_attempts
+            if a.fixture_id == fixture_id and a.candidate == "exact-string"
+        )
+        assert baseline.completed is False
+        assert baseline.error_code == "STALE_FILE"
+        edits = next(
+            a for a in report.batch_attempts
+            if a.fixture_id == fixture_id and a.candidate == "exact-string-edits"
+        )
+        assert edits.completed is True
+        assert edits.tool_calls == 1
+        assert edits.partial_write is False
+        assert edits.silent_corruption is False
+    eight = next(item for item in batch_fixture_catalog() if item.fixture_id == "same-turn-8-edits")
+    assert len(eight.operations) == 8
+
+
+def test_batch_failures_write_nothing_and_report_the_failing_index() -> None:
+    """批内任一项失败：文件逐字节不变，错误码与 edit_index 符合 Spec §2.3。"""
+    expectations = {
+        "batch-item-not-found": ("EXACT_MATCH_NOT_FOUND", 1),
+        "batch-item-ambiguous": ("AMBIGUOUS_MATCH", 0),
+        "batch-overlap-identical": ("OVERLAPPING_EDITS", 1),
+        "batch-overlap-nested": ("OVERLAPPING_EDITS", 1),
+        "batch-out-of-seen-range": ("UNREAD_RANGE", 1),
+        "batch-empty-file-mixed": ("INVALID_EDIT", 0),
+        "batch-too-many": ("TOO_MANY_EDITS", None),
+        "batch-malformed-empty": ("FILE_TOOL_SCHEMA_INVALID", None),
+        "batch-malformed-not-list": ("FILE_TOOL_SCHEMA_INVALID", None),
+        "batch-malformed-missing-field": ("FILE_TOOL_SCHEMA_INVALID", 0),
+        "batch-malformed-extra-field": ("FILE_TOOL_SCHEMA_INVALID", 0),
+        "batch-malformed-non-string": ("FILE_TOOL_SCHEMA_INVALID", 0),
+    }
+    for fixture_id, (code, index) in expectations.items():
+        fixture, simulator, outcome = _run_batch_call(fixture_id)
+        assert outcome.ok is False, fixture_id
+        assert outcome.code == code, fixture_id
+        assert outcome.edit_index == index, fixture_id
+        assert outcome.writes == 0, fixture_id
+        assert simulator.current_content == fixture.source, fixture_id
+
+
+def test_batch_adjacent_and_reverse_order_succeed_with_one_write() -> None:
+    """首尾相接不算重叠；edits 顺序不要求等于文件顺序。"""
+    for fixture_id in ("batch-adjacent-allowed", "batch-reverse-order"):
+        fixture, simulator, outcome = _run_batch_call(fixture_id)
+        assert outcome.ok is True, fixture_id
+        assert outcome.writes == 1
+        assert simulator.current_content == fixture.expected_content
+
+
+def test_batch_report_is_separate_from_the_baseline_decision_and_meets_gate() -> None:
+    """HC-185 停点 A 通过标准：零 silent corruption/partial write，批量场景全部符合预期。"""
+    report = run_mock_evaluation(repetitions=1)
+    edits = next(s for s in report.summaries if s.candidate == "exact-string-edits")
+    baseline = next(s for s in report.summaries if s.candidate == "exact-string")
+    assert edits.silent_corruption_count == 0
+    assert edits.partial_write_count == 0
+    assert edits.completion_ci95[0] >= baseline.completion_ci95[0]
+    batch_edits = next(s for s in report.batch_summaries if s.candidate == "exact-string-edits")
+    assert batch_edits.completed_attempts == batch_edits.attempts
+    assert batch_edits.silent_corruption_count == 0
+    assert batch_edits.partial_write_count == 0
+    # 批量 fixture 不进入原 fixture 统计，也不改变 mock 下的保守决策。
+    assert report.fixture_count == len(fixture_catalog())
+    assert report.decision == "exact-string"
+    assert "exact-string-edits" in report.decision_reason
+
+
+def test_batch_markdown_report_has_no_payloads(tmp_path) -> None:
+    """批量报告同样只含 fixture ID 与聚合数字。"""
+    report = run_mock_evaluation(repetitions=1)
+    json_path, markdown_path = write_report(report, tmp_path)
+    encoded = json_path.read_text(encoding="utf-8")
+    assert "batch_fixture_ids" in encoded
+    assert "old_string" not in encoded
+    assert "new_string" not in encoded
+    assert "HC-185" in markdown_path.read_text(encoding="utf-8")

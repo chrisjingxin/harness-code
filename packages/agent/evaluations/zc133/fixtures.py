@@ -7,10 +7,15 @@ fixture 只包含去业务化文本和期望操作。评测报告只写入 fixtu
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 
 FIXTURE_VERSION = "zc133-v1"
+BATCH_FIXTURE_VERSION = "hc185-v1"
+"""HC-185 同文件批量编辑的独立 fixture 版本；不改变 zc133-v1 的 24 个原场景。"""
+
+UNSET: Any = object()
+"""`custom_edits` 的“未提供”哨兵：None/[]/字符串都是需要原样回放的畸形取值。"""
 OperationKind = Literal["replace", "insert", "delete", "write"]
 InsertAction = Literal["before", "after"]
 Scenario = Literal["success", "expected_error", "recovery"]
@@ -50,6 +55,14 @@ class EvaluationFixture:
     path: str = "/src/fixture.txt"
     thread_id: str = "thread-a"
     backend_id: str = "local-fixture"
+    same_turn: bool = False
+    """同一轮模型输出的 N 个调用共用一个 snapshot_id，中间不重读（复现线上自我作废）。"""
+    custom_edits: Any = UNSET
+    """仅供 `exact-string-edits` 候选：原样作为 `edits` 参数回放，用于构造畸形或乱序入参。"""
+    edits_only: bool = False
+    """只对 `exact-string-edits` 有意义的场景；基线 exact-string 不运行。"""
+    expected_edit_index: int | None = None
+    """expected_error 场景下，错误应指向的 `edits` 数组下标。"""
 
 
 def split_source_lines(content: str) -> list[str]:
@@ -132,6 +145,10 @@ def _fixture(
     call_path: str = "/src/fixture.txt",
     expire_snapshot: bool = False,
     wrong_valid_range: bool = False,
+    same_turn: bool = False,
+    custom_edits: Any = UNSET,
+    edits_only: bool = False,
+    expected_edit_index: int | None = None,
 ) -> EvaluationFixture:
     """创建 fixture 并集中计算成功场景的期望内容。"""
 
@@ -153,6 +170,10 @@ def _fixture(
         call_path=call_path,
         expire_snapshot=expire_snapshot,
         wrong_valid_range=wrong_valid_range,
+        same_turn=same_turn,
+        custom_edits=custom_edits,
+        edits_only=edits_only,
+        expected_edit_index=expected_edit_index,
     )
 
 
@@ -291,5 +312,115 @@ def fixture_catalog() -> tuple[EvaluationFixture, ...]:
             "invalid-range", "invalid-range", "越过文件末尾的范围必须拒绝", single, 1, 2,
             (FixtureOperation("replace", 99, 99, "invalid"),),
             scenario="expected_error", expected_error="INVALID_RANGE",
+        ),
+    )
+
+
+def batch_fixture_catalog() -> tuple[EvaluationFixture, ...]:
+    """返回 HC-185 的同文件批量编辑 fixture：同轮多编辑与批内失败场景。
+
+    same-turn 类用来复现线上失败：基线对同一 snapshot_id 连发多个扁平调用，第二个起
+    被拒；`exact-string-edits` 只发一次调用。edits_only 类验证批内规则，失败必须零写入。
+    """
+
+    multi = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
+    sixteen = "".join(f"line {number:02d}\n" for number in range(1, 17))
+    duplicate = 'def first():\n    return "same"\n\ndef second():\n    return "same"\n'
+    eight_ops = tuple(
+        FixtureOperation("replace", line, line, f"LINE {line:02d}") for line in range(1, 16, 2)
+    )
+
+    def edit(old: str, new: str) -> dict[str, str]:
+        return {"old_string": old, "new_string": new}
+
+    return (
+        _fixture(
+            "same-turn-2-edits", "same-turn", "同一轮对同一文件连发两个编辑", multi, 1, 8,
+            (
+                FixtureOperation("replace", 2, 2, "TWO"),
+                FixtureOperation("replace", 6, 6, "SIX"),
+            ),
+            same_turn=True,
+        ),
+        _fixture(
+            "same-turn-8-edits", "same-turn", "同一轮对同一文件连发八个编辑（对应线上 Run 1327ba32）",
+            sixteen, 1, 16, eight_ops, same_turn=True,
+        ),
+        _fixture(
+            "batch-adjacent-allowed", "batch-success", "首尾相接的两处编辑不算重叠", multi, 1, 8,
+            (
+                FixtureOperation("replace", 2, 2, "TWO"),
+                FixtureOperation("replace", 3, 3, "THREE"),
+            ),
+            edits_only=True,
+        ),
+        _fixture(
+            "batch-reverse-order", "batch-success", "edits 顺序与文件顺序相反仍应成功", multi, 1, 8,
+            (
+                FixtureOperation("replace", 2, 2, "TWO"),
+                FixtureOperation("replace", 6, 6, "SIX"),
+            ),
+            custom_edits=[edit("six\n", "SIX\n"), edit("two\n", "TWO\n")],
+            edits_only=True,
+        ),
+        _fixture(
+            "batch-item-not-found", "batch-failure", "第 1 处找不到，整批零写入", multi, 1, 8, (),
+            scenario="expected_error", expected_error="EXACT_MATCH_NOT_FOUND", expected_edit_index=1,
+            custom_edits=[edit("two\n", "TWO\n"), edit("missing\n", "x\n")], edits_only=True,
+        ),
+        _fixture(
+            "batch-item-ambiguous", "batch-failure", "第 0 处在文件中不唯一，整批零写入", duplicate, 1, 5, (),
+            scenario="expected_error", expected_error="AMBIGUOUS_MATCH", expected_edit_index=0,
+            custom_edits=[edit('    return "same"\n', '    return "x"\n')], edits_only=True,
+        ),
+        _fixture(
+            "batch-overlap-identical", "batch-failure", "两处完全相同的编辑视为重叠", multi, 1, 8, (),
+            scenario="expected_error", expected_error="OVERLAPPING_EDITS", expected_edit_index=1,
+            custom_edits=[edit("two\n", "A\n"), edit("two\n", "B\n")], edits_only=True,
+        ),
+        _fixture(
+            "batch-overlap-nested", "batch-failure", "一处完全包含另一处视为重叠", multi, 1, 8, (),
+            scenario="expected_error", expected_error="OVERLAPPING_EDITS", expected_edit_index=1,
+            custom_edits=[edit("three\nfour\n", "X\n"), edit("four\n", "Y\n")], edits_only=True,
+        ),
+        _fixture(
+            "batch-out-of-seen-range", "batch-failure", "第 1 处落在未读范围，整批零写入", multi, 1, 4, (),
+            scenario="expected_error", expected_error="UNREAD_RANGE", expected_edit_index=1,
+            custom_edits=[edit("two\n", "TWO\n"), edit("six\n", "SIX\n")], edits_only=True,
+        ),
+        _fixture(
+            "batch-empty-file-mixed", "batch-failure", "空 old_string 与其他项混用必须拒绝", "", 1, 1, (),
+            scenario="expected_error", expected_error="INVALID_EDIT", expected_edit_index=0,
+            custom_edits=[edit("", "a\n"), edit("x", "y")], edits_only=True,
+        ),
+        _fixture(
+            "batch-too-many", "batch-failure", "超过 20 项必须拒绝", multi, 1, 8, (),
+            scenario="expected_error", expected_error="TOO_MANY_EDITS",
+            custom_edits=[edit("two\n", "TWO\n")] * 21, edits_only=True,
+        ),
+        _fixture(
+            "batch-malformed-empty", "batch-malformed", "edits 为空数组", multi, 1, 8, (),
+            scenario="expected_error", expected_error="FILE_TOOL_SCHEMA_INVALID",
+            custom_edits=[], edits_only=True,
+        ),
+        _fixture(
+            "batch-malformed-not-list", "batch-malformed", "edits 不是数组", multi, 1, 8, (),
+            scenario="expected_error", expected_error="FILE_TOOL_SCHEMA_INVALID",
+            custom_edits="oops", edits_only=True,
+        ),
+        _fixture(
+            "batch-malformed-missing-field", "batch-malformed", "项缺少 new_string", multi, 1, 8, (),
+            scenario="expected_error", expected_error="FILE_TOOL_SCHEMA_INVALID", expected_edit_index=0,
+            custom_edits=[{"old_string": "two\n"}], edits_only=True,
+        ),
+        _fixture(
+            "batch-malformed-extra-field", "batch-malformed", "项带有多余字段", multi, 1, 8, (),
+            scenario="expected_error", expected_error="FILE_TOOL_SCHEMA_INVALID", expected_edit_index=0,
+            custom_edits=[{"old_string": "two\n", "new_string": "x\n", "replace_all": True}], edits_only=True,
+        ),
+        _fixture(
+            "batch-malformed-non-string", "batch-malformed", "项字段不是字符串", multi, 1, 8, (),
+            scenario="expected_error", expected_error="FILE_TOOL_SCHEMA_INVALID", expected_edit_index=0,
+            custom_edits=[{"old_string": "two\n", "new_string": 1}], edits_only=True,
         ),
     )

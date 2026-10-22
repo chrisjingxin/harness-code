@@ -13,7 +13,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from .fixtures import FIXTURE_VERSION, EvaluationFixture, FixtureOperation, fixture_catalog, line_block
+from .fixtures import (
+    BATCH_FIXTURE_VERSION,
+    FIXTURE_VERSION,
+    UNSET,
+    EvaluationFixture,
+    FixtureOperation,
+    batch_fixture_catalog,
+    fixture_catalog,
+    line_block,
+)
 from .simulator import InMemoryEditSimulator, SimulationOutcome, expected_old_text
 
 
@@ -32,7 +41,12 @@ CANDIDATE_SPECS: tuple[CandidateSpec, ...] = (
     CandidateSpec("snapshot-single-zero-width", "snapshot-single", "zero-width"),
     CandidateSpec("snapshot-edits-explicit", "snapshot-edits", "explicit-action"),
     CandidateSpec("snapshot-edits-zero-width", "snapshot-edits", "zero-width"),
+    # HC-185：生产 exact-string 契约的同文件批量扩展，追加在末尾以免打乱按位置取候选的断言。
+    CandidateSpec("exact-string-edits", "exact-string-edits", "anchor-string"),
 )
+
+BATCH_CANDIDATES = ("exact-string", "exact-string-edits")
+"""同文件批量 fixture 只比较生产基线与 HC-185 候选。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +68,7 @@ class EvaluationAttempt:
     input_tokens: int
     output_tokens: int
     latency_ms: float
+    edit_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +145,10 @@ class EvaluationReport:
     decision: str
     decision_reason: str
     attempts: tuple[EvaluationAttempt, ...]
+    batch_fixture_version: str = BATCH_FIXTURE_VERSION
+    batch_fixture_ids: tuple[str, ...] = ()
+    batch_summaries: tuple[CandidateSummary, ...] = ()
+    batch_attempts: tuple[EvaluationAttempt, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """转换为可落盘的去敏 JSON。"""
@@ -146,6 +165,9 @@ class EvaluationReport:
             "decision": self.decision,
             "decision_reason": self.decision_reason,
             "candidates": [summary.to_dict() for summary in self.summaries],
+            "batch_fixture_version": self.batch_fixture_version,
+            "batch_fixture_ids": list(self.batch_fixture_ids),
+            "batch_candidates": [summary.to_dict() for summary in self.batch_summaries],
         }
 
 
@@ -206,13 +228,7 @@ def _exact_call(fixture: EvaluationFixture, operation: FixtureOperation, index: 
             "name": "write_file",
             "args": {"file_path": fixture.call_path, "content": operation.new_text},
         }
-    old_text = expected_old_text(fixture, index)
-    if operation.kind == "insert":
-        anchor = old_text
-        inserted = _inserted_text(operation, fixture.source)
-        new_text = inserted + anchor if operation.insert_action == "before" else anchor + inserted
-    else:
-        new_text = _with_line_ending(operation.new_text, old_text, fixture.source)
+    old_text, new_text = _exact_pair(fixture, operation, index)
     return {
         "name": "edit_file",
         "args": {
@@ -220,6 +236,42 @@ def _exact_call(fixture: EvaluationFixture, operation: FixtureOperation, index: 
             "snapshot_id": f"snap-{fixture.fixture_id}",
             "old_string": old_text,
             "new_string": new_text,
+        },
+    }
+
+
+def _exact_pair(fixture: EvaluationFixture, operation: FixtureOperation, index: int) -> tuple[str, str]:
+    """把一个 fixture 操作投影为 exact-string 的 (old_string, new_string)。"""
+
+    old_text = expected_old_text(fixture, index)
+    if operation.kind == "insert":
+        anchor = old_text
+        inserted = _inserted_text(operation, fixture.source)
+        new_text = inserted + anchor if operation.insert_action == "before" else anchor + inserted
+    else:
+        new_text = _with_line_ending(operation.new_text, old_text, fixture.source)
+    return old_text, new_text
+
+
+def _batch_edits_call(fixture: EvaluationFixture) -> dict[str, object]:
+    """生成 `exact-string-edits` 的单次调用；custom_edits 原样回放以构造畸形入参。"""
+
+    if fixture.custom_edits is not UNSET:
+        edits: object = fixture.custom_edits
+    else:
+        edits = [
+            {"old_string": old, "new_string": new}
+            for old, new in (
+                _exact_pair(fixture, operation, index)
+                for index, operation in enumerate(fixture.operations)
+            )
+        ]
+    return {
+        "name": "edit_file",
+        "args": {
+            "file_path": fixture.call_path,
+            "snapshot_id": f"snap-{fixture.fixture_id}",
+            "edits": edits,
         },
     }
 
@@ -253,6 +305,8 @@ def build_replay_calls(fixture: EvaluationFixture, spec: CandidateSpec) -> tuple
     if any(operation.kind == "write" for operation in fixture.operations):
         operation = fixture.operations[0]
         return ({"name": "write_file", "args": {"file_path": fixture.call_path, "content": operation.new_text}},)
+    if spec.family == "exact-string-edits":
+        return (_batch_edits_call(fixture),)
 
     operations = list(fixture.operations)
     if fixture.wrong_valid_range:
@@ -314,7 +368,7 @@ def _attempt(
     outcomes: list[SimulationOutcome] = []
     rereads = 1
     for index, call in enumerate(calls):
-        if spec.family == "exact-string" and index > 0:
+        if spec.family == "exact-string" and index > 0 and not fixture.same_turn:
             simulator.read(
                 thread_id=fixture.thread_id,
                 path=fixture.path,
@@ -339,7 +393,11 @@ def _attempt(
     expected_final = fixture.expected_content
     if fixture.scenario == "expected_error":
         expected_final = fixture.external_before_commit or fixture.external_after_read or fixture.source
-        completed = any(outcome.code == fixture.expected_error for outcome in outcomes)
+        completed = any(
+            outcome.code == fixture.expected_error
+            and (fixture.expected_edit_index is None or outcome.edit_index == fixture.expected_edit_index)
+            for outcome in outcomes
+        )
     else:
         completed = final_content == expected_final and bool(outcomes) and outcomes[-1].ok
     partial_write = any(
@@ -369,6 +427,7 @@ def _attempt(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         latency_ms=(time.perf_counter() - started) * 1000,
+        edit_index=next((o.edit_index for o in reversed(outcomes) if o.edit_index is not None), None),
     )
 
 
@@ -446,6 +505,12 @@ def _choose_decision(summaries: Iterable[CandidateSummary], *, mode: str) -> tup
         if mode == "mock":
             reason += "；mock replay 不能替代真实企业弱模型证据"
         return "exact-string", reason
+    if mode == "mock":
+        names = ", ".join(summary.candidate for summary in eligible)
+        return (
+            "exact-string",
+            f"mock 下通过安全门槛的候选：{names}；mock replay 不能替代真实企业弱模型证据，仅作为设计评审输入",
+        )
     selected = max(eligible, key=lambda summary: (summary.completion_rate, -summary.median_input_tokens))
     return selected.candidate, "候选满足安全门槛和基线完成率下界，可进入设计评审"
 
@@ -459,6 +524,8 @@ def _build_report(
     profile_id: str | None = None,
     model_name: str | None = None,
     provider_label: str | None = None,
+    batch_fixtures: tuple[EvaluationFixture, ...] = (),
+    batch_attempts: list[EvaluationAttempt] | None = None,
 ) -> EvaluationReport:
     """构造聚合报告。"""
 
@@ -471,6 +538,12 @@ def _build_report(
         if any(attempt.candidate == spec.name for attempt in attempts)
     )
     decision, reason = _choose_decision(summaries, mode=mode)
+    batch_list = batch_attempts or []
+    batch_summaries = tuple(
+        _summarize(spec, [attempt for attempt in batch_list if attempt.candidate == spec.name])
+        for spec in CANDIDATE_SPECS
+        if any(attempt.candidate == spec.name for attempt in batch_list)
+    )
     return EvaluationReport(
         mode=mode,
         fixture_version=FIXTURE_VERSION,
@@ -484,6 +557,9 @@ def _build_report(
         decision=decision,
         decision_reason=reason,
         attempts=tuple(attempts),
+        batch_fixture_ids=tuple(fixture.fixture_id for fixture in batch_fixtures),
+        batch_summaries=batch_summaries,
+        batch_attempts=tuple(batch_list),
     )
 
 
@@ -492,22 +568,40 @@ def run_mock_evaluation(
     repetitions: int = 3,
     candidates: tuple[CandidateSpec, ...] = CANDIDATE_SPECS,
     fixtures: tuple[EvaluationFixture, ...] | None = None,
+    batch_fixtures: tuple[EvaluationFixture, ...] | None = None,
 ) -> EvaluationReport:
-    """运行默认 mock replay；不访问模型、密钥或真实工作区。"""
+    """运行默认 mock replay；不访问模型、密钥或真实工作区。
+
+    batch_fixtures（HC-185 同轮多编辑与批内失败场景）单独统计，不进入基线对比的决策。
+    默认仅在使用默认 fixture 目录时附带运行。
+    """
 
     if repetitions < 1:
         raise ValueError("repetitions must be positive")
     selected_fixtures = fixtures or fixture_catalog()
+    selected_batch = (
+        batch_fixtures if batch_fixtures is not None else (batch_fixture_catalog() if fixtures is None else ())
+    )
     attempts: list[EvaluationAttempt] = []
+    batch_attempts: list[EvaluationAttempt] = []
     for repetition in range(1, repetitions + 1):
         for fixture in selected_fixtures:
             for spec in candidates:
                 attempts.append(_attempt(fixture, spec, repetition, build_replay_calls(fixture, spec)))
+        for fixture in selected_batch:
+            for spec in candidates:
+                if spec.name not in BATCH_CANDIDATES:
+                    continue
+                if fixture.edits_only and spec.name != "exact-string-edits":
+                    continue
+                batch_attempts.append(_attempt(fixture, spec, repetition, build_replay_calls(fixture, spec)))
     return _build_report(
         mode="mock",
         fixtures=selected_fixtures,
         repetitions=repetitions,
         attempts=attempts,
+        batch_fixtures=selected_batch,
+        batch_attempts=batch_attempts,
     )
 
 
@@ -613,6 +707,20 @@ def _model_prompt(fixture: EvaluationFixture, spec: CandidateSpec) -> str:
             separators=(",", ":"),
         )
         syntax_note = "已读文件为空时，使用空 old_string 写入初始内容；非空文件不能使用空匹配。"
+    elif spec.family == "exact-string-edits":
+        contract = json.dumps(
+            {
+                "tool": "edit_file",
+                "args": {
+                    "file_path": path,
+                    "snapshot_id": snapshot_id,
+                    "edits": [{"old_string": "...", "new_string": "..."}],
+                },
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        syntax_note = "同一文件的多处修改放进同一次调用的 edits；每处 old_string 必须取自已读内容且唯一。"
     elif spec.family == "snapshot-single":
         contract = json.dumps(
             {
@@ -797,6 +905,21 @@ def write_report(report: EvaluationReport, output_dir: Path) -> tuple[Path, Path
             f"{summary.median_input_tokens:.1f} | {summary.median_tool_calls:.1f} | "
             f"{summary.median_rereads:.1f} |"
         )
+    if report.batch_summaries:
+        rows.extend([
+            "",
+            f"## HC-185 同文件批量编辑（fixture `{report.batch_fixture_version}`，{len(report.batch_fixture_ids)} 个，不计入上方决策）",
+            "",
+            "| candidate | attempts | completion | silent corruption | partial write | median tool calls | median rereads | error codes |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ])
+        for summary in report.batch_summaries:
+            codes = ", ".join(f"{code}×{count}" for code, count in sorted(summary.error_codes.items())) or "-"
+            rows.append(
+                f"| `{summary.candidate}` | {summary.attempts} | {summary.completion_rate:.3f} | "
+                f"{summary.silent_corruption_count} | {summary.partial_write_count} | "
+                f"{summary.median_tool_calls:.1f} | {summary.median_rereads:.1f} | {codes} |"
+            )
     rows.extend([
         "",
         "报告只包含 fixture ID、候选名称和聚合指标；不包含合成源码、工具参数、模型原始响应、API Key、Header 或 endpoint。",

@@ -122,8 +122,7 @@ def test_read_returns_short_snapshot_and_edit_requires_seen_unique_text(tmp_path
                 {
                     "file_path": "/sample.py",
                     "snapshot_id": first["snapshot_id"],
-                    "old_string": "second\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "second\n", "new_string": "changed\n"}],
                 },
             )
         )
@@ -142,8 +141,7 @@ def test_read_returns_short_snapshot_and_edit_requires_seen_unique_text(tmp_path
                 {
                     "file_path": "/sample.py",
                     "snapshot_id": second["snapshot_id"],
-                    "old_string": "second\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "second\n", "new_string": "changed\n"}],
                 },
             )
         )
@@ -168,8 +166,7 @@ def test_read_returns_short_snapshot_and_edit_requires_seen_unique_text(tmp_path
                 {
                     "file_path": "/sample.py",
                     "snapshot_id": edited["snapshot_id"],
-                    "old_string": "changed\n",
-                    "new_string": "finished\n",
+                    "edits": [{"old_string": "changed\n", "new_string": "finished\n"}],
                 },
                 call_id="edit-continued",
             )
@@ -196,8 +193,7 @@ def test_empty_file_initialization_uses_current_snapshot_and_returns_editable_re
         {
             "file_path": "/empty.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "",
-            "new_string": "first\nsecond\n",
+            "edits": [{"old_string": "", "new_string": "first\nsecond\n"}],
         },
         call_id="initialize-empty",
     )
@@ -225,8 +221,7 @@ def test_empty_file_initialization_uses_current_snapshot_and_returns_editable_re
                 {
                     "file_path": "/empty.txt",
                     "snapshot_id": initialized["snapshot_id"],
-                    "old_string": "second\n",
-                    "new_string": "finished\n",
+                    "edits": [{"old_string": "second\n", "new_string": "finished\n"}],
                 },
                 call_id="edit-initialized",
             )
@@ -260,8 +255,7 @@ def test_empty_initialization_preserves_bom_mode_and_write_stays_create_only(
                 {
                     "file_path": "/bom-empty.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "created\n",
+                    "edits": [{"old_string": "", "new_string": "created\n"}],
                 },
             )
         )
@@ -289,16 +283,16 @@ def test_empty_old_string_rejects_nonempty_stale_cross_thread_noop_and_oversize(
                 {
                     "file_path": "/nonempty.txt",
                     "snapshot_id": read_nonempty["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "prefix\n",
+                    "edits": [{"old_string": "", "new_string": "prefix\n"}],
                 },
             )
         )
     )
     assert invalid["error"] == {
         "code": "INVALID_EDIT",
-        "message": "空 old_string 只允许初始化当前 Snapshot 对应的空文件。",
-        "next_action": "从已读非空内容复制唯一的 old_string 后重试。",
+        "message": "空 old_string 只允许单独初始化当前 Snapshot 对应的空文件。",
+        "next_action": "非空文件请从已读内容复制唯一的 old_string；空文件初始化只能在 edits 中单独一项。",
+        "edit_index": 0,
     }
     assert nonempty.read_text(encoding="utf-8") == "existing\n"
 
@@ -315,8 +309,7 @@ def test_empty_old_string_rejects_nonempty_stale_cross_thread_noop_and_oversize(
                 {
                     "file_path": "/stale-empty.txt",
                     "snapshot_id": stale_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "approved\n",
+                    "edits": [{"old_string": "", "new_string": "approved\n"}],
                 },
             )
         )
@@ -338,8 +331,7 @@ def test_empty_old_string_rejects_nonempty_stale_cross_thread_noop_and_oversize(
                 {
                     "file_path": "/cross-empty.txt",
                     "snapshot_id": cross_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "cross\n",
+                    "edits": [{"old_string": "", "new_string": "cross\n"}],
                 },
                 thread_id="thread-b",
             )
@@ -358,8 +350,7 @@ def test_empty_old_string_rejects_nonempty_stale_cross_thread_noop_and_oversize(
                 {
                     "file_path": "/noop-empty.txt",
                     "snapshot_id": noop_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "",
+                    "edits": [{"old_string": "", "new_string": ""}],
                 },
             )
         )
@@ -378,8 +369,7 @@ def test_empty_old_string_rejects_nonempty_stale_cross_thread_noop_and_oversize(
                 {
                     "file_path": "/oversized-empty.txt",
                     "snapshot_id": oversized_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "x" * (64 * 1024 + 1),
+                    "edits": [{"old_string": "", "new_string": "x" * (64 * 1024 + 1)}],
                 },
             )
         )
@@ -402,8 +392,7 @@ def test_truncated_empty_initialization_diff_remains_approvable_and_fingerprint_
         {
             "file_path": "/large-empty.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "",
-            "new_string": initial_content,
+            "edits": [{"old_string": "", "new_string": initial_content}],
         },
         call_id="large-empty-approval",
     )
@@ -428,8 +417,7 @@ def test_truncated_empty_initialization_diff_remains_approvable_and_fingerprint_
         {
             "file_path": "/bound-empty.txt",
             "snapshot_id": bound_read["snapshot_id"],
-            "old_string": "",
-            "new_string": initial_content,
+            "edits": [{"old_string": "", "new_string": initial_content}],
         },
         call_id="bound-empty-approval",
     )
@@ -440,8 +428,7 @@ def test_truncated_empty_initialization_diff_remains_approvable_and_fingerprint_
         {
             "file_path": "/bound-empty.txt",
             "snapshot_id": bound_read["snapshot_id"],
-            "old_string": "",
-            "new_string": "not-approved\n",
+            "edits": [{"old_string": "", "new_string": "not-approved\n"}],
         },
         call_id="bound-empty-approval",
     )
@@ -469,8 +456,7 @@ def test_empty_initialization_conflict_consumes_approval_and_drift_returns_actua
         {
             "file_path": "/conflict-empty.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "",
-            "new_string": "approved\n",
+            "edits": [{"old_string": "", "new_string": "approved\n"}],
         },
         call_id="empty-conflict",
     )
@@ -507,8 +493,7 @@ def test_empty_initialization_conflict_consumes_approval_and_drift_returns_actua
                 {
                     "file_path": "/drift-empty.txt",
                     "snapshot_id": drift_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "approved\n",
+                    "edits": [{"old_string": "", "new_string": "approved\n"}],
                 },
             )
         )
@@ -582,8 +567,7 @@ def test_empty_initialization_uses_remote_native_cas_and_rejects_read_only_provi
                 {
                     "file_path": "/remote.txt",
                     "snapshot_id": native_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "remote\n",
+                    "edits": [{"old_string": "", "new_string": "remote\n"}],
                 },
             )
         )
@@ -606,8 +590,7 @@ def test_empty_initialization_uses_remote_native_cas_and_rejects_read_only_provi
                 {
                     "file_path": "/remote.txt",
                     "snapshot_id": read_only_read["snapshot_id"],
-                    "old_string": "",
-                    "new_string": "must-not-write\n",
+                    "edits": [{"old_string": "", "new_string": "must-not-write\n"}],
                 },
             )
         )
@@ -630,8 +613,7 @@ def test_edit_allows_unique_text_copied_from_middle_of_seen_line(tmp_path: Path)
                 {
                     "file_path": "/inline.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "target",
-                    "new_string": "changed",
+                    "edits": [{"old_string": "target", "new_string": "changed"}],
                 },
             )
         )
@@ -655,8 +637,7 @@ def test_edit_rejects_overlapping_matches_as_ambiguous(tmp_path: Path) -> None:
                 {
                     "file_path": "/overlapping.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "aa",
-                    "new_string": "changed",
+                    "edits": [{"old_string": "aa", "new_string": "changed"}],
                 },
             )
         )
@@ -681,8 +662,7 @@ def test_edit_rejects_stale_cross_thread_ambiguous_and_legacy_parameters(tmp_pat
                 {
                     "file_path": "/sample.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "third\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "third\n", "new_string": "changed\n"}],
                 },
                 thread_id="thread-b",
             )
@@ -697,8 +677,7 @@ def test_edit_rejects_stale_cross_thread_ambiguous_and_legacy_parameters(tmp_pat
                 {
                     "file_path": "/sample.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "same\n",
-                    "new_string": "different\n",
+                    "edits": [{"old_string": "same\n", "new_string": "different\n"}],
                 },
             )
         )
@@ -712,8 +691,7 @@ def test_edit_rejects_stale_cross_thread_ambiguous_and_legacy_parameters(tmp_pat
                 {
                     "file_path": "/sample.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "third\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "third\n", "new_string": "changed\n"}],
                     "replace_all": True,
                 },
             )
@@ -740,8 +718,7 @@ def test_edit_rejects_stale_cross_thread_ambiguous_and_legacy_parameters(tmp_pat
                 {
                     "file_path": "/sample.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "same\n",
-                    "new_string": "different\n",
+                    "edits": [{"old_string": "same\n", "new_string": "different\n"}],
                 },
             )
         )
@@ -833,8 +810,7 @@ def test_large_write_returns_only_bounded_context_but_grants_visible_lines_to_ne
                 {
                     "file_path": "/large.txt",
                     "snapshot_id": written["snapshot_id"],
-                    "old_string": "line-1\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "line-1\n", "new_string": "changed\n"}],
                 },
                 call_id="edit-large-visible-line",
             )
@@ -862,8 +838,7 @@ def test_file_between_64_kib_and_mutation_limit_can_be_created_and_edited(tmp_pa
                 {
                     "file_path": "/medium.txt",
                     "snapshot_id": written["snapshot_id"],
-                    "old_string": "target\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "target\n", "new_string": "changed\n"}],
                 },
             )
         )
@@ -885,8 +860,7 @@ def test_crlf_bom_round_trip_and_schema_have_no_range_or_replace_all(tmp_path: P
                 {
                     "file_path": "/config.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "beta\n",
-                    "new_string": "changed\n",
+                    "edits": [{"old_string": "beta\n", "new_string": "changed\n"}],
                 },
             )
         )
@@ -895,7 +869,7 @@ def test_crlf_bom_round_trip_and_schema_have_no_range_or_replace_all(tmp_path: P
     assert target.read_bytes() == b"\xef\xbb\xbfalpha\r\nchanged\r\n"
 
     schema = next(tool for tool in contract.tool_definitions if tool.name == "edit_file").args_schema.model_json_schema()
-    assert set(schema["properties"]) == {"file_path", "snapshot_id", "old_string", "new_string"}
+    assert set(schema["properties"]) == {"file_path", "snapshot_id", "edits"}
 
 
 def test_truncated_read_never_grants_editable_seen_lines(tmp_path: Path) -> None:
@@ -916,8 +890,7 @@ def test_truncated_read_never_grants_editable_seen_lines(tmp_path: Path) -> None
                 {
                     "file_path": "/long.txt",
                     "snapshot_id": truncated["snapshot_id"],
-                    "old_string": long_line,
-                    "new_string": "changed",
+                    "edits": [{"old_string": long_line, "new_string": "changed"}],
                 },
             )
         )
@@ -979,8 +952,7 @@ def test_approval_diff_is_the_prepared_content_and_conflict_invalidates_approval
         {
             "file_path": "/approval.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "before\n",
-            "new_string": "approved\n",
+            "edits": [{"old_string": "before\n", "new_string": "approved\n"}],
         },
     )
 
@@ -1029,8 +1001,7 @@ def test_approval_rejects_changed_arguments_for_the_same_tool_call(tmp_path: Pat
         {
             "file_path": "/approval-arguments.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "before\n",
-            "new_string": "approved\n",
+            "edits": [{"old_string": "before\n", "new_string": "approved\n"}],
         },
         call_id="edit-approved-arguments",
     )
@@ -1039,8 +1010,7 @@ def test_approval_rejects_changed_arguments_for_the_same_tool_call(tmp_path: Pat
         {
             "file_path": "/approval-arguments.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "before\n",
-            "new_string": "not-approved\n",
+            "edits": [{"old_string": "before\n", "new_string": "not-approved\n"}],
         },
         call_id="edit-approved-arguments",
     )
@@ -1073,8 +1043,7 @@ def test_invalid_snapshot_never_prepares_an_approval(tmp_path: Path) -> None:
         {
             "file_path": "/stale.txt",
             "snapshot_id": read["snapshot_id"],
-            "old_string": "before\n",
-            "new_string": "approved\n",
+            "edits": [{"old_string": "before\n", "new_string": "approved\n"}],
         },
     )
 
@@ -1106,8 +1075,7 @@ def test_post_write_drift_returns_actual_diff_and_snapshot(tmp_path: Path) -> No
                 {
                     "file_path": "/drift.txt",
                     "snapshot_id": read["snapshot_id"],
-                    "old_string": "before\n",
-                    "new_string": "approved\n",
+                    "edits": [{"old_string": "before\n", "new_string": "approved\n"}],
                 },
             )
         )
@@ -1142,8 +1110,7 @@ def test_async_diagnostics_distinguish_zero_timeout_and_unavailable(tmp_path: Pa
                     {
                         "file_path": "/diagnostics.txt",
                         "snapshot_id": read["snapshot_id"],
-                        "old_string": "before\n",
-                        "new_string": "after\n",
+                        "edits": [{"old_string": "before\n", "new_string": "after\n"}],
                     },
                 )
             )
@@ -1173,8 +1140,7 @@ def test_async_diagnostics_distinguish_zero_timeout_and_unavailable(tmp_path: Pa
                     {
                         "file_path": "/timeout.txt",
                         "snapshot_id": timeout_read["snapshot_id"],
-                        "old_string": "before\n",
-                        "new_string": "after\n",
+                        "edits": [{"old_string": "before\n", "new_string": "after\n"}],
                     },
                 )
             )
@@ -1197,8 +1163,7 @@ def test_async_diagnostics_distinguish_zero_timeout_and_unavailable(tmp_path: Pa
                 {
                     "file_path": "/unavailable.txt",
                     "snapshot_id": unavailable_read["snapshot_id"],
-                    "old_string": "before\n",
-                    "new_string": "after\n",
+                    "edits": [{"old_string": "before\n", "new_string": "after\n"}],
                 },
             )
         )
@@ -1306,8 +1271,7 @@ def test_diagnostics_and_metrics_are_bounded_and_do_not_store_source_or_paths(
                     {
                         "file_path": "/secret-name.txt",
                         "snapshot_id": second["snapshot_id"],
-                        "old_string": "secret-source\n",
-                        "new_string": "changed\n",
+                        "edits": [{"old_string": "secret-source\n", "new_string": "changed\n"}],
                     },
                 )
             )
@@ -1459,3 +1423,305 @@ def test_write_file_plan_virtual_path_rejects_when_plan_constraint_closed(tmp_pa
     assert denied["ok"] is False
     assert denied["error"]["code"] == "VIRTUAL_READONLY"
     assert not (home / ".harness" / "plans" / "thread-plan.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# HC-185：同文件批量 edits[]
+# ---------------------------------------------------------------------------
+
+_NUMBERED = "".join(f"line {n:02d}\n" for n in range(1, 11))
+
+
+def _read_all(contract: Any, path: str) -> dict[str, Any]:
+    """完整读取一个小文件并返回 payload（含 snapshot_id）。"""
+    return _payload(contract.dispatch(_request("read_file", {"file_path": path, "limit": 200})))
+
+
+def _edit(contract: Any, path: str, snapshot_id: str, edits: Any, *, call_id: str = "edit-batch") -> dict[str, Any]:
+    return _payload(
+        contract.dispatch(
+            _request(
+                "edit_file",
+                {"file_path": path, "snapshot_id": snapshot_id, "edits": edits},
+                call_id=call_id,
+            )
+        )
+    )
+
+
+def test_batch_edit_applies_every_edit_once_and_returns_one_continuable_snapshot(tmp_path: Path) -> None:
+    """同一轮的多处修改在一次调用内成功；顺序不必等于文件顺序；新 Snapshot 可继续编辑。"""
+    target = tmp_path / "batch.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/batch.txt")
+
+    edited = _edit(
+        contract,
+        "/batch.txt",
+        read["snapshot_id"],
+        [
+            {"old_string": "line 08\n", "new_string": "LINE 08\n"},
+            {"old_string": "line 02\n", "new_string": "LINE 02\n"},
+            {"old_string": "line 05\n", "new_string": ""},
+        ],
+    )
+
+    assert edited["ok"] is True
+    assert edited["replaced"] == 3
+    assert edited["snapshot_id"] != read["snapshot_id"]
+    expected = _NUMBERED.replace("line 08", "LINE 08").replace("line 02", "LINE 02").replace("line 05\n", "")
+    assert target.read_text(encoding="utf-8") == expected
+
+    # 返回窗口覆盖整批改动的外包区间，用新 Snapshot 继续改窗口内内容必须成功。
+    again = _edit(
+        contract,
+        "/batch.txt",
+        edited["snapshot_id"],
+        [{"old_string": "LINE 02\n", "new_string": "second\n"}],
+        call_id="edit-continued",
+    )
+    assert again["ok"] is True
+    assert "second\n" in target.read_text(encoding="utf-8")
+
+
+def test_batch_edit_failure_writes_nothing_and_reports_the_failing_index(tmp_path: Path) -> None:
+    """任一处失败整批零写入，错误带 edit_index，且不弹出审批所需的计划。"""
+    target = tmp_path / "atomic.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/atomic.txt")
+
+    cases = {
+        "missing": ([{"old_string": "line 02\n", "new_string": "X\n"}, {"old_string": "nope\n", "new_string": "Y\n"}],
+                    "EXACT_MATCH_NOT_FOUND", 1),
+        "ambiguous": ([{"old_string": "line 0", "new_string": "X"}], "AMBIGUOUS_MATCH", 0),
+        "identical": ([{"old_string": "line 02\n", "new_string": "A\n"}, {"old_string": "line 02\n", "new_string": "B\n"}],
+                      "OVERLAPPING_EDITS", 1),
+        "nested": ([{"old_string": "line 03\nline 04\n", "new_string": "X\n"}, {"old_string": "line 04\n", "new_string": "Y\n"}],
+                   "OVERLAPPING_EDITS", 1),
+    }
+    for name, (edits, code, index) in cases.items():
+        result = _edit(contract, "/atomic.txt", read["snapshot_id"], edits, call_id=f"edit-{name}")
+        assert result["ok"] is False, name
+        assert result["error"]["code"] == code, name
+        assert result["error"]["edit_index"] == index, name
+        assert target.read_text(encoding="utf-8") == _NUMBERED, name
+
+    # 失败不消耗 Snapshot：修正后同一 snapshot_id 仍可提交。
+    fixed = _edit(contract, "/atomic.txt", read["snapshot_id"], [{"old_string": "line 02\n", "new_string": "X\n"}])
+    assert fixed["ok"] is True
+
+
+def test_batch_adjacent_edits_are_allowed_but_unread_item_rejects_the_whole_batch(tmp_path: Path) -> None:
+    """首尾相接不算重叠；某一项在已读范围外时整批拒绝并指出是哪一项。"""
+    target = tmp_path / "adjacent.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    partial = _payload(contract.dispatch(_request("read_file", {"file_path": "/adjacent.txt", "limit": 4})))
+
+    unread = _edit(
+        contract,
+        "/adjacent.txt",
+        partial["snapshot_id"],
+        [{"old_string": "line 02\n", "new_string": "X\n"}, {"old_string": "line 09\n", "new_string": "Y\n"}],
+        call_id="edit-unread",
+    )
+    assert unread["error"]["code"] == "UNREAD_RANGE"
+    assert unread["error"]["edit_index"] == 1
+    assert target.read_text(encoding="utf-8") == _NUMBERED
+
+    adjacent = _edit(
+        contract,
+        "/adjacent.txt",
+        partial["snapshot_id"],
+        [{"old_string": "line 02\n", "new_string": "TWO\n"}, {"old_string": "line 03\n", "new_string": "THREE\n"}],
+        call_id="edit-adjacent",
+    )
+    assert adjacent["ok"] is True
+    assert target.read_text(encoding="utf-8").splitlines()[1:3] == ["TWO", "THREE"]
+
+
+def test_edits_shape_and_size_limits_are_rejected_before_touching_the_file(tmp_path: Path) -> None:
+    """形状、数量、大小在读取文件前就拒绝；旧扁平入参不再被接受。"""
+    target = tmp_path / "shape.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/shape.txt")
+    good = {"old_string": "line 02\n", "new_string": "X\n"}
+
+    shape_cases = [
+        ([], None),
+        ("oops", None),
+        ([{"old_string": "line 02\n"}], 0),
+        ([good, {"old_string": "line 03\n", "new_string": "Y\n", "replace_all": True}], 1),
+        ([{"old_string": "line 02\n", "new_string": 1}], 0),
+        ([good, "not-an-object"], 1),
+    ]
+    for index, (edits, expected_index) in enumerate(shape_cases):
+        result = _edit(contract, "/shape.txt", read["snapshot_id"], edits, call_id=f"shape-{index}")
+        assert result["error"]["code"] == "FILE_TOOL_SCHEMA_INVALID", edits
+        assert result["error"].get("edit_index") == expected_index, edits
+
+    too_many = _edit(contract, "/shape.txt", read["snapshot_id"], [good] * 21, call_id="too-many")
+    assert too_many["error"]["code"] == "TOO_MANY_EDITS"
+    assert "edit_index" not in too_many["error"]
+
+    big = "x" * (60 * 1024)
+    oversize_total = _edit(
+        contract,
+        "/shape.txt",
+        read["snapshot_id"],
+        [{"old_string": big, "new_string": big}] * 3,
+        call_id="total-too-large",
+    )
+    assert oversize_total["error"]["code"] == "EDIT_TEXT_TOO_LARGE"
+    single_big = _edit(
+        contract,
+        "/shape.txt",
+        read["snapshot_id"],
+        [good, {"old_string": "line 03\n", "new_string": "x" * (64 * 1024 + 1)}],
+        call_id="single-too-large",
+    )
+    assert single_big["error"]["code"] == "EDIT_TEXT_TOO_LARGE"
+    assert single_big["error"]["edit_index"] == 1
+
+    legacy = _payload(
+        contract.dispatch(
+            _request(
+                "edit_file",
+                {
+                    "file_path": "/shape.txt",
+                    "snapshot_id": read["snapshot_id"],
+                    "old_string": "line 02\n",
+                    "new_string": "X\n",
+                },
+                call_id="legacy-flat",
+            )
+        )
+    )
+    assert legacy["error"]["code"] == "FILE_TOOL_SCHEMA_INVALID"
+    assert "edits[]" in legacy["error"]["message"]
+    assert target.read_text(encoding="utf-8") == _NUMBERED
+
+
+def test_empty_old_string_must_be_the_only_edit(tmp_path: Path) -> None:
+    """空 old_string 只能单独初始化空文件；与其他项混用被拒并指向空 old_string 那一项。"""
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _payload(contract.dispatch(_request("read_file", {"file_path": "/empty.txt"})))
+
+    mixed = _edit(
+        contract,
+        "/empty.txt",
+        read["snapshot_id"],
+        [{"old_string": "x", "new_string": "y"}, {"old_string": "", "new_string": "a\n"}],
+        call_id="mixed",
+    )
+    assert mixed["error"]["code"] == "INVALID_EDIT"
+    assert mixed["error"]["edit_index"] == 1
+    assert (tmp_path / "empty.txt").read_text(encoding="utf-8") == ""
+
+    alone = _edit(contract, "/empty.txt", read["snapshot_id"], [{"old_string": "", "new_string": "a\n"}], call_id="alone")
+    assert alone["ok"] is True
+    assert (tmp_path / "empty.txt").read_text(encoding="utf-8") == "a\n"
+
+
+def test_batch_edit_preserves_crlf_when_models_copy_lf_text(tmp_path: Path) -> None:
+    """每一项的换行都统一回文件风格，批量替换后 CRLF 往返不变。"""
+    target = tmp_path / "crlf.txt"
+    target.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/crlf.txt")
+
+    edited = _edit(
+        contract,
+        "/crlf.txt",
+        read["snapshot_id"],
+        [{"old_string": "alpha\n", "new_string": "A\n"}, {"old_string": "gamma\n", "new_string": "G\n"}],
+    )
+
+    assert edited["ok"] is True
+    assert target.read_bytes() == b"A\r\nbeta\r\nG\r\n"
+
+
+def test_batch_approval_is_one_prepared_plan_with_all_hunks_and_binds_every_item(tmp_path: Path) -> None:
+    """一次调用只有一份审批计划：diff 含全部 hunk、显示修改处数；审批后改任一项都被拒。"""
+    target = tmp_path / "approval-batch.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/approval-batch.txt")
+    args = {
+        "file_path": "/approval-batch.txt",
+        "snapshot_id": read["snapshot_id"],
+        "edits": [
+            {"old_string": "line 02\n", "new_string": "TWO\n"},
+            {"old_string": "line 09\n", "new_string": "NINE\n"},
+        ],
+    }
+    request = _request("edit_file", args, call_id="approval-batch")
+
+    assert contract.approval_preflight(request) is True
+    description = contract.approval_description(request.tool_call, None, request.runtime)
+    assert "修改处数：2" in description
+    assert "+TWO" in description and "+NINE" in description
+    details = contract.approval_details(request.tool_call, None, request.runtime)
+    assert "+TWO" in details.presentation["unified_diff"]
+    assert "+NINE" in details.presentation["unified_diff"]
+
+    tampered = _request(
+        "edit_file",
+        {**args, "edits": [args["edits"][0], {"old_string": "line 09\n", "new_string": "EVIL\n"}]},
+        call_id="approval-batch",
+    )
+    rejected = _payload(contract.dispatch(tampered))
+    assert rejected["error"]["code"] == "COMMIT_CONFLICT"
+    assert target.read_text(encoding="utf-8") == _NUMBERED
+
+    # 同一 tool_call_id 被改参作废后，原参数也不得再提交。
+    replay = _payload(contract.dispatch(request))
+    assert replay["error"]["code"] == "COMMIT_CONFLICT"
+    assert target.read_text(encoding="utf-8") == _NUMBERED
+
+
+def test_approval_preflight_rejects_a_batch_with_any_bad_item(tmp_path: Path) -> None:
+    """任何一项注定失败时，预检返回 False，不弹注定失败的审批卡片。"""
+    target = tmp_path / "preflight.txt"
+    target.write_text(_NUMBERED, encoding="utf-8")
+    contract = _contract(tmp_path)
+    read = _read_all(contract, "/preflight.txt")
+    request = _request(
+        "edit_file",
+        {
+            "file_path": "/preflight.txt",
+            "snapshot_id": read["snapshot_id"],
+            "edits": [
+                {"old_string": "line 02\n", "new_string": "X\n"},
+                {"old_string": "missing\n", "new_string": "Y\n"},
+            ],
+        },
+        call_id="preflight-bad",
+    )
+    assert contract.approval_preflight(request) is False
+
+
+def test_plan_file_accepts_only_a_single_edit(tmp_path: Path) -> None:
+    """会话计划文件没有 Snapshot，批量没有收益，多于一项返回 TOO_MANY_EDITS。"""
+    contract = _contract(tmp_path)
+    result = _payload(
+        contract.dispatch(
+            _request(
+                "edit_file",
+                {
+                    "file_path": "/.harness/plan.md",
+                    "snapshot_id": "unused",
+                    "edits": [
+                        {"old_string": "a", "new_string": "b"},
+                        {"old_string": "c", "new_string": "d"},
+                    ],
+                },
+                call_id="plan-two",
+            )
+        )
+    )
+    assert result["error"]["code"] == "TOO_MANY_EDITS"

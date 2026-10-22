@@ -40,9 +40,20 @@ from harness_agent.tools.file_tool_catalog import (
 class FileToolContractError(RuntimeError):
     """文件 contract 接管或 dispatch 失败。"""
 
-    def __init__(self, code: str, message: str | None = None) -> None:
-        """保存可被模型恢复逻辑判断的稳定 code。"""
+    def __init__(
+        self,
+        code: str,
+        message: str | None = None,
+        *,
+        edit_index: int | None = None,
+    ) -> None:
+        """保存标准化的错误代码（如 EXACT_MATCH_NOT_FOUND），以便大模型理解并自动重试。
+
+        edit_index 仅用于 edit_file 的批量 edits[]：指出是数组里第几项（从 0 开始）出错，
+        让模型只需要修正那一项；与某一项无关的错误保持 None。
+        """
         self.code = code
+        self.edit_index = edit_index
         super().__init__(message or code)
 
 

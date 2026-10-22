@@ -18,6 +18,9 @@ DEFAULT_READ_LIMIT = 100
 MAX_READ_LIMIT = 200
 """单次模型上下文允许的最大源行数。"""
 
+MAX_EDITS_PER_CALL = 20
+"""单次 edit_file 的 edits 项数上限；线上观察到的最大一次同轮编辑为 8 处。"""
+
 
 class CanonicalReadFileSchema(BaseModel):
     """Snapshot read_file 的唯一模型参数。"""
@@ -43,20 +46,35 @@ class CanonicalWriteFileSchema(BaseModel):
     content: str = Field(description="要创建的 UTF-8 文本内容；已有文件不会被覆盖。")
 
 
+class EditItem(BaseModel):
+    """edits[] 中的一处精确替换。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_string: str = Field(
+        description=(
+            "从已读内容复制的唯一原文本；仅当 Snapshot 与当前文件都为空时可传空字符串"
+            "初始化空文件（此时 edits 只能有这一项）；不支持 replace_all。"
+        )
+    )
+    new_string: str = Field(description="替换 old_string 的新文本；可为空以删除该文本。")
+
+
 class CanonicalEditFileSchema(BaseModel):
-    """exact-string + prior-read edit_file 参数。"""
+    """exact-string + prior-read 的同文件批量 edit_file 参数。"""
 
     model_config = ConfigDict(extra="forbid")
 
     file_path: str = Field(description="以 / 开头、相对于工作区根目录的已有文件路径。")
     snapshot_id: str = Field(description="由同一 Thread 的 read_file 返回的 Snapshot ID。")
-    old_string: str = Field(
+    edits: list[EditItem] = Field(
+        min_length=1,
+        max_length=MAX_EDITS_PER_CALL,
         description=(
-            "从已读内容复制的唯一原文本；仅当 Snapshot 与当前文件都为空时可传空字符串"
-            "初始化空文件；不支持 replace_all。"
-        )
+            f"同一文件的全部修改，最多 {MAX_EDITS_PER_CALL} 处。每处的 old_string 都取自已读内容"
+            "且在文件中唯一，各处互不重叠；整批要么全部写入，要么一处都不写。"
+        ),
     )
-    new_string: str = Field(description="替换 old_string 的新文本；可为空以删除该文本。")
 
 
 class CanonicalDeleteFileSchema(BaseModel):
@@ -92,8 +110,10 @@ def create_file_tool_definitions() -> tuple[BaseTool, ...]:
         (
             "edit_file",
             (
-                "先读取，再用同一 Thread Snapshot 将唯一 old_string 替换为 new_string；"
-                "已读空文件可用空 old_string 写入初始内容。"
+                "先读取，再用同一 Thread Snapshot 做精确替换。同一文件的多处修改必须放进同一次调用的 "
+                "edits[]（每处 old_string 取自已读内容且唯一、互不重叠，整批原子提交）；"
+                "跨调用继续编辑必须使用上一次返回的 snapshot_id，且只能改返回窗口内的内容。"
+                "已读空文件可用 edits=[{old_string:\"\", new_string:初始内容}] 写入初始内容。"
             ),
             CanonicalEditFileSchema,
         ),
@@ -163,6 +183,30 @@ def require_canonical_argument_keys(name: str, args: dict[str, Any]) -> None:
         raise FileToolContractError("FILE_TOOL_SCHEMA_INVALID")
 
 
+def edits_argument(args: dict[str, Any]) -> list[tuple[str, str]]:
+    """校验 edit_file 的 edits[]，返回 (old_string, new_string) 列表。
+
+    dispatch 收到的是未经 pydantic 校验的原始参数，嵌套项必须在这里自行把关。
+    顺序：是否为非空数组 → 项数上限 → 每项恰好两个字符串字段。项级错误带 edit_index。
+    """
+    value = args.get("edits")
+    if not isinstance(value, list) or not value:
+        raise FileToolContractError("FILE_TOOL_SCHEMA_INVALID")
+    if len(value) > MAX_EDITS_PER_CALL:
+        raise FileToolContractError("TOO_MANY_EDITS")
+    parsed: list[tuple[str, str]] = []
+    for index, item in enumerate(value):
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"old_string", "new_string"}
+            or not isinstance(item["old_string"], str)
+            or not isinstance(item["new_string"], str)
+        ):
+            raise FileToolContractError("FILE_TOOL_SCHEMA_INVALID", edit_index=index)
+        parsed.append((item["old_string"], item["new_string"]))
+    return parsed
+
+
 def snapshot_id_argument(args: dict[str, Any]) -> str:
     """读取 edit/delete 强制要求的非空 Snapshot ID。"""
     value = args.get("snapshot_id")
@@ -196,8 +240,11 @@ __all__ = [
     "CanonicalReadFileSchema",
     "CanonicalWriteFileSchema",
     "DEFAULT_READ_LIMIT",
+    "EditItem",
+    "MAX_EDITS_PER_CALL",
     "MAX_READ_LIMIT",
     "create_file_tool_definitions",
+    "edits_argument",
     "is_harness_virtual_path",
     "non_negative_int_argument",
     "optional_path_argument",

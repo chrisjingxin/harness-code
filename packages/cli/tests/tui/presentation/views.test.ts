@@ -351,8 +351,10 @@ test("edit_file 用 old/new 显示高亮 Diff，不铺 JSON 参数或结果", as
           arguments: JSON.stringify({
             file_path: "/file-organizer.py",
             snapshot_id: "snap-1",
-            old_string: "    '.pptx': 'documents',",
-            new_string: "    '.pptx': 'media',",
+            edits: [
+              { old_string: "    '.pptx': 'documents',", new_string: "    '.pptx': 'media'," },
+              { old_string: "    '.mp4': 'documents',", new_string: "    '.mp4': 'videos'," },
+            ],
           }),
           output: JSON.stringify({ ok: true, path: "/file-organizer.py", replaced: 1 }),
           status: "completed",
@@ -372,6 +374,7 @@ test("edit_file 用 old/new 显示高亮 Diff，不铺 JSON 参数或结果", as
     expect(frame).toContain("file-organizer.py")
     expect(frame).toContain("documents")
     expect(frame).toContain("media")
+    expect(frame).toContain("videos")
     expect(frame).not.toContain("snapshot_id")
     expect(frame).not.toContain("old_string")
     expect(frame).not.toContain("\"ok\":true")
