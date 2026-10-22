@@ -6,6 +6,7 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
@@ -22,7 +23,9 @@ _SUFFIX = "本轮完成。"
 class StreamGate:
     """首段已经交给图后暂停 provider，让测试先观察公开事件。"""
 
-    def __init__(self) -> None:
+    def __init__(self, target_report: int = 1) -> None:
+        self.target_report = target_report
+        self.report_count = 0
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
@@ -47,7 +50,13 @@ class StreamingFusionModel(FusionModel):
             # 测量，不能依赖以前那次多余的“本轮完成”请求。
             yield ChatGenerationChunk(message=AIMessageChunk(content=_PREFIX))
             gate = self.gate
-            if gate is not None and not gate.entered.is_set():
+            if gate is not None:
+                gate.report_count += 1
+            if (
+                gate is not None
+                and gate.report_count == gate.target_report
+                and not gate.entered.is_set()
+            ):
                 gate.execution_id = get_runtime().context.execution_id
                 gate.entered.set()
                 try:
@@ -55,8 +64,10 @@ class StreamingFusionModel(FusionModel):
                 except asyncio.CancelledError:
                     gate.cancelled.set()
                     raise
-            if self.fail_after_prefix:
-                raise RuntimeError("FUSION_OFFLINE_STREAM_FAILURE")
+            if self.fail_after_prefix and (
+                gate is None or gate.report_count == gate.target_report
+            ):
+                raise httpx.ReadError("FUSION_OFFLINE_STREAM_FAILURE")
             yield ChatGenerationChunk(message=AIMessageChunk(content=_SUFFIX))
         yield ChatGenerationChunk(
             message=AIMessageChunk(
@@ -252,7 +263,9 @@ async def test_sidekick_provider_failure_ends_child_and_parent_without_false_suc
             .fusion_state_store()
             .get(run.preparation.fusion_binding.task_id)
         )
-        assert task.phase in {"PAUSED", "OUTCOME_UNKNOWN"}, task.to_record()
+        assert task.phase == "PAUSED", task.to_record()
+        assert task.data["worker_checkpoint_interrupted"] is True
+        assert task.data["active_run"] is None
         assert task.active
     finally:
         gate.release.set()

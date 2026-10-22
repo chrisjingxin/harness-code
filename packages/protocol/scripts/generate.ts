@@ -221,6 +221,16 @@ function renderContractFixtures(root: Schema, meta: Metadata): string {
   for (const [name, entry] of Object.entries(meta.operations)) {
     addFixtureGroup(root, valid, invalid, "operation.params", name, entry.params!)
     addFixtureGroup(root, valid, invalid, "operation.result", name, entry.result!)
+    if (name === "fusion.cancel") {
+      // 停止核查与取消共用一条请求；两端必须一致拒绝无效说明。
+      const base = { task_id: "fusion-task", expected_version: 1 }
+      for (const [label, note] of [["explicit_stop_inspection", "已核实相关操作全部停止"], ["max_stop_inspection", "x".repeat(4000)]]) {
+        valid.push({ kind: "operation.params", name, case: label, value: { ...base, stopped_inspection_note: note } })
+      }
+      for (const [label, note] of [["empty_stop_inspection", ""], ["oversized_stop_inspection", "x".repeat(4001)], ["non_text_stop_inspection", true]]) {
+        invalid.push({ kind: "operation.params", name, case: label, value: { ...base, stopped_inspection_note: note } })
+      }
+    }
     if (entry.result === "#/$defs/controlStatus") {
       // controlHolder.attachment_id 固定存在：owner 为 null，attached 为 string；
       // 缺省自动 sample 只覆盖 string 场景，这里补齐契约边界样例。

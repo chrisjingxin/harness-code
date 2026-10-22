@@ -183,7 +183,7 @@ from harness_agent.extensions.mcp import (
     build_mcp_snapshot,
 )
 
-from harness_agent.runtime.run_context import RunCancellationToken, RunContext, RunPlanConstraint
+from harness_agent.runtime.run_context import FusionRunState, RunCancellationToken, RunContext, RunPlanConstraint
 from harness_agent.runtime.interactions import InteractionRequest
 from harness_agent.runtime.agent_engine_profile import AgentEngineProfile
 from harness_agent.runtime.resource_lifecycle import (
@@ -759,6 +759,9 @@ class AgentHost:
                     "pending_requests": pending_requests,
                 },
             )
+        if self._fusion_runtime is not None:
+            runtime, self._fusion_runtime = self._fusion_runtime, None
+            await runtime.close()
         await self._close_thread_persistence()
 
     async def close_connection(self, connection: ProtocolConnection) -> None:
@@ -2717,7 +2720,8 @@ class AgentHost:
         persistence = await self._ensure_thread_persistence()
         store = persistence.fusion_state_store()
         task = await store.latest(params["thread_id"])
-        if task and task.active and not await self._run_coordinator.is_active(task.thread_id):
+        if task and task.active and task.phase not in {"WORKER_RUNNING", "CHECKING"} and not await self._run_coordinator.is_active(task.thread_id):
+            # 同库可能有另一个 Host 的活动执行；查询不能把它误判为已退出并暂停。
             # 短维护锁阻止查询恢复过程中有新 Run 启动；这里不重放操作。
             try:
                 async with self._run_coordinator.idle_thread(task.thread_id):
@@ -2725,7 +2729,15 @@ class AgentHost:
             except RunError as exc:
                 if exc.code != "THREAD_BUSY":
                     raise
-        return {"task": task.to_record() if task else None}
+        blocker = (
+            await store.workspace_blocker(task.task_id)
+            if task and task.active
+            else await store.workspace_owner(self._workspace)
+        )
+        return {
+            "task": task.to_record() if task else None,
+            "workspace_blocker": blocker,
+        }
 
     async def _handle_fusion_recover(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """空闲 Thread 上保存人工核查，仍需显式继续原任务。"""
@@ -2751,7 +2763,7 @@ class AgentHost:
         async with self._run_coordinator.idle_thread(task.thread_id):
             try:
                 current = await store.get(task.task_id)
-                result = await store.cancel(task.task_id, current.version if stopped_run else params["expected_version"])
+                result = await store.cancel(task.task_id, current.version if stopped_run else params["expected_version"], stopped_inspection_note=params.get("stopped_inspection_note"))
                 if current.data.get("checkpoint_id"):
                     await persistence.delete_execution_checkpoint(current.data["checkpoint_id"])
                 return result.to_record()
@@ -5712,7 +5724,7 @@ class AgentHost:
             extra_root_tools: tuple[Any, ...] = ()
             if fusion_role:
                 from harness_agent.runtime.fusion.tools import create_fusion_tools
-                extra_root_tools = create_fusion_tools(fusion_role)
+                extra_root_tools = [tool for tool in create_fusion_tools(fusion_role) if spec.capability_view.allows_tool(tool.name)]
             rubric_middleware = None
             if getattr(spec, "goal_backed", False):
                 from harness_agent.goals.rubric_adapter import create_rubric_middleware
@@ -5960,6 +5972,13 @@ class AgentHost:
             usage_ledger=getattr(run, "usage_ledger", None),
             fusion_task_id=run.preparation.fusion_binding.task_id if run.preparation.fusion_binding else None,
             fusion_role="lead" if run.preparation.fusion_binding else None,
+            fusion_state=FusionRunState(
+                inspection_only=(
+                    run.preparation.fusion_binding.inspection_only
+                    if run.preparation.fusion_binding
+                    else False
+                )
+            ),
             fusion_service=self._fusion_runtime.service if run.preparation.fusion_binding else None,
             goal_binding=run.preparation.goal_binding,
             code_index_query_lease=run.preparation.code_index_lease,

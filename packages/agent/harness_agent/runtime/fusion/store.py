@@ -261,16 +261,88 @@ class FusionStateStore:
             row = await cursor.fetchone()
             return await self._get(row[0]) if row else None
 
+    async def claim_run(
+        self, task_id: str, expected_version: int, owner: str, run_id: str
+    ) -> FusionTask:
+        """跨窗口只允许一轮执行操作同一任务；不能把未知的旧执行当成已停止。"""
+
+        async def action() -> FusionTask:
+            task = await self._get(task_id)
+            if task.version != expected_version:
+                raise FusionError("FUSION_TASK_CONFLICT")
+            scope = {"owner": owner, "run_id": run_id}
+            current = task.data.get("active_run")
+            if current == scope:
+                return task
+            if current is not None:
+                raise FusionError("FUSION_LEASE_BUSY")
+            if not task.active or task.phase in {
+                "OUTCOME_UNKNOWN",
+                "WORKER_RUNNING",
+                "CHECKING",
+            }:
+                raise FusionError("FUSION_OUTCOME_UNKNOWN")
+            return await self._update(task, data={"active_run": scope})
+
+        return await self._transaction(action)
+
+    async def release_run(
+        self, task_id: str, owner: str, run_id: str, *, abandon_new: bool = False
+    ) -> None:
+        """只清理自己取得的归属，旧回调不能结束后来的运行。"""
+
+        async def action() -> None:
+            task = await self._get(task_id)
+            if task.data.get("active_run") == {"owner": owner, "run_id": run_id}:
+                if abandon_new and task.phase == "READY" and not task.data.get("round"):
+                    await self._terminate(
+                        task, "CANCELLED", {"reason": "run_not_accepted"}
+                    )
+                    return
+                if task.active and task.phase in {
+                    "READY",
+                    "WORKER_RUNNING",
+                    "CHECKING",
+                    "REVIEWING",
+                    "OUTCOME_UNKNOWN",
+                }:
+                    task = await self._pause(task)
+                await self._update(task, data={"active_run": None})
+
+        await self._transaction(action)
+
+    async def _release_idle_lease(self, task: FusionTask) -> bool:
+        """只有安全暂停/等待的任务让出目录；任务和文件仍保留。"""
+        if task.phase not in {"PAUSED", "WAITING_USER", "COMPLETED", "CANCELLED"}:
+            return False
+        if await self._pending(task.task_id) or await self._pending_delivery(
+            task.task_id
+        ):
+            return False
+        cursor = await self.connection.execute(
+            "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=?",
+            (task.task_id, self.project),
+        )
+        return cursor.rowcount > 0
+
     async def _workspace_blocker(self, task: FusionTask) -> dict[str, object] | None:
+        return await self._workspace_owner(
+            task.workspace_key, excluding_task_id=task.task_id
+        )
+
+    async def _workspace_owner(
+        self, key: str, *, excluding_task_id: str | None = None
+    ) -> dict[str, object] | None:
+        """在已有事务中读取目录写者，本项目内才公开身份。"""
         cursor = await self.connection.execute(
             "SELECT task_id,project_fingerprint FROM fusion_leases WHERE workspace_key=?",
-            (task.workspace_key,),
+            (key,),
         )
         lease = await cursor.fetchone()
         if not lease or not lease["task_id"]:
             return None
         if (
-            lease["task_id"] == task.task_id
+            lease["task_id"] == excluding_task_id
             and lease["project_fingerprint"] == self.project
         ):
             return None
@@ -285,6 +357,8 @@ class FusionStateStore:
                 "requires_inspection": True,
             }
         owner = await self._get(lease["task_id"])
+        if await self._release_idle_lease(owner):
+            return None
         return {
             "task_id": owner.task_id,
             "thread_id": owner.thread_id,
@@ -298,8 +372,19 @@ class FusionStateStore:
 
     async def workspace_blocker(self, task_id: str) -> dict[str, object] | None:
         """读取实际写者，不按进程、时间或模型声明推断占用已解除。"""
-        async with self.lock:
+
+        async def action() -> dict[str, object] | None:
             return await self._workspace_blocker(await self._get(task_id))
+
+        return await self._transaction(action)
+
+    async def workspace_owner(self, workspace: Path) -> dict[str, object] | None:
+        """没有本会话任务时仍能读取当前目录的实际占用；不自动核查未知操作。"""
+
+        async def action() -> dict[str, object] | None:
+            return await self._workspace_owner(workspace_key(workspace))
+
+        return await self._transaction(action)
 
     async def _refresh_workspace_wait(self, task_id: str) -> FusionTask:
         async def action() -> FusionTask:
@@ -374,6 +459,8 @@ class FusionStateStore:
         chosen = phase or task.phase
         if chosen not in PHASES:
             raise FusionError("FUSION_PHASE_INVALID")
+        if not task.active and chosen != task.phase:
+            raise FusionError("FUSION_TASK_CONFLICT")
         merged = dict(task.data)
         merged.update(data or {})
         cursor = await self.connection.execute(
@@ -389,7 +476,9 @@ class FusionStateStore:
         )
         if cursor.rowcount != 1:
             raise FusionError("FUSION_TASK_CONFLICT")
-        return await self._get(task.task_id)
+        updated = await self._get(task.task_id)
+        await self._release_idle_lease(updated)
+        return updated
 
     async def update(
         self,
@@ -424,13 +513,22 @@ class FusionStateStore:
                 or row["project_fingerprint"] != self.project
             ):
                 blocker = await self._workspace_blocker(task)
-                assert blocker is not None
-                raise FusionWorkspaceBusy(blocker)
+                if blocker is not None:
+                    raise FusionWorkspaceBusy(blocker)
+                cursor = await self.connection.execute(
+                    "SELECT * FROM fusion_leases WHERE workspace_key=?",
+                    (task.workspace_key,),
+                )
+                row = await cursor.fetchone()
             if await self._pending(task.task_id) or await self._pending_delivery(
                 task.task_id
             ):
                 raise FusionError("FUSION_OUTCOME_UNKNOWN")
-            if row["owner"] == owner and not new_round:
+            if (
+                row["task_id"] == task.task_id
+                and row["owner"] == owner
+                and not new_round
+            ):
                 return FusionLease(
                     task.workspace_key, task.task_id, owner, row["generation"]
                 )
@@ -446,6 +544,25 @@ class FusionStateStore:
 
         async def action() -> FusionLease:
             return await self._acquire_lease(await self._get(task_id), owner)
+
+        return await self._transaction(action)
+
+    async def begin_workspace_phase(
+        self, task_id: str, expected_version: int, phase: str
+    ) -> tuple[FusionTask, FusionLease]:
+        """取得目录并进入执行/检查/审阅须在一起提交，避免暂停任务刚取得目录又被让出。"""
+        if phase not in {"CHECKING", "REVIEWING", "WORKER_RUNNING"}:
+            raise FusionError("FUSION_PHASE_INVALID")
+
+        async def action() -> tuple[FusionTask, FusionLease]:
+            task = await self._get(task_id)
+            if task.version != expected_version:
+                raise FusionError("FUSION_TASK_CONFLICT")
+            lease = await self._acquire_lease(
+                task, "sidekick" if phase == "WORKER_RUNNING" else "host"
+            )
+            task = await self._update(task, phase=phase)
+            return task, lease
 
         return await self._transaction(action)
 
@@ -625,46 +742,50 @@ class FusionStateStore:
             )
             return [dict(row) for row in await cursor.fetchall()]
 
+    async def _pause(self, task: FusionTask) -> FusionTask:
+        """在已有事务中暂停；供显式暂停与运行归属收尾共用。"""
+        task_id = task.task_id
+        if not task.active:
+            return task
+        unknown = await self._pending(task_id) or await self._pending_delivery(task_id)
+        cursor = await self.connection.execute(
+            "SELECT operation_id,execution_id,kind,state FROM fusion_effects WHERE project_fingerprint=? AND task_id=? AND stopped=0",
+            (self.project, task_id),
+        )
+        pending_operations = [dict(row) for row in await cursor.fetchall()]
+        cursor = await self.connection.execute(
+            "SELECT operation_id,state FROM fusion_outbox WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
+            (self.project, task_id),
+        )
+        pending_operations.extend(
+            {**dict(row), "kind": "dispatch"} for row in await cursor.fetchall()
+        )
+        data = {
+            "resume_phase": task.data.get("resume_phase", task.phase)
+            if task.phase in {"PAUSED", "OUTCOME_UNKNOWN"}
+            else task.phase,
+            "reason": "effects_unconfirmed"
+            if unknown
+            else (
+                "workspace_busy"
+                if task.data.get("reason") == "workspace_busy"
+                else "run_paused"
+            ),
+            "pending_operations": pending_operations,
+        }
+        if unknown:
+            data["ticket_id"] = None
+        phase = "OUTCOME_UNKNOWN" if unknown else "PAUSED"
+        if task.phase == phase and all(task.data.get(k) == v for k, v in data.items()):
+            await self._release_idle_lease(task)
+            return task
+        return await self._update(task, phase=phase, data=data)
+
     async def pause(self, task_id: str) -> FusionTask:
-        """取消 Run 时暂停任务；仍有副作用则保持未知和写者。"""
+        """暂停后按操作事实决定是否让出目录；未知操作继续保留写者。"""
 
         async def action() -> FusionTask:
-            task = await self._get(task_id)
-            if not task.active:
-                return task
-            unknown = await self._pending(task_id) or await self._pending_delivery(
-                task_id
-            )
-            cursor = await self.connection.execute(
-                "SELECT operation_id,execution_id,kind,state FROM fusion_effects WHERE project_fingerprint=? AND task_id=? AND stopped=0",
-                (self.project, task_id),
-            )
-            pending_operations = [dict(row) for row in await cursor.fetchall()]
-            cursor = await self.connection.execute(
-                "SELECT operation_id,state FROM fusion_outbox WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
-                (self.project, task_id),
-            )
-            pending_operations.extend(
-                {**dict(row), "kind": "dispatch"} for row in await cursor.fetchall()
-            )
-            data = {
-                "resume_phase": task.data.get("resume_phase", task.phase)
-                if task.phase in {"PAUSED", "OUTCOME_UNKNOWN"}
-                else task.phase,
-                "reason": "effects_unconfirmed"
-                if unknown
-                else (
-                    "workspace_busy"
-                    if task.data.get("reason") == "workspace_busy"
-                    else "run_paused"
-                ),
-                "pending_operations": pending_operations,
-            }
-            if unknown:
-                data["ticket_id"] = None
-            return await self._update(
-                task, phase="OUTCOME_UNKNOWN" if unknown else "PAUSED", data=data
-            )
+            return await self._pause(await self._get(task_id))
 
         return await self._transaction(action)
 
@@ -697,31 +818,61 @@ class FusionStateStore:
             if task.version != expected_version:
                 raise FusionError("FUSION_TASK_CONFLICT")
             if (
-                task.phase != "OUTCOME_UNKNOWN"
+                task.phase not in {"OUTCOME_UNKNOWN", "WORKER_RUNNING", "CHECKING"}
                 or effects_stopped is not True
                 or not inspection_note.strip()
             ):
                 raise FusionError("FUSION_OUTCOME_UNKNOWN")
+            return await self._record_inspection(task, inspection_note)
+
+        return await self._transaction(action)
+
+    async def _record_inspection(self, task: FusionTask, note: str) -> FusionTask:
+        """调用方事务内保存用户明确核查；核查、取消和交还目录可以一起提交。"""
+        if not isinstance(note, str) or not note.strip() or len(note) > 4000:
+            raise FusionError("FUSION_OUTCOME_UNKNOWN")
+        await self.connection.execute(
+            "UPDATE fusion_effects SET state='unknown',stopped=1 WHERE project_fingerprint=? AND task_id=? AND stopped=0",
+            (self.project, task.task_id),
+        )
+        await self.connection.execute(
+            "UPDATE fusion_outbox SET state='inspected' WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
+            (self.project, task.task_id),
+        )
+        return await self._update(
+            task,
+            phase="PAUSED",
+            data={
+                "inspection_digest": hashlib.sha256(note.encode()).hexdigest(),
+                "reason": "inspection_recorded",
+                "ticket_id": None,
+                "pending_operations": [],
+                "worker_checkpoint_interrupted": True,
+                "active_run": None,
+            },
+        )
+
+    async def record_worker_stopped(
+        self, task_id: str, operation_id: str, execution_id: str, *, interrupted: bool
+    ) -> bool:
+        """真实执行退出后收尾派发；命令的停止事实仍由各自操作记录决定。"""
+
+        async def action() -> bool:
+            task = await self._get(task_id)
+            if (
+                not task.active
+                or task.data.get("operation_id") != operation_id
+                or task.data.get("worker_execution_id") != execution_id
+            ):
+                return False
             await self.connection.execute(
-                "UPDATE fusion_effects SET state='unknown',stopped=1 WHERE project_fingerprint=? AND task_id=? AND stopped=0",
-                (self.project, task_id),
+                "UPDATE fusion_outbox SET state='stopped' WHERE project_fingerprint=? AND task_id=? AND operation_id=? AND state='dispatched'",
+                (self.project, task_id, operation_id),
             )
-            await self.connection.execute(
-                "UPDATE fusion_outbox SET state='inspected' WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
-                (self.project, task_id),
+            await self._update(
+                task, data={"worker_checkpoint_interrupted": interrupted}
             )
-            return await self._update(
-                task,
-                phase="PAUSED",
-                data={
-                    "inspection_digest": hashlib.sha256(
-                        inspection_note.encode()
-                    ).hexdigest(),
-                    "reason": "inspection_recorded",
-                    "ticket_id": None,
-                    "pending_operations": [],
-                },
-            )
+            return True
 
         return await self._transaction(action)
 
@@ -737,7 +888,9 @@ class FusionStateStore:
         ):
             raise FusionError("FUSION_OUTCOME_UNKNOWN")
         task = await self._update(
-            task, phase=phase, data={**data, "workspace_blocker": None}
+            task,
+            phase=phase,
+            data={**data, "workspace_blocker": None, "active_run": None},
         )
         await self.connection.execute(
             "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=?",
@@ -765,13 +918,23 @@ class FusionStateStore:
 
         return await self._transaction(action)
 
-    async def cancel(self, task_id: str, expected_version: int) -> FusionTask:
+    async def cancel(
+        self,
+        task_id: str,
+        expected_version: int,
+        *,
+        stopped_inspection_note: str | None = None,
+    ) -> FusionTask:
         """副作用已停止时终结任务并释放写者；不回滚用户文件。"""
 
         async def action() -> FusionTask:
             task = await self._get(task_id)
             if task.version != expected_version:
                 raise FusionError("FUSION_TASK_CONFLICT")
+            if not task.active:
+                return task
+            if stopped_inspection_note is not None:
+                task = await self._record_inspection(task, stopped_inspection_note)
             return await self._terminate(task, "CANCELLED", {"ticket_id": None})
 
         return await self._transaction(action)

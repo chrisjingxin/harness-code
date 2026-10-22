@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -1777,6 +1778,7 @@ async def test_skill_text_only_changes_skill_prompt_not_tools_or_effective_polic
     server._thread_persistence = Store()  # type: ignore[assignment]
     from unittest.mock import AsyncMock
     server._fusion_runtime = SimpleNamespace(
+        close=AsyncMock(),
         store=SimpleNamespace(active=AsyncMock(return_value=None)),
         guard=SimpleNamespace(check_command=lambda _context: None),
     )
@@ -2106,6 +2108,7 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
     server._provider_client_pool = ProviderClients()  # type: ignore[assignment]
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
     server._fusion_runtime = SimpleNamespace(
+        close=AsyncMock(),
         guard=object(), effect_middleware=lambda: object(),
     )
     first_profile = profile("profile-first")
@@ -2242,6 +2245,7 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
 
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
     server._fusion_runtime = SimpleNamespace(
+        close=AsyncMock(),
         guard=object(), effect_middleware=lambda: object(),
     )
     server._resolved_agent_specs[profile.profile_key] = spec
@@ -2397,6 +2401,7 @@ async def test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view(
 
     server._ensure_thread_persistence = persistence  # type: ignore[method-assign]
     server._fusion_runtime = SimpleNamespace(
+        close=AsyncMock(),
         guard=object(), effect_middleware=lambda: object(),
     )
     server._mcp_manager = manager

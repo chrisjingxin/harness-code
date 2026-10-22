@@ -437,6 +437,8 @@ class RunPreparation:
     snapshot_reservation: Any | None = None
     experimental_delegation: bool = False
     fusion_binding: Any | None = None
+    # 准备已取得资源，但尚未转交给 Run 时失败，按原身份归还。
+    on_abandon: Callable[[], Awaitable[None]] | None = None
     # Shell 等绕过 Agent 图的入口仍须在实际执行前核对工作区写者。
     workspace_write_guard: Callable[[], None] | None = None
     # 直出 Shell 持有 Host 写锁直到命令停止，Fusion 取基线前等待它交还工作区。
@@ -1182,8 +1184,7 @@ class RunCoordinator:
                         raise RunError("THREAD_MODE_LOCKED") from exc
                     raise
                 if not acceptance.created:
-                    await self._release_snapshot_reservation(preparation)
-                    reservation_transferred = True
+                    # 只是幂等读取，没有新的 Run 接手准备资源，交给 finally 归还。
                     return self._accepted_without_events(command.ref, owner)
 
             # preparation/persistence 仍属于受理过程；Run wall time 从真正受理完成后起算。
@@ -1220,11 +1221,17 @@ class RunCoordinator:
             reservation_transferred = True
             return RunExecution(command.ref, owner, True, self._read_events(run), minimum_minor=11 if preparation.fusion_binding is not None else 0)
         finally:
-            if preparation is not None and not reservation_transferred:
-                await self._release_snapshot_reservation(preparation)
-            async with self._lock:
-                if self._starting_runs.get(command.thread_id) == owner:
-                    self._starting_runs.pop(command.thread_id, None)
+            try:
+                if preparation is not None and not reservation_transferred:
+                    try:
+                        await self._release_snapshot_reservation(preparation)
+                    finally:
+                        if preparation.on_abandon is not None:
+                            await preparation.on_abandon()
+            finally:
+                async with self._lock:
+                    if self._starting_runs.get(command.thread_id) == owner:
+                        self._starting_runs.pop(command.thread_id, None)
 
     async def cancel(self, run: RunRef, requester: ConnectionRef) -> CancelResult:
         """取消指定正在执行的 AI 运行任务（Run）。

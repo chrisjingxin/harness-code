@@ -266,7 +266,7 @@ function createPort(options: {
       return openThreadImpl(threadId)
     },
     async listFusionProfiles() { return { duo: { lead_profile_id: "pro", sidekick_profile_id: "fast", check_plan_ids: [] } } },
-    async inspectFusion() { return { task: null } },
+    async inspectFusion() { return { task: null, workspace_blocker: null } },
     async recoverFusion() { throw new Error("No unknown Fusion task") },
     async cancelFusion() { throw new Error("No active Fusion task") },
     async inspectGoal() {

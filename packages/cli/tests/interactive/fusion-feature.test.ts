@@ -7,7 +7,7 @@ import {
   startRun,
 } from "../../src/interactive/state"
 import type { FeatureContext } from "../../src/interactive/features/types"
-import { runtime, makeHarness, flush } from "./harness"
+import { runtime, makeHarness, flush, terminalEvent } from "./harness"
 
 function context(task: any = null) {
   let state = createInitialState("t")
@@ -30,7 +30,7 @@ function context(task: any = null) {
           check_plan_ids: [],
         },
       }),
-      inspectFusion: async () => ({ task }),
+      inspectFusion: async () => ({ task, workspace_blocker: null }),
       cancelFusion: async (params: any) => {
         calls.push(params)
         return { ...task, phase: "CANCELLED", active: false }
@@ -42,6 +42,195 @@ function context(task: any = null) {
     },
   } as unknown as FeatureContext
   return { ctx, calls }
+}
+
+function occupied(unknown = false) {
+  const owner: any = { task_id: "old-task", thread_id: "old", version: 7, phase: unknown ? "OUTCOME_UNKNOWN" : "REVIEWING", active: true, profile: { profile_id: "duo" } }
+  const waiting: any = { task_id: "waiting", thread_id: "t", version: 2, phase: "WAITING_USER", active: true, profile: { profile_id: "duo" }, reason: "workspace_busy", workspace_blocker: { task_id: owner.task_id, thread_id: owner.thread_id, phase: owner.phase, round: 2, requires_inspection: unknown } }
+  const { ctx, calls } = context(waiting)
+  let released = false
+  ctx.gateway.inspectFusion = async (threadId) => ({ task: threadId === "old" ? owner : released ? { ...waiting, version: 3, phase: "PAUSED", reason: "workspace_available", workspace_blocker: null } : waiting, workspace_blocker: null })
+  ctx.gateway.cancelFusion = async (params) => {
+    calls.push(params)
+    if (unknown && !params.stopped_inspection_note) throw new Error("FUSION_OUTCOME_UNKNOWN")
+    released = true
+    return { ...owner, phase: "CANCELLED", active: false }
+  }
+  return { ctx, calls, owner }
+}
+
+for (const unknown of [false, true]) for (const historical of [false, true]) {
+  test(`no active task in this conversation still shows and resolves the workspace owner: ${unknown}, historical: ${historical}`, async () => {
+    const ended = historical ? { task_id: "ended-task", thread_id: "t", phase: "CANCELLED", active: false, version: 3, profile: { profile_id: "duo" }, pending_operations: [], workspace_blocker: null } as any : null
+    const { ctx, calls } = context(ended)
+    const owner = { task_id: "owner-task", thread_id: "old-thread", phase: unknown ? "OUTCOME_UNKNOWN" : "REVIEWING", active: true, version: 7, profile: { profile_id: "duo" } } as any
+    const blocker = { task_id: owner.task_id, thread_id: owner.thread_id, phase: owner.phase, round: 1, reason: unknown ? "effects_unconfirmed" : null, requires_inspection: unknown }
+    let released = false
+    ctx.gateway.inspectFusion = async (threadId) => ({ task: threadId === "old-thread" ? owner : ended, workspace_blocker: threadId === "old-thread" || released ? null : blocker } as any)
+    ctx.gateway.cancelFusion = async params => { calls.push(params); released = true; return { ...owner, active: false, phase: "CANCELLED", version: 8 } }
+    expect((await new FusionFeature().execute("status", ctx)).status).toBe("accepted")
+    const text = ctx.getState().timeline.flatMap(item => item.type === "message" ? [item.message.content] : []).join("\n")
+    expect(text).toContain("old-thread")
+    expect(text).toContain("/fusion resolve")
+    expect((await new FusionFeature().execute(unknown ? "resolve --stopped 已核查相关命令停止" : "resolve", ctx)).status).toBe("accepted")
+    expect(calls).toHaveLength(1)
+    expect(calls[0].task_id).toBe("owner-task")
+    expect(calls[0].expected_version).toBe(7)
+    expect(ctx.getState().fusionTask).toEqual(ended)
+  })
+}
+
+test("Fusion rejection remains actionable when the current display has no Fusion selection", async () => {
+  const h = makeHarness()
+  try {
+    h.port.startRun = () => { throw new Error("FUSION_OUTCOME_UNKNOWN") }
+    const result = await h.controller.dispatch({ type: "input.submit", value: "你自己检查下" })
+    expect(result.status).toBe("rejected")
+    if (result.status !== "rejected") throw new Error("expected rejection")
+    expect(result.message).toContain("/fusion status")
+    expect(result.message).toContain("停止")
+  } finally { await h.controller.close() }
+})
+
+test("resolve cancels the actual owner from the current conversation and refreshes the waiting task", async () => {
+  const { ctx, calls } = occupied()
+  const result = await new FusionFeature().execute("resolve", ctx)
+  expect(result.status).toBe("accepted")
+  expect(calls).toEqual([{ task_id: "old-task", expected_version: 7 }])
+  expect(ctx.getState().currentThreadId).toBe("t")
+  expect(ctx.getState().fusionTask).toMatchObject({ task_id: "waiting", reason: "workspace_available" })
+  expect(ctx.getState().fusionProfileId).toBe("duo")
+})
+
+test("resolve unknown operation requires explicit stop confirmation in the current conversation", async () => {
+  const { ctx, calls } = occupied(true)
+  const feature = new FusionFeature()
+  const rejected = await feature.execute("resolve", ctx)
+  expect(rejected.status).toBe("rejected")
+  if (rejected.status !== "rejected") throw new Error("expected rejected")
+  expect(rejected.message).toContain("/fusion resolve --stopped")
+  expect(calls[0]).not.toHaveProperty("stopped_inspection_note")
+  expect((await feature.execute("resolve --stopped 已检查文件和所有旧进程停止", ctx)).status).toBe("accepted")
+  expect(calls[1]).toEqual({ task_id: "old-task", expected_version: 7, stopped_inspection_note: "已检查文件和所有旧进程停止" })
+  expect(ctx.getState().currentThreadId).toBe("t")
+})
+
+test("cancel with explicit stop note uses one canonical cancellation request", async () => {
+  const { ctx, calls } = context({ task_id: "f", thread_id: "t", version: 3, active: true, phase: "OUTCOME_UNKNOWN", profile: { profile_id: "duo" } })
+  expect((await new FusionFeature().execute("cancel --stopped 已确认执行停止", ctx)).status).toBe("accepted")
+  expect(calls).toEqual([{ task_id: "f", expected_version: 3, stopped_inspection_note: "已确认执行停止" }])
+  expect(ctx.getState().fusionTask?.active).toBe(false)
+  expect(ctx.getState().fusionProfileId).toBeNull()
+})
+
+test("resolve refuses changed owner identity and leaves both conversations untouched", async () => {
+  const { ctx, calls, owner } = occupied()
+  const inspect = ctx.gateway.inspectFusion
+  ctx.gateway.inspectFusion = async (threadId) => threadId === "old" ? { task: { ...owner, task_id: "different-task" }, workspace_blocker: null } : inspect(threadId)
+  expect((await new FusionFeature().execute("resolve", ctx)).status).toBe("rejected")
+  expect(calls).toEqual([])
+  expect(ctx.getState().currentThreadId).toBe("t")
+})
+
+test("resolve without a blocker never cancels the current task", async () => {
+  const { ctx, calls } = context({ task_id: "f", thread_id: "t", version: 3, active: true, phase: "PAUSED", profile: { profile_id: "duo" } })
+  expect((await new FusionFeature().execute("resolve", ctx)).status).toBe("rejected")
+  expect(calls).toEqual([])
+})
+
+test("resolve is already successful when an idle task yielded the directory", async () => {
+  const { ctx, calls } = context({ task_id: "waiting", thread_id: "t", version: 3, active: true, phase: "PAUSED", reason: "workspace_available", profile: { profile_id: "duo" } })
+  expect((await new FusionFeature().execute("resolve", ctx)).status).toBe("accepted")
+  expect(calls).toEqual([])
+})
+
+test("cancellation response cannot overwrite a conversation switched during the request", async () => {
+  const { ctx } = context({ task_id: "f", thread_id: "t", version: 3, active: true, phase: "PAUSED", profile: { profile_id: "duo" } })
+  ctx.gateway.cancelFusion = async () => {
+    ctx.commit(current => ({ ...current, currentThreadId: "new-thread", fusionTask: null, fusionProfileId: "new-profile" }))
+    return { task_id: "f", thread_id: "t", phase: "CANCELLED", active: false } as any
+  }
+  expect((await new FusionFeature().execute("cancel", ctx)).status).toBe("accepted")
+  expect(ctx.getState().currentThreadId).toBe("new-thread")
+  expect(ctx.getState().fusionProfileId).toBe("new-profile")
+  expect(ctx.getState().fusionTask).toBeNull()
+})
+
+test("switching conversation during initial status refresh cannot cancel the new target", async () => {
+  const old = { task_id: "old-task", thread_id: "t", version: 3, active: true, phase: "PAUSED", profile: { profile_id: "duo" } } as any
+  const { ctx, calls } = context(old)
+  ctx.gateway.inspectFusion = async () => {
+    ctx.commit(current => ({ ...current, currentThreadId: "new-thread", fusionTask: { ...old, task_id: "new-task", thread_id: "new-thread" } }))
+    return { task: old, workspace_blocker: null }
+  }
+  expect((await new FusionFeature().execute("cancel", ctx)).status).toBe("rejected")
+  expect(calls).toEqual([])
+})
+
+for (const action of ["cancel", "recover"]) {
+  test(`${action} response cannot overwrite a new task in the same conversation`, async () => {
+    const old = { task_id: "old-task", thread_id: "t", version: 3, active: true, phase: "OUTCOME_UNKNOWN", profile: { profile_id: "duo" } } as any
+    const { ctx } = context(old)
+    const mutate = async () => {
+      ctx.commit(current => ({ ...current, fusionTask: { ...old, task_id: "new-task" }, fusionProfileId: "new-profile" }))
+      return { ...old, phase: action === "cancel" ? "CANCELLED" : "PAUSED", active: action !== "cancel", version: 4 }
+    }
+    if (action === "cancel") ctx.gateway.cancelFusion = mutate
+    else ctx.gateway.recoverFusion = mutate
+    expect((await new FusionFeature().execute(`${action} --stopped 已核实全部操作停止`, ctx)).status).toBe("accepted")
+    expect(ctx.getState().fusionTask?.task_id).toBe("new-task")
+    expect(ctx.getState().fusionProfileId).toBe("new-profile")
+  })
+}
+
+test("blank stop notes are rejected before cancellation", async () => {
+  for (const value of ["resolve --stopped", "cancel --stopped", "resolve --stopped   "]) {
+    const { ctx, calls } = occupied(true)
+    expect((await new FusionFeature().execute(value, ctx)).status).toBe("rejected")
+    expect(calls).toEqual([])
+  }
+})
+
+for (const code of ["FUSION_LEASE_BUSY", "FUSION_OUTCOME_UNKNOWN"]) {
+  test(`Fusion start failure ${code} gives an action in the current conversation`, async () => {
+    const h = makeHarness({ capabilities: [...runtime.capabilities!, Capability.FUSION_READ, Capability.FUSION_MANAGE] })
+    try {
+      await h.controller.dispatch({ type: "input.submit", value: "/fusion duo" })
+      h.port.startRun = () => { throw new Error(code) }
+      const result = await h.controller.dispatch({ type: "input.submit", value: "继续" })
+      expect(result.status).toBe("rejected")
+      if (result.status !== "rejected") throw new Error("expected rejected")
+      expect(result.message).toContain("当前会话")
+      expect(result.message).toContain("/fusion cancel")
+    } finally {
+      await h.controller.close()
+    }
+  })
+}
+
+for (const fusion of [true, false]) {
+  test(`provider failure after partial output has actionable Fusion guidance: ${fusion}`, async () => {
+    const h = makeHarness({ capabilities: [...runtime.capabilities!, Capability.FUSION_READ, Capability.FUSION_MANAGE] })
+    const raw = "Provider stream failed after output was published"
+    try {
+      if (fusion) await h.controller.dispatch({ type: "input.submit", value: "/fusion duo" })
+      await h.controller.dispatch({ type: "input.submit", value: "实现工具" })
+      const run = h.controller.getSnapshot().activeRun!
+      h.port.emitEvent(terminalEvent(EventType.CONTENT_DELTA, run.threadId, run.runId, 1, { text: "已输出内容" }))
+      h.port.emitEvent(terminalEvent(EventType.RUN_FAILED, run.threadId, run.runId, 2, { error: { code: "PROVIDER_OUTPUT_INTERRUPTED", message: raw, retryable: true } }))
+      await flush()
+      const snapshot = h.controller.getSnapshot()
+      const text = snapshot.timeline.flatMap(item => item.type === "message" ? [item.message.content] : []).join("\n")
+      expect(snapshot.activeRun).toBeNull()
+      expect(text).toContain("已输出内容")
+      expect(h.calls.filter(call => call === "run.start")).toHaveLength(1)
+      if (fusion) {
+        expect(text).toContain("模型连接")
+        expect(text).toContain("继续")
+        expect(text).toContain("/fusion status")
+      } else expect(text).toContain(raw)
+    } finally { await h.controller.close() }
+  })
 }
 
 test("selects configured Fusion and refuses off during active task", async () => {
@@ -98,7 +287,7 @@ test("cancel with unknown effects explains recover before cancel without recover
   if (result.status !== "rejected") throw new Error("expected rejected")
   expect(result.message).toContain("/fusion recover --stopped")
   expect(result.message).toContain("核查已记录")
-  expect(result.message.indexOf("/fusion recover")).toBeLessThan(result.message.indexOf("/fusion cancel"))
+  expect(result.message).toContain("/fusion cancel --stopped")
   expect(calls).toEqual([])
   expect(ctx.getState().fusionTask?.active).toBe(true)
 })
@@ -124,22 +313,21 @@ test("unknown task status names the recovery command and its success message", a
   expect(text).toContain("/fusion recover --stopped")
   expect(text).toContain("核查已记录")
   expect(text).toContain("单独输入")
-  expect(text.indexOf("/fusion recover")).toBeLessThan(text.indexOf("/fusion cancel"))
+  expect(text).toContain("/fusion cancel --stopped")
 })
 
-test("workspace blocker with unknown effects shows recovery before cancellation", async () => {
+test("workspace blocker with unknown effects shows in-place stop confirmation", async () => {
   const { fusionSummary } = await import("../../src/interactive/fusion-summary")
   const text = fusionSummary({
     profile: { profile_id: "duo" }, phase: "WAITING_USER", round: 0,
     workspace_blocker: {
-      thread_id: "old-thread", phase: "OUTCOME_UNKNOWN", round: 3,
+      task_id: "owner-task", thread_id: "old-thread", phase: "OUTCOME_UNKNOWN", round: 3,
       reason: "effects_unconfirmed", requires_inspection: true,
     },
   } as any)
   expect(text).toContain("old-thread")
-  expect(text).toContain("/resume")
-  expect(text).toContain("/fusion recover --stopped")
-  expect(text.indexOf("/fusion recover")).toBeLessThan(text.indexOf("/fusion cancel"))
+  expect(text).not.toContain("/resume")
+  expect(text).toContain("/fusion resolve --stopped")
 })
 
 test("a stopped workspace owner keeps the ordinary cancellation instructions", async () => {
@@ -147,11 +335,11 @@ test("a stopped workspace owner keeps the ordinary cancellation instructions", a
   const text = fusionSummary({
     profile: { profile_id: "duo" }, phase: "WAITING_USER", round: 0,
     workspace_blocker: {
-      thread_id: "old-thread", phase: "PAUSED", round: 1,
+      task_id: "owner-task", thread_id: "old-thread", phase: "PAUSED", round: 1,
       reason: "run_paused", requires_inspection: false,
     },
   } as any)
-  expect(text).toContain("/fusion cancel")
+  expect(text).toContain("/fusion resolve")
   expect(text).not.toContain("/fusion recover")
 })
 
@@ -346,12 +534,12 @@ test("工作区占用显示原会话与处理方式，未派单不能当作完�
   expect(text).toContain("工作区被另一任务占用")
   expect(text).toContain("older-thread")
   expect(text).toContain("已达到返工上限")
-  expect(text).toContain("/resume")
-  expect(text).toContain("/fusion cancel")
+  expect(text).not.toContain("/resume")
+  expect(text).toContain("/fusion resolve")
   expect(text).toContain("尚未派单")
   expect(text).not.toContain("检查及审阅通过")
   const unknown = fusionSummary({ ...task, workspace_blocker: { ...task.workspace_blocker, requires_inspection: true } })
-  expect(unknown).toContain("/fusion recover --stopped")
+  expect(unknown).toContain("/fusion resolve --stopped")
 })
 
 
@@ -363,8 +551,18 @@ test("较早发出的状态查询不能覆盖新进度中的占用状态", async
   const waiting = new FusionFeature().refresh("t", ctx)
   const latest = { ...old, version: 2, phase: "WAITING_USER", reason: "workspace_busy" }
   ctx.commit(state => ({ ...state, fusionTask: latest }))
-  resolve({ task: old })
+  resolve({ task: old, workspace_blocker: null })
   await waiting
   expect(ctx.getState().fusionTask?.version).toBe(2)
   expect(ctx.getState().fusionTask?.reason).toBe("workspace_busy")
+})
+
+
+test("a workspace owner from another project has no misleading current-dialog cancellation hint", async () => {
+  const { ctx } = context()
+  ctx.gateway.inspectFusion = async () => ({ task: null, workspace_blocker: { task_id: null, thread_id: null, phase: null, round: 0, reason: "owner_unavailable", requires_inspection: true } })
+  expect((await new FusionFeature().execute("status", ctx)).status).toBe("accepted")
+  const notice = JSON.stringify(ctx.getState())
+  expect(notice).toContain("原项目")
+  expect(notice).not.toContain("/fusion resolve")
 })

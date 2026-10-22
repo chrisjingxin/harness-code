@@ -105,6 +105,12 @@ def _invalid_command(command: str, *, depth: int = 0) -> bool:
                     words = shlex.split(text, posix=True)
                 except ValueError:
                     return True
+                if words and (
+                    (words[0] == "cd" and "/" in words[1:])
+                    or (Path(words[0]).name == "find" and "/" in words[1:])
+                ):
+                    # 文件工具的虚拟根不能用于 Shell，否则会离开项目并全盘搜索。
+                    return True
                 shells = {
                     "bash",
                     "sh",
@@ -127,7 +133,9 @@ def _invalid_command(command: str, *, depth: int = 0) -> bool:
     return False
 
 
-def _repeated_rejection(state: Any) -> tuple[str, str] | None:
+def _repeated_rejection(
+    state: Any, *, include_unknown: bool = False
+) -> tuple[str, str] | None:
     """只在本轮连续三次相同工具拒绝时收尾；成功结果或新任务中断计数。"""
     if not isinstance(state, Mapping):
         return None
@@ -139,6 +147,12 @@ def _repeated_rejection(state: Any) -> tuple[str, str] | None:
         "FUSION_ROLE_DENIED",
         "FUSION_TASK_CONFLICT",
         "FUSION_PATH_INVALID",
+        "FUSION_CHECK_INVALID",
+        "FUSION_INPUT_INVALID",
+        "FUSION_FIRST_ORDER_REQUIRED",
+        "FUSION_REPORT_STALE",
+        "FUSION_EVIDENCE_INCOMPLETE",
+        "FUSION_TEST_REVIEW_REQUIRED",
     }
     for message in reversed(state.get("messages", ())):
         if getattr(message, "type", None) == "human":
@@ -148,8 +162,19 @@ def _repeated_rejection(state: Any) -> tuple[str, str] | None:
         if message.status != "error" or not isinstance(message.content, str):
             return None
         code = message.content.split("：", 1)[0].split(":", 1)[0].strip()
-        if code not in codes:
-            return None
+        if message.content.lstrip().startswith("{"):
+            try:
+                data = json.loads(message.content)
+            except (ValueError, TypeError):
+                return None
+            error = data.get("error") if isinstance(data, dict) else None
+            # 文件工具用 error.code，Fusion 控制工具直接返回 error 字符串。
+            code = error.get("code") if isinstance(error, dict) else error
+        # 工具结果属于输入数据；异常对象或数组不能作为错误码参与集合查询。
+        if not isinstance(code, str) or code not in codes:
+            if not include_unknown:
+                return None
+            code = "TOOL_REJECTED"
         key = (message.name or "工具", code)
         if previous is not None and key != previous:
             return None
@@ -337,6 +362,29 @@ class FusionEffectMiddleware(AgentMiddleware):
         if not task_id or role not in {"lead", "sidekick"}:
             return None
         task = await self.store.get(task_id)
+        if role == "lead" and context.fusion_state.inspection_only:
+            # 核查只读，不取得旧运行归属，不修改未知状态，也不强制补派单。
+            if _repeated_rejection(state, include_unknown=True) is not None:
+                return {
+                    "messages": [
+                        AIMessage(
+                            content="只读核查连续遇到工具错误，本轮已停止。可输入 /fusion status 查看操作归属和当前会话处理说明；停止情况尚未因此确认。"
+                        )
+                    ],
+                    "jump_to": "end",
+                }
+            return None
+        scope = task.data.get("active_run")
+        if (
+            not task.active
+            or task.phase == "OUTCOME_UNKNOWN"
+            or (
+                scope is not None
+                and scope["run_id"] != getattr(context, "run_id", None)
+            )
+        ):
+            # 未知操作应立即核查；已结束或被接替的执行也不能再请求模型或补报告。
+            return {"jump_to": "end"}
         if role == "sidekick":
             if task.data.get("report_id"):
                 return {"jump_to": "end"}
@@ -354,21 +402,41 @@ class FusionEffectMiddleware(AgentMiddleware):
                 )
                 return {"jump_to": "end"}
             return None
+        rejection = _repeated_rejection(state)
+        if (
+            task.active
+            and task.data.get("reason") != "workspace_busy"
+            and rejection is not None
+        ):
+            tool, code = rejection
+            task = await self.store.update(
+                task.task_id,
+                task.version,
+                phase="WAITING_USER",
+                data={"reason": "lead_control_rejected"},
+            )
+            if getattr(context, "fusion_service", None) is not None:
+                context.fusion_service._emit(context, task)
+            return {
+                "messages": [
+                    AIMessage(
+                        content=f"{tool} 连续三次被拒绝（{code}），本轮已暂停。工具结果中有参数与修正说明；发送继续后可调整再执行。",
+                        id=f"fusion-control-wait-{task.task_id}-{task.version}",
+                    )
+                ],
+                "jump_to": "end",
+            }
         if not task.active or task.data.get("reason") != "workspace_busy":
             return None
         blocker = task.data.get("workspace_blocker") or {}
         thread_id = blocker.get("thread_id")
         source = f"会话 {thread_id}" if thread_id else "另一任务"
         message = (
-            f"工作区被{source}占用。当前 Fusion 任务尚未取得写权限，已暂停派单，本轮不会继续重试。"
-            "\n请用 /resume 返回占用会话，查看 /fusion status；"
-            "需要结束旧任务时，在旧会话执行 /fusion cancel，已修改文件会保留。"
+            f"工作区被{source}占用，当前任务已暂停派单。"
+            "\n可直接在当前对话输入 /fusion resolve，结束占用任务并保留文件；成功后发送继续。"
         )
         if blocker.get("requires_inspection"):
-            message += "\n旧任务有结果不明的操作，请先核查是否停止，再按原恢复流程处理，不能强行释放写权限。"
-        message += (
-            "\n处理占用后，回到本对话发送继续。没有首轮任务单时应使用首次派单入口。"
-        )
+            message += "\n若提示结果不明，请先核查相关命令和进程已停止，再在当前对话输入 /fusion resolve --stopped 核查说明；无需切换旧会话。"
         return {
             "messages": [
                 AIMessage(
@@ -383,11 +451,26 @@ class FusionEffectMiddleware(AgentMiddleware):
         """审批恢复后登记 Shell；取消无法证明停止时保留未知操作。"""
         name = request.tool_call["name"]
         context = getattr(request.runtime, "context", None)
-        # 仅实际任务中的已登记控制工具免查写者；普通扩展不能借名称前缀越权。
+        # 控制工具返回的业务拒绝也必须呈现为失败，模型才能修正而非当作成功。
         if (
             getattr(context, "fusion_task_id", None)
             and name in LEAD_CONTROLS | WORKER_CONTROLS
-        ) or name in {
+        ):
+            result = await handler(request)
+            if isinstance(result, ToolMessage) and isinstance(result.content, str):
+                try:
+                    value = json.loads(result.content)
+                except ValueError:
+                    value = None
+                if (
+                    isinstance(value, dict)
+                    and isinstance(value.get("error"), str)
+                    and value["error"].startswith("FUSION_")
+                ):
+                    result.status = "error"
+            return result
+        # 仅实际任务中的已登记控制工具免查写者；普通扩展不能借名称前缀越权。
+        if name in {
             "ls",
             "read_file",
             "glob",
@@ -438,7 +521,12 @@ class FusionEffectMiddleware(AgentMiddleware):
             return result
         except FusionError as exc:
             return ToolMessage(
-                content=exc.code,
+                content=exc.code
+                + (
+                    "：execute 默认就在项目目录；文件工具的 / 是虚拟根。使用项目相对路径，不要 cd /、find / 或启动后台进程。"
+                    if exc.code == "FUSION_COMMAND_INVALID"
+                    else ""
+                ),
                 tool_call_id=request.tool_call["id"],
                 name=name,
                 status="error",

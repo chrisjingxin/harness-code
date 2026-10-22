@@ -10,6 +10,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Fusion 的拒绝或断流给出当前会话入口，普通模型错误沿用现有说明。 */
+function runFailureMessage(error: unknown, fusion: boolean): string {
+  const message = errorMessage(error)
+  if (message.includes("FUSION_LEASE_BUSY"))
+    return "这项 Fusion 任务仍由另一窗口执行。可以等它完成，或在当前会话输入 /fusion cancel 结束任务；已改文件保留。"
+  if (message.includes("FUSION_OUTCOME_UNKNOWN"))
+    return "上次执行的停止情况需要核查，这不表示已发现进程占用。先输入 /fusion status 查看实际任务；故障任务可直接提问进行只读核查。确认相关操作停止后，在当前会话输入 /fusion recover --stopped <核查说明> 继续，或 /fusion cancel --stopped <核查说明> 结束任务。"
+  if (fusion && (message.includes("PROVIDER_OUTPUT_INTERRUPTED") || message.includes("Provider stream failed after output was published")))
+    return "模型连接在输出中途断开。已写入的文件保留；可发送“继续”。如提示停止情况待核查，请先查看 /fusion status 的处理说明。"
+  return message
+}
+
 /** 从 RUN_STARTED 事件提取实际主模型绑定；字段缺失或形状不符时不回填。 */
 function actualModelFromStarted(payload: Record<string, unknown>): ModelProfile | undefined {
   const binding = objectRecord(payload.primary_model)
@@ -280,6 +292,7 @@ export class RunFeature {
       return { status: "rejected", code: "invalid-argument", message: "Fusion 只支持 Build 普通需求；先退出 Skill/Plan，或用 /fusion off。" }
     }
 
+    const fusion = Boolean(ctx.getState().fusionProfileId)
     try {
       const startedAtMs = ctx.clock.now()
       const run = ctx.gateway.startRun({
@@ -306,7 +319,7 @@ export class RunFeature {
       }).catch(error => {
         if (this.activeRunHandle?.ref.runId !== run.ref.runId) return
         this.activeRunHandle = null
-        ctx.commit(current => markRunFailed(current, run.ref.runId, errorMessage(error)))
+        ctx.commit(current => markRunFailed(current, run.ref.runId, runFailureMessage(error, fusion)))
         options.onRunFinish(undefined, undefined, "failed")
       })
 
@@ -321,14 +334,18 @@ export class RunFeature {
             if (event.type === EventType.RUN_STARTED) {
               actualModel = actualModelFromStarted(event.payload)
             }
-            options.onEvent(event)
+            if (fusion && event.type === EventType.RUN_FAILED) {
+              options.onEvent({ ...event, payload: { ...event.payload, error: {
+                ...event.payload.error, message: runFailureMessage(event.payload.error.message, fusion),
+              } } })
+            } else options.onEvent(event)
           }
         } catch (error) {
           // 只有当前 Run 可以转 failed；旧 Run 的流错误不能结束新 Run。
           const active = ctx.getState().activeRun
           if (active?.runId === run.ref.runId) {
             this.activeRunHandle = null
-            ctx.commit(current => markRunFailed(current, run.ref.runId, errorMessage(error)))
+            ctx.commit(current => markRunFailed(current, run.ref.runId, runFailureMessage(error, fusion)))
             options.onRunFinish(actualModel, undefined, "failed")
           }
         }
@@ -353,7 +370,7 @@ export class RunFeature {
 
       return { status: "accepted" }
     } catch (error) {
-      return { status: "rejected", code: "agent-error", message: `Run 启动失败：${errorMessage(error)}` }
+      return { status: "rejected", code: "agent-error", message: `Run 启动失败：${runFailureMessage(error, fusion)}` }
     }
   }
 

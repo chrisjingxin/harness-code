@@ -66,15 +66,10 @@ class DirectInput(Input):
 
 
 class DelegateInput(Input):
-    """首轮派单：原话、目标、步骤、路径和已配置检查 ID。"""
+    """首轮派单：目标、步骤、路径和已配置检查 ID；需求原话由 Host 保存。"""
 
     goal: str = Field(min_length=1, max_length=8000)
     brief: str = Field(min_length=1, max_length=16000)
-    user_requirements: list[str] = Field(
-        min_length=1,
-        max_length=32,
-        description="逐条引用任务原始用户消息中的原话，不要改写或补充用户未提出的要求。",
-    )
     allowed_paths: list[str] = Field(
         min_length=1, max_length=256, description=PATH_SCOPE_DESCRIPTION
     )
@@ -132,7 +127,7 @@ TOOLS = {
     "fusion_delegate": (
         "delegate",
         DelegateInput,
-        "派单给 Sidekick；需求引用用户原话，allowed_paths 使用项目相对路径，"
+        "派单给 Sidekick；Host 自动保存原始需求，实施细节填写 goal/brief。allowed_paths 使用项目相对路径，"
         "新文件无需预先创建。等待报告和 Host 检查。",
     ),
     "fusion_rework": (
@@ -163,7 +158,12 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
             context = require_run_context(get_runtime())
             service = context.fusion_service
             if service is None:
-                return "FUSION_ROLE_DENIED"
+                return encode(
+                    {
+                        "error": "FUSION_ROLE_DENIED",
+                        "message": "当前执行没有 Fusion 控制权限。",
+                    }
+                )
             if "requirements" in arguments:
                 arguments["requirements"] = [
                     item.model_dump() if isinstance(item, BaseModel) else item
@@ -179,7 +179,41 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
                             "message": "尚无首轮任务单，不能返工。请先用 fusion_delegate 派单；工作区被占用时先处理占用任务，不要反复重试。",
                         }
                     )
-                return exc.code
+                hints = {
+                    "FUSION_CHECK_INVALID": (
+                        "check_plan_ids",
+                        "只选择配置中的检查 ID；留空会使用组合的全部检查。",
+                    ),
+                    "FUSION_TASK_CONFLICT": (
+                        "task",
+                        "先调用 fusion_status；已有首轮任务单的修改用 fusion_rework，审阅使用当前 ticket_id。",
+                    ),
+                    "FUSION_INPUT_INVALID": (
+                        "goal/brief",
+                        "目标和实施说明均须填写非空文本。",
+                    ),
+                    "FUSION_REWORK_LIMIT": (
+                        "round",
+                        "已达到返工上限，说明受阻原因后等待用户调整任务。",
+                    ),
+                }
+                if exc.code in hints:
+                    field, message = hints[exc.code]
+                    result = {"error": exc.code, "field": field, "message": message}
+                    if exc.code == "FUSION_CHECK_INVALID":
+                        result["available_check_plan_ids"] = [
+                            p.plan_id
+                            for p in service.profile_provider(
+                                context.fusion_task_id
+                            ).check_plans
+                        ]
+                    return encode(result)
+                return encode(
+                    {
+                        "error": exc.code,
+                        "message": "读取 fusion_status 确认当前任务状态；不要原样重复遭拒绝的调用。",
+                    }
+                )
             except ValueError as exc:
                 # 仅解释已知路径错误；未知异常原文可能包含内部路径或凭据。
                 if str(exc) == "FUSION_PATH_INVALID" and method in {
@@ -193,7 +227,12 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
                             "message": PATH_SCOPE_DESCRIPTION,
                         }
                     )
-                return "FUSION_INPUT_INVALID"
+                return encode(
+                    {
+                        "error": "FUSION_INPUT_INVALID",
+                        "message": "工具参数不符合当前定义，请检查字段后修正；不要重复相同调用。",
+                    }
+                )
 
         return invoke
 
@@ -204,6 +243,19 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
             name=name,
             args_schema=TOOLS[name][1],
             description=TOOLS[name][2],
+            handle_validation_error=lambda error, schema=TOOLS[name][1]: encode(
+                {
+                    "error": "FUSION_INPUT_INVALID",
+                    "fields": sorted(
+                        {
+                            str(item["loc"][0])
+                            for item in error.errors()
+                            if item.get("loc") and item["loc"][0] in schema.model_fields
+                        }
+                    ),
+                    "message": "按当前工具参数填写必填字段；未知字段应删除，需求原话由 Host 自动保存。",
+                }
+            ),
         )
         for name in sorted(names)
     )

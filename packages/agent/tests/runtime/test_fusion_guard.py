@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+
 import pytest
+
 from harness_agent.runtime.run_context import FusionRunState
 from harness_agent.threads.thread_persistence import ThreadPersistence
 
@@ -83,6 +85,7 @@ async def test_stale_generation_and_ordinary_write_are_rejected(tmp_path):
 @pytest.mark.parametrize("tool_name", ["fusion_external_write", "fusion_delegate"])
 async def test_ordinary_tool_cannot_bypass_writer_by_fusion_name(tmp_path, tool_name):
     from langchain_core.messages import ToolMessage
+
     from harness_agent.runtime.fusion.guard import FusionEffectMiddleware
 
     p, store, task, lease, ctx, guard = await setup(tmp_path)
@@ -139,7 +142,9 @@ async def test_worker_rejects_git_state_mutation(tmp_path, command):
             ),
             handler,
         )
-        assert result.status == "error" and result.content == "FUSION_COMMAND_INVALID"
+        assert result.status == "error" and result.content.startswith(
+            "FUSION_COMMAND_INVALID"
+        )
         assert not called
     finally:
         await p.close()
@@ -152,6 +157,7 @@ async def test_execute_effect_uses_backend_exit_code_and_timeout_is_unknown(
     tmp_path, exit_code, expected_state
 ):
     from langchain_core.messages import ToolMessage
+
     from harness_agent.runtime.fusion.guard import FusionEffectMiddleware
 
     p, store, task, lease, ctx, guard = await setup(tmp_path)
@@ -187,6 +193,7 @@ async def test_execute_effect_uses_backend_exit_code_and_timeout_is_unknown(
 
 async def test_snapshot_contract_commits_real_file_under_fusion_guard(tmp_path):
     import json
+
     from harness_agent.threads.snapshots import ThreadSnapshotStore
     from harness_agent.threads.text_backend import LocalTextMutationBackend
     from harness_agent.tools.snapshot_file_contract import (
@@ -222,3 +229,95 @@ async def test_snapshot_contract_commits_real_file_under_fusion_guard(tmp_path):
         assert (await store.effects(task.task_id))[0]["state"] == "succeeded"
     finally:
         await p.close()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd / && python3 -m unittest discover",
+        "find / -name calculator.py",
+        "find -L / -name a.py",
+        "sh -c 'find / -name a.py'",
+    ],
+)
+def test_virtual_file_root_is_not_a_shell_working_directory(command):
+    from harness_agent.runtime.fusion.guard import _invalid_command
+
+    assert _invalid_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find . -name a.py",
+        "cd tests && python3 -m unittest",
+        "python3 -c \"s = 'find /'; print(s)\"",
+    ],
+)
+def test_project_commands_and_quoted_root_search_text_remain_valid(command):
+    from harness_agent.runtime.fusion.guard import _invalid_command
+
+    assert not _invalid_command(command)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {"code": "BACKEND_READ_FAILED", "message": "目录读取失败"},
+        {"code": {"invalid": "object"}},
+        {"code": ["invalid"]},
+        ["FUSION_PATH_INVALID"],
+        [],
+        None,
+        1,
+    ],
+)
+@pytest.mark.parametrize("inspection", [False, True])
+def test_rejection_counter_never_hashes_non_string_error_values(error, inspection):
+    import json
+
+    from langchain_core.messages import ToolMessage
+
+    from harness_agent.runtime.fusion.guard import _repeated_rejection
+
+    messages = [
+        ToolMessage(
+            content=json.dumps({"ok": False, "error": error}),
+            name="ls",
+            tool_call_id=f"ls-{index}",
+            status="error",
+        )
+        for index in range(3)
+    ]
+    assert _repeated_rejection({"messages": messages}, include_unknown=inspection) == (
+        ("ls", "TOOL_REJECTED") if inspection else None
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "FUSION_PATH_INVALID：路径需要调整",
+        '{"error":"FUSION_PATH_INVALID"}',
+        '{"ok":false,"error":{"code":"FUSION_PATH_INVALID","message":"范围外"}}',
+    ],
+)
+def test_rejection_counter_still_limits_actual_fusion_errors(payload):
+    from langchain_core.messages import ToolMessage
+
+    from harness_agent.runtime.fusion.guard import _repeated_rejection
+
+    messages = [
+        ToolMessage(
+            content=payload,
+            name="fusion_rework",
+            tool_call_id=str(index),
+            status="error",
+        )
+        for index in range(3)
+    ]
+    assert _repeated_rejection({"messages": messages}) == (
+        "fusion_rework",
+        "FUSION_PATH_INVALID",
+    )
+    assert _repeated_rejection({"messages": messages[:2]}) is None

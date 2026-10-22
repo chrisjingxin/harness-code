@@ -1,6 +1,6 @@
-from dataclasses import replace
-import pytest
+
 from tests.runtime.test_agent_spec import _spec
+
 from harness_agent.config.config import ModelProfile, ModelSettings
 from harness_agent.runtime.execution_binding import SafeModelProfile
 from harness_agent.runtime.fusion.profile import FrozenFusionProfile
@@ -64,8 +64,8 @@ def test_roles_use_distinct_models_and_original_write_scope(tmp_path):
 
 
 def test_control_tool_risks_and_real_approval():
-    from harness_agent.policy.tool_risk import TOOL_KIND_MAP, ToolKind
     from harness_agent.policy.approval_policy import interrupt_on_for_approval_mode
+    from harness_agent.policy.tool_risk import TOOL_KIND_MAP, ToolKind
 
     assert TOOL_KIND_MAP["fusion_delegate"] == ToolKind.AGENT
     assert TOOL_KIND_MAP["fusion_status"] == ToolKind.READ
@@ -73,3 +73,31 @@ def test_control_tool_risks_and_real_approval():
     for mode in ("default", "auto-edit", "auto"):
         policy = interrupt_on_for_approval_mode(mode)
         assert policy["fusion_delegate"] and policy["fusion_rework"]
+
+
+def test_inspection_role_is_readonly_and_has_distinct_runtime_identity(tmp_path):
+    from harness_agent.runtime.fusion.roles import resolve_fusion_specs
+
+    base = _spec(tmp_path)
+    ordinary, worker = resolve_fusion_specs(base, profile())
+    inspector, unused = resolve_fusion_specs(base, profile(), inspection_only=True)
+    assert inspector.runtime_profile.profile_key != ordinary.runtime_profile.profile_key
+    assert (
+        {"read_file", "fusion_status"}
+        <= set(inspector.capability_view.tool_names)
+        <= {
+            "read_file",
+            "ls",
+            "glob",
+            "grep",
+            "lsp",
+            "codebase_explore",
+            "fusion_status",
+        }
+    )
+    assert not inspector.enable_ask_user
+    assert inspector.capability_view.filesystem_write is None
+    assert str(tmp_path) in inspector.prompt
+    assert str(tmp_path) in worker.prompt
+    assert "虚拟" in worker.prompt and "find /" in worker.prompt
+    assert unused.runtime_profile.profile_key == worker.runtime_profile.profile_key

@@ -2,7 +2,7 @@
 
 export const PROTOCOL_MAJOR = 3 as const
 export const PROTOCOL_MINOR = 11 as const
-export const PROTOCOL_SCHEMA_SHA256 = "a8a25b2af9496f79e8806a8d83f5331a6dc2766499f81debe8850698fec9d9f8" as const
+export const PROTOCOL_SCHEMA_SHA256 = "3043e6fb01fb900ad19b331dda9606cb2c20c3dccf317d18e4297f518cc56d2a" as const
 export const MAX_FRAME_BYTES = 8388608 as const
 export const MAX_TOOL_PAYLOAD_BYTES = 1048576 as const
 export const CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate","fusion.status","fusion.recover","fusion.cancel"] as const
@@ -295,10 +295,10 @@ export type GoalChangedPayload = { "reason": "blocked" | "completed" | "proposal
 export type GoalInteractionRequest = { "thread_id": string; "run_id": string; "timeout_ms": number; "execution_id"?: string; "parent_execution_id"?: string | null; "agent_id"?: string; "compose_scope"?: ComposeActivityScope; "payload": { "interrupt_id": string; "request_id": string; "proposal_kind": "create" | "replace" | "amend"; "base_goal_id": string | null; "base_revision": number | null; "objective": string; "assumptions": Array<string>; "criteria": Array<string>; "decisions": Array<"accepted" | "edited" | "rejected" | "cancelled"> } }
 export type GoalInteractionResponse = ({ "decision": "accepted"; "feedback"?: string }) | ({ "decision": "edited"; "criteria": Array<string>; "feedback"?: string }) | ({ "decision": "rejected"; "feedback"?: string }) | ({ "decision": "cancelled"; "feedback"?: string })
 export type FusionStatusParams = { "thread_id": string }
-export type FusionCancelParams = { "task_id": string; "expected_version": number }
+export type FusionCancelParams = { "task_id": string; "expected_version": number; "stopped_inspection_note"?: string }
 export type FusionRecoverParams = { "task_id": string; "expected_version": number; "inspection_note": string; "effects_stopped": boolean }
 export type FusionTaskStatus = { "task_id": string; "thread_id": string; "version": number; "phase": "READY" | "WORKER_RUNNING" | "CHECKING" | "REVIEWING" | "PAUSED" | "WAITING_USER" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED"; "active": boolean; "profile": JsonObject; "worker_session_id": string; "revision": number; "round": number; "verification": "verified" | "review_only" | "unverified"; "reason": string | null; "report_id": string | null; "ticket_id": string | null; "pending_operations"?: Array<JsonObject>; "workspace_blocker"?: (FusionWorkspaceBlocker) | (null) }
-export type FusionStatusResult = { "task": (FusionTaskStatus) | (null) }
+export type FusionStatusResult = { "task": (FusionTaskStatus) | (null); "workspace_blocker": (FusionWorkspaceBlocker) | (null) }
 export type FusionExecutionPayload = { "task_id": string; "role": "sidekick"; "round": number; "model": string; "status": "running" | "completed" | "cancelled" | "failed" }
 export type FusionWorkspaceBlocker = { "task_id": string | null; "thread_id": string | null; "phase": "READY" | "WORKER_RUNNING" | "CHECKING" | "REVIEWING" | "PAUSED" | "WAITING_USER" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED" | null; "round": number; "reason": string | null; "requires_inspection": boolean }
 

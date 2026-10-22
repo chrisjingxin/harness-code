@@ -71,7 +71,6 @@ class FusionModel(BaseChatModel):
                     {
                         "goal": "修改实现",
                         "brief": "保持兼容，更新 a.py",
-                        "user_requirements": ["保持兼容"],
                         "allowed_paths": ["a.py"],
                         "check_plan_ids": [],
                     },
@@ -140,6 +139,16 @@ class LeaseRetryModel(FusionModel):
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         ctx = get_runtime().context
         self.calls.append((self.role, ctx.execution_id, ctx.checkpoint_thread_id))
+        if ctx.fusion_state.inspection_only:
+            return ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content="已只读核查，目录仍由原任务使用，停止情况未确认。"
+                        )
+                    )
+                ]
+            )
         latest = messages[-1]
         tool = latest if isinstance(latest, ToolMessage) else None
         args = {}
@@ -174,7 +183,6 @@ class LeaseRetryModel(FusionModel):
                 args = {
                     "goal": "新建文件",
                     "brief": "新建 created.py",
-                    "user_requirements": ["新建 created.py"],
                     "allowed_paths": ["created.py"],
                     "check_plan_ids": [],
                 }
@@ -456,6 +464,7 @@ async def test_restart_restores_ticket_and_never_replays_completed_worker(
             fusion_role="lead",
             fusion_state=FusionRunState(),
             thread_id="t",
+            run_id="r",
             approval_mode="yolo",
             approval_state=None,
             approval_mode_provider=None,
@@ -478,7 +487,6 @@ async def test_restart_restores_ticket_and_never_replays_completed_worker(
             context,
             goal="修改实现",
             brief="保持兼容",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -615,7 +623,7 @@ async def test_real_run_resumes_prepared_order_and_reviews_without_new_round(
         "saved-dispatch",
         "首次任务：保持兼容，修改 a.py",
     )
-    await store.pause(task.task_id)
+    await store.release_run(task.task_id, prepared.fusion_binding.owner_id, "saved")
     await prepared.snapshot_reservation.release()
     frames = []
 
@@ -697,7 +705,7 @@ async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
         owner = await store.update(
             owner.task_id,
             owner.version,
-            phase="WAITING_USER",
+            phase="WORKER_RUNNING",
             data={"round": 4, "reason": "rework_limit"},
         )
 
@@ -734,7 +742,9 @@ async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
         ).generation == lease.generation
         second = await run("still-blocked-run")
         assert second.task_id == first.task_id and second.phase == "WAITING_USER"
-        assert len(calls) == 1, "占用未解除时不得再次请求模型或追问用户"
+        assert len(calls) == 2 and calls[-1][0] == "strong-test", (
+            "明确的新消息只进行 Lead 只读核查，不启动 Sidekick"
+        )
         persistence = await host._ensure_thread_persistence()
         history = (await persistence.load_context("t")).messages
         assert isinstance(history[-1], AIMessage), (

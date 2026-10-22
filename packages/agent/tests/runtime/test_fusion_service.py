@@ -83,7 +83,6 @@ async def test_delegate_rework_same_session_and_review_only(tmp_path):
             ctx,
             goal="修改实现",
             brief="保持接口",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -137,14 +136,13 @@ async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path
         owner = await store.update(
             owner.task_id,
             owner.version,
-            phase="WAITING_USER",
+            phase="WORKER_RUNNING",
             data={"round": 4, "reason": "rework_limit"},
         )
         result = await service.delegate(
             ctx,
             goal="修改实现",
             brief="保持兼容",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -154,7 +152,7 @@ async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path
         assert result["workspace_blocker"] == {
             "task_id": owner.task_id,
             "thread_id": owner.thread_id,
-            "phase": "WAITING_USER",
+            "phase": "WORKER_RUNNING",
             "round": 4,
             "reason": "rework_limit",
             "requires_inspection": False,
@@ -191,7 +189,6 @@ async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path
             ctx,
             goal="修改实现",
             brief="保持兼容",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -254,12 +251,11 @@ async def test_rejects_invalid_evidence(tmp_path, failure):
 
             service.worker = outside
         if failure == "source":
-            with pytest.raises(FusionError, match="FUSION_REQUIREMENT_INVALID"):
+            with pytest.raises(FusionError, match="FUSION_INPUT_INVALID"):
                 await service.delegate(
                     ctx,
-                    goal="g",
+                    goal=" ",
                     brief="b",
-                    user_requirements=["用户未说过的要求"],
                     allowed_paths=["a.py"],
                     check_plan_ids=[],
                 )
@@ -268,7 +264,6 @@ async def test_rejects_invalid_evidence(tmp_path, failure):
             ctx,
             goal="g",
             brief="b",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=["unit"] if failure == "check_failure" else [],
         )
@@ -317,7 +312,6 @@ async def test_unknown_check_does_not_start_next_round(tmp_path):
             ctx,
             goal="g",
             brief="b",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=["unit"],
         )
@@ -358,7 +352,6 @@ async def test_explicit_continue_restores_review_without_replaying_worker(
             ctx,
             goal="修改",
             brief="保持接口",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=["unit"],
         )
@@ -368,7 +361,7 @@ async def test_explicit_continue_restores_review_without_replaying_worker(
         task = await service.resume(task.task_id)
         assert len(rounds) == 1
         status = await service.status(ctx)
-        assert status["requirements"] == [{"id": "r1", "quote": "保持兼容"}]
+        assert status["requirements"] == [{"id": "r1", "quote": "保持兼容，修改实现。"}]
         if drift:
             assert task.phase == "WAITING_USER" and task.data["ticket_id"] is None
         else:
@@ -404,7 +397,6 @@ async def test_busy_workspace_does_not_partially_register_order(tmp_path):
             ctx,
             goal="修改",
             brief="保持接口",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -431,7 +423,6 @@ async def test_round_waits_for_ordinary_writer_before_baseline(tmp_path):
                 ctx,
                 goal="修改",
                 brief="保持接口",
-                user_requirements=["保持兼容"],
                 allowed_paths=["a.py"],
                 check_plan_ids=[],
             )
@@ -455,7 +446,7 @@ async def seed_prepared_order(store, task, root):
         "goal": "修改",
         "brief": "保持兼容",
         "source_message": task.data["source_message"],
-        "requirements": [{"id": "r1", "quote": "保持兼容"}],
+        "requirements": [{"id": "r1", "quote": "保持兼容，修改实现。"}],
         "allowed_paths": ["a.py"],
         "check_plan_ids": ["unit"],
         "baseline": capture_snapshot(root, ["a.py"]),
@@ -561,7 +552,6 @@ async def test_resume_reuses_saved_check_receipt_and_runs_only_remaining_plan(tm
                 ctx,
                 goal="修改",
                 brief="保持兼容",
-                user_requirements=["保持兼容"],
                 allowed_paths=["a.py"],
                 check_plan_ids=["unit", "lint"],
             )
@@ -586,7 +576,6 @@ async def test_review_finishes_task_and_releases_writer_in_one_transaction(tmp_p
             ctx,
             goal="修改",
             brief="保持兼容",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )
@@ -635,7 +624,6 @@ async def test_control_explains_relative_path_error_without_starting_worker(
         arguments = {
             "goal": "修改实现",
             "brief": "保持兼容",
-            "user_requirements": ["保持兼容"],
             "allowed_paths": ["/calc.py"],
             "check_plan_ids": [],
         }
@@ -690,12 +678,11 @@ async def test_unknown_value_error_is_not_exposed_to_model(monkeypatch):
         {
             "goal": "修改",
             "brief": "修改",
-            "user_requirements": ["修改"],
             "allowed_paths": ["calc.py"],
             "check_plan_ids": [],
         }
     )
-    assert response == "FUSION_INPUT_INVALID"
+    assert json.loads(response)["error"] == "FUSION_INPUT_INVALID"
 
 
 @pytest.mark.parametrize(
@@ -760,7 +747,6 @@ async def test_new_files_complete_real_guarded_write_and_review(
             ctx,
             goal="修改实现",
             brief="保持兼容",
-            user_requirements=["保持兼容"],
             allowed_paths=allowed,
             check_plan_ids=[],
         )
@@ -812,7 +798,6 @@ async def test_rework_with_order_does_not_require_first_ticket(tmp_path):
             ctx,
             goal="g",
             brief="b",
-            user_requirements=["保持兼容"],
             allowed_paths=["a.py"],
             check_plan_ids=[],
         )

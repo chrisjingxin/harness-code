@@ -6973,6 +6973,12 @@
         "expected_version": {
           "type": "integer",
           "minimum": 1
+        },
+        "stopped_inspection_note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "用户已明确核查相关操作全部停止时填写；核查、取消和交还目录在同一事务提交，保留已改文件。"
         }
       },
       "required": [
@@ -7126,10 +7132,21 @@
               "type": "null"
             }
           ]
+        },
+        "workspace_blocker": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fusionWorkspaceBlocker"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "task"
+        "task",
+        "workspace_blocker"
       ],
       "additionalProperties": false
     },
@@ -7137,13 +7154,37 @@
       "description": "Sidekick 每轮执行的安全开始/结束事实；执行和父执行身份来自事件信封。",
       "type": "object",
       "properties": {
-        "task_id": { "type": "string", "minLength": 1 },
-        "role": { "const": "sidekick" },
-        "round": { "type": "integer", "minimum": 1 },
-        "model": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["running", "completed", "cancelled", "failed"] }
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "const": "sidekick"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "running",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        }
       },
-      "required": ["task_id", "role", "round", "model", "status"],
+      "required": [
+        "task_id",
+        "role",
+        "round",
+        "model",
+        "status"
+      ],
       "additionalProperties": false
     },
     "fusionWorkspaceBlocker": {

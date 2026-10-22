@@ -1,8 +1,23 @@
 /** TUI/Web 共用的 Fusion 任务说明；仅展示 Host 已脱敏的状态。 */
-import type { FusionTaskStatus } from "@za38/protocol"
+import type { FusionTaskStatus, FusionWorkspaceBlocker } from "@za38/protocol"
 
 /** 状态说明和取消错误共用操作顺序；核查成功后才能结束未知任务。 */
-export const FUSION_RECOVERY_GUIDANCE = "先检查已改文件，并确认相关命令和进程全部停止；在占用会话单独输入 /fusion recover --stopped <核查说明>。看到“核查已记录”后，可以发送消息继续任务；需要结束任务时，再单独输入 /fusion cancel，已修改文件会保留。"
+export const FUSION_RECOVERY_GUIDANCE = "可直接提问，让 Lead 只读核查；停止凭据缺失不代表已经检测到进程占用。恢复写入前须检查已改文件，并确认相关命令和进程全部停止；要结束任务，单独输入 /fusion cancel --stopped <核查说明>，文件会保留。要继续原任务，可输入 /fusion recover --stopped <核查说明>，看到“核查已记录”后发送继续。"
+
+function workspaceRecoveryGuidance(blocker: FusionWorkspaceBlocker): string {
+  if (!blocker.task_id || !blocker.thread_id)
+    return "占用来源不属于当前项目记录或已不可用，请在原项目检查任务状态；当前对话无法结束这项任务。"
+  return blocker.requires_inspection
+    ? "先核查停止情况；确认后在当前对话输入 /fusion resolve --stopped <核查说明>，成功后发送继续。"
+    : "在当前对话输入 /fusion resolve 可结束占用任务，文件会保留；成功后发送继续。"
+}
+
+/** 当前对话无任务时也说明目录写者，不能据此声称发现了运行中的进程。 */
+export function fusionWorkspaceSummary(blocker: FusionWorkspaceBlocker): string {
+  const owner = blocker.thread_id ? `会话 ${blocker.thread_id}` : "来源待核查的任务"
+  const action = workspaceRecoveryGuidance(blocker)
+  return `本会话没有活动 Fusion 任务，但工作目录仍由${owner}使用。这是任务写权限记录，不表示已检测到运行中的进程。${action}`
+}
 
 const PHASE_LABELS: Record<string, string> = {
   READY: "等待派单",
@@ -16,6 +31,7 @@ const PHASE_LABELS: Record<string, string> = {
   CANCELLED: "已取消",
 }
 const REASON_LABELS: Record<string, string> = {
+  lead_control_rejected: "派单或审阅参数连续被拒绝，本轮已暂停",
   worker_report_missing: "Sidekick 未提交报告",
   worker_blocked: "Sidekick 遇到阻塞",
   worker_checkpoint_invalid: "Sidekick 历史缺失或未完整结束，请核查后取消任务",
@@ -82,11 +98,8 @@ export function fusionSummary(task: FusionTaskStatus): string {
   if (blocker) {
     const phase = PHASE_LABELS[blocker.phase ?? ""] ?? "需要核查"
     const cause = blocker.reason ? `（${REASON_LABELS[blocker.reason] ?? "需要处理"}）` : ""
-    const instructions = blocker.requires_inspection
-      ? FUSION_RECOVERY_GUIDANCE
-      : "需要结束旧任务时，在旧会话执行 /fusion cancel；已修改文件会保留。"
-    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；`
-      + `用 /resume 返回该会话，查看 /fusion status。${instructions}处理后回本对话发送继续。`
+    const instructions = workspaceRecoveryGuidance(blocker)
+    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；${instructions}`
   }
   const recovery = task.phase === "OUTCOME_UNKNOWN" ? `；${FUSION_RECOVERY_GUIDANCE}` : ""
   const round = task.round === 0 ? "尚未派单" : `第 ${task.round} 轮`

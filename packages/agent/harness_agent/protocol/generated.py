@@ -7,7 +7,7 @@ from harness_agent.protocol.runtime import event_model, schema_model
 
 PROTOCOL_MAJOR = 3
 PROTOCOL_MINOR = 11
-PROTOCOL_SCHEMA_SHA256 = "a8a25b2af9496f79e8806a8d83f5331a6dc2766499f81debe8850698fec9d9f8"
+PROTOCOL_SCHEMA_SHA256 = "3043e6fb01fb900ad19b331dda9606cb2c20c3dccf317d18e4297f518cc56d2a"
 MAX_FRAME_BYTES = 8388608
 MAX_TOOL_PAYLOAD_BYTES = 1048576
 CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate","fusion.status","fusion.recover","fusion.cancel"]
@@ -1083,6 +1083,7 @@ class FusionStatusParamsWire(TypedDict):
 class FusionCancelParamsWire(TypedDict):
     task_id: str
     expected_version: int
+    stopped_inspection_note: NotRequired[str]
 
 class FusionRecoverParamsWire(TypedDict):
     task_id: str
@@ -1109,6 +1110,7 @@ class FusionTaskStatusWire(TypedDict):
 
 class FusionStatusResultWire(TypedDict):
     task: FusionTaskStatusWire | None
+    workspace_blocker: FusionWorkspaceBlockerWire | None
 
 class FusionExecutionPayloadWire(TypedDict):
     task_id: str

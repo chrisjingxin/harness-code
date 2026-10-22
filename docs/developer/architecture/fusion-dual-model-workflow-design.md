@@ -151,7 +151,7 @@ timeout_seconds = 300
 | 工具 | 调用者 | 参数与结果 |
 | --- | --- | --- |
 | `fusion_finish_direct` | Lead，未派单 | `summary`；完成直接问答，标为 `unverified` |
-| `fusion_delegate` | Lead，`READY` | `goal`、`brief`、`user_requirements`、`allowed_paths`、`check_plan_ids`；执行首轮并返回票据或待处理状态 |
+| `fusion_delegate` | Lead，`READY` | `goal`、`brief`、`allowed_paths`、`check_plan_ids`；执行首轮并返回票据或待处理状态 |
 | `fusion_rework` | Lead，可返工状态 | `feedback`；可选 `allowed_paths`、`reason`；向原 Sidekick 追加反馈 |
 | `fusion_review_result` | Lead，`REVIEWING` | `ticket_id`、`decision=accept/reject`、逐项 `requirements`、`test_review_reason` |
 | `fusion_status` | 两角色 | 无参数；读取任务要求、范围、检查和票据 |
@@ -165,13 +165,12 @@ timeout_seconds = 300
 {
   "goal": "修复重复写入",
   "brief": "保留现有接口，修正去重逻辑并补充用例",
-  "user_requirements": ["保持接口兼容", "避免重复写入"],
   "allowed_paths": ["src/store.py", "tests/"],
   "check_plan_ids": ["unit"]
 }
 ~~~
 
-`user_requirements` 必须能在原始用户消息中找到；Host 分配 `r1/r2/...`。`check_plan_ids` 只能选组合允许的检查，空列表表示使用组合的全部检查。
+Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r1/r2/...`，模型不再传 `user_requirements`。单段需求保存为一项，明确的行首列表按原文边界拆分；最多 32 项，超出时保留完整尾段，不截掉需求。实施建议只写在 `goal/brief`。`check_plan_ids` 只能选组合允许的检查，空列表表示使用组合的全部检查。
 
 `allowed_paths` 使用**项目相对路径**，支持精确文件或以 `/` 结尾的目录。文件和目录可以尚不存在，由 Sidekick 创建；不需要用户先建空文件。例如，新增两个文件时填写 `["calc.py", "tests/test_calc.py"]`，允许在新目录中改码时填写 `["new/"]`。读取工具中的 `/calc.py` 是虚拟路径，不能直接作为派单范围；派单时应写 `calc.py`。
 
@@ -179,7 +178,7 @@ timeout_seconds = 300
 
 首轮基线只取一次，返工继续与这份基线比较。扩大范围必须填写原因、增加任务单 revision 并使旧票据失效。返工次数按组合限制，超过上限进入等待状态。
 
-`run_worker` 每轮登记新的 execution ID；checkpoint ID 根据项目、Thread、任务和 `worker_session_id` 稳定计算。执行前比对历史身份和上一轮完整结束的 checkpoint 标记，缺失、覆盖或未完整结束都停止；不会静默创建空会话重新写文件。
+`run_worker` 每轮登记新的 execution ID；checkpoint ID 根据项目、Thread、任务和 `worker_session_id` 稳定计算。执行前比对历史身份和上一轮完整结束的 checkpoint 标记。正常结束后出现丢失、覆盖或不匹配时拒绝执行；若本轮已明确停止并记录中断，则只恢复上一完整 checkpoint。第一轮从未完整结束时，可保留文件和任务单、清理半轮上下文后重新准备；不重放待执行的旧工具。
 
 子执行复用 Managed 执行器、父取消信号、真实审批和用量账本。审批携带该轮子 execution ID，不能混到根执行。索引查询租约由每轮自行借用和释放；文件读取快照也每轮关闭。任务未终结时保留 Worker checkpoint，完成或取消后清理。
 
@@ -217,7 +216,7 @@ timeout_seconds = 300
 | --- | --- |
 | `fusion_tasks` | Thread、任务、阶段、active、version、模型摘要、当前任务单/报告/票据、会话身份 |
 | `fusion_orders` | 不可覆盖的任务单 revision、用户原话、要求、范围、检查及首轮基线 |
-| `fusion_outbox` | 唯一派发操作，`prepared/dispatched/accepted/result_recorded/not_started/inspected` 状态 |
+| `fusion_outbox` | 唯一派发操作，`prepared/dispatched/accepted/result_recorded/not_started/stopped/inspected` 状态 |
 | `fusion_messages` | 与派发操作绑定的原消息和 revision，恢复时核对消息摘要 |
 | `fusion_evidence` | 报告、检查回执、票据和审阅记录 |
 | `fusion_effects` | 操作 ID、execution、类型、参数摘要、任务版本、代号、结果与停止确认 |
@@ -231,7 +230,7 @@ timeout_seconds = 300
 | `WORKER_RUNNING` | Sidekick 执行；报告后检查，阻塞时等待 |
 | `CHECKING` | Host 检查；结果明确后审阅，不明则暂停核查 |
 | `REVIEWING` | Lead 接受、拒绝或返工 |
-| `PAUSED/WAITING_USER` | 保存现场；同一 Thread 的新消息明确继续原任务 |
+| `PAUSED/WAITING_USER` | 保存现场；没有未停操作或未结束派发时自动让出目录；原 Thread 新消息明确继续 |
 | `OUTCOME_UNKNOWN` | 展示待核查操作；记录人工确认前拒绝继续、返工和释放写者 |
 | `COMPLETED/CANCELLED` | 任务终结，清理 Worker checkpoint 并交还工作区 |
 
@@ -245,7 +244,8 @@ timeout_seconds = 300
 | 部分检查回执已保存 | 复用原回执，只运行剩余计划；已开始却缺少回执时等待核查 |
 | 票据或全部检查已保存，Lead 尚未接受 | 核对文件后恢复/重建票据，不重跑 Worker 或已有检查 |
 | 派发或副作用是否结束无法确认 | `OUTCOME_UNKNOWN`，保留写者和待核查操作 |
-| Worker 历史缺失、不一致或未完整结束 | `WAITING_USER`；核查后取消任务，重新发起，不能续跑中断工具 |
+| 已明确停止的中断轮次 | 恢复上一完整 checkpoint；首轮没有完整记录时保留文件后重新准备，不重放半轮工具 |
+| 未确认中断却发生历史缺失、不一致 | `WAITING_USER`；拒绝用空历史冒充完整会话 |
 | 文件已被外部修改 | 旧票据失效，等待 Lead 返工或用户处理 |
 
 人工恢复只记录核查说明摘要和“操作已停止”的声明，使任务进入 `PAUSED`；不会认定代码正确，也不会自动重放操作。取消任务不回滚工作区文件。
@@ -257,7 +257,7 @@ timeout_seconds = 300
 | `run.start.fusion_profile_id` | minor 11 起支持；只允许 Build 用户消息，拒绝同时指定主模型 |
 | `fusion.status(thread_id)` | 返回活动任务，或最近终结任务的安全状态和待核查操作 |
 | `fusion.recover(task_id, expected_version, inspection_note, effects_stopped)` | 只在空闲 Thread 上记录明确的人工停止确认 |
-| `fusion.cancel(task_id, expected_version)` | 核对版本，停止当前所属 Run，再按持久化停止事实终结任务 |
+| `fusion.cancel(task_id, expected_version, stopped_inspection_note?)` | 核对版本，停止当前所属 Run，再按持久化停止事实终结任务 |
 | `fusion.progress` | 沿已有 Run 事件流投影安全状态和版本 |
 
 新增 `fusion.read`、`fusion.manage`；管理方法走原有控制权机制。旧 minor 连接不接收整个 Fusion Run 流，防止只过滤新事件后产生序号缺口。普通 Run 事件不受影响。
@@ -266,7 +266,10 @@ timeout_seconds = 300
 /fusion default                      选择组合；下一条需求启动 Fusion
 /fusion status                       查看阶段、两模型和待核查操作
 /fusion off                          无活动任务时退出选择
-/fusion cancel                       结束任务，保留已经修改的文件
+/fusion cancel                       结束当前任务，保留已经修改的文件
+/fusion cancel --stopped <核查说明>   确认停止后直接结束当前任务
+/fusion resolve                      在当前会话结束占用目录的另一任务
+/fusion resolve --stopped <核查说明>  确认停止后结束占用任务
 /fusion recover --stopped <核查说明>  确认相关操作停止后记录恢复
 ~~~
 
@@ -349,3 +352,68 @@ Sidekick 在 `FusionEffectMiddleware.abefore_model` 进入下一次请求前检�
 命令约束复用 `policy/bash_parser.py` 的语法树与 `strip_wrappers`：识别真实 `&` 后台节点，允许普通 Python 参数和 here-doc 的位运算；展开 `bash -lc`、`sh -ec` 等脚本后再检查。选项解析遇到脚本路径或 `--` 即停止，避免把脚本参数误当成 Shell 选项。不能可靠展开的 Shell 载荷含后台语法时仍拒绝，Git 修改与内部目录限制保留。`WORKER_PROMPT` 同时提示优先使用文件工具，以及受阻时提交报告。
 
 对应回归为 `test_model_response_deadline.py`、`test_fusion_execution_limits.py`、`test_fusion_stall.py`；原 `test_fusion_streaming.py` 在报告提交前验证实时正文，不再依赖报告后的冗余模型请求。
+
+
+## 八、派单与恢复体验优化（HC-184，2026-10-21）
+
+详见 [HC-184 Spec](../spec/HC-184-双模型协作体验优化.md)。原文需求由 Host 生成、闲置自动让出目录、当前会话处理占用这三项共同简化流程，已有角色、检查与审阅门禁继续有效。
+
+### 1. 运行归属与目录写者
+
+任务终态不能被迟到回调恢复；已取消或被新 Run 接替的执行会在下次模型请求前停止，不再要求补报告，Root 收尾清理取消后的 checkpoint。
+
+任务 JSON 保存 `active_run={owner,run_id}`。`FusionRuntime.prepare` 用 `claim_run` 取得本轮归属，防止两个窗口同时执行同一个任务；目录 lease 则防止不同任务同时写目录。查询另一 Host 的活动执行不再暂停它。没有可靠退出记录的运行，不能仅因等待很久就接管。
+
+准备失败、Root 结束或正常 Host 关闭时，按准确 owner/run_id 清理归属。迟到的旧回调不能暂停新 Run。受理前放弃的新空任务标记取消；已有任务暂停并保留。RunCoordinator 的 `on_abandon` 统一处理准备成功后未能真正受理的分支。
+
+`begin_workspace_phase` 在一个短事务中取得目录并进入 Worker 执行、检查或审阅阶段，避免先取得目录、又因仍处于暂停阶段被其他窗口释放。首轮基线也在取得目录后读取。闲置释放不删除任务、不回滚文件；新 Run 恢复时重新取得目录并检查快照。
+
+### 2. 断流与停止事实
+
+Native Worker 真正退出并完成执行器收尾后，`record_worker_stopped` 按任务、派发和 execution ID 记录 stopped。模型断流或等待时取消，不再仅因 outbox 留在 dispatched 就误报结果不明。命令的停止事实仍单独判断；不能用“模型退出”推断所有命令已停。
+
+命令结果不明时，两角色立即结束模型循环。Worker 的最终输出门禁不会再因报告缺失追加模型请求，任务保持 OUTCOME_UNKNOWN；Root 退出重新生成待查清单，移除已停止的派发，只保留真正未确认停止的操作。
+
+模型已公开输出后断流，不自动重放响应。退出事实明确且没有未知命令时，任务进入 PAUSED，可直接发送“继续”；仍有不明命令时保留 OUTCOME_UNKNOWN。TUI/Web 共用明确的断流、继续和核查说明，原始协议错误码保留。中断恢复只用完整 checkpoint，不自动补跑半轮工具。
+
+### 3. 当前会话处理占用
+
+`/fusion resolve` 刷新当前任务及服务端占用者，读取占用任务当前版本，再按准确身份取消。成功后刷新当前任务，提示发送“继续”；不跳转旧 Thread。版本、占用者或当前对话变化时拒绝，避免结束错误任务。
+
+`cancel/resolve --stopped <核查说明>` 只接受用户明确输入的停止确认。Host 使用已有 Run 停止和空闲锁；Store 在一个事务中记录核查摘要、结束准确任务并释放目录。`recover --stopped` 则用于保留并继续当前任务。没有核查说明的未知操作继续拒绝释放。重复读取相同未知状态不增加版本。
+
+### 4. 错误和验证
+
+模型控制工具返回带 error、field、action 的安全结果；校验错误不回显输入或密钥。结果按失败工具显示；连续三次相同控制失败会暂停，避免反复猜参数。首次派单和返工仍按是否已有任务单区分。
+
+新增 `test_fusion_usability.py`、`test_fusion_management.py`，覆盖原文冻结、尾段保留、闲置让出、未知命令、原子核查取消、两个 Host 查询/启动、受理失败清理、第一/后续轮取消及流式断开后续接。CLI 回归覆盖当前会话 resolve、目标变化、切换会话、显式停止确认和流式失败提示；Protocol 共享样例覆盖停止说明的类型和长度。
+
+
+## HC-185：故障时可以只读核查
+
+### 用户新消息如何处理
+
+任务是 `OUTCOME_UNKNOWN` 或 `reason=workspace_busy` 时，`FusionRuntime.prepare` 将本轮固定为 `inspection_only`。仍被占用时，新消息进入只读核查；占用已解除时，先 reconcile，再按普通流程恢复。不按“继续”“自己检查”等文字猜测授权。
+
+只读核查使用当前配置的 Lead；旧任务配置变化不阻止查询，恢复写入仍需原配置指纹一致。Binding 和 RunContext 持有 Host 私有标记；不 claim/release 旧 `active_run`，不 resume/continue_pending，不删除旧 Worker checkpoint，不改停止记录或写租约。受理失败、取消和 Host 关闭同样不清理别人的运行。
+
+能力仅保留原有只读工具与 `fusion_status`，移除 ask_user 和所有修改控制；工具注册、Service 实际调用边界同时限制。核查 Final gate 可以自然答复，Guard 不再直接结束该模式；连续三次同一工具错误则带说明结束，不更新任务。普通写入 Run 的未知状态停止门禁不变。核查期间任务变化，也不提升本轮权限。
+
+### 状态与目录
+
+`fusion.status` 必需返回 `task` 和可空 `workspace_blocker`。Store 新增 `workspace_owner(workspace)`，无需本会话存在任务即可查询；复用原租约规则和项目身份隔离。CLI 将目录结果与查询 Thread 绑定，保留版本及异步身份校验。无活动任务或只有终态历史任务时仍展示实际占用者，`/fusion resolve` 可以从当前会话处理它。
+
+模型用的 `fusion_status` 额外返回 diagnostics：只读标记、实际命令目录、操作所属任务/会话、停止证据是否缺失。`unconfirmed` 只说明记录缺少停止依据，**不是已探测到进程还在运行**。没有 PID 时不自动确认停止，不自动填写 `--stopped`。
+
+Worker 提示给出真实命令目录，并说明文件工具的虚拟 `/`。命令解析在副作用登记前拒绝显式 `cd /`、`find /` 及嵌套 Shell 变体；项目相对命令和普通 Python 字符串不受影响。
+
+相关回归：`test_fusion_inspection.py`、`test_fusion_roles.py`、`test_fusion_guard.py`、`test_fusion_store.py` 以及 CLI `fusion-feature.test.ts`。核查不改用户任务数据库，也不停止系统进程。
+
+
+### 文件工具错误的解析
+
+文件工具返回 `{"ok":false,"error":{"code":"...","message":"..."}}`，Fusion 控制工具的业务错误返回 `{"error":"FUSION_..."}`。重试计数器按各工具现有格式提取错误码；只有字符串才参与错误码集合查询，对象和数组不能直接拿来查询，否则普通 ls 失败也会导致整轮 TypeError。
+
+文件工具内嵌的 Fusion 错误码继续使用原有“同工具、同错误码连续三次”规则。其他文件错误交还模型纠正；只读核查按原规则计入未识别的工具失败，并在三次后收尾。没有改变文件工具协议、停止事实或写权限。
+
+回归为 `test_fusion_guard.py` 中错误类型与两种工具格式，以及 `test_fusion_tool_errors.py` 的真实 Host 列目录失败/纠正、只读核查与连续错误场景。

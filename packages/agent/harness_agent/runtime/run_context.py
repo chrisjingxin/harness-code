@@ -109,6 +109,8 @@ class FusionRunState:
     """只在当前 Run 内更新的任务单版本与写者代号。"""
     revision: int = 0
     generation: int | None = None
+    # Host 固定的只读核查模式，不代表用户确认操作已停止。
+    inspection_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

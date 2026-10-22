@@ -13,15 +13,15 @@ Skill/Runtime 准备、以及把 stream signal 投影为 root Event。
 
 from __future__ import annotations
 
-import hashlib
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import signal
 import time
-from copy import deepcopy
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -30,16 +30,16 @@ logger = logging.getLogger(__name__)
 from harness_agent.compose.engine_services import EngineDriverServices
 from harness_agent.runtime.execution_stream import (
     CONTENT_DELTA,
-    ExecutionSignal,
-    ExecutionStreamError,
     MAX_TOOL_PAYLOAD_BYTES,
     REASONING_DELTA,
     RUN_PROGRESS,
-    StreamInteractionRequest,
-    StreamSession,
     TOOL_COMPLETED,
     TOOL_DELTA,
     TOOL_STARTED,
+    ExecutionSignal,
+    ExecutionStreamError,
+    StreamInteractionRequest,
+    StreamSession,
     bounded_json,
     content_text,
     ensure_model_round_for_assistant,
@@ -113,7 +113,9 @@ def _run_error(
 
 def _provider_retry_for_run(run: RunState) -> BoundedProviderRetry | None:
     """把 Run 解析时冻结的 retry attempt budget 绑定到共享 executor。"""
-    attempts = getattr(getattr(run, "preparation", None), "provider_retry_attempts", None)
+    attempts = getattr(
+        getattr(run, "preparation", None), "provider_retry_attempts", None
+    )
     if not isinstance(attempts, int) or isinstance(attempts, bool):
         return None
     return BoundedProviderRetry(max_attempts=attempts)
@@ -223,7 +225,10 @@ class BuildRunAdapter:
 
     async def execute(self, run: RunState, port: RunLifecyclePort) -> None:
         loaded = run.preparation.requested_skill
-        if loaded is not None and loaded.snapshot_id != run.preparation.skill_snapshot_id:
+        if (
+            loaded is not None
+            and loaded.snapshot_id != run.preparation.skill_snapshot_id
+        ):
             raise _run_error("RUN_PREPARATION_REQUESTED_SKILL_SNAPSHOT_MISMATCH")
         started_payload: dict[str, object] = {
             "resumed": False,
@@ -231,7 +236,11 @@ class BuildRunAdapter:
             "skills_snapshot_id": run.preparation.skill_snapshot_id,
         }
         if run.preparation.fusion_binding is not None and run.persistence is not None:
-            started_payload["fusion"] = (await run.persistence.fusion_state_store().get(run.preparation.fusion_binding.task_id)).to_record()
+            started_payload["fusion"] = (
+                await run.persistence.fusion_state_store().get(
+                    run.preparation.fusion_binding.task_id
+                )
+            ).to_record()
         if loaded is not None and loaded.record.kind == "command":
             started_payload["command_provenance"] = loaded.provenance()
         binding = run.preparation.execution_binding
@@ -251,7 +260,10 @@ class BuildRunAdapter:
             }
             # provenance 只适用于有 immutable package identity 的 Plugin。内置、项目和
             # 用户 Skill 没有 package digest，继续发送既有旧 payload，避免伪造来源摘要。
-            if loaded.record.source.startswith("plugin:") and loaded.record.package_digest:
+            if (
+                loaded.record.source.startswith("plugin:")
+                and loaded.record.package_digest
+            ):
                 skill_loaded_payload["provenance"] = loaded.provenance()
             port.emit(
                 run,
@@ -273,7 +285,11 @@ class BuildRunAdapter:
             """将 Host runtime provider 收敛到 Managed executor 的唯一入口。"""
             nonlocal fusion_continued
             runtime = await port.resolve_runtime(run)
-            if run.preparation.fusion_binding is not None and not fusion_continued:
+            if (
+                run.preparation.fusion_binding is not None
+                and not run.preparation.fusion_binding.inspection_only
+                and not fusion_continued
+            ):
                 try:
                     context = run.run_context
                     if context is None or context.fusion_service is None:
@@ -315,6 +331,7 @@ class BuildRunAdapter:
                 "rubric": canonical_rubric(goal_binding.criteria),
             }
         fusion_gate_impl = None
+
         async def fusion_gate(output):
             nonlocal fusion_gate_impl
             if fusion_gate_impl is None:
@@ -346,12 +363,17 @@ class BuildRunAdapter:
             diagnostic_log=getattr(run, "diagnostic_log", None),
             timing=getattr(run, "timing", None),
             on_resume_consumed=on_resume_consumed,
-            final_output_gate=fusion_gate if run.preparation.fusion_binding is not None else None,
+            final_output_gate=fusion_gate
+            if run.preparation.fusion_binding is not None
+            else None,
             usage_ledger=getattr(run, "usage_ledger", None),
             model_profile_id=(
                 run.execution_binding.actual_primary.profile_id
                 if getattr(run, "execution_binding", None) is not None
-                else getattr(getattr(run, "start", None), "requested_primary_profile", None) or "default"
+                else getattr(
+                    getattr(run, "start", None), "requested_primary_profile", None
+                )
+                or "default"
             ),
         )
         try:
@@ -361,13 +383,28 @@ class BuildRunAdapter:
                 raise asyncio.CancelledError from exc
             raise _run_error(exc.code, exc.message, retryable=exc.retryable) from exc
         finally:
-            if run.preparation.fusion_binding is not None and run.persistence is not None:
+            if (
+                run.preparation.fusion_binding is not None
+                and not run.preparation.fusion_binding.inspection_only
+                and run.persistence is not None
+            ):
                 store = run.persistence.fusion_state_store()
-                task = await store.get(run.preparation.fusion_binding.task_id)
-                if run.cancellation_token.cancelled or task.phase in {"WORKER_RUNNING", "CHECKING", "READY"}:
-                    await asyncio.shield(store.pause(task.task_id))
-                elif task.phase == "COMPLETED" and task.data.get("checkpoint_id"):
-                    await run.persistence.delete_execution_checkpoint(task.data["checkpoint_id"])
+                try:
+                    task = await store.get(run.preparation.fusion_binding.task_id)
+                    if task.phase in {"COMPLETED", "CANCELLED"} and task.data.get(
+                        "checkpoint_id"
+                    ):
+                        await run.persistence.delete_execution_checkpoint(
+                            task.data["checkpoint_id"]
+                        )
+                finally:
+                    await asyncio.shield(
+                        store.release_run(
+                            run.preparation.fusion_binding.task_id,
+                            run.preparation.fusion_binding.owner_id,
+                            run.ref.run_id,
+                        )
+                    )
 
 
 class DirectShellRunAdapter:
@@ -427,8 +464,12 @@ class DirectShellRunAdapter:
                 await lock.release_write()
 
     async def _run_command(
-        self, run: RunState, port: RunLifecyclePort, command: str,
-        workspace: str, tool_call_id: str,
+        self,
+        run: RunState,
+        port: RunLifecyclePort,
+        command: str,
+        workspace: str,
+        tool_call_id: str,
     ) -> None:
         """写锁保护从创建到进程退出；取消先杀进程组，再等待停止。"""
         process = await asyncio.create_subprocess_shell(
@@ -446,6 +487,7 @@ class DirectShellRunAdapter:
         timed_out = False
 
         try:
+
             async def run_process() -> None:
                 nonlocal stdout_bytes, stderr_bytes
                 stdout_bytes, stderr_bytes = await process.communicate()
@@ -501,7 +543,9 @@ class DirectShellRunAdapter:
             if stderr_bytes:
                 parts.extend(
                     f"[stderr] {line}"
-                    for line in stderr_bytes.decode("utf-8", errors="replace").rstrip().split("\n")
+                    for line in stderr_bytes.decode("utf-8", errors="replace")
+                    .rstrip()
+                    .split("\n")
                     if line
                 )
             output = "\n".join(parts) if parts else "<no output>"
@@ -511,7 +555,10 @@ class DirectShellRunAdapter:
 
             encoded = output.encode("utf-8")
             if len(encoded) > 100_000:
-                output = encoded[:100_000].decode("utf-8", errors="ignore") + "\n\n... Output truncated at 100000 bytes."
+                output = (
+                    encoded[:100_000].decode("utf-8", errors="ignore")
+                    + "\n\n... Output truncated at 100000 bytes."
+                )
                 truncated = True
             else:
                 truncated = False
@@ -579,7 +626,9 @@ class _BuildStreamPorts:
 
     def on_model_round(self) -> None:
         """由 executor 在 initial/resume 回合开始时投影 Build 进度。"""
-        self._port.emit(self._run, RUN_PROGRESS, _run_progress_payload(self._run, "model"))
+        self._port.emit(
+            self._run, RUN_PROGRESS, _run_progress_payload(self._run, "model")
+        )
 
     async def on_execution_complete(self, result: ManagedAgentResult) -> None:
         """在 runtime release 前落盘 root Transcript，并完成 Build echo 投影。"""
@@ -628,7 +677,11 @@ class _BuildStreamPorts:
         from harness_agent.runtime.execution_stream import ExecutionSignal
 
         binding = self._run.preparation.goal_binding
-        store = getattr(self._run.persistence, "goal_store", None) if self._run.persistence else None
+        store = (
+            getattr(self._run.persistence, "goal_store", None)
+            if self._run.persistence
+            else None
+        )
         if binding is None or not binding.goal_backed or store is None:
             return None
         try:
@@ -641,7 +694,9 @@ class _BuildStreamPorts:
                 expected_criteria=binding.criteria,
             )
         except Exception as exc:
-            logger.exception("Failed to normalize rubric event from payload: %r", payload)
+            logger.exception(
+                "Failed to normalize rubric event from payload: %r", payload
+            )
             normalized = {
                 "goal_id": binding.goal_id,
                 "goal_revision": binding.goal_revision,
@@ -659,9 +714,7 @@ class _BuildStreamPorts:
             "grader_profile_id": binding.actual_grader_profile_id,
         }
         if normalized.get("phase") == "result":
-            evaluation_id = (
-                f"{self._run.ref.run_id}-{normalized['grading_run_id']}-{normalized['iteration']}"
-            )
+            evaluation_id = f"{self._run.ref.run_id}-{normalized['grading_run_id']}-{normalized['iteration']}"
             await store().record_evaluation(
                 thread_id=self._run.ref.thread_id,
                 evaluation_id=evaluation_id,
@@ -678,10 +731,11 @@ class _BuildStreamPorts:
                 now_ms=int(time.time() * 1000),
             )
             self._run.context_summary["goal_latest_evaluation_id"] = evaluation_id
-            self._run.context_summary["goal_latest_grading_run_id"] = str(normalized["grading_run_id"])
+            self._run.context_summary["goal_latest_grading_run_id"] = str(
+                normalized["grading_run_id"]
+            )
             self._run.context_summary["goal_latest_result"] = str(normalized["result"])
         return ExecutionSignal("goal.evaluation", event_payload)
-
 
 
 class _ComposeStageObserver:
@@ -906,7 +960,9 @@ class ComposeRunAdapter:
                                 "description": "写入确认并进入下一阶段",
                             },
                             {
-                                "label": "按意见改" if artifact == "review" else "我要改",
+                                "label": "按意见改"
+                                if artifact == "review"
+                                else "我要改",
                                 "value": "revise",
                                 "description": (
                                     "不结束，带着 review.md 退回实现"
@@ -922,7 +978,9 @@ class ComposeRunAdapter:
             )
             answers = result.value.get("answers") if hasattr(result, "value") else None
             if isinstance(answers, dict):
-                chosen = answers.get("stage-confirm") or next(iter(answers.values()), None)
+                chosen = answers.get("stage-confirm") or next(
+                    iter(answers.values()), None
+                )
                 if isinstance(chosen, list):
                     chosen = chosen[0] if chosen else ""
                 return str(chosen) in {
@@ -1033,7 +1091,10 @@ class ComposeRunAdapter:
             model_profile_id=(
                 run.execution_binding.actual_primary.profile_id
                 if getattr(run, "execution_binding", None) is not None
-                else getattr(getattr(run, "start", None), "requested_primary_profile", None) or "default"
+                else getattr(
+                    getattr(run, "start", None), "requested_primary_profile", None
+                )
+                or "default"
             ),
         )
         try:
@@ -1073,11 +1134,17 @@ def _capture_transcript_on_session_impl(
     if chunk_type in {"AIMessage", "AIMessageChunk"}:
         ensure_model_round_for_assistant(session)
         full_tool_calls = getattr(chunk, "tool_calls", None)
-        if chunk_type == "AIMessage" and isinstance(full_tool_calls, list) and full_tool_calls:
+        if (
+            chunk_type == "AIMessage"
+            and isinstance(full_tool_calls, list)
+            and full_tool_calls
+        ):
             for index, tool_call in enumerate(full_tool_calls):
                 if not isinstance(tool_call, Mapping):
                     continue
-                _capture_full_tool_call(run, session, tool_call, index=index, source_message=chunk)
+                _capture_full_tool_call(
+                    run, session, tool_call, index=index, source_message=chunk
+                )
         else:
             for tool_chunk in getattr(chunk, "tool_call_chunks", None) or []:
                 if not isinstance(tool_chunk, Mapping):

@@ -89,6 +89,8 @@ class FusionRunBinding:
     profile: FrozenFusionProfile
     lead_profile_key: str
     sidekick_profile_key: str
+    owner_id: str
+    inspection_only: bool = False
 
 
 class FusionWorkerObserver(ManagedChildObserver):
@@ -173,6 +175,8 @@ class FusionRuntime:
         self.store: FusionStateStore = persistence.fusion_state_store()
         self.profiles: dict[str, FrozenFusionProfile] = {}
         self.worker_specs: dict[str, ResolvedAgentSpec] = {}
+        self.owner_id = new_id("fusion-host")
+        self._claimed_runs: dict[str, str] = {}
 
         def context_provider() -> RunContext | None:
             try:
@@ -195,6 +199,12 @@ class FusionRuntime:
             check=self.run_check,
             rwlock=host._tool_concurrency_lock,
         )
+
+    async def close(self) -> None:
+        """正常关闭已经停止所有 Run，归还尚未转交或未完成收尾的本 Host 归属。"""
+        for task_id, run_id in self._claimed_runs.items():
+            await self.store.release_run(task_id, self.owner_id, run_id)
+        self._claimed_runs.clear()
 
     async def prepare(self, command: StartRun) -> RunPreparation:
         """准备两角色再建立任务；拒绝 Goal、Plan 与配置漂移。"""
@@ -221,16 +231,42 @@ class FusionRuntime:
             raise FusionError("FUSION_INPUT_INVALID")
         frozen = resolve_fusion_profile(config, command.fusion_profile_id or "")
         task = await self.store.active(command.thread_id)
+        created_task = False
+        inspection_only = False
         if task:
-            if (
+            if task.data.get("reason") == "workspace_busy":
+                task = await self.store.reconcile(task.task_id)
+            inspection_only = (
+                task.phase == "OUTCOME_UNKNOWN"
+                or task.data.get("reason") == "workspace_busy"
+            )
+            if not inspection_only and (
                 task.data["profile"].get("config_fingerprint")
                 != frozen.config_fingerprint
             ):
                 raise FusionError("FUSION_TASK_CONFLICT")
-            task = await self.service.resume(task.task_id)
-            if task.phase == "OUTCOME_UNKNOWN":
-                raise FusionError("FUSION_OUTCOME_UNKNOWN")
-        reservation = await host._reserve_agent_engine_snapshot()
+            if not inspection_only:
+                task = await self.store.claim_run(
+                    task.task_id, task.version, self.owner_id, command.run_id
+                )
+                self._claimed_runs[task.task_id] = command.run_id
+                try:
+                    task = await self.service.resume(task.task_id)
+                except BaseException:
+                    await asyncio.shield(
+                        self.store.release_run(
+                            task.task_id, self.owner_id, command.run_id
+                        )
+                    )
+                    raise
+        try:
+            reservation = await host._reserve_agent_engine_snapshot()
+        except BaseException:
+            if task is not None and not inspection_only:
+                await asyncio.shield(
+                    self.store.release_run(task.task_id, self.owner_id, command.run_id)
+                )
+            raise
         index_lease = None
         try:
             registry = await host._refresh_skill_catalog_locked()
@@ -254,7 +290,9 @@ class FusionRuntime:
                 code_index_generation=index_lease.generation if index_lease else None,
                 fusion=True,
             )
-            lead, worker = resolve_fusion_specs(base, frozen)
+            lead, worker = resolve_fusion_specs(
+                base, frozen, inspection_only=inspection_only
+            )
             for spec in (lead, worker):
                 profile = spec.runtime_profile
                 await self.persistence.persist_agent_engine_profile(profile)
@@ -266,6 +304,11 @@ class FusionRuntime:
                     workspace=host._workspace,
                     source_message=command.input.message,
                 )
+                created_task = True
+                task = await self.store.claim_run(
+                    task.task_id, task.version, self.owner_id, command.run_id
+                )
+                self._claimed_runs[task.task_id] = command.run_id
             self.profiles[task.task_id] = frozen
             self.worker_specs[task.task_id] = worker
             snapshot = ContextLifecycle(
@@ -283,6 +326,16 @@ class FusionRuntime:
                 ),
             )
             profile = lead.runtime_profile
+
+            async def abandon() -> None:
+                if not inspection_only:
+                    await self.store.release_run(
+                        task.task_id,
+                        self.owner_id,
+                        command.run_id,
+                        abandon_new=created_task,
+                    )
+
             return RunPreparation(
                 resolved_execution_binding=resolved,
                 execution_binding=resolved.bind_run(
@@ -300,15 +353,27 @@ class FusionRuntime:
                 or lead.execution.approval_mode,
                 provider_retry_attempts=lead.model_settings.max_retries + 1,
                 snapshot_reservation=reservation,
+                on_abandon=abandon,
                 code_index_lease=index_lease,
                 fusion_binding=FusionRunBinding(
                     task.task_id,
                     frozen,
                     profile.profile_key,
                     worker.runtime_profile.profile_key,
+                    self.owner_id,
+                    inspection_only,
                 ),
             )
         except BaseException:
+            if task is not None and not inspection_only:
+                await asyncio.shield(
+                    self.store.release_run(
+                        task.task_id,
+                        self.owner_id,
+                        command.run_id,
+                        abandon_new=created_task,
+                    )
+                )
             if index_lease is not None:
                 await index_lease.release()
             await reservation.release()
@@ -334,17 +399,35 @@ class FusionRuntime:
                 f"{self.persistence.project_fingerprint}:{parent.thread_id}:{task.task_id}:{task.worker_session_id}".encode()
             ).hexdigest()
         )
+        restore_checkpoint_id = None
         if task.data.get("checkpoint_id") or task.data.get("round", 0) > 1:
             saved = await self.persistence.checkpointer.aget_tuple(
                 self.persistence.graph_config(stable_id)
             )
-            if (
-                task.data.get("checkpoint_id") != stable_id
-                or saved is None
-                or not task.data.get("completed_checkpoint_id")
-                or saved.checkpoint["id"] != task.data["completed_checkpoint_id"]
+            completed_id = task.data.get("completed_checkpoint_id")
+            interrupted = task.data.get("worker_checkpoint_interrupted") is True
+            if task.data.get("checkpoint_id") != stable_id and not (
+                interrupted
+                and task.data.get("checkpoint_id") is None
+                and completed_id is None
             ):
-                # 丢失、被覆盖或上一轮未完整结束的历史都不能当成空会话重开。
+                raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
+            if interrupted:
+                # 只从上一完整记录续接；半轮工具不重放，已改文件留在工作区供重新读取。
+                if completed_id:
+                    config = self.persistence.graph_config(stable_id)
+                    config["configurable"]["checkpoint_id"] = completed_id
+                    completed = await self.persistence.checkpointer.aget_tuple(config)
+                    if completed is None:
+                        raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
+                    restore_checkpoint_id = completed_id
+                else:
+                    await self.persistence.delete_execution_checkpoint(stable_id)
+            elif (
+                saved is None
+                or not completed_id
+                or saved.checkpoint["id"] != completed_id
+            ):
                 raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
         await registry.accept(
             AgentExecutionBinding(
@@ -424,12 +507,20 @@ class FusionRuntime:
         def release() -> None:
             host._snapshot_store.close_thread(stable_id)
 
+        def graph_config(_: str) -> Mapping[str, object]:
+            nonlocal restore_checkpoint_id
+            config = self.persistence.graph_config(stable_id)
+            if restore_checkpoint_id is not None:
+                config["configurable"]["checkpoint_id"] = restore_checkpoint_id
+                restore_checkpoint_id = None
+            return config
+
         async def acquire() -> ManagedAgentRuntime:
             return await acquire_pooled_agent_runtime(
                 pool=host._ensure_agent_engine_pool(host._config),
                 profile=profile,
                 run_context=context,
-                graph_config=lambda _: self.persistence.graph_config(stable_id),
+                graph_config=graph_config,
                 on_release=release,
             )
 
@@ -463,6 +554,7 @@ class FusionRuntime:
             host, parent, ref, stable_id, task=task, model=spec.model_view.model
         )
         observer.emit_status("running")
+        checkpoint_finished = False
         try:
             await ManagedAgentExecutor().execute(request, observer)
             saved = await self.persistence.checkpointer.aget_tuple(
@@ -475,6 +567,7 @@ class FusionRuntime:
                     current.version,
                     data={"completed_checkpoint_id": saved.checkpoint["id"]},
                 )
+            checkpoint_finished = True
             await registry.finalize(ref, status=ExecutionStatus.COMPLETED)
             observer.emit_status("completed")
         except BaseException as exc:
@@ -496,8 +589,19 @@ class FusionRuntime:
             raise
         finally:
             release()
-            if index_lease is not None:
-                await index_lease.release()
+            try:
+                if index_lease is not None:
+                    await index_lease.release()
+            finally:
+                # Managed 执行已经退出；这里仅确认派发收尾，不替命令推断 stopped。
+                await asyncio.shield(
+                    self.store.record_worker_stopped(
+                        task.task_id,
+                        task.data["operation_id"],
+                        ref.execution_id,
+                        interrupted=not checkpoint_finished,
+                    )
+                )
 
     async def run_check(
         self, context: RunContext, plan: FrozenFusionCheckPlan, lease: FusionLease

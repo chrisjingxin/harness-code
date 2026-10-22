@@ -1,9 +1,11 @@
 """真实 SQLite 下的 Fusion 状态、并发写者和恢复。"""
 
 from __future__ import annotations
+
 import asyncio
-from pathlib import Path
+
 import pytest
+
 from harness_agent.threads.thread_persistence import ThreadPersistence
 
 
@@ -244,3 +246,32 @@ async def test_cancelling_waiter_never_releases_other_task_writer(persistence):
     assert (
         await store.acquire_lease(owner.task_id, "sidekick")
     ).generation == lease.generation
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+async def test_workspace_owner_without_current_task_respects_project_boundary(
+    persistence, foreign
+):
+    from harness_agent.runtime.fusion.store import FusionStateStore
+
+    store = persistence.fusion_state_store()
+    task = await create(persistence)
+    lease = await store.acquire_lease(task.task_id, "sidekick")
+    await store.begin_effect(
+        task.task_id, lease.generation, "old-worker", "execute", "digest"
+    )
+    task = await store.pause(task.task_id)
+    query = FusionStateStore(
+        store.connection,
+        project_fingerprint="other" if foreign else store.project,
+        lock=store.lock,
+        database_path=store.database_path,
+    )
+    workspace = persistence.database_path.parent.parent / "workspace"
+    result = await query.workspace_owner(workspace)
+    assert result is not None
+    assert (result["reason"] == "owner_unavailable") is foreign
+    assert result["requires_inspection"] is True
+    assert result["task_id"] == (None if foreign else task.task_id)
+    assert result["thread_id"] == (None if foreign else task.thread_id)
+    assert await store.get(task.task_id) == task
