@@ -10,6 +10,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
 
+# sidecar 的 stdin 是 JSON-RPC 管道且有线程阻塞读取；Windows 上子进程继承该句柄会在启动时卡死。
+_NO_STDIN = subprocess.DEVNULL
+
 
 class DiffStats(TypedDict):
     files: list[str]
@@ -26,6 +29,7 @@ class GitCheckpointService:
             res = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
                 cwd=str(workspace_path),
+                stdin=_NO_STDIN,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -46,6 +50,7 @@ class GitCheckpointService:
                 ["git", "read-tree", "HEAD"],
                 cwd=cwd,
                 env=env,
+                stdin=_NO_STDIN,
                 check=False,
                 capture_output=True,
             )
@@ -53,6 +58,7 @@ class GitCheckpointService:
                 ["git", "add", "-A"],
                 cwd=cwd,
                 env=env,
+                stdin=_NO_STDIN,
                 check=True,
                 capture_output=True,
             )
@@ -60,6 +66,7 @@ class GitCheckpointService:
                 ["git", "write-tree"],
                 cwd=cwd,
                 env=env,
+                stdin=_NO_STDIN,
                 text=True,
             ).strip()
 
@@ -75,6 +82,7 @@ class GitCheckpointService:
             output = subprocess.check_output(
                 ["git", "diff-tree", "--numstat", "-r", base_tree_oid, target_tree_oid],
                 cwd=cwd,
+                stdin=_NO_STDIN,
                 text=True,
             ).strip()
         except subprocess.CalledProcessError:
@@ -121,6 +129,7 @@ class GitCheckpointService:
                 ["git", "read-tree", target_tree_oid],
                 cwd=cwd,
                 env=env,
+                stdin=_NO_STDIN,
                 check=True,
                 capture_output=True,
             )
@@ -128,6 +137,7 @@ class GitCheckpointService:
                 ["git", "checkout-index", "-a", "-f"],
                 cwd=cwd,
                 env=env,
+                stdin=_NO_STDIN,
                 check=True,
                 capture_output=True,
             )
@@ -139,6 +149,7 @@ class GitCheckpointService:
             ls_check = subprocess.run(
                 ["git", "ls-tree", target_tree_oid, "--", rel_path],
                 cwd=cwd,
+                stdin=_NO_STDIN,
                 capture_output=True,
                 text=True,
             )
