@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
@@ -121,6 +122,7 @@ class ManagedVerificationPort:
         rwlock: Any,
         now_ms: Callable[[], int],
         write_guard: Callable[[], None] | None = None,
+        write_scope: Callable[[], Any] | None = None,
     ) -> None:
         """注入与 Agent 相同的资源池、策略、规则与 Host 并发锁。"""
         self._pool = pool
@@ -130,6 +132,7 @@ class ManagedVerificationPort:
         self._rwlock = rwlock
         self._now_ms = now_ms
         self._write_guard = write_guard
+        self._write_scope = write_scope
 
     async def capture_workspace_changes(
         self, resource_key: str
@@ -184,7 +187,6 @@ class ManagedVerificationPort:
             finally:
                 await self._rwlock.release_read()
 
-
     async def workspace_revision(self, resource_key: str) -> str | None:
         """经 canonical backend 捕获当前 workspace 的 Git HEAD；非 Git 工作区返回 None。"""
         if not resource_key:
@@ -234,24 +236,36 @@ class ManagedVerificationPort:
             )
         return str(response.output or "")
 
-    async def run(self, request: VerificationRequest) -> VerificationEvidence:
-        """执行一条命令；所有路径都经过既有安全边界并返回 fresh evidence。"""
+    async def prepare(
+        self, request: VerificationRequest
+    ) -> Callable[[], Awaitable[VerificationEvidence]]:
+        """先校验并审批，返回只能使用一次的执行入口；执行前仍复查策略。"""
         from harness_agent.policy.bash_floors import evaluate_safety_floors
         from harness_agent.policy.bash_parser import extract_segments
         from harness_agent.policy.permission_rules import evaluate_tool_rules
         from harness_agent.policy.safe_commands import is_safe_command
         from harness_agent.policy.shell_access import evaluate_shell_file_access
 
-        def recheck() -> None:
-            mode = request.approval_mode_provider() if request.approval_mode_provider else "default"
+        def recheck(*, executing: bool = False) -> None:
+            mode = (
+                request.approval_mode_provider()
+                if request.approval_mode_provider
+                else "default"
+            )
             if mode == "plan":
                 raise VerificationError("POLICY_DENIED")
-            if evaluate_tool_rules("execute", {"command": request.command}, self._rules_provider()) == "deny":
+            if (
+                evaluate_tool_rules(
+                    "execute", {"command": request.command}, self._rules_provider()
+                )
+                == "deny"
+            ):
                 raise VerificationError("POLICY_DENIED")
-            if request.before_execute is not None:
-                request.before_execute()
-            elif self._write_guard is not None:
-                self._write_guard()
+            if executing:
+                if request.before_execute is not None:
+                    request.before_execute()
+                elif self._write_guard is not None:
+                    self._write_guard()
 
         recheck()
         rules = self._rules_provider()
@@ -280,7 +294,10 @@ class ManagedVerificationPort:
         )
         if not needs_approval and floors.get("any_floor_triggered"):
             needs_approval = True
-        if request.approval_mode_provider is not None and request.approval_mode_provider() == "yolo":
+        if (
+            request.approval_mode_provider is not None
+            and request.approval_mode_provider() == "yolo"
+        ):
             needs_approval = False
         if needs_approval:
             if request.approve is None:
@@ -289,8 +306,7 @@ class ManagedVerificationPort:
                     "verification command requires user approval",
                 )
             description = (
-                f"验证命令需要审批：{request.label}\n"
-                f"命令：{request.command[:500]}"
+                f"验证命令需要审批：{request.label}\n命令：{request.command[:500]}"
             )
             approved = await request.approve(description)
             if not approved:
@@ -298,78 +314,108 @@ class ManagedVerificationPort:
                     "VERIFICATION_DENIED", "verification command rejected by user"
                 )
 
-        # 验证命令可能修改工作区，与 Agent 写工具一致：整个执行期间持有
-        # Host 独占写锁，防止其他 Thread 的写操作与验证命令交错。
-        recheck()
-        await self._rwlock.acquire_write()
-        lease = None
-        try:
-            try:
-                lease = await self._pool.acquire(
-                    request.resource_key,
-                    self._settings,
-                    self._workspace,
-                )
-            except Exception as exc:
-                raise VerificationError(
-                    "BACKEND_FAILED",
-                    f"execution resource unavailable: {type(exc).__name__}",
-                ) from exc
-            started_at_ms = self._now_ms()
+        used = False
+
+        async def execute() -> VerificationEvidence:
+            nonlocal used
+            if used:
+                raise VerificationError("VERIFICATION_ALREADY_EXECUTED")
+            used = True
+            # 验证命令可能修改工作区，与 Agent 写工具一致：整个执行期间持有
+            # Host 独占写锁，防止其他 Thread 的写操作与验证命令交错。
             recheck()
-            try:
-                backend = lease.value.backend
-                # backend.execute 的 timeout 是终止进程的权威超时；外层
-                # wait_for 只作兜底，防止 backend 无视 timeout 时无限挂起。
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        backend.execute,
-                        request.command,
-                        timeout=int(request.timeout_seconds),
-                    ),
-                    timeout=request.timeout_seconds + 30.0,
-                )
-            except TimeoutError:
-                raise VerificationError(
-                    "VERIFICATION_TIMEOUT",
-                    f"command timed out after {request.timeout_seconds:.0f}s",
-                ) from None
-            except Exception as exc:
-                if "timeout" in type(exc).__name__.lower():
-                    raise VerificationError(
-                        "VERIFICATION_TIMEOUT",
-                        f"command timed out after {request.timeout_seconds:.0f}s",
-                    ) from exc
-                raise VerificationError(
-                    "BACKEND_FAILED",
-                    f"execution backend failed: {type(exc).__name__}",
-                ) from exc
-            exit_code = int(response.exit_code) if response.exit_code is not None else -1
-            if exit_code < 0 or exit_code > 255:
-                raise VerificationError(
-                    "BACKEND_FAILED", "backend returned an invalid exit code"
-                )
-            output = str(response.output or "")
-        finally:
-            try:
-                if lease is not None:
-                    await lease.release()
-            finally:
-                await self._rwlock.release_write()
-        finished_at_ms = self._now_ms()
-        encoded = output.encode("utf-8")
-        truncated = len(encoded) > MAX_OUTPUT_SUMMARY_CHARS * 4
-        summary = redact_verification_text(output[:MAX_OUTPUT_SUMMARY_CHARS])
-        return VerificationEvidence(
-            command=request.command,
-            working_dir=_working_dir_identity(lease.value.workspace_path, self._workspace),
-            started_at_ms=started_at_ms,
-            finished_at_ms=finished_at_ms,
-            exit_code=exit_code,
-            output_digest=hashlib.sha256(encoded).hexdigest(),
-            output_summary=summary,
-            truncated=truncated,
-        )
+            async with (
+                self._write_scope()
+                if self._write_scope is not None
+                else nullcontext() as permit
+            ):
+                await self._rwlock.acquire_write()
+                lease = None
+                try:
+                    recheck(executing=True)
+                    try:
+                        lease = await self._pool.acquire(
+                            request.resource_key,
+                            self._settings,
+                            self._workspace,
+                        )
+                    except Exception as exc:
+                        raise VerificationError(
+                            "BACKEND_FAILED",
+                            f"execution resource unavailable: {type(exc).__name__}",
+                        ) from exc
+                    started_at_ms = self._now_ms()
+                    recheck(executing=True)
+                    try:
+                        if permit is not None:
+                            permit.stopped = False
+                        backend = lease.value.backend
+                        # backend.execute 的 timeout 是终止进程的权威超时；外层
+                        # wait_for 只作兜底，防止 backend 无视 timeout 时无限挂起。
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                backend.execute,
+                                request.command,
+                                timeout=int(request.timeout_seconds),
+                            ),
+                            timeout=request.timeout_seconds + 30.0,
+                        )
+                    except TimeoutError:
+                        raise VerificationError(
+                            "VERIFICATION_TIMEOUT",
+                            f"command timed out after {request.timeout_seconds:.0f}s",
+                        ) from None
+                    except Exception as exc:
+                        if "timeout" in type(exc).__name__.lower():
+                            raise VerificationError(
+                                "VERIFICATION_TIMEOUT",
+                                f"command timed out after {request.timeout_seconds:.0f}s",
+                            ) from exc
+                        raise VerificationError(
+                            "BACKEND_FAILED",
+                            f"execution backend failed: {type(exc).__name__}",
+                        ) from exc
+                    exit_code = (
+                        int(response.exit_code)
+                        if response.exit_code is not None
+                        else -1
+                    )
+                    if exit_code < 0 or exit_code > 255:
+                        raise VerificationError(
+                            "BACKEND_FAILED", "backend returned an invalid exit code"
+                        )
+                    if permit is not None:
+                        permit.stopped = exit_code != TIMEOUT_EXIT_CODE
+                    output = str(response.output or "")
+                finally:
+                    try:
+                        if lease is not None:
+                            await lease.release()
+                    finally:
+                        await self._rwlock.release_write()
+            finished_at_ms = self._now_ms()
+            encoded = output.encode("utf-8")
+            truncated = len(encoded) > MAX_OUTPUT_SUMMARY_CHARS * 4
+            summary = redact_verification_text(output[:MAX_OUTPUT_SUMMARY_CHARS])
+            return VerificationEvidence(
+                command=request.command,
+                working_dir=_working_dir_identity(
+                    lease.value.workspace_path, self._workspace
+                ),
+                started_at_ms=started_at_ms,
+                finished_at_ms=finished_at_ms,
+                exit_code=exit_code,
+                output_digest=hashlib.sha256(encoded).hexdigest(),
+                output_summary=summary,
+                truncated=truncated,
+            )
+
+        return execute
+
+    async def run(self, request: VerificationRequest) -> VerificationEvidence:
+        """审批后执行一次；拆开的 prepare 也只能消费一次，且执行前重查策略。"""
+        execute = await self.prepare(request)
+        return await execute()
 
 
 def _bounded_change_text(text: str, limit: int, label: str) -> str:

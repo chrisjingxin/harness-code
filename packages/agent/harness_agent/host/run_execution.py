@@ -452,16 +452,19 @@ class DirectShellRunAdapter:
         if binding is not None and getattr(binding, "workspace_path", None):
             workspace = binding.workspace_path
 
-        lock = run.preparation.workspace_write_lock
-        if lock is not None:
-            await lock.acquire_write()
-        try:
-            if run.preparation.workspace_write_guard is not None:
-                run.preparation.workspace_write_guard()
-            await self._run_command(run, port, command, workspace, tool_call_id)
-        finally:
+        from contextlib import nullcontext
+        scope=run.preparation.workspace_write_scope
+        async with scope() if scope is not None else nullcontext() as permit:
+            lock=run.preparation.workspace_write_lock
             if lock is not None:
-                await lock.release_write()
+                await lock.acquire_write()
+            try:
+                if run.preparation.workspace_write_guard is not None:
+                    run.preparation.workspace_write_guard()
+                await self._run_command(run,port,command,workspace,tool_call_id,permit=permit)
+            finally:
+                if lock is not None:
+                    await lock.release_write()
 
     async def _run_command(
         self,
@@ -470,6 +473,7 @@ class DirectShellRunAdapter:
         command: str,
         workspace: str,
         tool_call_id: str,
+        *, permit: Any = None,
     ) -> None:
         """写锁保护从创建到进程退出；取消先杀进程组，再等待停止。"""
         process = await asyncio.create_subprocess_shell(
@@ -481,6 +485,8 @@ class DirectShellRunAdapter:
             start_new_session=os.name != "nt",
         )
 
+        if permit is not None:
+            permit.stopped=False
         timeout = 120
         stdout_bytes = b""
         stderr_bytes = b""
@@ -530,6 +536,8 @@ class DirectShellRunAdapter:
             raise
         finally:
             await process.wait()
+            if permit is not None:
+                permit.stopped=True
             await asyncio.gather(task, return_exceptions=True)
 
         if timed_out:

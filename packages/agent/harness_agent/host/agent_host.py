@@ -579,6 +579,7 @@ class AgentHost:
             METHOD["FUSION_STATUS"]: self._handle_fusion_status,
             METHOD["FUSION_RECOVER"]: self._handle_fusion_recover,
             METHOD["FUSION_CANCEL"]: self._handle_fusion_cancel,
+            METHOD["FUSION_RELEASE"]: self._handle_fusion_release,
             METHOD["GOAL_INSPECT"]: self._handle_goal_inspect,
             METHOD["GOAL_REQUEST"]: self._handle_goal_request,
             METHOD["GOAL_MUTATE"]: self._handle_goal_mutate,
@@ -1726,6 +1727,7 @@ class AgentHost:
                 code_index_lease=code_index_lease,
                 workspace_write_guard=(lambda: self._fusion_runtime.guard.check_command(None)) if self._fusion_runtime is not None else None,
                 workspace_write_lock=self._tool_concurrency_lock,
+                workspace_write_scope=(lambda: self._fusion_runtime.guard.operation("command")) if self._fusion_runtime is not None else None,
             )
         except BaseException:
             lease = locals().get("code_index_lease")
@@ -2598,23 +2600,33 @@ class AgentHost:
 
     @asynccontextmanager
     async def _thread_history_change(
-        self, persistence: ThreadPersistence, thread_id: str, *, writes_workspace: bool,
+        self,
+        persistence: ThreadPersistence,
+        thread_id: str,
+        *,
+        writes_workspace: bool,
     ) -> AsyncIterator[None]:
         """历史回退与派单共享短期写锁，防止改写活动任务的来源或验收文件。"""
         from harness_agent.runtime.fusion.store import FusionError
 
-        await self._tool_concurrency_lock.acquire_write()
-        try:
-            runtime = await self._ensure_fusion_runtime(persistence)
-            if await runtime.store.active(thread_id):
-                raise RpcError(-32000, "FUSION_TASK_CONFLICT")
-            if writes_workspace:
-                runtime.guard.check_command(None)
-            yield
-        except FusionError as exc:
-            raise RpcError(-32000, exc.code) from exc
-        finally:
-            await self._tool_concurrency_lock.release_write()
+        from contextlib import nullcontext
+
+        runtime = await self._ensure_fusion_runtime(persistence)
+        if await runtime.store.active(thread_id):
+            raise RpcError(-32000, "FUSION_TASK_CONFLICT")
+        scope = runtime.guard.operation("command") if writes_workspace else nullcontext()
+        async with scope:
+            await self._tool_concurrency_lock.acquire_write()
+            try:
+                if await runtime.store.active(thread_id):
+                    raise RpcError(-32000, "FUSION_TASK_CONFLICT")
+                if writes_workspace:
+                    runtime.guard.check_command(None)
+                yield
+            except FusionError as exc:
+                raise RpcError(-32000, exc.code) from exc
+            finally:
+                await self._tool_concurrency_lock.release_write()
 
     async def _handle_threads_undo(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """将当前 Thread 回退到指定历史回合，可选择还原代码、对话或两者。"""
@@ -2749,6 +2761,21 @@ class AgentHost:
                 return (await store.recover(task.task_id, params["expected_version"], params["inspection_note"], params["effects_stopped"])).to_record()
             except ValueError as exc:
                 raise RpcError(-32000, str(exc)) from exc
+
+    async def _handle_fusion_release(
+        self, params: dict[str, Any], _id: str
+    ) -> dict[str, object]:
+        """普通命令没有 Fusion 任务，只能按精确操作和用户停止说明解除未知保护。"""
+        persistence = await self._ensure_thread_persistence()
+        try:
+            await persistence.fusion_state_store().release_workspace_operation(
+                params["operation_id"],
+                params["expected_sequence"],
+                params["stopped_inspection_note"],
+            )
+            return {"released": True}
+        except ValueError as exc:
+            raise RpcError(-32000, str(exc)) from exc
 
     async def _handle_fusion_cancel(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """先取消当前 Run，再由持久化停止事实决定能否结束任务。"""
@@ -4912,6 +4939,7 @@ class AgentHost:
                 rwlock=self._tool_concurrency_lock,
                 now_ms=lambda: int(time.time() * 1000),
                 write_guard=(lambda: self._fusion_runtime.guard.check_command(None)) if self._fusion_runtime is not None else None,
+                write_scope=(lambda: self._fusion_runtime.guard.operation("command")) if self._fusion_runtime is not None else None,
             ),
             # 组装发生在 adapter 执行前，run.agent_engine_profile_key 尚未由
             # runtime 获取填充；直接使用受理阶段解析出的 AgentEngineProfile key，

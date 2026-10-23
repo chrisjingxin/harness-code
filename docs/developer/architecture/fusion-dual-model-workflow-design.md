@@ -91,8 +91,8 @@ flowchart LR
 | `runtime/fusion/roles.py::resolve_fusion_specs` | 从基础 Spec 分别派生角色和实际模型 | 能力白名单、提示词、Profile 指纹 |
 | `runtime/fusion/tools.py::create_fusion_tools` | 模型可见的六个控制工具 | `tool_risk.py`、`approval_policy.py` |
 | `runtime/fusion/service.py::FusionService` | 派单、返工、续接、检查、逐项审阅和最终输出门禁 | 状态机、票据、失败测试 |
-| `runtime/fusion/store.py::FusionStateStore` | 七张扩展表、版本校验、派发、证据、副作用和写者 | schema 验证、事务和崩溃测试 |
-| `runtime/fusion/snapshot.py` | 独立文件快照、路径规范化和改动清单 | Git index、不跟随 symlink、严格失败 |
+| `runtime/fusion/store.py::FusionStateStore` | 任务、文件预留、排队、派发、证据及停止记录 | schema 验证、事务和崩溃测试 |
+| `runtime/fusion/snapshot.py` | 独立文件快照、路径规范化和改动清单 | 范围快照、源码版本、不跟随 symlink、严格失败 |
 | `runtime/fusion/guard.py` | 文件准备/提交守卫与 Shell 副作用登记 | Snapshot 文件契约、审批恢复、停止确认 |
 | `host/fusion_runtime.py::FusionRuntime` | Host 装配、持续 Worker、真实子审批和检查端口 | Pool、registry、索引和 checkpoint 生命周期 |
 | `runtime/verification.py::ManagedVerificationPort` | 共用 backend、权限、审批、超时和执行锁 | Compose 调用方；旧 `compose/verification.py` 已删除 |
@@ -182,20 +182,27 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 
 子执行复用 Managed 执行器、父取消信号、真实审批和用量账本。审批携带该轮子 execution ID，不能混到根执行。索引查询租约由每轮自行借用和释放；文件读取快照也每轮关闭。任务未终结时保留 Worker checkpoint，完成或取消后清理。
 
-### 4. 写者、快照、检查和审阅
+### 4. 文件并行、命令协调和验收
 
-**写者**指当前有权修改工作区的人。SQLite 按真实工作区路径摘要保存唯一写者，并递增 `generation`（写者代号）；旧工具不能沿用过期授权。
+**文件预留**表示任务本轮可以修改哪些文件。以真实启动目录为键，SQLite 按任务保存整组 `allowed_paths`。不同文件可并行；同名文件、目录与子文件、整个 `./` 目录相交时排队。已存在目录统一补 `/`；大小写及 Unicode 等价路径按冲突处理，实际写权限仍严格匹配路径。新文件可以直接声明，符号链接、越界路径和内部数据路径拒绝。
 
-- 派单登记写者、任务单和消息在同一短事务内完成；工作区被占用时全部回滚。
-- 文件工具在准备、审批恢复和提交时检查角色、阶段、范围、revision 和写者代号；提交前先保存副作用记录。
-- Sidekick 提交报告后关闭本轮写入。Host 确认副作用停止，才取得检查写者。
-- 普通 Build 工具、Compose 检查、Direct Shell 和文件撤销/重做也检查 Fusion 写者。Direct Shell 持有 Host 写锁直到命令停止；取基线前等待已有普通写入结束。
-- 只有实际 Fusion 任务中的六个已登记控制工具免查写者；普通扩展即使名称以 `fusion_` 开头，也不能绕过写入保护。
-- 完成/取消和释放写者在同一 SQLite 事务中提交，避免留下已完成任务的占用。
+- `wait_for_lease` 一次申请整组范围。返工扩大范围时先交回旧组再申请，避免两个任务各拿一半互相等待。
+- 冲突进入 `WAITING_RESOURCE`，保存未派发任务单，异步轮询短事务；没有数据库锁、Host 工具锁跨等待持有。范围可用后自动 `start_round`，只派发一次。
+- 等待请求保存心跳。过期只失去排队顺序，活跃请求会重新入队；文件预留和执行中、结果不明的操作不会按超时释放。
+- 新一轮或换写入角色递增 `generation`。文件准备和提交都检查角色、阶段、范围、revision、generation 及原文件版本（CAS）。写前拒绝记录“未开始”，不能变成假的未知操作。
+- 暂停且确认停止后交回范围；取消清理排队请求、保留文件。取消排队后的提问只读；明确“继续等待”才恢复。Sidekick 尚未启动的派发保留 `prepared`，不能误判成已执行。
 
-**快照**由 Host 自己计算。Git 工作区使用临时 index，不改用户 index；统计已跟踪文件、非忽略的新文件及允许范围内的忽略文件。非 Git 工作区直接计算文件摘要。创建、修改、删除、文件类型和模式变化都参与比较；无法读取、路径越界或取样期间文件变化时拒绝验收。
+**实际操作队列**由 `resources.py::FusionResources` 提供：文件操作只协调相关路径；命令和快照屏障临时协调整个启动目录的实际写入，确认结束后释放。Fusion 命令等待实际文件操作，不等待其他任务长期预留，避免两个并行任务在检查时互锁。普通无范围命令需等所有任务交回文件；这些任务的收尾可越过等待中的普通命令，防止反向阻塞。
 
-**检查**只运行冻结配置中的命令，通过 `ManagedVerificationPort` 复用现有执行 backend、权限、审批和 Host 锁。配置命令不等于自动批准。审批后重新检查目录、候选文件、Plan 和写者；每项记录命令摘要、任务单版本、起止快照、时间、退出码和脱敏输出。退出码非零或检查改了源码，不能验收；超时 124 或缺少停止确认进入 `OUTCOME_UNKNOWN`。
+所有写入口共用此队列：原生 Snapshot 文件工具、图工具及内联子执行、Direct Shell、Compose 检查、历史撤销/重做。取得跨进程操作许可后才取本地工具锁；审批在申请许可之前完成，执行前重查审批与权限。控制工具自身不持有长命令许可。
+
+已确认停止自动释放；未知文件操作只保护其路径，未知命令保护启动目录。Host PID 已不存在时，只把运行记录转成可核查的 `unknown`，不释放权限，也不宣称子命令停止。迟到的可信停止回执可以释放保护；已人工核查的记录不能被迟到回调复活。
+
+**快照**由 Host 计算。任务基线和候选只包含当前范围；扩范围时保留旧范围的原始基线，只为新文件取样。其他任务的文件变化不算本任务越界。命令另取源码快照核查范围外改动；Git 仅列举文件，不创建临时 index。常见缓存和依赖目录默认跳过，显式声明的文件仍参与比较。文件内容、类型和模式变化均计入摘要。
+
+**检查**只运行冻结配置的命令。`ManagedVerificationPort.prepare` 先完成权限与审批，返回只能执行一次的动作；随后整组检查共用一个命令许可，逐项保存停止回执、源码摘要与 `verification_cycle`。已开始却缺少回执的检查不自动重放；退出码非零、源码被检查改动或停止不明，不能验收。
+
+已保存检查仅在同一源码版本复用。另一任务改了源码时，重新检查并生成新票据，交 Lead 再确认；不重跑 Sidekick、不消耗返工轮次。最终接受在快照屏障内重查候选和源码摘要，再写审阅记录并完成任务。
 
 **审阅票据**绑定任务单 revision、报告、候选摘要和检查记录。接受前必须重新计算文件摘要，并确认：
 
@@ -220,13 +227,16 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 | `fusion_messages` | 与派发操作绑定的原消息和 revision，恢复时核对消息摘要 |
 | `fusion_evidence` | 报告、检查回执、票据和审阅记录 |
 | `fusion_effects` | 操作 ID、execution、类型、参数摘要、任务版本、代号、结果与停止确认 |
-| `fusion_leases` | 工作区唯一写者、所属任务和代号 |
+| `fusion_reservations` | 每任务预留路径、所属角色和代号 |
+| `fusion_generations` | 每个真实启动目录单调递增的授权代号 |
+| `fusion_access` | 按序申请的实际操作、状态、停止关联、Host PID 与排队心跳 |
 
 副作用先记录 `running`，再真正执行；只有确认停止才记成功/失败。结果不明保留 `unknown` 和写者。初始化时验证列、主键以及活动任务部分唯一索引，结构不符明确报错。
 
 | 阶段 | 含义与下一步 |
 | --- | --- |
 | `READY` | 尚未派单；直接答复或派单 |
+| `WAITING_RESOURCE` | 文件范围冲突；程序等待并自动继续，可取消 |
 | `WORKER_RUNNING` | Sidekick 执行；报告后检查，阻塞时等待 |
 | `CHECKING` | Host 检查；结果明确后审阅，不明则暂停核查 |
 | `REVIEWING` | Lead 接受、拒绝或返工 |
@@ -241,8 +251,8 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 | 消息仍为 `prepared`，确认本轮子执行未启动 | 沿原操作、轮次和会话派发原消息 |
 | Worker 已完整结束，checkpoint 身份和结束标记一致 | 允许在同一会话追加返工 |
 | 报告已保存，派发已结束，检查未开始 | 核对报告时文件摘要后，只运行检查 |
-| 部分检查回执已保存 | 复用原回执，只运行剩余计划；已开始却缺少回执时等待核查 |
-| 票据或全部检查已保存，Lead 尚未接受 | 核对文件后恢复/重建票据，不重跑 Worker 或已有检查 |
+| 部分检查回执已保存 | 源码版本一致时复用回执；源码变动则重新检查，缺失停止回执仍等待核查 |
+| 票据或全部检查已保存，Lead 尚未接受 | 核对文件；源码版本变化则重新检查并发新票据，不重跑 Worker |
 | 派发或副作用是否结束无法确认 | `OUTCOME_UNKNOWN`，保留写者和待核查操作 |
 | 已明确停止的中断轮次 | 恢复上一完整 checkpoint；首轮没有完整记录时保留文件后重新准备，不重放半轮工具 |
 | 未确认中断却发生历史缺失、不一致 | `WAITING_USER`；拒绝用空历史冒充完整会话 |
@@ -281,7 +291,7 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 | --- | --- |
 | `tests/config/test_fusion_config.py`、`tests/runtime/test_fusion_profile.py` | 合并、引用、可信来源、冻结和脱敏 |
 | `tests/runtime/test_fusion_roles.py`、`test_fusion_guard.py` | 原始权限派生、Lead 禁写、路径、提交和命令结果 |
-| `tests/runtime/test_fusion_store.py`、`test_fusion_snapshot.py` | CAS、单写者、原子派单、schema、重启和 Git index |
+| `tests/runtime/test_fusion_store.py`、`test_fusion_snapshot.py` | CAS、文件并行、自动排队、schema、迁移、重启及范围快照 |
 | `tests/runtime/test_fusion_service.py`、`test_verification_shared.py` | 越界/漂移/失败拒收、逐项审阅、检查续接、终态释放 |
 | `tests/host/test_fusion_run.py`、`test_fusion_execution.py` | 真实 Host/Pool/图/工具链，两模型、同会话返工、真实审批、取消、恢复与历史一致性 |
 | `packages/cli/tests/interactive/fusion-feature.test.ts`、`tests/ipc/` | 共享入口、选择、恢复、中文状态、协议和双端帧 |
@@ -292,9 +302,9 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 
 ## 五、派单占用修复（2026-10-20）
 
-同一目录已有旧任务占用时，重复派单不会释放写权限。占用是工作区级别，不能把 `FUSION_LEASE_BUSY` 解释成“Sidekick 模型会话卡住”。
+本节记录 HC-186 之前的故障背景。整目录单写者及普通冲突返回 `FUSION_LEASE_BUSY` 的路径已由第 4 节文件预留、自动排队替代。`LEASE_BUSY` 也从未等于模型会话或进程卡住。
 
-修复链路：`start_round` 在原子事务中发现占用 → 返回安全占用摘要 → 当前任务记录 `WAITING_USER/workspace_busy` → `FusionEffectMiddleware.abefore_model` 在下一次模型请求前结束本轮。没有任务单、消息、轮次或子执行被部分登记，也不自动取消占用者。
+当时的修复链路（已替代）：`start_round` 在原子事务中发现占用 → 返回安全占用摘要 → 当前任务记录 `WAITING_USER/workspace_busy` → `FusionEffectMiddleware.abefore_model` 在下一次模型请求前结束本轮。没有任务单、消息、轮次或子执行被部分登记，也不自动取消占用者。
 
 - `workspace_blocker` 在既有任务 JSON 中保存，仅包含占用任务/会话 ID、阶段、轮次、安全原因及待核查标记；协议增加严格可空字段，不新增 SQLite 表。
 - 查询和显式继续都核对数据库里的实际写者。占用仍在时不请求模型；占用解除时查询只提示可继续，用户新消息才恢复原首轮派单。
@@ -355,6 +365,8 @@ Sidekick 在 `FusionEffectMiddleware.abefore_model` 进入下一次请求前检�
 
 
 ## 八、派单与恢复体验优化（HC-184，2026-10-21）
+
+本节保留故障处理背景；目录写权限的当前规则以第 4 节和 HC-186 为准，正常范围冲突自动排队。
 
 详见 [HC-184 Spec](../spec/HC-184-双模型协作体验优化.md)。原文需求由 Host 生成、闲置自动让出目录、当前会话处理占用这三项共同简化流程，已有角色、检查与审阅门禁继续有效。
 
@@ -417,3 +429,17 @@ Worker 提示给出真实命令目录，并说明文件工具的虚拟 `/`。命
 文件工具内嵌的 Fusion 错误码继续使用原有“同工具、同错误码连续三次”规则。其他文件错误交还模型纠正；只读核查按原规则计入未识别的工具失败，并在三次后收尾。没有改变文件工具协议、停止事实或写权限。
 
 回归为 `test_fusion_guard.py` 中错误类型与两种工具格式，以及 `test_fusion_tool_errors.py` 的真实 Host 列目录失败/纠正、只读核查与连续错误场景。
+
+
+## HC-186：迁移与当前对话核查
+
+升级须重启共享该数据目录的所有旧 Host。首次打开旧库先建立权限为 `0600` 的 SQLite 备份，再在一个事务内转换旧租约、投影旧基线、使旧验收票据失效，最后删除 `fusion_leases`。备份失败不迁移；旧命令停止不明保留全目录保护。运行时只使用新结构。
+
+普通命令可能没有 Fusion task ID。状态摘要对本项目未知操作返回 `operation_id/sequence`；`/fusion resolve --stopped <说明>` 调用受控的 `fusion.release`。Store 核对项目、精确操作、序号、未知状态和非空说明，仅存说明摘要。活动操作、任务所属操作和过期请求不能从这个入口释放；任务所属操作仍走已有 cancel/recover。该入口不向模型提供。
+
+`FusionTaskStatus` 增加 `write_paths/resource_waits`，阶段增加 `WAITING_RESOURCE`。Host 进度事件沿原 Run 流发布，Interactive Core 把资源等待转成 `fusionWaitLabel`，经 Selector 同步到 TUI/Web。界面分别展示 Lead/Sidekick 时间线，资源排队不会显示为模型迟迟未响应。
+
+完整规格和回归范围见 [HC-186 规格](../spec/HC-186-双模型文件并行执行.md)；完成后以对应归档 Task 的检查记录为准。
+
+
+纯读取快照没有写入副作用，Host 退出后可以回收；历史文件还原归入命令保护。实际操作已登记但副作用记录尚未保存就退出时，待查操作列表仍保留操作编号，不能只显示空的“结果不明”。

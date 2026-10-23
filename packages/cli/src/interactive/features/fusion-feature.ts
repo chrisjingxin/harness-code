@@ -11,7 +11,7 @@ export class FusionFeature {
 
   /** 目录占用独立于当前任务，缓存必须和发起查询的会话一起使用。 */
   private blocker(threadId: string | null, task: FusionTaskStatus | null): FusionWorkspaceBlocker | null {
-    return task?.workspace_blocker ?? (this.workspace?.threadId === threadId ? this.workspace.blocker : null)
+    return task?.workspace_blocker ?? task?.resource_waits?.[0] ?? (this.workspace?.threadId === threadId ? this.workspace.blocker : null)
   }
   /** 重连或切换 Thread 后刷新，活动任务自动带回原组合。 */
   async refresh(
@@ -93,6 +93,17 @@ export class FusionFeature {
           const blocker = this.blocker(threadId, task)
           if (!blocker && task?.reason === "workspace_available") {
             ctx.commit(state => appendNotice(state, "占用已自动解除，发送“继续”恢复当前任务。"))
+            return { status: "accepted" }
+          }
+          if (!blocker?.task_id && blocker?.operation_id && blocker.sequence) {
+            if (!match[2]?.trim())
+              return { status: "rejected", code: "invalid-argument", message: "这是普通工具留下的未知操作。请确认相关命令已停止，再输入 /fusion resolve --stopped <核查说明>。" }
+            await ctx.gateway.releaseFusionOperation({ operation_id: blocker.operation_id, expected_sequence: blocker.sequence, stopped_inspection_note: match[2].trim() })
+            if (ctx.getState().currentThreadId === threadId) {
+              if (threadId) await this.refresh(threadId, ctx)
+              if (ctx.getState().currentThreadId === threadId)
+                ctx.commit(state => appendNotice(state, "已记录停止核查并释放工具权限，文件已保留。原排队任务会自动继续；主动暂停过的任务请发送“继续等待”。"))
+            }
             return { status: "accepted" }
           }
           if (!blocker?.task_id || !blocker.thread_id)

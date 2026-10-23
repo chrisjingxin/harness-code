@@ -46,10 +46,17 @@ import logging
 import mimetypes
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from deepagents.backends.protocol import FileData, GlobResult, GrepResult, LsResult, ReadResult
+from deepagents.backends.protocol import (
+    FileData,
+    GlobResult,
+    GrepResult,
+    LsResult,
+    ReadResult,
+)
 from deepagents.backends.utils import (
     _get_file_type,
     check_empty_content,
@@ -71,19 +78,27 @@ from harness_agent.threads.text_backend import (
     TextMutationBackend,
     TextMutationError,
 )
+from harness_agent.tools.file_diagnostics import (
+    MAX_DIAGNOSTIC_BYTES,
+    MAX_DIAGNOSTIC_ITEMS,
+)
+from harness_agent.tools.file_diagnostics import (
+    diagnostics_timeout as _diagnostics_timeout,
+)
+from harness_agent.tools.file_diagnostics import (
+    diagnostics_unavailable as _diagnostics_unavailable,
+)
+from harness_agent.tools.file_diagnostics import (
+    elapsed_ms as _elapsed_ms,
+)
+from harness_agent.tools.file_diagnostics import (
+    summarize_diagnostics as _summarize_diagnostics,
+)
 from harness_agent.tools.file_mutation import (
     FileMutationService,
     MutationMetadata,
     PreparedFileMutation,
     mutation_fingerprint,
-)
-from harness_agent.tools.file_diagnostics import (
-    MAX_DIAGNOSTIC_BYTES,
-    MAX_DIAGNOSTIC_ITEMS,
-    diagnostics_timeout as _diagnostics_timeout,
-    diagnostics_unavailable as _diagnostics_unavailable,
-    elapsed_ms as _elapsed_ms,
-    summarize_diagnostics as _summarize_diagnostics,
 )
 from harness_agent.tools.file_tool_metrics import FileToolMetrics
 from harness_agent.tools.file_tools import (
@@ -93,38 +108,84 @@ from harness_agent.tools.file_tools import (
 )
 from harness_agent.tools.plan_file import is_plan_virtual_path
 from harness_agent.tools.snapshot_file_schema import (
+    DEFAULT_READ_LIMIT,
+    MAX_READ_LIMIT,
     CanonicalDeleteFileSchema,
     CanonicalEditFileSchema,
     CanonicalReadFileSchema,
     CanonicalWriteFileSchema,
-    DEFAULT_READ_LIMIT,
-    MAX_READ_LIMIT,
     create_file_tool_definitions,
+)
+from harness_agent.tools.snapshot_file_schema import (
     is_harness_virtual_path as _is_virtual,
+)
+from harness_agent.tools.snapshot_file_schema import (
     non_negative_int_argument as _non_negative_int,
+)
+from harness_agent.tools.snapshot_file_schema import (
     optional_path_argument as _optional_path,
+)
+from harness_agent.tools.snapshot_file_schema import (
     path_argument as _path,
+)
+from harness_agent.tools.snapshot_file_schema import (
     positive_int_argument as _positive_int,
+)
+from harness_agent.tools.snapshot_file_schema import (
     require_canonical_argument_keys as _require_canonical_argument_keys,
+)
+from harness_agent.tools.snapshot_file_schema import (
     snapshot_id_argument as _snapshot_id,
+)
+from harness_agent.tools.snapshot_file_schema import (
     string_argument as _string_arg,
 )
 from harness_agent.tools.snapshot_file_support import (
     attach_post_write_drift as _attach_post_write_drift,
+)
+from harness_agent.tools.snapshot_file_support import (
     error_code as _error_code,
+)
+from harness_agent.tools.snapshot_file_support import (
     error_message as _error_message,
+)
+from harness_agent.tools.snapshot_file_support import (
     message as _message,
+)
+from harness_agent.tools.snapshot_file_support import (
     next_action as _next_action,
+)
+from harness_agent.tools.snapshot_file_support import (
     normalize_line_endings as _normalize_line_endings,
+)
+from harness_agent.tools.snapshot_file_support import (
     observation_path as _observation_path,
+)
+from harness_agent.tools.snapshot_file_support import (
     render_changed_context as _render_changed_context,
+)
+from harness_agent.tools.snapshot_file_support import (
     render_window as _render_window,
+)
+from harness_agent.tools.snapshot_file_support import (
     require_actual_document as _require_actual_document,
+)
+from harness_agent.tools.snapshot_file_support import (
     require_mutation_size as _require_mutation_size,
+)
+from harness_agent.tools.snapshot_file_support import (
     require_mutation_text_size as _require_mutation_text_size,
+)
+from harness_agent.tools.snapshot_file_support import (
     require_text_size as _require_text_size,
+)
+from harness_agent.tools.snapshot_file_support import (
     shown_lines as _shown_lines,
+)
+from harness_agent.tools.snapshot_file_support import (
     source_line_range as _source_line_range,
+)
+from harness_agent.tools.snapshot_file_support import (
     tool_payload as _tool_payload,
 )
 
@@ -144,7 +205,8 @@ class SnapshotFileToolContract:
         snapshot_store: ThreadSnapshotStore | None,
         mutation_guard: Any | None = None,
         text_backend: TextMutationBackend,
-        diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]] | None = None,
+        diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]]
+        | None = None,
         diagnostics_timeout_seconds: float = DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS,
         metrics: FileToolMetrics | None = None,
     ) -> None:
@@ -155,7 +217,9 @@ class SnapshotFileToolContract:
         self._snapshot_store = snapshot_store or ThreadSnapshotStore()
         self._text_backend = text_backend
         self._mutation_guard = mutation_guard
-        self._mutation_service = FileMutationService(text_backend, mutation_guard=mutation_guard)
+        self._mutation_service = FileMutationService(
+            text_backend, mutation_guard=mutation_guard
+        )
         self._diagnostics_provider = diagnostics_provider
         self._diagnostics_timeout_seconds = diagnostics_timeout_seconds
         self._metrics = metrics or FileToolMetrics()
@@ -174,7 +238,11 @@ class SnapshotFileToolContract:
     @property
     def registration_tools(self) -> Sequence[BaseTool | dict[str, Any]]:
         """只注册底层框架原生不提供的占位工具（例如 delete_file）。"""
-        return tuple(tool for tool in self._definitions if getattr(tool, "name", "") not in BUILTIN_FILE_TOOL_NAMES)
+        return tuple(
+            tool
+            for tool in self._definitions
+            if getattr(tool, "name", "") not in BUILTIN_FILE_TOOL_NAMES
+        )
 
     def dispatch(self, request: ToolCallRequest) -> ToolMessage:
         """同步分发执行一项文件工具调用，将任何异常统一收敛为结构化 JSON 提示。"""
@@ -207,7 +275,39 @@ class SnapshotFileToolContract:
 
     async def adispatch(self, request: ToolCallRequest) -> ToolMessage:
         """异步执行文件工具：落盘完成后可限时收集语法诊断结果并随消息返回。"""
-        message = await asyncio.to_thread(self._dispatch, request)
+        name, args, _ = self._call_args(request)
+        scope = (
+            self._mutation_guard.operation(
+                "file",
+                context=self._mutation_guard.context_provider(),
+                paths=[_path(args, "file_path", name)],
+            )
+            if self._mutation_guard is not None
+            and name in {"write_file", "edit_file", "delete_file"}
+            else nullcontext()
+        )
+        async with scope as permit:
+            work = asyncio.create_task(asyncio.to_thread(self._dispatch, request))
+            try:
+                message = await asyncio.shield(work)
+            except asyncio.CancelledError:
+                # asyncio 取消不会终止磁盘线程，先等真实提交结束再交回许可。
+                try:
+                    await asyncio.wait_for(asyncio.shield(work), 2)
+                except TimeoutError:
+                    if permit is not None:
+                        permit.stopped = False
+
+                        def finished(_job):
+                            permit.stopped = True
+                            asyncio.create_task(
+                                asyncio.to_thread(
+                                    self._mutation_guard.resources.finish, permit
+                                )
+                            )
+
+                        work.add_done_callback(finished)
+                raise
         message = await self._attach_async_diagnostics(request, message)
         self._observe(message)
         return message
@@ -219,7 +319,11 @@ class SnapshotFileToolContract:
             return True
         args = request.tool_call.get("args") or {}
         path = args.get("file_path") if isinstance(args, dict) else None
-        if name in {"write_file", "edit_file"} and isinstance(path, str) and is_plan_virtual_path(path):
+        if (
+            name in {"write_file", "edit_file"}
+            and isinstance(path, str)
+            and is_plan_virtual_path(path)
+        ):
             return True
         try:
             self._prepare_mutation(request)
@@ -227,15 +331,23 @@ class SnapshotFileToolContract:
             return False
         return True
 
-    def approval_description(self, tool_call: dict[str, Any], _state: Any, runtime: Any) -> str:
+    def approval_description(
+        self, tool_call: dict[str, Any], _state: Any, runtime: Any
+    ) -> str:
         """从预先准备好的文件变更计划中生成人性化的文本 Diff 摘要，供用户审批界面展示。"""
-        request = type("ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime})()
+        request = type(
+            "ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime}
+        )()
         plan = self._prepare_mutation(request)
         return self._mutation_service.approval_description(plan)
 
-    def approval_details(self, tool_call: dict[str, Any], _state: Any, runtime: Any) -> Any:
+    def approval_details(
+        self, tool_call: dict[str, Any], _state: Any, runtime: Any
+    ) -> Any:
         """返回结构化的 Diff 详情对象，便于前端 TUI/Web 渲染高亮对比视图。"""
-        request = type("ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime})()
+        request = type(
+            "ApprovalToolCallRequest", (), {"tool_call": tool_call, "runtime": runtime}
+        )()
         plan = self._prepare_mutation(request)
         return self._mutation_service.approval_details(plan)
 
@@ -243,7 +355,7 @@ class SnapshotFileToolContract:
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
         """读取文件文本内容并签发快照（Snapshot）。
-        
+
         为避免超大文件撑爆上下文，支持分页窗口（offset/limit）。系统会记录模型
         本次读取的实际行范围，并签发唯一的 snapshot_id。后续模型如果想编辑该文件，
         只能修改这次“亲眼读过”的有效行范围。
@@ -256,18 +368,29 @@ class SnapshotFileToolContract:
         if _is_virtual(path):
             return self._read_virtual(request, path, offset, limit, tool_call_id)
         if Path(path).suffix.lower() == ".ipynb":
-            return self._read_without_snapshot(request, path, offset, limit, tool_call_id)
+            return self._read_without_snapshot(
+                request, path, offset, limit, tool_call_id
+            )
         try:
             document = self._text_backend.read_text_document(path)
         except TextMutationError as exc:
-            if exc.code not in {"TEXT_ENCODING_UNSUPPORTED", "BACKEND_TEXT_UNSUPPORTED"}:
+            if exc.code not in {
+                "TEXT_ENCODING_UNSUPPORTED",
+                "BACKEND_TEXT_UNSUPPORTED",
+            }:
                 raise
-            return self._read_without_snapshot(request, path, offset, limit, tool_call_id)
+            return self._read_without_snapshot(
+                request, path, offset, limit, tool_call_id
+            )
         _require_mutation_size(document)
-        rendered, shown_count, context_truncated = _render_window(document.content, offset, limit)
+        rendered, shown_count, context_truncated = _render_window(
+            document.content, offset, limit
+        )
         # 超长输出的可见部分不足以证明模型读过一整源行，不能扩大 seen range。
         record_limit = shown_count if not context_truncated else 0
-        record = self._record_snapshot(request, document, offset=offset, limit=record_limit)
+        record = self._record_snapshot(
+            request, document, offset=offset, limit=record_limit
+        )
         payload = {
             "ok": True,
             "path": path,
@@ -290,7 +413,7 @@ class SnapshotFileToolContract:
         tool_call_id: str,
     ) -> ToolMessage:
         """读取 Notebook (.ipynb) 或二进制等特殊文件，仅供查看，绝不签发可写快照。
-        
+
         Notebook 文件由复杂的 JSON 单元格组成，直接当成纯文本让模型替换极易损坏格式；
         非文本二进制文件同样如此。因此此类文件仅能读取供模型参考，不可通过 edit_file 编辑。
         """
@@ -309,17 +432,27 @@ class SnapshotFileToolContract:
         file_type = _get_file_type(path)
         if encoding == "base64" or file_type != "text":
             block_type = file_type if file_type != "text" else "file"
-            mime_type = mimetypes.guess_type("file" + Path(path).suffix)[0] or "application/octet-stream"
+            mime_type = (
+                mimetypes.guess_type("file" + Path(path).suffix)[0]
+                or "application/octet-stream"
+            )
             return ToolMessage(
-                content_blocks=[{"type": block_type, "base64": content, "mime_type": mime_type}],
+                content_blocks=[
+                    {"type": block_type, "base64": content, "mime_type": mime_type}
+                ],
                 name="read_file",
                 tool_call_id=tool_call_id,
-                additional_kwargs={"read_file_path": path, "read_file_media_type": mime_type},
+                additional_kwargs={
+                    "read_file_path": path,
+                    "read_file_media_type": mime_type,
+                },
                 status="success",
             )
 
         empty = check_empty_content(content)
-        rendered = empty or format_content_with_line_numbers(content, start_line=offset + 1)
+        rendered = empty or format_content_with_line_numbers(
+            content, start_line=offset + 1
+        )
         payload = {
             "ok": True,
             "path": path,
@@ -421,7 +554,7 @@ class SnapshotFileToolContract:
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
         """新建文件并写入内容。
-        
+
         仅适用于创建尚不存在的新文件。如果文件已存在，会报错拒绝并引导使用 edit_file，
         防止模型不小心覆盖现有代码。创建成功后，会立即为该文件签发首个有效快照。
         """
@@ -432,9 +565,11 @@ class SnapshotFileToolContract:
         committed = self._mutation_service.commit(plan)
         document = _require_actual_document(committed.actual)
         _require_mutation_size(document)
-        rendered, offset, shown_count, context_truncated, context_editable = _render_changed_context(
-            document,
-            committed.changed_range,
+        rendered, offset, shown_count, context_truncated, context_editable = (
+            _render_changed_context(
+                document,
+                committed.changed_range,
+            )
         )
         record = self._record_snapshot(
             request,
@@ -462,7 +597,7 @@ class SnapshotFileToolContract:
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
         """基于快照的精确局部文本替换。
-        
+
         必须传入有效的 snapshot_id 以及在文件中唯一出现的 old_string。
         在校验快照未过期、文本唯一且在已读范围内之后，执行局部替换并回读磁盘。
         执行成功后向模型返回修改局部的新内容以及全新签发的 snapshot_id。
@@ -474,9 +609,11 @@ class SnapshotFileToolContract:
         committed = self._mutation_service.commit(plan)
         actual = _require_actual_document(committed.actual)
         _require_mutation_size(actual)
-        rendered, offset, shown_count, context_truncated, context_editable = _render_changed_context(
-            actual,
-            committed.changed_range,
+        rendered, offset, shown_count, context_truncated, context_editable = (
+            _render_changed_context(
+                actual,
+                committed.changed_range,
+            )
         )
         new_record = self._record_snapshot(
             request,
@@ -504,7 +641,7 @@ class SnapshotFileToolContract:
         self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
     ) -> ToolMessage:
         """安全删除文件。
-        
+
         要求必须完整读过该文件并附带有效 snapshot_id。删除成功后，会把该文件关联
         的所有历史快照标记为失效，防止模型后续拿旧快照进行误操作。
         """
@@ -522,9 +659,11 @@ class SnapshotFileToolContract:
         }
         if committed.actual is not None:
             _require_mutation_size(committed.actual)
-            rendered, offset, shown_count, context_truncated, context_editable = _render_changed_context(
-                committed.actual,
-                committed.changed_range,
+            rendered, offset, shown_count, context_truncated, context_editable = (
+                _render_changed_context(
+                    committed.actual,
+                    committed.changed_range,
+                )
             )
             actual_record = self._record_snapshot(
                 request,
@@ -579,7 +718,12 @@ class SnapshotFileToolContract:
         content = str(message.content)
         payload = _tool_payload(message)
         if payload is None:
-            self._metrics.record_result(name, ok=False, result_bytes=len(content.encode("utf-8")), error_code=None)
+            self._metrics.record_result(
+                name,
+                ok=False,
+                result_bytes=len(content.encode("utf-8")),
+                error_code=None,
+            )
             return
         ok = payload.get("ok") is True
         error = payload.get("error")
@@ -600,7 +744,9 @@ class SnapshotFileToolContract:
         )
         if name == "read_file" and ok:
             snapshot_id = payload.get("snapshot_id")
-            self._metrics.record_read(snapshot_id if isinstance(snapshot_id, str) else None)
+            self._metrics.record_read(
+                snapshot_id if isinstance(snapshot_id, str) else None
+            )
         diagnostics = payload.get("diagnostics")
         if isinstance(diagnostics, dict):
             status = diagnostics.get("status")
@@ -612,7 +758,9 @@ class SnapshotFileToolContract:
 
     def _authorize_metadata(self, metadata: MutationMetadata) -> MutationMetadata:
         """文件准备先核对范围；提交由 FileMutationService 再次核对。"""
-        return self._mutation_guard.prepare(metadata) if self._mutation_guard else metadata
+        return (
+            self._mutation_guard.prepare(metadata) if self._mutation_guard else metadata
+        )
 
     def _prepare_mutation(self, request: ToolCallRequest) -> PreparedFileMutation:
         """把已通过 canonical schema 的工具调用转换为不含原始参数的提交计划。"""
@@ -656,12 +804,14 @@ class SnapshotFileToolContract:
             _require_mutation_size(existing)
             raise FileToolContractError("FILE_ALREADY_EXISTS")
         return self._mutation_service.prepare(
-            metadata=self._authorize_metadata(MutationMetadata(
-                operation="write",
-                path=path,
-                thread_id=thread_id,
-                tool_call_id=tool_call_id,
-            )),
+            metadata=self._authorize_metadata(
+                MutationMetadata(
+                    operation="write",
+                    path=path,
+                    thread_id=thread_id,
+                    tool_call_id=tool_call_id,
+                )
+            ),
             current=None,
             proposed_content=content,
             fingerprint=fingerprint,
@@ -712,21 +862,29 @@ class SnapshotFileToolContract:
             # 搜索，才能把 `aaa` 中的两个 `aa` 正确判为歧义。
             if current.content.find(old_source, start + 1) >= 0:
                 raise FileToolContractError("AMBIGUOUS_MATCH")
-            start_line, end_line = _source_line_range(current.content, start, old_source)
+            start_line, end_line = _source_line_range(
+                current.content, start, old_source
+            )
             if not self._snapshot_store.has_seen(record, start_line, end_line):
                 raise FileToolContractError("UNREAD_RANGE")
-            proposed = current.content[:start] + new_source + current.content[start + len(old_source) :]
+            proposed = (
+                current.content[:start]
+                + new_source
+                + current.content[start + len(old_source) :]
+            )
         if proposed == current.content:
             raise FileToolContractError("NO_CHANGES")
         _require_mutation_text_size(proposed)
         return self._mutation_service.prepare(
-            metadata=self._authorize_metadata(MutationMetadata(
-                operation="edit",
-                path=path,
-                thread_id=thread_id,
-                tool_call_id=tool_call_id,
-                snapshot_id=snapshot_id,
-            )),
+            metadata=self._authorize_metadata(
+                MutationMetadata(
+                    operation="edit",
+                    path=path,
+                    thread_id=thread_id,
+                    tool_call_id=tool_call_id,
+                    snapshot_id=snapshot_id,
+                )
+            ),
             current=current,
             proposed_content=proposed,
             fingerprint=fingerprint,
@@ -756,47 +914,67 @@ class SnapshotFileToolContract:
         current = self._text_backend.read_text_document(path)
         _require_mutation_size(current)
         self._require_current(record, current)
-        if record.line_count and not self._snapshot_store.has_seen(record, 0, record.line_count):
+        if record.line_count and not self._snapshot_store.has_seen(
+            record, 0, record.line_count
+        ):
             raise FileToolContractError("UNREAD_RANGE")
         return self._mutation_service.prepare(
-            metadata=self._authorize_metadata(MutationMetadata(
-                operation="delete",
-                path=path,
-                thread_id=thread_id,
-                tool_call_id=tool_call_id,
-                snapshot_id=snapshot_id,
-            )),
+            metadata=self._authorize_metadata(
+                MutationMetadata(
+                    operation="delete",
+                    path=path,
+                    thread_id=thread_id,
+                    tool_call_id=tool_call_id,
+                    snapshot_id=snapshot_id,
+                )
+            ),
             current=current,
             proposed_content=None,
             fingerprint=fingerprint,
         )
 
-    def _ls(self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str) -> ToolMessage:
+    def _ls(
+        self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
+    ) -> ToolMessage:
         """保留既有只读 ls 输出。"""
         result: LsResult = self._resolve_backend(request).ls(_path(args, "path", "ls"))
         if result.error:
             raise FileToolContractError("BACKEND_READ_FAILED")
         return ToolMessage(
-            content=str(truncate_if_too_long([item.get("path", "") for item in (result.entries or [])])),
+            content=str(
+                truncate_if_too_long(
+                    [item.get("path", "") for item in (result.entries or [])]
+                )
+            ),
             name="ls",
             tool_call_id=tool_call_id,
             status="success",
         )
 
-    def _glob(self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str) -> ToolMessage:
+    def _glob(
+        self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
+    ) -> ToolMessage:
         """保留既有只读 glob 输出。"""
         path = _optional_path(args, "path", "glob")
-        result: GlobResult = self._resolve_backend(request).glob(_string_arg(args, "pattern"), path=path)
+        result: GlobResult = self._resolve_backend(request).glob(
+            _string_arg(args, "pattern"), path=path
+        )
         if result.error:
             raise FileToolContractError("BACKEND_READ_FAILED")
         return ToolMessage(
-            content=str(truncate_if_too_long([item.get("path", "") for item in (result.matches or [])])),
+            content=str(
+                truncate_if_too_long(
+                    [item.get("path", "") for item in (result.matches or [])]
+                )
+            ),
             name="glob",
             tool_call_id=tool_call_id,
             status="success",
         )
 
-    def _grep(self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str) -> ToolMessage:
+    def _grep(
+        self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
+    ) -> ToolMessage:
         """保留既有只读 grep 输出和三种输出模式。"""
         output_mode = str(args.get("output_mode", "files_with_matches"))
         if output_mode not in {"files_with_matches", "content", "count"}:
@@ -809,13 +987,19 @@ class SnapshotFileToolContract:
         if result.error:
             raise FileToolContractError("BACKEND_READ_FAILED")
         return ToolMessage(
-            content=str(truncate_if_too_long(format_grep_matches(result.matches or [], output_mode))),
+            content=str(
+                truncate_if_too_long(
+                    format_grep_matches(result.matches or [], output_mode)
+                )
+            ),
             name="grep",
             tool_call_id=tool_call_id,
             status="success",
         )
 
-    def _resolve_snapshot(self, request: ToolCallRequest, path: str, snapshot_id: str) -> SnapshotRecord:
+    def _resolve_snapshot(
+        self, request: ToolCallRequest, path: str, snapshot_id: str
+    ) -> SnapshotRecord:
         """按当前 Thread、路径和 backend identity 解析，不匹配时 fail closed。"""
         return self._snapshot_store.resolve(
             snapshot_id,
@@ -825,7 +1009,12 @@ class SnapshotFileToolContract:
         )
 
     def _record_snapshot(
-        self, request: ToolCallRequest, document: TextDocument, *, offset: int, limit: int
+        self,
+        request: ToolCallRequest,
+        document: TextDocument,
+        *,
+        offset: int,
+        limit: int,
     ) -> SnapshotRecord:
         """为模型实际获得的窗口记录身份与 seen range，不缓存源码。"""
         record = self._snapshot_store.record_read(
@@ -858,7 +1047,9 @@ class SnapshotFileToolContract:
 
     def _resolve_backend(self, request: ToolCallRequest) -> Any:
         """共享图每次调用从 RunContext 获取已挂载虚拟 backend。"""
-        return self._backend(request.runtime) if callable(self._backend) else self._backend
+        return (
+            self._backend(request.runtime) if callable(self._backend) else self._backend
+        )
 
     @staticmethod
     def _thread_id(request: ToolCallRequest) -> str:
@@ -871,8 +1062,14 @@ class SnapshotFileToolContract:
         thread_id = getattr(context, "thread_id", None)
         if not isinstance(thread_id, str) or not thread_id:
             config = getattr(runtime, "config", None)
-            configurable = config.get("configurable") if isinstance(config, Mapping) else None
-            thread_id = configurable.get("thread_id") if isinstance(configurable, Mapping) else None
+            configurable = (
+                config.get("configurable") if isinstance(config, Mapping) else None
+            )
+            thread_id = (
+                configurable.get("thread_id")
+                if isinstance(configurable, Mapping)
+                else None
+            )
         if not isinstance(thread_id, str) or not thread_id:
             # HumanInTheLoop 的 description callback 不暴露 Runtime.config，
             # 但仍运行在 LangGraph 的当前调用 context 中；直接读取同一份 config，
@@ -881,8 +1078,14 @@ class SnapshotFileToolContract:
                 config = get_config()
             except RuntimeError:
                 config = {}
-            configurable = config.get("configurable") if isinstance(config, Mapping) else None
-            thread_id = configurable.get("thread_id") if isinstance(configurable, Mapping) else None
+            configurable = (
+                config.get("configurable") if isinstance(config, Mapping) else None
+            )
+            thread_id = (
+                configurable.get("thread_id")
+                if isinstance(configurable, Mapping)
+                else None
+            )
         if not isinstance(thread_id, str) or not thread_id:
             raise FileToolContractError("RUN_CONTEXT_REQUIRED")
         return thread_id
@@ -920,7 +1123,8 @@ def create_snapshot_file_tool_contract(
     snapshot_store: ThreadSnapshotStore | None,
     mutation_guard: Any | None = None,
     text_backend: TextMutationBackend,
-    diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]] | None = None,
+    diagnostics_provider: Callable[[str], Awaitable[Mapping[str, object]]]
+    | None = None,
     diagnostics_timeout_seconds: float = DEFAULT_DIAGNOSTICS_TIMEOUT_SECONDS,
     metrics: FileToolMetrics | None = None,
 ) -> SnapshotFileToolContract:

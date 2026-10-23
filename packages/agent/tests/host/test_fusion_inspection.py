@@ -392,3 +392,63 @@ async def test_inspection_stops_after_three_invalid_tool_requests(
         )
     finally:
         await host.close()
+
+
+@pytest.mark.parametrize(
+    "message,readonly",
+    [
+        ("检查谁占用了文件", True),
+        ("看看代码", True),
+        ("继续等待", False),
+        ("继续", False),
+    ],
+)
+async def test_paused_queue_questions_are_readonly_and_explicit_continue_resumes(
+    tmp_path, monkeypatch, message, readonly
+):
+    from tests.host.test_fusion_run import make_host
+
+    from harness_agent.host.run_coordinator import StartRun, UserRunInput
+
+    monkeypatch.setenv("TEST_FUSION_LEAD", "fake")
+    monkeypatch.setenv("TEST_FUSION_WORKER", "fake")
+    host = await make_host(tmp_path)
+    persistence = await host._ensure_thread_persistence()
+    first = await host._prepare_run(
+        StartRun(
+            "t", "seed", "build", UserRunInput("创建 a.py"), fusion_profile_id="duo"
+        ),
+        persistence,
+    )
+    runtime = host._fusion_runtime
+    store = runtime.store
+    task = await store.get(first.fusion_binding.task_id)
+    await store.update(
+        task.task_id,
+        task.version,
+        phase="PAUSED",
+        data={
+            "reason": "resource_wait_paused",
+            "pending_round": {
+                "order": {"allowed_paths": ["a.py"]},
+                "message": "原任务",
+            },
+        },
+    )
+    await store.release_run(task.task_id, first.fusion_binding.owner_id, "seed")
+    await first.snapshot_reservation.release()
+    prepared = None
+    try:
+        prepared = await host._prepare_run(
+            StartRun(
+                "t", "followup", "build", UserRunInput(message), fusion_profile_id="duo"
+            ),
+            persistence,
+        )
+        assert prepared.fusion_binding.inspection_only is readonly
+    finally:
+        if prepared is not None and prepared.on_abandon is not None:
+            await prepared.on_abandon()
+        if prepared is not None and prepared.snapshot_reservation is not None:
+            await prepared.snapshot_reservation.release()
+        await host.close()

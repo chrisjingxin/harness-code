@@ -5,6 +5,10 @@ import type { FusionTaskStatus, FusionWorkspaceBlocker } from "@za38/protocol"
 export const FUSION_RECOVERY_GUIDANCE = "可直接提问，让 Lead 只读核查；停止凭据缺失不代表已经检测到进程占用。恢复写入前须检查已改文件，并确认相关命令和进程全部停止；要结束任务，单独输入 /fusion cancel --stopped <核查说明>，文件会保留。要继续原任务，可输入 /fusion recover --stopped <核查说明>，看到“核查已记录”后发送继续。"
 
 function workspaceRecoveryGuidance(blocker: FusionWorkspaceBlocker): string {
+  if (!blocker.requires_inspection)
+    return "冲突操作结束后会自动继续；若想停止当前等待，按 Ctrl+C 或输入 /fusion cancel。"
+  if (blocker.operation_id && blocker.requires_inspection)
+    return "确认相关命令或文件操作已停止后，在当前对话输入 /fusion resolve --stopped <核查说明>，即可保留文件并释放保护。"
   if (!blocker.task_id || !blocker.thread_id)
     return "占用来源不属于当前项目记录或已不可用，请在原项目检查任务状态；当前对话无法结束这项任务。"
   return blocker.requires_inspection
@@ -14,13 +18,14 @@ function workspaceRecoveryGuidance(blocker: FusionWorkspaceBlocker): string {
 
 /** 当前对话无任务时也说明目录写者，不能据此声称发现了运行中的进程。 */
 export function fusionWorkspaceSummary(blocker: FusionWorkspaceBlocker): string {
-  const owner = blocker.thread_id ? `会话 ${blocker.thread_id}` : "来源待核查的任务"
+  const owner = blocker.thread_id ? `会话 ${blocker.thread_id}` : blocker.operation_id ? "未确认停止的工具操作" : "来源待核查的任务"
   const action = workspaceRecoveryGuidance(blocker)
-  return `本会话没有活动 Fusion 任务，但工作目录仍由${owner}使用。这是任务写权限记录，不表示已检测到运行中的进程。${action}`
+  return `本会话没有活动 Fusion 任务；${owner}预留了${blocker.kind === "command" ? "目录命令权限" : (blocker.paths?.join("、") || "文件范围")}。不同文件范围仍可派单，重叠范围会排队，可用后自动继续。这是权限记录，不表示已检测到运行中的进程。${blocker.requires_inspection ? action : ""}`
 }
 
 const PHASE_LABELS: Record<string, string> = {
   READY: "等待派单",
+  WAITING_RESOURCE: "等待文件权限，可用后自动继续",
   WORKER_RUNNING: "Sidekick 执行中",
   CHECKING: "Host 检查中",
   REVIEWING: "Lead 审阅中",
@@ -45,7 +50,11 @@ const REASON_LABELS: Record<string, string> = {
   inspection_recorded: "已保存人工核查记录",
   direct_answer: "直接问答",
   lead_stopped_without_completion: "Lead 尚未完成派单或审阅",
-  workspace_busy: "工作区被另一任务占用",
+  resource_wait: "文件范围有冲突，正在自动等待",
+  resource_wait_paused: "已暂停排队；可只读提问，发送“继续等待”恢复",
+  workspace_changed: "其他源码已变化，需要重新检查",
+  scope_upgrade: "权限规则已升级，需要对保留的文件重新派单检查",
+  workspace_busy: "文件范围被另一任务预留",
   workspace_available: "工作区占用已解除，发送新消息继续原任务",
   owner_unavailable: "占用来源需要人工核查",
 }
@@ -98,10 +107,21 @@ export function fusionSummary(task: FusionTaskStatus): string {
   if (blocker) {
     const phase = PHASE_LABELS[blocker.phase ?? ""] ?? "需要核查"
     const cause = blocker.reason ? `（${REASON_LABELS[blocker.reason] ?? "需要处理"}）` : ""
-    const instructions = workspaceRecoveryGuidance(blocker)
-    owner = `；占用会话：${blocker.thread_id ?? "未知"}，${phase}，第 ${blocker.round} 轮${cause}；${instructions}`
+    const instructions = task.reason === "resource_wait_paused" ? "排队已暂停；发送“继续等待”可恢复，其他提问保持只读。" : workspaceRecoveryGuidance(blocker)
+    owner = `；等待${blocker.kind === "command" ? "命令结束" : `文件 ${blocker.paths?.join("、") || "范围"}`}；相关会话：${blocker.thread_id ?? "其他执行"}，${phase}，第 ${blocker.round} 轮${cause}；${instructions}`
   }
+  const waits = task.resource_waits ?? []
+  const waiting = waits.length ? `；正在等待${waits[0]?.kind === "command" ? "另一条命令结束" : `文件 ${waits[0]?.paths?.join("、") || "写入权限"}`}，可用后自动继续` : ""
   const recovery = task.phase === "OUTCOME_UNKNOWN" ? `；${FUSION_RECOVERY_GUIDANCE}` : ""
   const round = task.round === 0 ? "尚未派单" : `第 ${task.round} 轮`
-  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}${recovery}`
+  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}${waiting}${recovery}`
+}
+
+/** 等待资源时给出真实原因，避免把排队显示为模型一直没有响应。 */
+export function fusionWaitingLabel(task: FusionTaskStatus | null | undefined): string | null {
+  if (!task?.active) return null
+  const blocker = task.phase === "WAITING_RESOURCE" ? task.workspace_blocker : ["WORKER_RUNNING", "CHECKING"].includes(task.phase) ? task.resource_waits?.[0] : null
+  if (blocker?.requires_inspection) return "等待操作停止状态核查"
+  if (blocker) return blocker.kind === "command" ? "等待其他命令结束" : "等待文件写入权限"
+  return task.phase === "WAITING_RESOURCE" ? "等待文件写入权限" : null
 }

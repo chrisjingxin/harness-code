@@ -242,8 +242,9 @@ export function Timeline({
   }, [isExpanded])
 
   const compose = snapshot.interactive.composeState
-  const phaseLabel = progressPhaseLabel(snapshot.interactive.runProgress?.phase ?? "preparing")
-  const fusionLine = fusionLiveStatusLine(timeline, activeRun?.runId, formatElapsed(elapsedMs))
+  const waiting = snapshot.interactive.fusionWaitLabel
+  const phaseLabel = waiting ?? progressPhaseLabel(snapshot.interactive.runProgress?.phase ?? "preparing")
+  const fusionLine = waiting ? `${waiting} · 已运行 ${formatElapsed(elapsedMs)}` : fusionLiveStatusLine(timeline, activeRun?.runId, formatElapsed(elapsedMs))
   const liveLine = fusionLine ? `${fusionLine} · 点停止取消` : compose
     ? `${composeLiveStatusLine({
       stage: compose.currentStage,

@@ -80,7 +80,11 @@ async def test_cancel_rpc_accepts_explicit_inspection_and_retains_files(tmp_path
             source_message="旧任务",
         )
         task, _ = await store.start_round(
-            task.task_id, task.version, {"revision": 1}, "pending", "message"
+            task.task_id,
+            task.version,
+            {"revision": 1, "allowed_paths": ["./"]},
+            "pending",
+            "message",
         )
         await store.mark_delivery("pending", "dispatched")
         task = await store.pause(task.task_id)
@@ -397,4 +401,62 @@ async def test_second_host_preserves_run_ownership_and_cancellation(
     finally:
         gate.release.set()
         await other.close()
+        await host.close()
+
+
+async def test_ordinary_unknown_resource_has_status_and_current_dialogue_release(
+    tmp_path,
+):
+    from harness_agent.runtime.fusion.resources import FusionResources
+    from harness_agent.runtime.fusion.store import workspace_key
+
+    host = await make_host(tmp_path)
+    frames = []
+
+    async def send(frame):
+        frames.append(frame)
+
+    host.send = send
+    try:
+        store = (await host._ensure_thread_persistence()).fusion_state_store()
+        resources = FusionResources(
+            store.database_path, store.project, workspace_key(tmp_path)
+        )
+        async with resources.operation("command") as permit:
+            permit.stopped = False
+        await host.dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": "status",
+                "method": "fusion.status",
+                "params": {"thread_id": "t"},
+            }
+        )
+        result = next(
+            frame["result"] for frame in frames if frame.get("id") == "status"
+        )
+        assert result["task"] is None
+        blocker = result["workspace_blocker"]
+        assert (
+            blocker["operation_id"] == permit.request_id
+            and blocker["requires_inspection"]
+        )
+        await host.dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": "release",
+                "method": "fusion.release",
+                "params": {
+                    "operation_id": blocker["operation_id"],
+                    "expected_sequence": blocker["sequence"],
+                    "stopped_inspection_note": "已确认相关命令全部停止",
+                },
+            }
+        )
+        assert next(frame for frame in frames if frame.get("id") == "release")[
+            "result"
+        ] == {"released": True}
+        async with resources.operation("command"):
+            pass
+    finally:
         await host.close()

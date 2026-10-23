@@ -217,6 +217,8 @@ export type InteractiveSnapshot = {
   readonly activeRun: ActiveRun | null
   readonly timeline: readonly TimelineItem[]
   readonly runProgress: RunProgress | null
+  /** 等待写入范围时的可读状态；两个界面共用这份投影。 */
+  readonly fusionWaitLabel: string | null
   readonly interaction: InteractiveInteraction | null
   readonly confirmation: InteractiveConfirmation | null
   readonly lastRun: RunSummary | null

@@ -4,6 +4,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.messages import ToolMessage
+from pydantic import ValidationError
+from tests.runtime.test_fusion_service import setup
+
 from harness_agent.runtime.fusion.guard import FusionEffectMiddleware
 from harness_agent.runtime.fusion.store import FusionError
 from harness_agent.runtime.fusion.tools import DelegateInput, create_fusion_tools
@@ -118,11 +122,6 @@ async def test_run_exit_refreshes_unknown_operations_after_worker_stopped(tmp_pa
         await p.close()
 
 
-from langchain_core.messages import ToolMessage
-from pydantic import ValidationError
-from tests.runtime.test_fusion_service import setup
-
-
 async def delegate(service, ctx):
     return await service.delegate(
         ctx,
@@ -135,7 +134,11 @@ async def delegate(service, ctx):
 
 async def pending(store, task):
     task, lease = await store.start_round(
-        task.task_id, task.version, {"revision": 1}, "pending", "message"
+        task.task_id,
+        task.version,
+        {"revision": 1, "allowed_paths": ["./"]},
+        "pending",
+        "message",
     )
     task = await store.update(
         task.task_id, task.version, data={"worker_execution_id": "worker"}
@@ -177,7 +180,7 @@ async def test_every_snapshot_is_protected_by_the_tasks_workspace_lease(
         connection = sqlite3.connect(store.database_path)
         try:
             row = connection.execute(
-                "SELECT task_id FROM fusion_leases WHERE workspace_key=?",
+                "SELECT task_id FROM fusion_reservations WHERE workspace_key=? AND owner IS NOT NULL",
                 (task.workspace_key,),
             ).fetchone()
             assert row and row[0] == task.task_id
@@ -444,7 +447,11 @@ async def test_old_ack_cannot_overwrite_new_round_or_revoke_new_writer(tmp_path)
         )
         task = await store.pause(task.task_id)
         task, _ = await store.start_round(
-            task.task_id, task.version, {"revision": 1}, "new-op", "new message"
+            task.task_id,
+            task.version,
+            {"revision": 1, "allowed_paths": ["./"]},
+            "new-op",
+            "new message",
         )
         task = await store.update(
             task.task_id, task.version, data={"worker_execution_id": "new-worker"}
@@ -460,7 +467,7 @@ async def test_old_ack_cannot_overwrite_new_round_or_revoke_new_writer(tmp_path)
         await p.close()
 
 
-async def test_resume_reacquires_directory_before_reusing_review_ticket(tmp_path):
+async def test_resume_defers_scope_acquisition_until_actual_review(tmp_path):
     p, store, task, ctx, service, _, root = await setup(tmp_path)
     try:
         result = await delegate(service, ctx)
@@ -473,8 +480,10 @@ async def test_resume_reacquires_directory_before_reusing_review_ticket(tmp_path
         )
         other, _ = await pending(store, other)
         waiting = await service.resume(task.task_id)
-        assert waiting.data["reason"] == "workspace_busy"
-        assert waiting.data["workspace_blocker"]["task_id"] == other.task_id
+        assert waiting.phase == "REVIEWING"
+        assert waiting.data["ticket_id"] == result["ticket_id"]
+        # 查看票据不抢写权限；实际验收仍由 _begin_phase 排队取得范围。
+        assert (await store.workspace_owner(root))["task_id"] == other.task_id
         await store.mark_delivery("pending", "not_started")
         await store.pause(other.task_id)
         restored = await service.resume(task.task_id)

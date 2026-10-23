@@ -787,6 +787,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       activeRun: view.conversation.activeRun,
       timeline: view.conversation.timeline,
       runProgress: view.conversation.runProgress,
+      fusionWaitLabel: view.conversation.fusionWaitLabel,
       lastRun: view.conversation.lastRun,
       interaction: view.interaction.interaction,
       confirmation: view.interaction.confirmation,

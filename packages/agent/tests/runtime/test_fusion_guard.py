@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -65,6 +66,35 @@ async def test_prepare_scope_and_commit_recheck_after_approval(tmp_path):
         await p.close()
 
 
+async def test_second_commit_check_rejection_is_known_not_started(
+    tmp_path, monkeypatch
+):
+    from harness_agent.runtime.fusion.store import FusionError
+    from harness_agent.tools.file_mutation import MutationMetadata
+
+    p, store, task, _, _, guard = await setup(tmp_path)
+    try:
+        metadata = guard.prepare(MutationMetadata("write", "/src/a.py", "t", "race"))
+        original = guard._check
+        calls = 0
+
+        def changed(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise FusionError("FUSION_ROLE_DENIED")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(guard, "_check", changed)
+        with pytest.raises(FusionError, match="FUSION_ROLE_DENIED"):
+            with guard.commit(metadata):
+                pytest.fail("权限失效后不得执行文件操作")
+        effects = await store.effects(task.task_id)
+        assert effects and all(effect["stopped"] for effect in effects)
+    finally:
+        await p.close()
+
+
 async def test_stale_generation_and_ordinary_write_are_rejected(tmp_path):
     from harness_agent.tools.file_mutation import MutationMetadata
 
@@ -76,8 +106,10 @@ async def test_stale_generation_and_ordinary_write_are_rejected(tmp_path):
             with guard.commit(authorized):
                 pass
         ctx.fusion_task_id = None
+        pending = guard.prepare(MutationMetadata("write", "/src/a.py", "t", "other"))
         with pytest.raises(ValueError, match="FUSION_LEASE_BUSY"):
-            guard.prepare(MutationMetadata("write", "/src/a.py", "t", "other"))
+            with guard.commit(pending):
+                pass
     finally:
         await p.close()
 
@@ -97,14 +129,17 @@ async def test_ordinary_tool_cannot_bypass_writer_by_fusion_name(tmp_path, tool_
             called.append(request)
             return ToolMessage(content="unexpected write", tool_call_id="tool")
 
-        result = await FusionEffectMiddleware(guard, store).awrap_tool_call(
-            SimpleNamespace(
-                tool_call={"name": tool_name, "id": "tool", "args": {}},
-                runtime=SimpleNamespace(context=ctx),
-            ),
-            handler,
+        pending = asyncio.create_task(
+            FusionEffectMiddleware(guard, store).awrap_tool_call(
+                SimpleNamespace(
+                    tool_call={"name": tool_name, "id": "tool", "args": {}},
+                    runtime=SimpleNamespace(context=ctx),
+                ),
+                handler,
+            )
         )
-        assert result.status == "error" and result.content == "FUSION_LEASE_BUSY"
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(pending, 0.1)
         assert not called
     finally:
         await p.close()

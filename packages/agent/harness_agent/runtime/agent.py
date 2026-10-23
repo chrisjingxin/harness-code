@@ -265,6 +265,7 @@ def _create_controlled_inline_subagents(
     blocked_target_messages: Mapping[str, str] | None = None,
     concurrency_lock: AsyncRWLock | None = None,
     plugin_middleware: Any | None = None,
+    effect_middleware: Any | None = None,
     file_tool_contract: Any | None = None,
     rules_provider: Callable[[], list[PermissionRule]] | None = None,
     dynamic: bool = False,
@@ -376,6 +377,8 @@ def _create_controlled_inline_subagents(
                     rules_provider=rules_provider,
                 )
             )
+        if effect_middleware is not None:
+            child_middleware.append(effect_middleware)
         child_middleware.append(
             ConcurrencyGuardMiddleware(concurrency_lock or RuntimeAsyncRWLock())
         )
@@ -1192,6 +1195,7 @@ def create_harness_agent(
             concurrency_lock=concurrency_lock,
             plugin_middleware=getattr(plugin_runtime, "middleware", None),
             file_tool_contract=file_tool_contract,
+            effect_middleware=effect_middleware,
             rules_provider=rules_provider,
             dynamic=shared_engine,
             managed_builtin_ids=managed_builtin_ids,
@@ -1353,9 +1357,9 @@ def create_harness_agent(
     from harness_agent.policy.concurrency_guard import ConcurrencyGuardMiddleware
     if plugin_runtime is not None:
         agent_middleware.append(plugin_runtime.middleware)
-    agent_middleware.append(ConcurrencyGuardMiddleware(concurrency_lock or AsyncRWLock()))
     if effect_middleware is not None:
         agent_middleware.append(effect_middleware)
+    agent_middleware.append(ConcurrencyGuardMiddleware(concurrency_lock or AsyncRWLock()))
     # 必须位于 WorkspaceBoundary 和并发守卫之后：边界先完成 canonical
     # path/virtual route 校验，并发锁再覆盖实际 dispatch，最后由 seam 短路
     # DeepAgents builtin handler。

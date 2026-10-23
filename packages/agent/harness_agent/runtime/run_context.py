@@ -13,10 +13,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Mapping
 
-from langchain.agents.middleware.types import AgentMiddleware, ExtendedModelResponse, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_core.messages import SystemMessage
 
 from harness_agent.policy.approval_mode import ApprovalMode
@@ -46,7 +50,11 @@ class ApprovalModeState:
     def __post_init__(self) -> None:
         """校验初始 mode/revision，避免无效权限语义进入运行时。"""
         self._validate_mode(self.mode)
-        if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 0:
+        if (
+            not isinstance(self.revision, int)
+            or isinstance(self.revision, bool)
+            or self.revision < 0
+        ):
             raise ValueError("APPROVAL_MODE_REVISION_INVALID")
 
     def snapshot(self) -> tuple[ApprovalMode, int]:
@@ -107,10 +115,12 @@ class RunCancellationToken:
 @dataclass(slots=True)
 class FusionRunState:
     """只在当前 Run 内更新的任务单版本与写者代号。"""
+
     revision: int = 0
     generation: int | None = None
     # Host 固定的只读核查模式，不代表用户确认操作已停止。
     inspection_only: bool = False
+    check_effect_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +137,9 @@ class RunContext:
     approval_mode: ApprovalMode
     # 根 Run 与所有 child 共享 Host-owned 状态；child 可通过 provider 暴露求交 view。
     approval_state: ApprovalModeState | None = field(default=None, repr=False)
-    approval_mode_provider: Callable[[], ApprovalMode] | None = field(default=None, repr=False)
+    approval_mode_provider: Callable[[], ApprovalMode] | None = field(
+        default=None, repr=False
+    )
     # 根图 checkpoint 的内部身份；公开 thread_id 仍绑定 Transcript、Skill、
     # 诊断日志和 UI provenance，不能用内部摘要伪造对外执行来源。
     checkpoint_thread_id: str | None = None
@@ -137,10 +149,14 @@ class RunContext:
     parent_execution_id: str | None = None
     agent_id: str = "main"
     execution_mode: ExecutionMode = ExecutionMode.MANAGED
-    cancellation_token: RunCancellationToken = field(default_factory=RunCancellationToken)
+    cancellation_token: RunCancellationToken = field(
+        default_factory=RunCancellationToken
+    )
     model_call_lifecycle: ModelCallLifecycle = field(default_factory=ModelCallLifecycle)
     # 用户可在同一 Run 内批准 enter_plan_mode；该 flag 只会从 False 变 True。
-    plan_constraint: RunPlanConstraint = field(default_factory=RunPlanConstraint, repr=False)
+    plan_constraint: RunPlanConstraint = field(
+        default_factory=RunPlanConstraint, repr=False
+    )
     # 共享图只能从当前 Run 取得对应的 immutable Skill snapshot；不写入持久化记录。
     skill_registry: Any | None = field(default=None, repr=False)
     delegation_policy: DelegationPolicy | None = None
@@ -157,16 +173,18 @@ class RunContext:
     # Host-owned 的进程内 deferred 工具 reveal 存储；按 thread_id 隔离已激活的低频/MCP 工具。
     deferred_tool_store: Any | None = field(default=None, repr=False)
     # child HITL 把 Interaction 交给 Host 的回调；None 时询问 fail closed。
-    interaction_port: Callable[[Any], Awaitable[Any]] | None = field(default=None, repr=False)
+    interaction_port: Callable[[Any], Awaitable[Any]] | None = field(
+        default=None, repr=False
+    )
     # child 过程事件转发到 Host 的回调；None 时 child 过程不对外可见。
     event_port: (
-        Callable[
-            [str, Mapping[str, object], str | None, str | None, str | None], None
-        ]
+        Callable[[str, Mapping[str, object], str | None, str | None, str | None], None]
         | None
     ) = field(default=None, repr=False)
     # 把 approve_thread / approve_project 暂存到父 Run 的 rule store 边界。
-    record_approval: Callable[[str, dict[str, Any], str], None] | None = field(default=None, repr=False)
+    record_approval: Callable[[str, dict[str, Any], str], None] | None = field(
+        default=None, repr=False
+    )
     # 当前 Run 的 Diagnostic Log；共享图在调用时读取，不在构图期捕获。
     diagnostic_log: Any | None = field(default=None, repr=False)
     usage_ledger: Any | None = field(default=None, repr=False)
@@ -195,7 +213,11 @@ class RunContext:
             raise RunContextError("RUN_CONTEXT_SNAPSHOT_THREAD_MISMATCH")
         snapshot_skill_id = self.context_snapshot.skill_snapshot_id
         if snapshot_skill_id is not None:
-            if self.skill_registry is None or getattr(self.skill_registry, "snapshot_id", None) != snapshot_skill_id:
+            if (
+                self.skill_registry is None
+                or getattr(self.skill_registry, "snapshot_id", None)
+                != snapshot_skill_id
+            ):
                 raise RunContextError("RUN_CONTEXT_SKILL_SNAPSHOT_MISMATCH")
         if not self.execution_id or not self.agent_id:
             raise RunContextError("RUN_CONTEXT_EXECUTION_ID_INVALID")
@@ -245,8 +267,12 @@ def thread_id_for_runtime(runtime: object) -> str | None:
     context = getattr(runtime, "context", None)
     if isinstance(context, RunContext):
         config = getattr(runtime, "config", {})
-        configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
-        configured_thread = configurable.get("thread_id") if isinstance(configurable, Mapping) else None
+        configurable = (
+            config.get("configurable", {}) if isinstance(config, Mapping) else {}
+        )
+        configured_thread = (
+            configurable.get("thread_id") if isinstance(configurable, Mapping) else None
+        )
         expected_thread = context.checkpoint_thread_id or context.thread_id
         if configured_thread is not None and str(configured_thread) != expected_thread:
             raise RunContextError("RUN_CONTEXT_CONFIG_THREAD_MISMATCH")
@@ -269,16 +295,22 @@ class RunContextSnapshotMiddleware(AgentMiddleware):
         """
         context = require_run_context(request.runtime)
         base_prompt = _system_message_text(request.system_message)
-        prompt = _without_legacy_approval_mode_section(context.context_snapshot.system_prompt)
+        prompt = _without_legacy_approval_mode_section(
+            context.context_snapshot.system_prompt
+        )
         current_mode = current_approval_mode(context, fallback=context.approval_mode)
-        effective_mode: ApprovalMode = "plan" if plan_constraint_active(context) else current_mode  # type: ignore[assignment]
+        effective_mode: ApprovalMode = (
+            "plan" if plan_constraint_active(context) else current_mode
+        )  # type: ignore[assignment]
         prompt = f"{prompt}{approval_mode_prompt(effective_mode)}"
         # 已信任额外根是会话内可变事实，必须在模型调用边界动态追加。
         extra_roots = _extra_roots_prompt(request.runtime)
         if extra_roots:
             prompt = f"{prompt}{extra_roots}"
         system_prompt = f"{prompt}\n\n{base_prompt}" if base_prompt else prompt
-        return await handler(request.override(system_message=SystemMessage(content=system_prompt)))
+        return await handler(
+            request.override(system_message=SystemMessage(content=system_prompt))
+        )
 
 
 class ApprovalModePromptMiddleware(AgentMiddleware):
@@ -333,7 +365,9 @@ def _extra_roots_prompt(runtime: object) -> str:
         return ""
     registry = getattr(context, "workspace_root_registry", None)
     if registry is None:
-        registry = getattr(getattr(runtime, "context", None), "workspace_root_registry", None)
+        registry = getattr(
+            getattr(runtime, "context", None), "workspace_root_registry", None
+        )
     if registry is None or not hasattr(registry, "display_extra_roots"):
         return ""
     roots = registry.display_extra_roots()

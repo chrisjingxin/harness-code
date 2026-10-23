@@ -382,12 +382,13 @@ function TimelineActivity(props: { interactive: InteractiveSnapshot }) {
   const frame = useSpinner(visible, 80)
   const elapsed = useRunElapsed(visible, interactive.runProgress?.elapsedMs)
   if (!visible) return null
-  const phase = interactive.runProgress
+  const waiting = interactive.fusionWaitLabel
+  const phase = waiting ?? (interactive.runProgress
     ? progressPhaseLabel(interactive.runProgress.phase)
-    : activityLabel(interactive.activity.kind)
+    : activityLabel(interactive.activity.kind))
   const compose = interactive.composeState
   const isChild = Boolean(interactive.childTimelineExecutionId)
-  const fusion = fusionLiveStatusLine(interactive.timeline, interactive.activeRun?.runId, formatElapsed(elapsed))
+  const fusion = waiting ? `${waiting} · 已运行 ${formatElapsed(elapsed)}` : fusionLiveStatusLine(interactive.timeline, interactive.activeRun?.runId, formatElapsed(elapsed))
   const line = isChild
     ? `${phase} · 已运行 ${formatElapsed(elapsed)}`
     : fusion ? `${fusion} · Ctrl+C 取消` : compose

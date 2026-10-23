@@ -12,18 +12,33 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
 import aiosqlite
 
+from harness_agent.runtime.fusion.resources import (
+    CLEANUP_ACCESS_SQL,
+    IDLE_RESERVATIONS_SQL,
+    RESOURCE_SQL,
+    owner_exited,
+    scopes_overlap,
+)
+from harness_agent.runtime.fusion.snapshot import (
+    normalize_paths,
+    path_allowed,
+    snapshot_from_entries,
+)
+
 T = TypeVar("T")
 PHASES = frozenset(
     {
         "READY",
+        "WAITING_RESOURCE",
         "WORKER_RUNNING",
         "CHECKING",
         "REVIEWING",
@@ -59,10 +74,9 @@ TABLE_SQL = {
         execution_id TEXT NOT NULL, kind TEXT NOT NULL, digest TEXT NOT NULL,
         task_version INTEGER NOT NULL, generation INTEGER NOT NULL, state TEXT NOT NULL,
         stopped INTEGER NOT NULL, PRIMARY KEY(project_fingerprint,operation_id))""",
-    "fusion_leases": """CREATE TABLE IF NOT EXISTS fusion_leases (
-        workspace_key TEXT PRIMARY KEY, project_fingerprint TEXT, task_id TEXT,
-        owner TEXT, generation INTEGER NOT NULL)""",
 }
+
+TABLE_SQL.update(RESOURCE_SQL)
 
 
 class FusionError(ValueError):
@@ -75,7 +89,7 @@ class FusionError(ValueError):
 
 
 class FusionWorkspaceBusy(FusionError):
-    """派单未落库时携带占用者的安全摘要；不包含原话、路径或工具参数。"""
+    """派单未落库时携带占用者的安全摘要；不包含原话、模型配置或工具参数。"""
 
     def __init__(self, blocker: Mapping[str, object]) -> None:
         """复制事务内确认的占用事实，外层只读取诊断信息。"""
@@ -129,6 +143,8 @@ class FusionTask:
             "ticket_id": self.data.get("ticket_id"),
             "pending_operations": self.data.get("pending_operations", []),
             "workspace_blocker": self.data.get("workspace_blocker"),
+            "write_paths": list(self.data.get("write_paths", [])),
+            "resource_waits": list(self.data.get("resource_waits", {}).values()),
         }
 
 
@@ -165,6 +181,7 @@ class FusionStateStore:
         async def action() -> None:
             for sql in TABLE_SQL.values():
                 await self.connection.execute(sql)
+            await self._migrate_workspace_leases()
             await self.connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS fusion_one_active_thread ON fusion_tasks(project_fingerprint,thread_id) WHERE active=1"
             )
@@ -204,7 +221,289 @@ class FusionStateStore:
             finally:
                 reference.close()
 
+        async with self.lock:
+            cursor = await self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fusion_leases'"
+            )
+            legacy = await cursor.fetchone()
+        if legacy:
+            await asyncio.to_thread(self._backup_before_scope_upgrade)
         await self._transaction(action)
+
+    def _backup_before_scope_upgrade(self) -> None:
+        """备份只用于数据保护；不作为另一条运行路径读取或双写。"""
+        import os
+
+        backup = self.database_path.with_name(
+            self.database_path.stem
+            + ".before-file-scopes-"
+            + uuid.uuid4().hex
+            + ".sqlite3"
+        )
+        descriptor = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(descriptor)
+        source = sqlite3.connect(self.database_path)
+        target = sqlite3.connect(backup)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+
+    async def _migrate_workspace_leases(self) -> None:
+        """一次性迁移目录租约；旧表删除后，旧进程不能通过旧查询写入。"""
+
+        async def one(sql, parameters=()):
+            async with self.connection.execute(sql, parameters) as cursor:
+                return await cursor.fetchone()
+
+        async def rows(sql, parameters=()):
+            async with self.connection.execute(sql, parameters) as cursor:
+                return await cursor.fetchall()
+
+        if not await one(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fusion_leases'"
+        ):
+            return
+        for lease in await rows("SELECT * FROM fusion_leases"):
+            await self.connection.execute(
+                "INSERT INTO fusion_generations VALUES(?,?) ON CONFLICT(workspace_key) DO UPDATE SET generation=MAX(generation,excluded.generation)",
+                (lease["workspace_key"], lease["generation"]),
+            )
+            if not lease["task_id"]:
+                continue
+            identity = (lease["project_fingerprint"], lease["task_id"])
+            task = await one(
+                "SELECT * FROM fusion_tasks WHERE project_fingerprint=? AND task_id=?",
+                identity,
+            )
+            if not task:
+                raise FusionError("FUSION_SCHEMA_INVALID")
+            data = json.loads(task["data_json"])
+            order = await one(
+                "SELECT data_json FROM fusion_orders WHERE project_fingerprint=? AND task_id=? AND revision=?",
+                (*identity, data.get("revision", 0)),
+            )
+            paths = json.loads(order[0])["allowed_paths"] if order else ["./"]
+            await self.connection.execute(
+                "INSERT INTO fusion_reservations VALUES(?,?,?,?,?,?)",
+                (
+                    lease["workspace_key"],
+                    *identity,
+                    lease["owner"],
+                    lease["generation"],
+                    encode(paths),
+                ),
+            )
+            unknown_command = await one(
+                "SELECT 1 FROM fusion_effects WHERE project_fingerprint=? AND task_id=? AND stopped=0 AND kind NOT IN ('write','edit','delete','write_file','edit_file','delete_file') UNION ALL SELECT 1 FROM fusion_outbox WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
+                (*identity, *identity),
+            )
+            if unknown_command:
+                await self.connection.execute(
+                    "INSERT INTO fusion_access(request_id,workspace_key,project_fingerprint,task_id,execution_id,kind,paths_json,state) VALUES(?,?,?,?,?,'command',?,'unknown')",
+                    (
+                        "legacy-" + lease["task_id"],
+                        lease["workspace_key"],
+                        *identity,
+                        "legacy",
+                        encode(["./"]),
+                    ),
+                )
+        for task in await rows("SELECT * FROM fusion_tasks WHERE active=1"):
+            data = json.loads(task["data_json"])
+            identity = (task["project_fingerprint"], task["task_id"])
+            if not data.get("revision"):
+                if data.get("reason") == "workspace_busy":
+                    data.update({"reason": None, "workspace_blocker": None})
+                    await self.connection.execute(
+                        "UPDATE fusion_tasks SET phase='READY',version=version+1,data_json=? WHERE project_fingerprint=? AND task_id=?",
+                        (encode(data), *identity),
+                    )
+                continue
+            for row in await rows(
+                "SELECT revision,data_json FROM fusion_orders WHERE project_fingerprint=? AND task_id=?",
+                identity,
+            ):
+                order = json.loads(row["data_json"])
+                if row["revision"] == data["revision"]:
+                    data["write_paths"] = order["allowed_paths"]
+                if "baseline" in order:
+                    order["baseline"] = snapshot_from_entries(
+                        {
+                            name: value
+                            for name, value in order["baseline"]["entries"].items()
+                            if path_allowed(name, order["allowed_paths"])
+                        }
+                    )
+                    await self.connection.execute(
+                        "UPDATE fusion_orders SET data_json=? WHERE project_fingerprint=? AND task_id=? AND revision=?",
+                        (encode(order), *identity, row["revision"]),
+                    )
+            pending = await one(
+                "SELECT 1 FROM fusion_access WHERE project_fingerprint=? AND task_id=? AND state='unknown'",
+                identity,
+            )
+            effects = await one(
+                "SELECT 1 FROM fusion_effects WHERE project_fingerprint=? AND task_id=? AND stopped=0 LIMIT 1",
+                identity,
+            )
+            unknown = bool(pending or effects or task["phase"] == "OUTCOME_UNKNOWN")
+            data.update(
+                {
+                    "report_id": None,
+                    "ticket_id": None,
+                    "candidate_digest": None,
+                    "verification": "unverified",
+                    "check_started_plan_ids": [],
+                    "verification_cycle": new_id("verification"),
+                    "reason": "effects_unconfirmed" if unknown else "scope_upgrade",
+                }
+            )
+            phase = "OUTCOME_UNKNOWN" if unknown else "PAUSED"
+            await self.connection.execute(
+                "UPDATE fusion_tasks SET phase=?,version=version+1,data_json=? WHERE project_fingerprint=? AND task_id=?",
+                (phase, encode(data), *identity),
+            )
+        await self.connection.execute("DROP TABLE fusion_leases")
+
+    async def wait_for_lease(
+        self,
+        task_id: str,
+        owner: str,
+        *,
+        paths: Iterable[str],
+        on_wait: Callable[[FusionTask], Awaitable[None]] | None = None,
+        preserve_ticket: bool = False,
+    ) -> FusionLease:
+        """一次排队申请全部范围；不让模型重试，也不跨等待持有数据库或 Host 锁。"""
+        request_id = new_id("reservation")
+        wanted = tuple(paths)
+
+        async def enqueue() -> None:
+            task = await self._get(task_id)
+            if not task.active or task.phase == "OUTCOME_UNKNOWN":
+                raise FusionError("FUSION_OUTCOME_UNKNOWN")
+            if await self._pending(task_id) or await self._pending_delivery(task_id):
+                raise FusionError("FUSION_OUTCOME_UNKNOWN")
+            # 开新轮须交回整组旧范围，避免 A 持 a 等 b、B 持 b 等 a。
+            await self.connection.execute(
+                "UPDATE fusion_reservations SET owner=NULL WHERE project_fingerprint=? AND task_id=?",
+                (self.project, task_id),
+            )
+            await self.connection.execute(
+                "INSERT INTO fusion_access(request_id,workspace_key,project_fingerprint,task_id,execution_id,kind,paths_json,state,heartbeat_ms) VALUES(?,?,?,?,?,'reservation',?,'waiting',?)",
+                (
+                    request_id,
+                    task.workspace_key,
+                    self.project,
+                    task_id,
+                    "reservation",
+                    encode(wanted),
+                    int(time.time() * 1000),
+                ),
+            )
+            await self._update(
+                task,
+                phase="WAITING_RESOURCE",
+                data={
+                    "waiting_request": request_id,
+                    "waiting_paths": list(wanted),
+                    "reason": "resource_wait",
+                    "ticket_id": task.data.get("ticket_id")
+                    if preserve_ticket
+                    else None,
+                    "verification": task.data.get("verification", "unverified")
+                    if preserve_ticket
+                    else "unverified",
+                },
+            )
+
+        acquired: FusionLease | None = None
+        returned = False
+        try:
+            await self._transaction(enqueue)
+            while True:
+
+                async def attempt() -> tuple[FusionLease | None, FusionTask]:
+                    nonlocal acquired
+                    task = await self._get(task_id)
+                    if task.data.get("waiting_request") != request_id:
+                        raise asyncio.CancelledError()
+                    await self.connection.execute(
+                        "INSERT OR IGNORE INTO fusion_access(request_id,workspace_key,project_fingerprint,task_id,execution_id,kind,paths_json,state,heartbeat_ms) VALUES(?,?,?,?,?,'reservation',?,'waiting',?)",
+                        (
+                            request_id,
+                            task.workspace_key,
+                            self.project,
+                            task_id,
+                            "reservation",
+                            encode(wanted),
+                            int(time.time() * 1000),
+                        ),
+                    )
+                    await self.connection.execute(
+                        "UPDATE fusion_access SET heartbeat_ms=? WHERE request_id=? AND state='waiting'",
+                        (int(time.time() * 1000), request_id),
+                    )
+                    if not task.active:
+                        raise asyncio.CancelledError()
+                    try:
+                        acquired = await self._acquire_lease(
+                            task, owner, paths=wanted, request_id=request_id
+                        )
+                    except FusionWorkspaceBusy as exc:
+                        if task.data.get("workspace_blocker") != exc.blocker:
+                            task = await self._update(
+                                task, data={"workspace_blocker": exc.blocker}
+                            )
+                        return None, task
+                    task = await self._update(
+                        task,
+                        data={
+                            "workspace_blocker": None,
+                            "write_paths": list(wanted),
+                            "reason": None,
+                        },
+                    )
+                    return acquired, task
+
+                lease, task = await self._transaction(attempt)
+                if on_wait:
+                    await on_wait(task)
+                if lease:
+                    returned = True
+                    return lease
+                await asyncio.sleep(0.1)
+        finally:
+
+            async def remove() -> None:
+                await self.connection.execute(
+                    "DELETE FROM fusion_access WHERE request_id=?", (request_id,)
+                )
+                task = await self._get(task_id)
+                if not returned:
+                    if acquired:
+                        await self.connection.execute(
+                            "UPDATE fusion_reservations SET owner=NULL WHERE project_fingerprint=? AND task_id=? AND generation=?",
+                            (self.project, task_id, acquired.generation),
+                        )
+                    if (
+                        task.active
+                        and task.phase == "WAITING_RESOURCE"
+                        and task.data.get("waiting_request") == request_id
+                    ):
+                        await self._update(
+                            task,
+                            phase="PAUSED",
+                            data={
+                                "reason": "resource_wait_paused",
+                                "waiting_paths": [],
+                                "waiting_request": None,
+                            },
+                        )
+
+            await asyncio.shield(self._transaction(remove))
 
     async def _transaction(self, action: Callable[[], Awaitable[T]]) -> T:
         async with self.lock:
@@ -320,55 +619,137 @@ class FusionStateStore:
         ):
             return False
         cursor = await self.connection.execute(
-            "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=?",
+            "UPDATE fusion_reservations SET owner=NULL WHERE task_id=? AND project_fingerprint=?",
             (task.task_id, self.project),
         )
         return cursor.rowcount > 0
 
     async def _workspace_blocker(self, task: FusionTask) -> dict[str, object] | None:
+        cursor = await self.connection.execute(
+            "SELECT paths_json FROM fusion_reservations WHERE project_fingerprint=? AND task_id=? AND owner IS NOT NULL",
+            (self.project, task.task_id),
+        )
+        row = await cursor.fetchone()
+        paths = (
+            task.data.get("waiting_paths")
+            or (json.loads(row[0]) if row else task.data.get("write_paths"))
+            or ["./"]
+        )
         return await self._workspace_owner(
-            task.workspace_key, excluding_task_id=task.task_id
+            task.workspace_key, excluding_task_id=task.task_id, paths=paths
         )
 
+    async def _cleanup_resources(self) -> None:
+        async with self.connection.execute(
+            "SELECT DISTINCT owner_pid FROM fusion_access WHERE state IN ('running','unknown') AND owner_pid>0"
+        ) as cursor:
+            pids = [row[0] for row in await cursor.fetchall()]
+        for pid in pids:
+            if owner_exited(pid):
+                await self.connection.execute(
+                    "DELETE FROM fusion_access WHERE kind='snapshot' AND owner_pid=?",
+                    (pid,),
+                )
+                await self.connection.execute(
+                    "UPDATE fusion_access SET state='unknown' WHERE state='running' AND owner_pid=?",
+                    (pid,),
+                )
+        for query in CLEANUP_ACCESS_SQL:
+            await self.connection.execute(query)
+        await self.connection.execute(IDLE_RESERVATIONS_SQL)
+
     async def _workspace_owner(
-        self, key: str, *, excluding_task_id: str | None = None
+        self,
+        key: str,
+        *,
+        excluding_task_id: str | None = None,
+        paths: Iterable[str] = ("./",),
+        include_operations: bool = True,
     ) -> dict[str, object] | None:
-        """在已有事务中读取目录写者，本项目内才公开身份。"""
+        """返回第一个实际范围冲突；不同文件的其他任务不会被当作阻塞者。"""
+        await self._cleanup_resources()
+        if include_operations:
+            cursor = await self.connection.execute(
+                "SELECT * FROM fusion_access WHERE workspace_key=? AND ((kind IN ('command','snapshot') AND state IN ('running','unknown')) OR kind='file' AND state='unknown') ORDER BY sequence",
+                (key,),
+            )
+            for operation in await cursor.fetchall():
+                if (
+                    excluding_task_id is not None
+                    and operation["project_fingerprint"] == self.project
+                    and operation["task_id"] == excluding_task_id
+                ):
+                    continue
+                own = operation["project_fingerprint"] == self.project
+                holder = (
+                    await self._get(operation["task_id"])
+                    if own and operation["task_id"]
+                    else None
+                )
+                return {
+                    "task_id": holder.task_id if holder else None,
+                    "thread_id": holder.thread_id if holder else None,
+                    "phase": holder.phase if holder else None,
+                    "round": holder.data.get("round", 0) if holder else 0,
+                    "reason": holder.data.get("reason") if holder else None,
+                    "requires_inspection": operation["state"] == "unknown",
+                    "kind": "command" if operation["kind"] != "file" else "paths",
+                    "paths": json.loads(operation["paths_json"]),
+                    **(
+                        {
+                            "operation_id": operation["request_id"],
+                            "sequence": operation["sequence"],
+                        }
+                        if own
+                        and operation["task_id"] is None
+                        and operation["state"] == "unknown"
+                        else {}
+                    ),
+                }
         cursor = await self.connection.execute(
-            "SELECT task_id,project_fingerprint FROM fusion_leases WHERE workspace_key=?",
+            "SELECT * FROM fusion_reservations WHERE workspace_key=? AND owner IS NOT NULL ORDER BY generation",
             (key,),
         )
-        lease = await cursor.fetchone()
-        if not lease or not lease["task_id"]:
-            return None
-        if (
-            lease["task_id"] == excluding_task_id
-            and lease["project_fingerprint"] == self.project
-        ):
-            return None
-        if lease["project_fingerprint"] != self.project:
-            # 只能公开本项目内的会话身份，未知来源不能自动抢占。
+        for lease in await cursor.fetchall():
+            if (
+                lease["task_id"] == excluding_task_id
+                and lease["project_fingerprint"] == self.project
+            ):
+                continue
+            if not scopes_overlap(paths, json.loads(lease["paths_json"])):
+                continue
+            if lease["project_fingerprint"] != self.project:
+                return {
+                    "task_id": None,
+                    "thread_id": None,
+                    "phase": None,
+                    "round": 0,
+                    "reason": "owner_unavailable",
+                    "requires_inspection": True,
+                    "kind": "paths",
+                    "paths": [],
+                }
+            owner = await self._get(lease["task_id"])
+            if await self._release_idle_lease(owner):
+                continue
             return {
-                "task_id": None,
-                "thread_id": None,
-                "phase": None,
-                "round": 0,
-                "reason": "owner_unavailable",
-                "requires_inspection": True,
+                "task_id": owner.task_id,
+                "thread_id": owner.thread_id,
+                "phase": owner.phase,
+                "round": owner.data.get("round", 0),
+                "reason": owner.data.get("reason"),
+                "requires_inspection": owner.phase == "OUTCOME_UNKNOWN"
+                or (
+                    not owner.data.get("active_run")
+                    and (
+                        await self._pending(owner.task_id)
+                        or await self._pending_delivery(owner.task_id)
+                    )
+                ),
+                "kind": "paths",
+                "paths": json.loads(lease["paths_json"]),
             }
-        owner = await self._get(lease["task_id"])
-        if await self._release_idle_lease(owner):
-            return None
-        return {
-            "task_id": owner.task_id,
-            "thread_id": owner.thread_id,
-            "phase": owner.phase,
-            "round": owner.data.get("round", 0),
-            "reason": owner.data.get("reason"),
-            "requires_inspection": owner.phase == "OUTCOME_UNKNOWN"
-            or await self._pending(owner.task_id)
-            or await self._pending_delivery(owner.task_id),
-        }
+        return None
 
     async def workspace_blocker(self, task_id: str) -> dict[str, object] | None:
         """读取实际写者，不按进程、时间或模型声明推断占用已解除。"""
@@ -377,6 +758,20 @@ class FusionStateStore:
             return await self._workspace_blocker(await self._get(task_id))
 
         return await self._transaction(action)
+
+    async def claimed_paths(self, key: str) -> tuple[str, ...]:
+        """命令核查包含所有已声明文件，别人明确修改的缓存文件也不能漏掉。"""
+        async with self.lock:
+            cursor = await self.connection.execute(
+                "SELECT paths_json FROM fusion_reservations WHERE workspace_key=? AND owner IS NOT NULL",
+                (key,),
+            )
+            paths = []
+            for row in await cursor.fetchall():
+                for path in json.loads(row[0]):
+                    if path not in paths:
+                        paths.append(path)
+            return tuple(paths)
 
     async def workspace_owner(self, workspace: Path) -> dict[str, object] | None:
         """没有本会话任务时仍能读取当前目录的实际占用；不自动核查未知操作。"""
@@ -422,6 +817,7 @@ class FusionStateStore:
         data = {
             "profile": dict(profile),
             "source_message": source_message,
+            "workspace_path": str(workspace.resolve()),
             "revision": 0,
             "round": 0,
             "verification": "unverified",
@@ -499,51 +895,145 @@ class FusionStateStore:
         return await self._transaction(action)
 
     async def _acquire_lease(
-        self, task: FusionTask, owner: str, *, new_round: bool = False
+        self,
+        task: FusionTask,
+        owner: str,
+        *,
+        new_round: bool = False,
+        paths: Iterable[str] | None = None,
+        request_id: str | None = None,
     ) -> FusionLease:
         if not task.active or task.phase == "OUTCOME_UNKNOWN":
             raise FusionError("FUSION_OUTCOME_UNKNOWN")
+        if owner not in {"host", "sidekick"}:
+            raise FusionError("FUSION_ROLE_DENIED")
         cursor = await self.connection.execute(
-            "SELECT * FROM fusion_leases WHERE workspace_key=?", (task.workspace_key,)
+            "SELECT * FROM fusion_reservations WHERE project_fingerprint=? AND task_id=?",
+            (self.project, task.task_id),
         )
         row = await cursor.fetchone()
-        if row and row["task_id"] is not None:
-            if (
-                row["task_id"] != task.task_id
-                or row["project_fingerprint"] != self.project
-            ):
-                blocker = await self._workspace_blocker(task)
-                if blocker is not None:
-                    raise FusionWorkspaceBusy(blocker)
-                cursor = await self.connection.execute(
-                    "SELECT * FROM fusion_leases WHERE workspace_key=?",
-                    (task.workspace_key,),
-                )
-                row = await cursor.fetchone()
-            if await self._pending(task.task_id) or await self._pending_delivery(
-                task.task_id
-            ):
-                raise FusionError("FUSION_OUTCOME_UNKNOWN")
-            if (
-                row["task_id"] == task.task_id
-                and row["owner"] == owner
-                and not new_round
-            ):
-                return FusionLease(
-                    task.workspace_key, task.task_id, owner, row["generation"]
-                )
-        generation = (row["generation"] if row else 0) + 1
-        await self.connection.execute(
-            "INSERT INTO fusion_leases VALUES(?,?,?,?,?) ON CONFLICT(workspace_key) DO UPDATE SET project_fingerprint=excluded.project_fingerprint,task_id=excluded.task_id,owner=excluded.owner,generation=excluded.generation",
-            (task.workspace_key, self.project, task.task_id, owner, generation),
+        wanted = (
+            tuple(paths)
+            if paths is not None
+            else tuple(
+                json.loads(row["paths_json"])
+                if row
+                else task.data.get("write_paths") or ["./"]
+            )
         )
+        if task.data.get("workspace_path"):
+            wanted = normalize_paths(Path(task.data["workspace_path"]), wanted)
+        blocker = await self._workspace_owner(
+            task.workspace_key,
+            excluding_task_id=task.task_id,
+            paths=wanted,
+            include_operations=False,
+        )
+        if blocker:
+            raise FusionWorkspaceBusy(blocker)
+        # 已有范围内的 owner 交接不受后到等待者阻碍，避免它无法完成检查而永远不释放。
+        renewing = bool(
+            row and row["owner"] and set(wanted) == set(json.loads(row["paths_json"]))
+        )
+        if not renewing:
+            cursor = await self.connection.execute(
+                "SELECT * FROM fusion_access WHERE workspace_key=? AND kind IN ('command','snapshot') AND (state IN ('running','unknown') OR state='waiting' AND task_id IS NULL) ORDER BY sequence",
+                (task.workspace_key,),
+            )
+            for running in await cursor.fetchall():
+                owner_task = (
+                    await self._get(running["task_id"])
+                    if running["project_fingerprint"] == self.project
+                    and running["task_id"]
+                    else None
+                )
+                raise FusionWorkspaceBusy(
+                    {
+                        "task_id": owner_task.task_id if owner_task else None,
+                        "thread_id": owner_task.thread_id if owner_task else None,
+                        "phase": owner_task.phase if owner_task else None,
+                        "round": owner_task.data.get("round", 0) if owner_task else 0,
+                        "reason": owner_task.data.get("reason") if owner_task else None,
+                        "requires_inspection": running["state"] == "unknown",
+                        "kind": "command",
+                        "paths": ["./"],
+                    }
+                )
+            cursor = await self.connection.execute(
+                "SELECT sequence FROM fusion_access WHERE request_id=?", (request_id,)
+            )
+            current = await cursor.fetchone()
+            position = current[0] if current else 2**63 - 1
+            cursor = await self.connection.execute(
+                "SELECT * FROM fusion_access WHERE workspace_key=? AND kind='reservation' AND state='waiting' AND sequence<? ORDER BY sequence",
+                (task.workspace_key, position),
+            )
+            for queued in await cursor.fetchall():
+                if (
+                    queued["task_id"] == task.task_id
+                    and queued["project_fingerprint"] == self.project
+                ):
+                    continue
+                if scopes_overlap(wanted, json.loads(queued["paths_json"])):
+                    owner_task = (
+                        await self._get(queued["task_id"])
+                        if queued["project_fingerprint"] == self.project
+                        else None
+                    )
+                    raise FusionWorkspaceBusy(
+                        {
+                            "task_id": owner_task.task_id if owner_task else None,
+                            "thread_id": owner_task.thread_id if owner_task else None,
+                            "phase": owner_task.phase if owner_task else None,
+                            "round": owner_task.data.get("round", 0)
+                            if owner_task
+                            else 0,
+                            "reason": "resource_wait",
+                            "requires_inspection": False,
+                            "kind": "paths",
+                            "paths": json.loads(queued["paths_json"]),
+                        }
+                    )
+        if await self._pending(task.task_id) or await self._pending_delivery(
+            task.task_id
+        ):
+            raise FusionError("FUSION_OUTCOME_UNKNOWN")
+        if renewing and row["owner"] == owner and not new_round:
+            return FusionLease(
+                task.workspace_key, task.task_id, owner, row["generation"]
+            )
+        cursor = await self.connection.execute(
+            "INSERT INTO fusion_generations VALUES(?,1) ON CONFLICT(workspace_key) DO UPDATE SET generation=generation+1 RETURNING generation",
+            (task.workspace_key,),
+        )
+        generation = (await cursor.fetchone())[0]
+        await self.connection.execute(
+            "INSERT INTO fusion_reservations VALUES(?,?,?,?,?,?) ON CONFLICT(project_fingerprint,task_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,paths_json=excluded.paths_json",
+            (
+                task.workspace_key,
+                self.project,
+                task.task_id,
+                owner,
+                generation,
+                encode(wanted),
+            ),
+        )
+        if request_id:
+            await self.connection.execute(
+                "DELETE FROM fusion_access WHERE request_id=? AND state='waiting'",
+                (request_id,),
+            )
         return FusionLease(task.workspace_key, task.task_id, owner, generation)
 
-    async def acquire_lease(self, task_id: str, owner: str) -> FusionLease:
-        """取得或交接写者；未停止操作或未确认派发阻止交接。"""
+    async def acquire_lease(
+        self, task_id: str, owner: str, *, paths: Iterable[str] | None = None
+    ) -> FusionLease:
+        """非等待申请文件范围；未声明范围时沿用当前预留，首次保守申请整个目录。"""
 
         async def action() -> FusionLease:
-            return await self._acquire_lease(await self._get(task_id), owner)
+            return await self._acquire_lease(
+                await self._get(task_id), owner, paths=paths
+            )
 
         return await self._transaction(action)
 
@@ -587,9 +1077,12 @@ class FusionStateStore:
                 "REVIEWING",
                 "WAITING_USER",
                 "PAUSED",
+                "WAITING_RESOURCE",
             }:
                 raise FusionError("FUSION_TASK_CONFLICT")
-            lease = await self._acquire_lease(task, "sidekick", new_round=True)
+            lease = await self._acquire_lease(
+                task, "sidekick", new_round=True, paths=order["allowed_paths"]
+            )
             revision = int(order["revision"])
             cursor = await self.connection.execute(
                 "SELECT data_json FROM fusion_orders WHERE project_fingerprint=? AND task_id=? AND revision=?",
@@ -642,6 +1135,13 @@ class FusionStateStore:
                     "pending_operations": [],
                     "candidate_digest": None,
                     "check_started_plan_ids": [],
+                    "verification_cycle": new_id("verification"),
+                    "write_paths": list(order["allowed_paths"]),
+                    "waiting_paths": [],
+                    "waiting_request": None,
+                    "pending_round": None,
+                    "workspace_blocker": None,
+                    "resource_waits": {},
                 },
             )
             return task, lease
@@ -656,11 +1156,18 @@ class FusionStateStore:
         return await cursor.fetchone() is not None
 
     async def _pending(self, task_id: str) -> bool:
+        await self._cleanup_resources()
         cursor = await self.connection.execute(
             "SELECT 1 FROM fusion_effects WHERE project_fingerprint=? AND task_id=? AND stopped=0 LIMIT 1",
             (self.project, task_id),
         )
-        return (await cursor.fetchone()) is not None
+        if await cursor.fetchone() is not None:
+            return True
+        cursor = await self.connection.execute(
+            "SELECT 1 FROM fusion_access a WHERE a.project_fingerprint=? AND a.task_id=? AND a.kind IN ('file','command') AND a.state IN ('running','unknown') AND NOT EXISTS(SELECT 1 FROM fusion_effects e WHERE e.project_fingerprint=a.project_fingerprint AND e.operation_id=COALESCE(a.effect_id,a.request_id) AND e.stopped=1) LIMIT 1",
+            (self.project, task_id),
+        )
+        return await cursor.fetchone() is not None
 
     async def release_lease(self, task_id: str, generation: int) -> None:
         """只释放当前代写者，有不明操作时拒绝释放。"""
@@ -669,7 +1176,7 @@ class FusionStateStore:
             if await self._pending(task_id) or await self._pending_delivery(task_id):
                 raise FusionError("FUSION_OUTCOME_UNKNOWN")
             cursor = await self.connection.execute(
-                "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=? AND generation=?",
+                "UPDATE fusion_reservations SET owner=NULL WHERE task_id=? AND project_fingerprint=? AND generation=? AND owner IS NOT NULL",
                 (task_id, self.project, generation),
             )
             if cursor.rowcount != 1:
@@ -678,15 +1185,22 @@ class FusionStateStore:
         await self._transaction(action)
 
     async def begin_effect(
-        self, task_id: str, generation: int, execution_id: str, kind: str, digest: str
+        self,
+        task_id: str,
+        generation: int,
+        execution_id: str,
+        kind: str,
+        digest: str,
+        *,
+        operation_id: str | None = None,
     ) -> str:
         """副作用开始前保存 running 事实，参数仅保存摘要。"""
-        operation_id = new_id("effect")
+        operation_id = operation_id or new_id("effect")
 
         async def action() -> str:
             task = await self._get(task_id)
             cursor = await self.connection.execute(
-                "SELECT 1 FROM fusion_leases WHERE task_id=? AND project_fingerprint=? AND generation=?",
+                "SELECT 1 FROM fusion_reservations WHERE task_id=? AND project_fingerprint=? AND generation=? AND owner IS NOT NULL",
                 (task_id, self.project, generation),
             )
             if not await cursor.fetchone():
@@ -760,6 +1274,24 @@ class FusionStateStore:
         pending_operations.extend(
             {**dict(row), "kind": "dispatch"} for row in await cursor.fetchall()
         )
+        # 进程可能在登记实际操作后、保存工具副作用前退出；状态仍须给出可核查的身份。
+        cursor = await self.connection.execute(
+            "SELECT a.request_id AS operation_id,a.execution_id,CASE a.kind WHEN 'file' THEN 'write' ELSE 'execute' END AS kind,a.state FROM fusion_access a WHERE a.project_fingerprint=? AND a.task_id=? AND a.kind IN ('file','command') AND a.state IN ('running','unknown') AND NOT EXISTS(SELECT 1 FROM fusion_effects e WHERE e.project_fingerprint=a.project_fingerprint AND e.operation_id=COALESCE(a.effect_id,a.request_id))",
+            (self.project, task_id),
+        )
+        pending_operations.extend(dict(row) for row in await cursor.fetchall())
+        prepared = False
+        if (
+            not unknown
+            and task.data.get("operation_id")
+            and task.data.get("worker_execution_id") is None
+        ):
+            cursor = await self.connection.execute(
+                "SELECT state FROM fusion_outbox WHERE project_fingerprint=? AND operation_id=?",
+                (self.project, task.data["operation_id"]),
+            )
+            delivery = await cursor.fetchone()
+            prepared = bool(delivery and delivery[0] == "prepared")
         data = {
             "resume_phase": task.data.get("resume_phase", task.phase)
             if task.phase in {"PAUSED", "OUTCOME_UNKNOWN"}
@@ -767,8 +1299,10 @@ class FusionStateStore:
             "reason": "effects_unconfirmed"
             if unknown
             else (
-                "workspace_busy"
-                if task.data.get("reason") == "workspace_busy"
+                task.data.get("reason")
+                if task.data.get("reason") in {"workspace_busy", "resource_wait_paused"}
+                else "resource_wait_paused"
+                if task.data.get("pending_round") or prepared
                 else "run_paused"
             ),
             "pending_operations": pending_operations,
@@ -797,12 +1331,34 @@ class FusionStateStore:
         async with self.lock:
             delivery_pending = await self._pending_delivery(task_id)
         if (
-            task.phase in {"WORKER_RUNNING", "CHECKING"}
+            task.phase in {"WORKER_RUNNING", "CHECKING", "OUTCOME_UNKNOWN"}
             or delivery_pending
             or any(not x["stopped"] for x in await self.effects(task_id))
         ):
             return await self.pause(task_id)
         return task
+
+    async def release_workspace_operation(
+        self, operation_id: str, expected_sequence: int, note: str
+    ) -> None:
+        """用户明确核查后释放普通工具的未知保护；带 Task 的操作仍走完整恢复流程。"""
+        if not isinstance(note, str) or not note.strip() or len(note) > 4000:
+            raise FusionError("FUSION_OUTCOME_UNKNOWN")
+
+        async def action() -> None:
+            cursor = await self.connection.execute(
+                "SELECT * FROM fusion_access WHERE project_fingerprint=? AND request_id=? AND sequence=?",
+                (self.project, operation_id, expected_sequence),
+            )
+            row = await cursor.fetchone()
+            if not row or row["task_id"] is not None or row["state"] != "unknown":
+                raise FusionError("FUSION_TASK_CONFLICT")
+            await self.connection.execute(
+                "UPDATE fusion_access SET state='inspected',inspection_digest=? WHERE request_id=?",
+                (hashlib.sha256(note.encode()).hexdigest(), operation_id),
+            )
+
+        await self._transaction(action)
 
     async def recover(
         self,
@@ -839,6 +1395,10 @@ class FusionStateStore:
             "UPDATE fusion_outbox SET state='inspected' WHERE project_fingerprint=? AND task_id=? AND state='dispatched'",
             (self.project, task.task_id),
         )
+        await self.connection.execute(
+            "DELETE FROM fusion_access WHERE project_fingerprint=? AND task_id=?",
+            (self.project, task.task_id),
+        )
         return await self._update(
             task,
             phase="PAUSED",
@@ -851,6 +1411,36 @@ class FusionStateStore:
                 "active_run": None,
             },
         )
+
+    async def pause_dispatch(
+        self, task_id: str, operation_id: str | None, run_id: str
+    ) -> FusionTask:
+        """当前派发回调收尾；从未登记子执行时恢复 prepared，不把未启动误报为未知。"""
+
+        async def action() -> FusionTask:
+            task = await self._get(task_id)
+            scope = task.data.get("active_run")
+            if (
+                not task.active
+                or task.data.get("operation_id") != operation_id
+                or scope is not None
+                and scope["run_id"] != run_id
+            ):
+                return task
+            if (
+                operation_id
+                and task.data.get("worker_execution_id") is None
+                and not await self._pending(task_id)
+            ):
+                # 原生 Worker 先登记执行 ID 再创建执行器；回调已返回，说明没有未来待启动的子执行。
+                await self.connection.execute(
+                    "UPDATE fusion_outbox SET state='prepared' WHERE project_fingerprint=? AND task_id=? AND operation_id=? AND state='dispatched'",
+                    (self.project, task_id, operation_id),
+                )
+                task = await self._update(task, data={"reason": "resource_wait_paused"})
+            return await self._pause(task)
+
+        return await self._transaction(action)
 
     async def record_worker_stopped(
         self, task_id: str, operation_id: str, execution_id: str, *, interrupted: bool
@@ -890,11 +1480,20 @@ class FusionStateStore:
         task = await self._update(
             task,
             phase=phase,
-            data={**data, "workspace_blocker": None, "active_run": None},
+            data={
+                **data,
+                "workspace_blocker": None,
+                "active_run": None,
+                "resource_waits": {},
+            },
         )
         await self.connection.execute(
-            "UPDATE fusion_leases SET task_id=NULL,project_fingerprint=NULL,owner=NULL WHERE task_id=? AND project_fingerprint=?",
+            "UPDATE fusion_reservations SET owner=NULL WHERE task_id=? AND project_fingerprint=?",
             (task.task_id, self.project),
+        )
+        await self.connection.execute(
+            "DELETE FROM fusion_access WHERE project_fingerprint=? AND task_id=? AND state='waiting'",
+            (self.project, task.task_id),
         )
         return task
 

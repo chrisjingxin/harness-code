@@ -443,6 +443,7 @@ class RunPreparation:
     workspace_write_guard: Callable[[], None] | None = None
     # 直出 Shell 持有 Host 写锁直到命令停止，Fusion 取基线前等待它交还工作区。
     workspace_write_lock: AsyncRWLock | None = None
+    workspace_write_scope: Callable[[], Any] | None = None
     code_index_lease: Any | None = None
 
     def __post_init__(self) -> None:

@@ -1,3 +1,4 @@
+import type { FusionReleaseParams, FusionReleaseResult } from "@za38/protocol"
 /** AgentClientGateway 基础设施：将通信传输层的 AgentClient 适配为 Core 依赖的 AgentGateway 接口，并集中收敛错误映射。 */
 
 import type {
@@ -200,6 +201,11 @@ export class AgentClientGateway implements AgentGateway {
 
   async recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus> {
     try { return await this.client.recoverFusion(params) } catch(error) { throw this.wrapError(error) }
+  }
+
+  /** 人工核查停止后解除普通工具的未知保护。 */
+  async releaseFusionOperation(params: FusionReleaseParams): Promise<FusionReleaseResult> {
+    try { return await this.client.releaseFusionOperation(params) } catch(error) { throw this.wrapError(error) }
   }
 
   async cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus> {

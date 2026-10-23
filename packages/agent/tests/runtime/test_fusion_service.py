@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -10,6 +11,16 @@ from tests.runtime.test_fusion_roles import profile
 from harness_agent.runtime.fusion.profile import FrozenFusionCheckPlan
 from harness_agent.runtime.run_context import FusionRunState
 from harness_agent.threads.thread_persistence import ThreadPersistence
+
+
+def prepared_check(check):
+    async def prepare(context, plan, lease):
+        async def execute():
+            return await check(context, plan, lease)
+
+        return execute
+
+    return prepare
 
 
 async def setup(tmp_path, *, checks=False, submitted=True):
@@ -71,7 +82,15 @@ async def setup(tmp_path, *, checks=False, submitted=True):
         workspace=root,
         profile_provider=lambda task_id: frozen,
         worker=worker,
-        check=check,
+        prepare_check=prepared_check(check),
+        guard=__import__(
+            "harness_agent.runtime.fusion.guard", fromlist=["FusionWriteGuard"]
+        ).FusionWriteGuard(
+            store.database_path,
+            project_fingerprint=store.project,
+            workspace=root,
+            context_provider=lambda: ctx,
+        ),
     )
     return p, store, task, ctx, service, rounds, root
 
@@ -121,80 +140,44 @@ async def test_delegate_rework_same_session_and_review_only(tmp_path):
 
 
 async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path):
-    """旧任务的占用保留；当前任务不反复派发，取消旧任务后仍能首轮执行。"""
-    from harness_agent.runtime.fusion.store import FusionError
-
+    """正常冲突由 Host 排队，旧任务结束后同一次工具调用自动继续。"""
     p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    pending = None
     try:
         owner = await store.create(
-            thread_id="older-thread",
+            thread_id="older",
             profile=task.data["profile"],
             workspace=root,
-            source_message="保留旧任务",
+            source_message="旧任务",
         )
-        lease = await store.acquire_lease(owner.task_id, "sidekick")
-        owner = await store.update(
-            owner.task_id,
-            owner.version,
-            phase="WORKER_RUNNING",
-            data={"round": 4, "reason": "rework_limit"},
+        await store.acquire_lease(owner.task_id, "sidekick", paths=["a.py"])
+        owner = await store.update(owner.task_id, owner.version, phase="WORKER_RUNNING")
+        pending = asyncio.create_task(
+            service.delegate(
+                ctx,
+                goal="修改",
+                brief="保持接口",
+                allowed_paths=["a.py"],
+                check_plan_ids=[],
+            )
         )
-        result = await service.delegate(
-            ctx,
-            goal="修改实现",
-            brief="保持兼容",
-            allowed_paths=["a.py"],
-            check_plan_ids=[],
-        )
-        assert result["phase"] == "WAITING_USER"
-        assert result["reason"] == "workspace_busy"
-        assert result["round"] == result["revision"] == 0
-        assert result["workspace_blocker"] == {
-            "task_id": owner.task_id,
-            "thread_id": owner.thread_id,
-            "phase": "WORKER_RUNNING",
-            "round": 4,
-            "reason": "rework_limit",
-            "requires_inspection": False,
-        }
-        before = (await store.get(task.task_id)).to_record()
+        async with asyncio.timeout(2):
+            while (await store.get(task.task_id)).phase != "WAITING_RESOURCE":
+                await asyncio.sleep(0.01)
+        await asyncio.sleep(0.04)
+        current = await store.get(task.task_id)
+        assert current.data["round"] == current.data["revision"] == 0
+        assert current.data["workspace_blocker"]["task_id"] == owner.task_id
         assert not rounds
-        with pytest.raises(FusionError, match="FUSION_EVIDENCE_INCOMPLETE"):
+        with pytest.raises(ValueError, match="FUSION_EVIDENCE_INCOMPLETE"):
             await store.load_record(task.task_id, "order", "1")
-        # 不能用直接完成或改走返工把这次占用误认为已解决。
-        with pytest.raises(FusionError):
-            await service.finish_direct(ctx, summary="已解决")
-        repeated = await service.rework(
-            ctx, feedback="重试", allowed_paths=[], reason=""
-        )
-        assert repeated["reason"] == "workspace_busy" and not rounds
-        assert (await store.get(task.task_id)).to_record() == before
-        assert (
-            await store.acquire_lease(owner.task_id, "sidekick")
-        ).generation == lease.generation
-        still_waiting = await service.resume(task.task_id)
-        assert still_waiting.phase == "WAITING_USER" and not rounds
         await store.cancel(owner.task_id, owner.version)
-        visible = await store.reconcile(task.task_id)
-        assert (
-            visible.phase == "PAUSED"
-            and visible.data["reason"] == "workspace_available"
-        )
-        assert visible.to_record()["workspace_blocker"] is None
-        ready = await service.resume(task.task_id)
-        assert (
-            ready.phase == "READY" and ready.worker_session_id == task.worker_session_id
-        )
-        result = await service.delegate(
-            ctx,
-            goal="修改实现",
-            brief="保持兼容",
-            allowed_paths=["a.py"],
-            check_plan_ids=[],
-        )
-        assert result["phase"] == "REVIEWING" and result["round"] == 1
-        assert len(rounds) == 1
+        result = await asyncio.wait_for(pending, 3)
+        assert result["phase"] == "REVIEWING" and len(rounds) == 1
     finally:
+        if pending is not None:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
         await p.close()
 
 
@@ -215,7 +198,6 @@ async def test_rework_before_first_order_explains_delegate(tmp_path):
     "failure",
     [
         "source",
-        "out_of_scope",
         "drift",
         "requirements",
         "check_failure",
@@ -241,15 +223,7 @@ async def test_rejects_invalid_evidence(tmp_path, failure):
                     "summary": "failed",
                 }
 
-            service.check = failed
-        if failure == "out_of_scope":
-            base = service.worker
-
-            async def outside(context, task, message):
-                await base(context, task, message)
-                (root / "other.py").write_text("outside")
-
-            service.worker = outside
+            service.prepare_check = prepared_check(failed)
         if failure == "source":
             with pytest.raises(FusionError, match="FUSION_INPUT_INVALID"):
                 await service.delegate(
@@ -267,7 +241,7 @@ async def test_rejects_invalid_evidence(tmp_path, failure):
             allowed_paths=["a.py"],
             check_plan_ids=["unit"] if failure == "check_failure" else [],
         )
-        if failure in {"missing_report", "out_of_scope"}:
+        if failure == "missing_report":
             assert (
                 result["phase"] == "WAITING_USER"
                 and result["verification"] == "unverified"
@@ -307,7 +281,7 @@ async def test_unknown_check_does_not_start_next_round(tmp_path):
                 "summary": "unknown",
             }
 
-        service.check = unknown
+        service.prepare_check = prepared_check(unknown)
         result = await service.delegate(
             ctx,
             goal="g",
@@ -385,6 +359,7 @@ async def test_explicit_continue_restores_review_without_replaying_worker(
 
 async def test_busy_workspace_does_not_partially_register_order(tmp_path):
     p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    pending = None
     try:
         other = await store.create(
             thread_id="other",
@@ -392,32 +367,7 @@ async def test_busy_workspace_does_not_partially_register_order(tmp_path):
             workspace=root,
             source_message="other",
         )
-        await store.acquire_lease(other.task_id, "sidekick")
-        result = await service.delegate(
-            ctx,
-            goal="修改",
-            brief="保持接口",
-            allowed_paths=["a.py"],
-            check_plan_ids=[],
-        )
-        assert result["reason"] == "workspace_busy"
-        assert (await store.get(task.task_id)).phase == "WAITING_USER" and not rounds
-        with pytest.raises(ValueError, match="FUSION_EVIDENCE_INCOMPLETE"):
-            await store.load_record(task.task_id, "order", "1")
-    finally:
-        await p.close()
-
-
-async def test_round_waits_for_ordinary_writer_before_baseline(tmp_path):
-    import asyncio
-
-    from harness_agent.policy.concurrency import AsyncRWLock
-
-    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
-    try:
-        lock = AsyncRWLock()
-        service.rwlock = lock
-        await lock.acquire_write()
+        await store.acquire_lease(other.task_id, "sidekick", paths=["a.py"])
         pending = asyncio.create_task(
             service.delegate(
                 ctx,
@@ -427,14 +377,50 @@ async def test_round_waits_for_ordinary_writer_before_baseline(tmp_path):
                 check_plan_ids=[],
             )
         )
-        await asyncio.sleep(0.3)
+        async with asyncio.timeout(2):
+            while (await store.get(task.task_id)).phase != "WAITING_RESOURCE":
+                await asyncio.sleep(0.01)
         assert not rounds
-        (root / "other.py").write_text("existing ordinary writer")
-        await lock.release_write()
-        result = await pending
-        assert result["phase"] == "REVIEWING"
-        assert result["changed_paths"] == ["a.py"]
+        with pytest.raises(ValueError, match="FUSION_EVIDENCE_INCOMPLETE"):
+            await store.load_record(task.task_id, "order", "1")
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        assert (await store.get(task.task_id)).phase == "PAUSED"
+        async with store.lock:
+            cursor = await store.connection.execute(
+                "SELECT COUNT(*) FROM fusion_access WHERE task_id=?", (task.task_id,)
+            )
+            assert (await cursor.fetchone())[0] == 0
     finally:
+        if pending is not None:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await p.close()
+
+
+async def test_round_waits_for_ordinary_writer_before_baseline(tmp_path):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    pending = None
+    try:
+        async with service.guard.operation("command"):
+            pending = asyncio.create_task(
+                service.delegate(
+                    ctx,
+                    goal="修改",
+                    brief="保持接口",
+                    allowed_paths=["a.py"],
+                    check_plan_ids=[],
+                )
+            )
+            await asyncio.sleep(0.1)
+            assert not rounds
+            (root / "other.py").write_text("existing ordinary writer")
+        result = await asyncio.wait_for(pending, 3)
+        assert result["phase"] == "REVIEWING" and result["changed_paths"] == ["a.py"]
+    finally:
+        if pending is not None:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
         await p.close()
 
 
@@ -494,13 +480,14 @@ async def test_explicit_continue_checks_saved_report_without_worker_replay(
         await store.mark_delivery("saved-dispatch", "accepted")
         await store.pause(task.task_id)
         check_calls = []
-        original = service.check
+        original = service.prepare_check
 
         async def check(context, plan, lease):
             check_calls.append(plan.plan_id)
-            return await original(context, plan, lease)
+            execute = await original(context, plan, lease)
+            return await execute()
 
-        service.check = check
+        service.prepare_check = prepared_check(check)
         if drift:
             (root / "a.py").write_text("external edit")
         await service.continue_pending(ctx)
@@ -532,19 +519,20 @@ async def test_resume_reuses_saved_check_receipt_and_runs_only_remaining_plan(tm
     )
     service.profile_provider = lambda task_id: frozen
     calls = []
-    original_check = service.check
+    original_check = service.prepare_check
     original_save = store.save_record
 
     async def check(context, plan, lease):
         calls.append(plan.plan_id)
-        return await original_check(context, plan, lease)
+        execute = await original_check(context, plan, lease)
+        return await execute()
 
     async def crash_after_check(task_id, kind, record_id, data):
         await original_save(task_id, kind, record_id, data)
         if kind == "check":
             raise RuntimeError("模拟回执保存后进程退出")
 
-    service.check = check
+    service.prepare_check = prepared_check(check)
     store.save_record = crash_after_check
     try:
         with pytest.raises(RuntimeError, match="模拟回执保存"):
@@ -807,4 +795,130 @@ async def test_rework_with_order_does_not_require_first_ticket(tmp_path):
         )
         assert result["round"] == 2 and len(rounds) == 2
     finally:
+        await p.close()
+
+
+async def test_other_source_change_rechecks_and_issues_new_ticket_without_worker_replay(
+    tmp_path,
+):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path, checks=True)
+    try:
+        result = await service.delegate(
+            ctx,
+            goal="修改",
+            brief="保持兼容",
+            allowed_paths=["a.py"],
+            check_plan_ids=["unit"],
+        )
+        old_ticket = result["ticket_id"]
+        (root / "other.py").write_text("other task changed")
+        kwargs = {
+            "decision": "accept",
+            "requirements": [
+                {"id": "r1", "satisfied": True, "evidence": ["file:a.py", "check:unit"]}
+            ],
+            "test_review_reason": "",
+        }
+        rechecked = await service.review(ctx, ticket_id=old_ticket, **kwargs)
+        assert (
+            rechecked["phase"] == "REVIEWING" and rechecked["ticket_id"] != old_ticket
+        )
+        assert len(rounds) == 1 and rechecked["round"] == 1
+        accepted = await service.review(ctx, ticket_id=rechecked["ticket_id"], **kwargs)
+        assert accepted["phase"] == "COMPLETED"
+        assert len(await store.list_records(task.task_id, "check")) == 2
+    finally:
+        await p.close()
+
+
+async def test_expansion_uses_current_new_files_as_baseline(tmp_path):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    try:
+        (root / "b.py").write_text("preexisting unrelated file")
+        await service.delegate(
+            ctx,
+            goal="修改",
+            brief="保持兼容",
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        result = await service.rework(
+            ctx,
+            feedback="需要读取 b 并继续修正 a",
+            allowed_paths=["b.py"],
+            reason="扩展文件范围",
+        )
+        assert result["changed_paths"] == ["a.py"]
+    finally:
+        await p.close()
+
+
+async def test_approval_preparation_does_not_hold_directory_permission(tmp_path):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path, checks=True)
+    started = asyncio.Event()
+    approved = asyncio.Event()
+    prepare = service.prepare_check
+
+    async def approval(context, plan, lease):
+        started.set()
+        await approved.wait()
+        return await prepare(context, plan, lease)
+
+    service.prepare_check = approval
+    pending = asyncio.create_task(
+        service.delegate(
+            ctx,
+            goal="修改",
+            brief="保持兼容",
+            allowed_paths=["a.py"],
+            check_plan_ids=["unit"],
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        async with asyncio.timeout(2):
+            async with service.guard.operation("file", paths=["b.py"]):
+                (root / "b.py").write_text("other task")
+        approved.set()
+        assert (await asyncio.wait_for(pending, 3))["verification"] == "verified"
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await p.close()
+
+
+async def test_cancel_before_worker_execution_keeps_prepared_order_without_unknown_outcome(
+    tmp_path,
+):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    entered = asyncio.Event()
+
+    async def not_started(context, current, message):
+        entered.set()
+        await asyncio.Event().wait()
+
+    service.worker = not_started
+    pending = asyncio.create_task(
+        service.delegate(
+            ctx,
+            goal="修改",
+            brief="保持接口",
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        current = await store.get(task.task_id)
+        assert current.phase == "PAUSED"
+        assert current.data["reason"] == "resource_wait_paused"
+        assert not await store.effects(task.task_id)
+        assert (await store.load_delivery(task.task_id, current.data["operation_id"]))[
+            "state"
+        ] == "prepared"
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
         await p.close()

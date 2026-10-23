@@ -7,11 +7,18 @@ import json
 import os
 import stat
 import subprocess
-import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 INTERNAL = frozenset({".git", ".harness-index"})
+SNAPSHOT_IGNORES = INTERNAL | {
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".venv",
+    "node_modules",
+}
 
 
 def normalize_paths(workspace: Path, values: Iterable[str]) -> tuple[str, ...]:
@@ -42,7 +49,9 @@ def normalize_paths(workspace: Path, values: Iterable[str]) -> tuple[str, ...]:
             for i in range(1, len(path.parts) + 1)
         ):
             raise ValueError("FUSION_PATH_INVALID")
-        normalized = path.as_posix().rstrip("/") + ("/" if value.endswith("/") else "")
+        normalized = path.as_posix().rstrip("/") + (
+            "/" if value.endswith("/") or (root / path).is_dir() else ""
+        )
         if normalized in {".", "./"}:
             normalized = "./"
         if normalized not in result:
@@ -64,21 +73,14 @@ def path_allowed(path: str, allowed: Iterable[str]) -> bool:
     )
 
 
-def _git(
-    root: Path,
-    args: list[str],
-    env: Mapping[str, str] | None = None,
-    *,
-    allow_empty_head: bool = False,
-) -> bytes:
+def _git(root: Path, args: list[str]) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(root), *args],
-        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=60,
     )
-    if result.returncode and not allow_empty_head:
+    if result.returncode:
         raise ValueError("FUSION_SNAPSHOT_UNAVAILABLE")
     return result.stdout
 
@@ -92,7 +94,7 @@ def _walk(root: Path, base: Path) -> set[str]:
     for current, directories, files in os.walk(
         base, followlinks=False, onerror=lambda error: (_ for _ in ()).throw(error)
     ):
-        directories[:] = [name for name in directories if name not in INTERNAL]
+        directories[:] = [name for name in directories if name not in SNAPSHOT_IGNORES]
         for name in [
             *files,
             *[name for name in directories if (Path(current) / name).is_symlink()],
@@ -134,62 +136,53 @@ def capture_snapshot(
     """严格捕获实际文件；任何读取或 Git 错误都不能伪装成空快照。"""
     root = workspace.resolve()
     allowed = normalize_paths(root, allowed_paths)
-    git_dir = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=10,
-    )
-    git = git_dir.returncode == 0
-    if git and Path(os.fsdecode(git_dir.stdout).strip()).resolve() != root:
-        raise ValueError("FUSION_SNAPSHOT_UNAVAILABLE")
-    tree = None
-    if git:
-        names = {
-            os.fsdecode(item)
-            for item in _git(
-                root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-            ).split(b"\0")
-            if item
-        }
-        with tempfile.TemporaryDirectory(prefix="fusion-index-") as temp:
-            env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
-            head = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10,
-            )
-            _git(
-                root,
-                ["read-tree", os.fsdecode(head.stdout).strip()]
-                if head.returncode == 0
-                else ["read-tree", "--empty"],
-                env,
-            )
-            _git(root, ["add", "-A", "--", "."], env)
-            _git(
-                root,
-                ["rm", "-r", "--cached", "--ignore-unmatch", "--", ".harness-index"],
-                env,
-            )
-            tree = _git(root, ["write-tree"], env).decode().strip()
-    else:
-        names = _walk(root, root)
+    names = set()
+    if "./" in allowed:
+        git_dir = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+        if git_dir.returncode == 0:
+            if Path(os.fsdecode(git_dir.stdout).strip()).resolve() != root:
+                raise ValueError("FUSION_SNAPSHOT_UNAVAILABLE")
+            names = {
+                os.fsdecode(item)
+                for item in _git(
+                    root,
+                    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                ).split(b"\0")
+                if item
+            }
+        else:
+            names = _walk(root, root)
     for value in allowed:
-        names.update(_walk(root, root / value.rstrip("/")))
+        if value != "./":
+            names.update(_walk(root, root / value.rstrip("/")))
     entries = {}
     for name in sorted(names):
-        if any(part in INTERNAL for part in PurePosixPath(name).parts):
+        if not path_allowed(name, allowed):
+            continue
+        if any(
+            part in SNAPSHOT_IGNORES for part in PurePosixPath(name).parts
+        ) and not any(
+            value != "./" and path_allowed(name, [value]) for value in allowed
+        ):
             continue
         file = root / name
         if file.exists() or file.is_symlink():
             entries[name] = _entry(root, name)
-    body = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    return snapshot_from_entries(entries)
+
+
+def snapshot_from_entries(entries: Mapping[str, str]) -> dict[str, object]:
+    """对已核对的文件摘要计算快照；扩范围时沿用旧范围基线、新范围取当前值。"""
+    body = json.dumps(dict(entries), sort_keys=True, separators=(",", ":")).encode()
     return {
         "digest": hashlib.sha256(body).hexdigest(),
-        "entries": entries,
-        "tree": tree,
+        "entries": dict(entries),
+        "tree": None,
     }
 
 

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.thread_fixtures import accept_thread
 
 from harness_agent.threads.thread_persistence import TranscriptAppend, _user_record_id
-from tests.support.thread_fixtures import accept_thread
 
 
 def _request(method: str, params: dict[str, Any], request_id: str) -> dict[str, Any]:
@@ -27,15 +28,29 @@ def _initialize_params() -> dict[str, Any]:
 def _git_init(path: Path) -> Path:
     path.mkdir()
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
     (path / "file1.txt").write_text("initial v1\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True
+    )
     return path
 
 
-async def _capture_host(tmp_path: Path, workspace: Path) -> tuple[Any, list[dict[str, Any]]]:
+async def _capture_host(
+    tmp_path: Path, workspace: Path
+) -> tuple[Any, list[dict[str, Any]]]:
     from harness_agent.host.agent_host import AgentHost
 
     frames: list[dict[str, Any]] = []
@@ -59,7 +74,9 @@ def _result(frames: list[dict[str, Any]], request_id: str) -> dict[str, Any]:
     return frame["result"]
 
 
-async def _seed_two_turns(server: Any, workspace: Path, thread_id: str) -> tuple[str, str]:
+async def _seed_two_turns(
+    server: Any, workspace: Path, thread_id: str
+) -> tuple[str, str]:
     store = await server._ensure_thread_persistence()
     await accept_thread(store, thread_id, "Turn 1: 创建初始文件", run_id="run-1")
     tree_1 = server._git_checkpoints.create_tree_snapshot(workspace)
@@ -104,7 +121,9 @@ async def test_list_turns_uses_user_record_ids_and_omits_null_optional_fields(
     thread_id = "test-undo-thread"
     turn_1, turn_2 = await _seed_two_turns(server, workspace, thread_id)
 
-    await server.dispatch(_request("threads.list_turns", {"thread_id": thread_id}, "list_turns"))
+    await server.dispatch(
+        _request("threads.list_turns", {"thread_id": thread_id}, "list_turns")
+    )
     result = _result(frames, "list_turns")
     turns = result["turns"]
     assert [item["turn_id"] for item in turns] == [turn_1, turn_2]
@@ -117,33 +136,56 @@ async def test_list_turns_uses_user_record_ids_and_omits_null_optional_fields(
 
 
 @pytest.mark.parametrize("operation", ["undo", "redo"])
-async def test_code_restore_rejects_active_fusion_workspace_writer(tmp_path, operation):
-    """其他 Thread 的撤销/重做也不能覆盖 Fusion 正在验收的文件。"""
+async def test_code_restore_waits_for_fusion_scope_then_continues(tmp_path, operation):
+    """撤销/重做自动等待，取得权限前不修改活动任务的文件。"""
     workspace = _git_init(tmp_path / "git_project")
     server, frames = await _capture_host(tmp_path, workspace)
     thread_id = "test-undo-thread"
     turn_1, _ = await _seed_two_turns(server, workspace, thread_id)
     store = await server._ensure_thread_persistence()
     if operation == "redo":
-        await server.dispatch(_request("threads.undo", {
-            "thread_id": thread_id, "target_turn_id": turn_1, "mode": "code",
-        }, "prepare"))
+        await server.dispatch(
+            _request(
+                "threads.undo",
+                {
+                    "thread_id": thread_id,
+                    "target_turn_id": turn_1,
+                    "mode": "code",
+                },
+                "prepare",
+            )
+        )
         _result(frames, "prepare")
     task = await store.fusion_state_store().create(
-        thread_id="fusion-thread", workspace=workspace, source_message="修改代码",
-        profile={"profile_id": "duo", "lead": {}, "sidekick": {}, "config_fingerprint": "a" * 64},
+        thread_id="fusion-thread",
+        workspace=workspace,
+        source_message="修改代码",
+        profile={
+            "profile_id": "duo",
+            "lead": {},
+            "sidekick": {},
+            "config_fingerprint": "a" * 64,
+        },
     )
     await store.fusion_state_store().acquire_lease(task.task_id, "sidekick")
     before = (workspace / "file1.txt").read_text()
     params = {"thread_id": thread_id}
     if operation == "undo":
         params.update(target_turn_id=turn_1, mode="code")
+    pending = asyncio.create_task(
+        server.dispatch(_request("threads." + operation, params, "queued"))
+    )
     try:
-        await server.dispatch(_request("threads." + operation, params, "blocked"))
-        response = next(f for f in frames if f.get("id") == "blocked")
-        assert response.get("error", {}).get("message") == "FUSION_LEASE_BUSY", response
+        await asyncio.sleep(0.08)
+        assert not pending.done()
         assert (workspace / "file1.txt").read_text() == before
+        current = await store.fusion_state_store().get(task.task_id)
+        await store.fusion_state_store().cancel(task.task_id, current.version)
+        await asyncio.wait_for(pending, 3)
+        assert _result(frames, "queued")["success"] is True
     finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
         await server.close()
 
 
@@ -155,15 +197,32 @@ async def test_conversation_undo_rejects_same_thread_active_fusion_task(tmp_path
     turn_1, _ = await _seed_two_turns(server, workspace, thread_id)
     store = await server._ensure_thread_persistence()
     await store.fusion_state_store().create(
-        thread_id=thread_id, workspace=workspace, source_message="修改代码",
-        profile={"profile_id": "duo", "lead": {}, "sidekick": {}, "config_fingerprint": "a" * 64},
+        thread_id=thread_id,
+        workspace=workspace,
+        source_message="修改代码",
+        profile={
+            "profile_id": "duo",
+            "lead": {},
+            "sidekick": {},
+            "config_fingerprint": "a" * 64,
+        },
     )
     try:
-        await server.dispatch(_request("threads.undo", {
-            "thread_id": thread_id, "target_turn_id": turn_1, "mode": "conversation",
-        }, "blocked"))
+        await server.dispatch(
+            _request(
+                "threads.undo",
+                {
+                    "thread_id": thread_id,
+                    "target_turn_id": turn_1,
+                    "mode": "conversation",
+                },
+                "blocked",
+            )
+        )
         response = next(f for f in frames if f.get("id") == "blocked")
-        assert response.get("error", {}).get("message") == "FUSION_TASK_CONFLICT", response
+        assert response.get("error", {}).get("message") == "FUSION_TASK_CONFLICT", (
+            response
+        )
         assert await store.get_thread_revert_state(thread_id) is None
     finally:
         await server.close()
@@ -191,13 +250,17 @@ async def test_undo_both_restores_files_and_redo_restores_pre_undo_workspace(
     assert (workspace / "file1.txt").read_text(encoding="utf-8") == "initial v1\n"
     assert not (workspace / "file2.txt").exists()
 
-    await server.dispatch(_request("threads.list_turns", {"thread_id": thread_id}, "list_after_undo"))
+    await server.dispatch(
+        _request("threads.list_turns", {"thread_id": thread_id}, "list_after_undo")
+    )
     assert _result(frames, "list_after_undo")["reverted_turn_id"] == turn_1
 
     await server.dispatch(_request("threads.redo", {"thread_id": thread_id}, "redo"))
     redo_res = _result(frames, "redo")
     assert redo_res["success"] is True
-    assert (workspace / "file1.txt").read_text(encoding="utf-8") == "modified in turn 2\n"
+    assert (workspace / "file1.txt").read_text(
+        encoding="utf-8"
+    ) == "modified in turn 2\n"
     assert (workspace / "file2.txt").exists()
 
     store = await server._ensure_thread_persistence()
@@ -220,7 +283,9 @@ async def test_undo_conversation_keeps_files_and_marks_reverted(tmp_path: Path) 
         )
     )
     _result(frames, "undo")
-    assert (workspace / "file1.txt").read_text(encoding="utf-8") == "modified in turn 2\n"
+    assert (workspace / "file1.txt").read_text(
+        encoding="utf-8"
+    ) == "modified in turn 2\n"
     assert (workspace / "file2.txt").exists()
 
     store = await server._ensure_thread_persistence()
@@ -260,7 +325,9 @@ async def test_undo_code_restores_files_but_keeps_transcript(tmp_path: Path) -> 
     await server.close()
 
 
-async def test_new_run_after_conversation_undo_physically_truncates(tmp_path: Path) -> None:
+async def test_new_run_after_conversation_undo_physically_truncates(
+    tmp_path: Path,
+) -> None:
     """Reverted 态下发新 Prompt 会物理删除目标 Turn 之后的 Transcript 与 checkpoint。"""
     workspace = _git_init(tmp_path / "git_project")
     server, frames = await _capture_host(tmp_path, workspace)
@@ -279,7 +346,12 @@ async def test_new_run_after_conversation_undo_physically_truncates(tmp_path: Pa
     await server.dispatch(
         _request(
             "run.start",
-            {"mode": "build", "input": {"kind": "user", "message": "Turn 3: 新分支"}, "thread_id": thread_id, "run_id": "run-3"},
+            {
+                "mode": "build",
+                "input": {"kind": "user", "message": "Turn 3: 新分支"},
+                "thread_id": thread_id,
+                "run_id": "run-3",
+            },
             "run-3",
         )
     )
@@ -306,7 +378,12 @@ async def test_run_start_records_checkpoint_under_user_turn_id(tmp_path: Path) -
     await server.dispatch(
         _request(
             "run.start",
-            {"mode": "build", "input": {"kind": "user", "message": "hello checkpoint"}, "thread_id": thread_id, "run_id": "run-a"},
+            {
+                "mode": "build",
+                "input": {"kind": "user", "message": "hello checkpoint"},
+                "thread_id": thread_id,
+                "run_id": "run-a",
+            },
             "run-a",
         )
     )

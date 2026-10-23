@@ -369,6 +369,13 @@
         "capability": "fusion.manage",
         "min_minor": 11,
         "controlled": true
+      },
+      "fusion.release": {
+        "params": "#/$defs/fusionReleaseParams",
+        "result": "#/$defs/fusionReleaseResult",
+        "capability": "fusion.manage",
+        "min_minor": 11,
+        "controlled": true
       }
     },
     "events": {
@@ -7032,6 +7039,7 @@
         "phase": {
           "enum": [
             "READY",
+            "WAITING_RESOURCE",
             "WORKER_RUNNING",
             "CHECKING",
             "REVIEWING",
@@ -7101,6 +7109,20 @@
               "type": "null"
             }
           ]
+        },
+        "write_paths": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "resource_waits": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/fusionWorkspaceBlocker"
+          }
         }
       },
       "required": [
@@ -7207,6 +7229,7 @@
         "phase": {
           "enum": [
             "READY",
+            "WAITING_RESOURCE",
             "WORKER_RUNNING",
             "CHECKING",
             "REVIEWING",
@@ -7230,6 +7253,33 @@
         },
         "requires_inspection": {
           "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "paths",
+            "command"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "sequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         }
       },
       "required": [
@@ -7239,6 +7289,42 @@
         "round",
         "reason",
         "requires_inspection"
+      ],
+      "additionalProperties": false
+    },
+    "fusionReleaseParams": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stopped_inspection_note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "operation_id",
+        "expected_sequence",
+        "stopped_inspection_note"
+      ],
+      "additionalProperties": false
+    },
+    "fusionReleaseResult": {
+      "type": "object",
+      "properties": {
+        "released": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "released"
       ],
       "additionalProperties": false
     }

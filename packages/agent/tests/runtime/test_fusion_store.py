@@ -157,7 +157,11 @@ async def test_dispatched_worker_without_tool_effect_is_unknown_after_restart(
     store = persistence.fusion_state_store()
     task = await create(persistence)
     task, lease = await store.start_round(
-        task.task_id, task.version, {"revision": 1}, "dispatch", "message"
+        task.task_id,
+        task.version,
+        {"revision": 1, "allowed_paths": ["./"]},
+        "dispatch",
+        "message",
     )
     await store.mark_delivery("dispatch", "dispatched")
     task = await store.reconcile(task.task_id)
@@ -211,6 +215,8 @@ async def test_workspace_blocker_shows_only_owner_and_stop_facts(persistence):
         "round": 0,
         "reason": None,
         "requires_inspection": True,
+        "kind": "paths",
+        "paths": ["./"],
     }
     assert "source_message" not in blocker and "profile" not in blocker
     with pytest.raises(ValueError, match="FUSION_OUTCOME_UNKNOWN"):

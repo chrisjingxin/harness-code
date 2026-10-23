@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from harness_agent.policy.concurrency import AsyncRWLock
+from harness_agent.runtime.fusion.guard import FusionWriteGuard
 from harness_agent.runtime.fusion.profile import (
     FrozenFusionCheckPlan,
     FrozenFusionProfile,
@@ -23,6 +23,7 @@ from harness_agent.runtime.fusion.snapshot import (
     changed_paths,
     normalize_paths,
     path_allowed,
+    snapshot_from_entries,
 )
 from harness_agent.runtime.fusion.store import (
     FusionError,
@@ -55,20 +56,21 @@ class FusionService:
         workspace: Path,
         profile_provider: Callable[[str], FrozenFusionProfile],
         worker: Callable[[RunContext, FusionTask, str], Awaitable[None]],
-        check: Callable[
+        guard: FusionWriteGuard,
+        prepare_check: Callable[
             [RunContext, FrozenFusionCheckPlan, FusionLease],
-            Awaitable[Mapping[str, object]],
+            Awaitable[Callable[[], Awaitable[Mapping[str, object]]]],
         ],
-        rwlock: AsyncRWLock | None = None,
     ) -> None:
         """注入状态、冻结配置和 Host 执行端口，每个任务内串行控制操作。"""
         self.store = store
         self.workspace = workspace
         self.profile_provider = profile_provider
         self.worker = worker
-        self.check = check
-        self.rwlock = rwlock
+        self.guard = guard
+        self.prepare_check = prepare_check
         self._locks: dict[str, asyncio.Lock] = {}
+        self.resources = guard.resources
 
     async def _task(self, context: RunContext, role: str | None = None) -> FusionTask:
         task_id = getattr(context, "fusion_task_id", None)
@@ -134,7 +136,14 @@ class FusionService:
             "process_status": "unconfirmed"
             if result["pending_effects"]
             else "no_pending_effects",
-            "explanation": "停止凭据缺失表示操作结果尚未确认，不等于已经检测到运行中的进程。操作的会话归属见 operation_owner；没有 PID/停止凭据时不能声称进程已停。",
+            "explanation": (
+                "文件权限冲突由程序自动等待，可用后继续；暂停后发送“继续等待”恢复。"
+                if task.phase == "WAITING_RESOURCE"
+                or task.data.get("reason") == "resource_wait_paused"
+                else "停止凭据缺失表示结果尚未确认，不等于已经检测到进程占用；Host PID 不能证明子命令停止。"
+                if task.phase == "OUTCOME_UNKNOWN"
+                else "状态查询不会启动模型或命令；实际写入由文件范围和操作队列协调。"
+            ),
         }
         return result
 
@@ -157,17 +166,6 @@ class FusionService:
                     data={"reason": None, "workspace_blocker": None},
                 )
             return task
-        try:
-            task, _ = await self.store.begin_workspace_phase(
-                task.task_id, task.version, "REVIEWING"
-            )
-        except FusionWorkspaceBusy as exc:
-            return await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={"reason": "workspace_busy", "workspace_blocker": exc.blocker},
-            )
         ticket = await self.store.load_record(task.task_id, "ticket", ticket_id)
         order = await self.store.load_record(
             task.task_id, "order", str(task.data["revision"])
@@ -199,6 +197,15 @@ class FusionService:
         context.fusion_state.revision = task.data.get("revision", 0)
         async with self._locks.setdefault(task.task_id, asyncio.Lock()):
             task = await self._task(context, "lead")
+            pending = task.data.get("pending_round")
+            if pending and task.phase in {
+                "PAUSED",
+                "WAITING_USER",
+                "WAITING_RESOURCE",
+                "READY",
+            }:
+                await self._round(context, task, pending["order"], pending["message"])
+                return
             if (
                 task.phase not in {"PAUSED", "WAITING_USER"}
                 or not task.data.get("operation_id")
@@ -220,27 +227,7 @@ class FusionService:
             if delivery["state"] == "prepared" and not task.data.get(
                 "worker_execution_id"
             ):
-                if self.rwlock is not None:
-                    await self.rwlock.acquire_write()
-                try:
-                    task, lease = await self.store.begin_workspace_phase(
-                        task.task_id, task.version, "WORKER_RUNNING"
-                    )
-                except FusionWorkspaceBusy as exc:
-                    task = await self.store.update(
-                        task.task_id,
-                        task.version,
-                        phase="WAITING_USER",
-                        data={
-                            "reason": "workspace_busy",
-                            "workspace_blocker": exc.blocker,
-                        },
-                    )
-                    self._emit(context, task)
-                    return
-                finally:
-                    if self.rwlock is not None:
-                        await self.rwlock.release_write()
+                task, lease = await self._begin_phase(context, task, "WORKER_RUNNING")
                 context.fusion_state.generation = lease.generation
                 await self._dispatch(context, task, order, delivery["message"])
             elif delivery["state"] in {
@@ -284,8 +271,6 @@ class FusionService:
         task = await self._task(context, "lead")
         async with self._locks.setdefault(task.task_id, asyncio.Lock()):
             task = await self._task(context, "lead")
-            if task.data.get("reason") == "workspace_busy":
-                return task.to_record()
             if task.phase != "READY":
                 raise FusionError("FUSION_TASK_CONFLICT")
             if not goal.strip() or not brief.strip():
@@ -400,6 +385,28 @@ class FusionService:
                 + encode({k: v for k, v in order.items() if k != "baseline"}),
             )
 
+    async def resource_wait(
+        self, context: RunContext, request_id: str, blocker: Mapping[str, Any] | None
+    ) -> None:
+        """向角色执行区域展示真实等待原因；不会让模型重新派单。"""
+        task_id = getattr(context, "fusion_task_id", None)
+        if not task_id:
+            return
+        task = await self.store.get(task_id)
+        if not task.active:
+            return
+        waits = dict(task.data.get("resource_waits", {}))
+        before = dict(waits)
+        if blocker is None:
+            waits.pop(request_id, None)
+        else:
+            waits[request_id] = dict(blocker)
+        if waits != before:
+            task = await self.store.update(
+                task_id, task.version, data={"resource_waits": waits}
+            )
+            self._emit(context, task)
+
     async def _round(
         self,
         context: RunContext,
@@ -407,38 +414,103 @@ class FusionService:
         order: Mapping[str, Any],
         message: str,
     ) -> dict[str, object]:
-        operation_id = new_id("dispatch")
-        if self.rwlock is not None:
-            await self.rwlock.acquire_write()
+        """完整范围排队后只派发一次；等待期间不占 Host 工具写锁。"""
+        normalized = list(normalize_paths(self.workspace, order["allowed_paths"]))
+        if normalized != list(order["allowed_paths"]):
+            order = {
+                **order,
+                "allowed_paths": normalized,
+                "revision": max(order["revision"], task.data.get("revision", 0) + 1),
+            }
+        task = await self.store.update(
+            task.task_id,
+            task.version,
+            data={"pending_round": {"order": dict(order), "message": message}},
+        )
+        last_version = 0
+
+        async def waiting(current: FusionTask) -> None:
+            nonlocal last_version
+            if current.version != last_version:
+                self._emit(context, current)
+                last_version = current.version
+
         try:
-            if not task.data.get("round"):
-                # 跨 Host 的目录写者也要先取得，再读取首轮基线。
-                await self.store.acquire_lease(task.task_id, "sidekick")
-                order = {
-                    **order,
-                    "baseline": await asyncio.to_thread(
+            await self.store.wait_for_lease(
+                task.task_id, "sidekick", paths=order["allowed_paths"], on_wait=waiting
+            )
+            task = await self.store.get(task.task_id)
+            # 原范围基线保留；新申请的文件以取得许可后的真实内容为基线。
+            if not task.data.get("round") or order["revision"] != task.data.get(
+                "revision"
+            ):
+                async with self.guard.operation("snapshot", context=context, host=True):
+                    current = await asyncio.to_thread(
                         capture_snapshot, self.workspace, order["allowed_paths"]
-                    ),
-                }
+                    )
+                    if task.data.get("round"):
+                        previous = await self.store.load_record(
+                            task.task_id, "order", str(task.data["revision"])
+                        )
+                        entries = {
+                            name: value
+                            for name, value in current["entries"].items()
+                            if not path_allowed(name, previous["allowed_paths"])
+                        }
+                        entries.update(
+                            {
+                                name: value
+                                for name, value in previous["baseline"][
+                                    "entries"
+                                ].items()
+                                if path_allowed(name, previous["allowed_paths"])
+                            }
+                        )
+                        current = snapshot_from_entries(entries)
+                    order = {**order, "baseline": current}
+            task = await self.store.get(task.task_id)
             task, lease = await self.store.start_round(
-                task.task_id, task.version, order, operation_id, message
+                task.task_id, task.version, order, new_id("dispatch"), message
             )
-        except FusionWorkspaceBusy as exc:
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={"reason": "workspace_busy", "workspace_blocker": exc.blocker},
+        except BaseException:
+            await asyncio.shield(
+                self.store.pause_dispatch(
+                    task.task_id, task.data.get("operation_id"), context.run_id
+                )
             )
-            self._emit(context, task)
-            return task.to_record()
-        finally:
-            if self.rwlock is not None:
-                await self.rwlock.release_write()
+            raise
         context.fusion_state.revision = order["revision"]
         context.fusion_state.generation = lease.generation
         self._emit(context, task)
         return await self._dispatch(context, task, order, message)
+
+    async def _begin_phase(
+        self, context: RunContext, task: FusionTask, phase: str
+    ) -> tuple[FusionTask, FusionLease]:
+        """正常交接直接完成；暂停后的范围冲突也在 Host 内自动等待。"""
+        try:
+            return await self.store.begin_workspace_phase(
+                task.task_id, task.version, phase
+            )
+        except FusionWorkspaceBusy:
+            order = await self.store.load_record(
+                task.task_id, "order", str(task.data["revision"])
+            )
+
+            async def waiting(current: FusionTask) -> None:
+                self._emit(context, current)
+
+            await self.store.wait_for_lease(
+                task.task_id,
+                "host" if phase != "WORKER_RUNNING" else "sidekick",
+                paths=order["allowed_paths"],
+                on_wait=waiting,
+                preserve_ticket=True,
+            )
+            current = await self.store.get(task.task_id)
+            return await self.store.begin_workspace_phase(
+                current.task_id, current.version, phase
+            )
 
     async def _dispatch(
         self,
@@ -473,7 +545,9 @@ class FusionService:
                 )
                 self._emit(context, task)
                 return task.to_record()
-            await asyncio.shield(self.store.pause(task.task_id))
+            await asyncio.shield(
+                self.store.pause_dispatch(task.task_id, operation_id, context.run_id)
+            )
             raise
         task = await self.store.get(task.task_id)
         if task.phase == "OUTCOME_UNKNOWN":
@@ -490,7 +564,7 @@ class FusionService:
                 task.task_id,
                 task.version,
                 phase="WAITING_USER",
-                data={"reason": "worker_report_missing"},
+                data={"reason": task.data.get("reason") or "worker_report_missing"},
             )
             self._emit(context, task)
             return task.to_record()
@@ -516,19 +590,7 @@ class FusionService:
         """核对当前候选，复用已保存的检查记录后运行剩余计划。"""
         report_id = task.data["report_id"]
         report = await self.store.load_record(task.task_id, "report", report_id)
-        try:
-            task, lease = await self.store.begin_workspace_phase(
-                task.task_id, task.version, "CHECKING"
-            )
-        except FusionWorkspaceBusy as exc:
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={"reason": "workspace_busy", "workspace_blocker": exc.blocker},
-            )
-            self._emit(context, task)
-            return task.to_record()
+        task, lease = await self._begin_phase(context, task, "CHECKING")
         context.fusion_state.generation = lease.generation
         candidate = await asyncio.to_thread(
             capture_snapshot, self.workspace, order["allowed_paths"]
@@ -573,10 +635,12 @@ class FusionService:
             data={"candidate_digest": candidate["digest"]},
         )
         self._emit(context, task)
+        cycle = task.data.get("verification_cycle")
         saved_checks = {
             item["plan_id"]: item
             for item in await self.store.list_records(task.task_id, "check")
             if item["operation_id"] == task.data["operation_id"]
+            and item.get("verification_cycle") == cycle
         }
         started_plans = list(task.data.get("check_started_plan_ids", []))
         if any(name not in saved_checks for name in started_plans):
@@ -588,69 +652,132 @@ class FusionService:
             )
             self._emit(context, task)
             return task.to_record()
+        plans = [
+            plan
+            for plan in self.profile_provider(task.task_id).check_plans
+            if plan.plan_id in order["check_plan_ids"]
+        ]
+        # 审批在任何目录许可之外完成；消费准备结果前仍会重查策略和候选文件。
+        executors = {
+            plan.plan_id: await self.prepare_check(context, plan, lease)
+            for plan in plans
+        }
+        task = await self.store.get(task.task_id)
         checks = []
-        for plan in self.profile_provider(task.task_id).check_plans:
-            if plan.plan_id not in order["check_plan_ids"]:
-                continue
-            if plan.plan_id in saved_checks:
-                saved = saved_checks[plan.plan_id]
-                if (
-                    saved["revision"] != order["revision"]
-                    or saved["command_digest"] != plan.command_digest
-                ):
-                    raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-                checks.append(saved)
-                continue
-            started_plans.append(plan.plan_id)
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                data={"check_started_plan_ids": started_plans},
+        workspace_digest = None
+        async with self.guard.operation(
+            "command" if plans else "snapshot", context=context, host=True
+        ) as permit:
+            source_paths = [
+                "./",
+                *await self.store.claimed_paths(task.workspace_key),
+                *order["allowed_paths"],
+            ]
+            source = await asyncio.to_thread(
+                capture_snapshot, self.workspace, source_paths
             )
-            before = await asyncio.to_thread(
+            workspace_digest = source["digest"]
+            current = await asyncio.to_thread(
                 capture_snapshot, self.workspace, order["allowed_paths"]
             )
-            if before["digest"] != candidate["digest"]:
-                raise FusionError("FUSION_REPORT_STALE")
-            effect_id = await self.store.begin_effect(
-                task.task_id,
-                lease.generation,
-                context.execution_id,
-                "check",
-                plan.command_digest,
-            )
-            try:
-                check = dict(await self.check(context, plan, lease))
-            except BaseException:
-                await asyncio.shield(
-                    self.store.finish_effect(effect_id, succeeded=False, stopped=False)
+            if current["digest"] != candidate["digest"]:
+                task = await self.store.get(task.task_id)
+                task = await self.store.update(
+                    task.task_id,
+                    task.version,
+                    phase="WAITING_USER",
+                    data={
+                        "reason": "candidate_changed",
+                        "ticket_id": None,
+                        "verification": "unverified",
+                    },
                 )
-                await asyncio.shield(self.store.pause(task.task_id))
-                raise
-            stopped = check.get("stopped") is True
-            await self.store.finish_effect(
-                effect_id, succeeded=check.get("exit_code") == 0, stopped=stopped
-            )
-            if not stopped:
-                task = await self.store.pause(task.task_id)
                 self._emit(context, task)
                 return task.to_record()
-            after = await asyncio.to_thread(
-                capture_snapshot, self.workspace, order["allowed_paths"]
-            )
-            check = {
-                **check,
-                "revision": order["revision"],
-                "operation_id": task.data["operation_id"],
-                "command_digest": plan.command_digest,
-                "before_digest": before["digest"],
-                "after_digest": after["digest"],
-                "source_changed": after["digest"] != candidate["digest"],
-            }
-            checks.append(check)
-            await self.store.save_record(task.task_id, "check", new_id("check"), check)
-            if check["source_changed"]:
-                break
+            if saved_checks and any(
+                check.get("workspace_digest") != workspace_digest
+                for check in saved_checks.values()
+            ):
+                # 旧检查有完整停止回执，但其他源码更新过，整组重新检查，不拼接过期证据。
+                saved_checks = {}
+                started_plans = []
+                cycle = new_id("verification")
+                task = await self.store.get(task.task_id)
+                task = await self.store.update(
+                    task.task_id,
+                    task.version,
+                    data={"verification_cycle": cycle, "check_started_plan_ids": []},
+                )
+            for plan in plans:
+                if plan.plan_id in saved_checks:
+                    saved = saved_checks[plan.plan_id]
+                    if (
+                        saved["revision"] != order["revision"]
+                        or saved["command_digest"] != plan.command_digest
+                    ):
+                        raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
+                    checks.append(saved)
+                    continue
+                task = await self.store.get(task.task_id)
+                started_plans.append(plan.plan_id)
+                task = await self.store.update(
+                    task.task_id,
+                    task.version,
+                    data={"check_started_plan_ids": started_plans},
+                )
+                effect_id = await self.store.begin_effect(
+                    task.task_id,
+                    lease.generation,
+                    context.execution_id,
+                    "check",
+                    plan.command_digest,
+                )
+                context.fusion_state.check_effect_id = effect_id
+                await asyncio.to_thread(self.resources.bind_effect, permit, effect_id)
+                before = await asyncio.to_thread(
+                    capture_snapshot, self.workspace, source_paths
+                )
+                permit.stopped = False
+                try:
+                    check = dict(await executors[plan.plan_id]())
+                    permit.stopped = check.get("stopped") is True
+                except BaseException:
+                    await asyncio.shield(
+                        self.store.finish_effect(
+                            effect_id, succeeded=False, stopped=permit.stopped
+                        )
+                    )
+                    await asyncio.shield(self.store.pause(task.task_id))
+                    raise
+                await self.store.finish_effect(
+                    effect_id,
+                    succeeded=check.get("exit_code") == 0,
+                    stopped=permit.stopped,
+                )
+                if not permit.stopped:
+                    task = await self.store.pause(task.task_id)
+                    self._emit(context, task)
+                    return task.to_record()
+                after = await asyncio.to_thread(
+                    capture_snapshot, self.workspace, source_paths
+                )
+                check = {
+                    **check,
+                    "revision": order["revision"],
+                    "operation_id": task.data["operation_id"],
+                    "verification_cycle": cycle,
+                    "command_digest": plan.command_digest,
+                    "before_digest": before["digest"],
+                    "after_digest": after["digest"],
+                    "workspace_digest": workspace_digest,
+                    "source_changed": before["digest"] != after["digest"],
+                }
+                checks.append(check)
+                await self.store.save_record(
+                    task.task_id, "check", new_id("check"), check
+                )
+                if check["source_changed"]:
+                    break
         ticket_id = new_id("ticket")
         success = all(
             check.get("exit_code") == 0 and not check.get("source_changed")
@@ -676,6 +803,8 @@ class FusionService:
                 "checks": checks,
                 "verification": verification,
                 "success": success,
+                "workspace_digest": workspace_digest,
+                "source_paths": source_paths,
             },
         )
         task = await self.store.get(task.task_id)
@@ -764,6 +893,8 @@ class FusionService:
                 return task.to_record()
             if decision != "accept":
                 raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
+            task, lease = await self._begin_phase(context, task, "REVIEWING")
+            context.fusion_state.generation = lease.generation
             ticket = await self.store.load_record(task.task_id, "ticket", ticket_id)
             order = await self.store.load_record(
                 task.task_id, "order", str(task.data["revision"])
@@ -777,6 +908,25 @@ class FusionService:
             )
             if current["digest"] != ticket["candidate"]["digest"]:
                 raise FusionError("FUSION_REPORT_STALE")
+            if order["check_plan_ids"]:
+                async with self.guard.operation("snapshot", context=context, host=True):
+                    source = await asyncio.to_thread(
+                        capture_snapshot, self.workspace, ticket["source_paths"]
+                    )
+                if source["digest"] != ticket["workspace_digest"]:
+                    task = await self.store.get(task.task_id)
+                    task = await self.store.update(
+                        task.task_id,
+                        task.version,
+                        data={
+                            "verification_cycle": new_id("verification"),
+                            "check_started_plan_ids": [],
+                            "ticket_id": None,
+                            "verification": "unverified",
+                            "reason": "workspace_changed",
+                        },
+                    )
+                    return await self._verify(context, task, order)
             if not ticket["success"] or ticket["verification"] == "unverified":
                 raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
             expected = {requirement["id"] for requirement in order["requirements"]}
@@ -818,19 +968,36 @@ class FusionService:
                 for effect in await self.store.effects(task.task_id)
             ):
                 raise FusionError("FUSION_OUTCOME_UNKNOWN")
-            await self.store.save_record(
-                task.task_id,
-                "review",
-                new_id("review"),
-                {
-                    "ticket_id": ticket_id,
-                    "requirements": list(requirements),
-                    "test_review_digest": hashlib.sha256(
-                        test_review_reason.encode()
-                    ).hexdigest(),
-                },
-            )
-            task = await self.store.complete_task(task.task_id, task.version)
+            async with self.guard.operation("snapshot", context=context, host=True):
+                final = await asyncio.to_thread(
+                    capture_snapshot, self.workspace, order["allowed_paths"]
+                )
+                if final["digest"] != ticket["candidate"]["digest"]:
+                    raise FusionError("FUSION_REPORT_STALE")
+                if (
+                    order["check_plan_ids"]
+                    and (
+                        await asyncio.to_thread(
+                            capture_snapshot, self.workspace, ticket["source_paths"]
+                        )
+                    )["digest"]
+                    != ticket["workspace_digest"]
+                ):
+                    raise FusionError("FUSION_REPORT_STALE")
+                task = await self.store.get(task.task_id)
+                await self.store.save_record(
+                    task.task_id,
+                    "review",
+                    new_id("review"),
+                    {
+                        "ticket_id": ticket_id,
+                        "requirements": list(requirements),
+                        "test_review_digest": hashlib.sha256(
+                            test_review_reason.encode()
+                        ).hexdigest(),
+                    },
+                )
+                task = await self.store.complete_task(task.task_id, task.version)
             self._emit(context, task)
             return task.to_record()
 

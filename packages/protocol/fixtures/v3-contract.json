@@ -1677,6 +1677,24 @@
       }
     },
     {
+      "kind": "operation.params",
+      "name": "fusion.release",
+      "case": "valid",
+      "value": {
+        "operation_id": "x",
+        "expected_sequence": 1,
+        "stopped_inspection_note": "x"
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.release",
+      "case": "valid",
+      "value": {
+        "released": false
+      }
+    },
+    {
       "kind": "event",
       "name": "run.started",
       "case": "valid",
@@ -6797,6 +6815,53 @@
         "expected_version": 1,
         "stopped_inspection_note": true
       }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.release",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.release",
+      "case": "extra_field",
+      "value": {
+        "operation_id": "x",
+        "expected_sequence": 1,
+        "stopped_inspection_note": "x",
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.params",
+      "name": "fusion.release",
+      "case": "missing_field",
+      "value": {
+        "expected_sequence": 1,
+        "stopped_inspection_note": "x"
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.release",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.release",
+      "case": "extra_field",
+      "value": {
+        "released": false,
+        "__extra": true
+      }
+    },
+    {
+      "kind": "operation.result",
+      "name": "fusion.release",
+      "case": "missing_field",
+      "value": {}
     },
     {
       "kind": "event",

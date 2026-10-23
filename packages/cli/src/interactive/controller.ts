@@ -42,6 +42,7 @@
  */
 
 import { FusionFeature } from "./features"
+import { fusionWaitingLabel } from "./fusion-summary"
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
 import { builtinCommandCapabilities } from "./commands"
@@ -812,6 +813,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       timeline: [...scopeTimeline(this.state.timeline, this.state.childTimelineExecutionId ?? "root")],
       childTimelineExecutionId: this.state.childTimelineExecutionId,
       runProgress: this.state.runProgress,
+      fusionWaitLabel: fusionWaitingLabel(this.state.fusionTask),
       interaction: this.interactionFeature.interactionDto(this.interactionFeature.pendingInteraction, this.clock),
       confirmation: this.confirmation,
       lastRun: this.state.lastRun ?? null,

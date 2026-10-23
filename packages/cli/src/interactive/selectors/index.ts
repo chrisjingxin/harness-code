@@ -110,6 +110,7 @@ export function selectConversationView(snapshot: InteractiveSnapshot): Conversat
     activeRun: snapshot.activeRun,
     timeline: snapshot.timeline,
     runProgress: snapshot.runProgress,
+    fusionWaitLabel: snapshot.fusionWaitLabel,
     lastRun: snapshot.lastRun,
     childTimelineExecutionId: snapshot.childTimelineExecutionId,
     goal: snapshot.goal,

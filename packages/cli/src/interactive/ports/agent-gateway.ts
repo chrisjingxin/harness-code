@@ -1,3 +1,4 @@
+import type { FusionReleaseParams, FusionReleaseResult } from "@za38/protocol"
 /** Agent Gateway Port：定义 Interactive Core 与底层 Agent 通信的依赖倒置契约及错误类型。 */
 
 import {
@@ -118,6 +119,7 @@ export interface AgentGateway {
   listFusionProfiles(): Promise<Record<string, { lead_profile_id: string; sidekick_profile_id: string; check_plan_ids: string[] }>>
   inspectFusion(threadId: string): Promise<FusionStatusResult>
   recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus>
+  releaseFusionOperation(params: FusionReleaseParams): Promise<FusionReleaseResult>
   cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus>
   startRun(input: AgentGatewayStartRunInput): InteractiveAgentRun
   cancel(threadId: string, runId: string): Promise<RunCancelResult>
@@ -169,6 +171,7 @@ export function createFallbackNoopGateway(): AgentGateway {
     async listFusionProfiles() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
     async inspectFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
     async recoverFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
+    async releaseFusionOperation() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
     async cancelFusion() { throw new AgentGatewayError("FUSION_UNAVAILABLE", "Fusion 需要已连接的 Host") },
     startRun() {
       return {

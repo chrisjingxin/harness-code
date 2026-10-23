@@ -1,3 +1,4 @@
+import type { FusionReleaseParams, FusionReleaseResult } from "@za38/protocol"
 /**
  * 跨进程 JSON-RPC 核心通信客户端（AgentClient）
  *
@@ -474,6 +475,11 @@ export class AgentClient {
 
   recoverFusion(params: FusionRecoverParams): Promise<FusionTaskStatus> {
     return this.request(Method.FUSION_RECOVER, params)
+  }
+
+  /** 人工核查停止后解除普通工具的未知保护。 */
+  releaseFusionOperation(params: FusionReleaseParams): Promise<FusionReleaseResult> {
+    return this.request(Method.FUSION_RELEASE, params)
   }
 
   cancelFusion(params: FusionCancelParams): Promise<FusionTaskStatus> {

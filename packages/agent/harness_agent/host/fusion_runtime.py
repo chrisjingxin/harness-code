@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import shlex
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -196,8 +196,8 @@ class FusionRuntime:
             workspace=host._workspace,
             profile_provider=self.profiles.__getitem__,
             worker=self.run_worker,
-            check=self.run_check,
-            rwlock=host._tool_concurrency_lock,
+            guard=self.guard,
+            prepare_check=self.prepare_check,
         )
 
     async def close(self) -> None:
@@ -237,7 +237,17 @@ class FusionRuntime:
             if task.data.get("reason") == "workspace_busy":
                 task = await self.store.reconcile(task.task_id)
             inspection_only = (
-                task.phase == "OUTCOME_UNKNOWN"
+                task.phase in {"OUTCOME_UNKNOWN", "WAITING_RESOURCE"}
+                or task.data.get("reason") == "resource_wait_paused"
+                and command.input.message.strip().lower()
+                not in {
+                    "继续",
+                    "继续等待",
+                    "继续排队",
+                    "继续原任务",
+                    "continue",
+                    "resume",
+                }
                 or task.data.get("reason") == "workspace_busy"
             )
             if not inspection_only and (
@@ -603,10 +613,10 @@ class FusionRuntime:
                     )
                 )
 
-    async def run_check(
+    async def prepare_check(
         self, context: RunContext, plan: FrozenFusionCheckPlan, lease: FusionLease
-    ) -> Mapping[str, object]:
-        """检查固定配置命令；审批后重查权限、目录、候选和写者。"""
+    ) -> Callable[[], Awaitable[Mapping[str, object]]]:
+        """先审批固定命令，返回一次执行入口；目录许可由 Service 执行整组时取得。"""
         from harness_agent.policy.permission_rules import load_rules, merge_rules
         from harness_agent.runtime.verification import (
             ManagedVerificationPort,
@@ -685,8 +695,10 @@ class FusionRuntime:
             now_ms=lambda: int(time.time() * 1000),
             write_guard=lambda: self.guard.check_command(None),
         )
+        prepared = None
+        preparation_error = None
         try:
-            evidence = await port.run(
+            prepared = await port.prepare(
                 VerificationRequest(
                     command=command,
                     label=plan.plan_id,
@@ -699,34 +711,43 @@ class FusionRuntime:
                     ),
                 )
             )
-            return {
-                "plan_id": plan.plan_id,
-                "exit_code": evidence.exit_code,
-                "summary": evidence.output_summary,
-                "output_digest": evidence.output_digest,
-                "started_at_ms": evidence.started_at_ms,
-                "finished_at_ms": evidence.finished_at_ms,
-                "working_dir": evidence.working_dir,
-                "stopped": evidence.exit_code != 124,
-            }
-        except FusionError as exc:
-            return {
-                "plan_id": plan.plan_id,
-                "exit_code": None,
-                "summary": exc.code,
-                "stopped": True,
-            }
-        except VerificationError as exc:
-            if exc.code in {"VERIFICATION_TIMEOUT", "BACKEND_FAILED"}:
+        except (FusionError, VerificationError) as exc:
+            preparation_error = exc.code
+
+        async def execute_check() -> Mapping[str, object]:
+            if preparation_error is not None:
+                return {
+                    "plan_id": plan.plan_id,
+                    "exit_code": None,
+                    "summary": preparation_error,
+                    "stopped": True,
+                }
+            try:
+                evidence = await prepared()
+                return {
+                    "plan_id": plan.plan_id,
+                    "exit_code": evidence.exit_code,
+                    "summary": evidence.output_summary,
+                    "output_digest": evidence.output_digest,
+                    "started_at_ms": evidence.started_at_ms,
+                    "finished_at_ms": evidence.finished_at_ms,
+                    "working_dir": evidence.working_dir,
+                    "stopped": evidence.exit_code != 124,
+                }
+            except FusionError as exc:
                 return {
                     "plan_id": plan.plan_id,
                     "exit_code": None,
                     "summary": exc.code,
-                    "stopped": False,
+                    "stopped": True,
                 }
-            return {
-                "plan_id": plan.plan_id,
-                "exit_code": None,
-                "summary": exc.code,
-                "stopped": True,
-            }
+            except VerificationError as exc:
+                return {
+                    "plan_id": plan.plan_id,
+                    "exit_code": None,
+                    "summary": exc.code,
+                    "stopped": exc.code
+                    not in {"VERIFICATION_TIMEOUT", "BACKEND_FAILED"},
+                }
+
+        return execute_check

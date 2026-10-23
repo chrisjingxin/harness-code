@@ -667,7 +667,7 @@ async def test_real_run_resumes_prepared_order_and_reviews_without_new_round(
 async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
     tmp_path, monkeypatch
 ):
-    """真实图、文件工具与检查：阻塞后没有第二次模型调用，解除后完整完成。"""
+    """真实图只派单一次：自动等待、原生创建文件、检查与验收完整完成。"""
     monkeypatch.setenv("TEST_FUSION_LEAD", "fake")
     monkeypatch.setenv("TEST_FUSION_WORKER", "fake")
     calls = []
@@ -701,7 +701,7 @@ async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
             workspace=tmp_path,
             source_message="旧任务",
         )
-        lease = await store.acquire_lease(owner.task_id, "sidekick")
+        await store.acquire_lease(owner.task_id, "sidekick")
         owner = await store.update(
             owner.task_id,
             owner.version,
@@ -731,44 +731,36 @@ async def test_busy_workspace_stops_model_retry_then_creates_and_verifies(
             await asyncio.wait_for(current.task, 30)
             return await store.get(current.preparation.fusion_binding.task_id)
 
-        first = await run("blocked-run")
-        assert (
-            first.phase == "WAITING_USER" and first.data["reason"] == "workspace_busy"
-        ), first.to_record()
-        assert first.data["round"] == 0 and not (tmp_path / "created.py").exists()
-        assert len(calls) == 1 and calls[0][0] == "strong-test", calls
-        assert (
-            await store.acquire_lease(owner.task_id, "sidekick")
-        ).generation == lease.generation
-        second = await run("still-blocked-run")
-        assert second.task_id == first.task_id and second.phase == "WAITING_USER"
-        assert len(calls) == 2 and calls[-1][0] == "strong-test", (
-            "明确的新消息只进行 Lead 只读核查，不启动 Sidekick"
-        )
-        persistence = await host._ensure_thread_persistence()
-        history = (await persistence.load_context("t")).messages
-        assert isinstance(history[-1], AIMessage), (
-            "本次等待说明应追加在本次用户消息之后"
-        )
+        pending = asyncio.create_task(run("queued-run"))
+        async with asyncio.timeout(5):
+            while True:
+                current = await store.active("t")
+                if (
+                    current is not None
+                    and current.phase == "WAITING_RESOURCE"
+                    and current.data.get("workspace_blocker")
+                ):
+                    break
+                await asyncio.sleep(0.01)
+        assert current.data["round"] == 0 and not (tmp_path / "created.py").exists()
+        assert len(calls) == 1 and calls[0][0] == "strong-test"
         await store.cancel(owner.task_id, owner.version)
-        completed = await run("available-run")
-        assert completed.task_id == first.task_id
+        completed = await asyncio.wait_for(pending, 15)
         assert (
             completed.phase == "COMPLETED"
             and completed.data["verification"] == "verified"
-        ), completed.to_record()
+        ), json.dumps(completed.to_record(), ensure_ascii=False)
         assert (
             completed.data["round"] == 1
             and (tmp_path / "created.py").read_text() == "answer = 42\n"
         )
         assert any(call[0] == "cheap-test" for call in calls)
-        text = "".join(
-            frame.get("params", {}).get("payload", {}).get("text", "")
-            for frame in frames
-            if frame.get("method") == "event"
-            and frame.get("params", {}).get("type") == "content.delta"
-        )
-        assert "占用" in text and "older-thread" in text
-        assert "fusion_rework" not in text
+        progress = [
+            f["params"]["payload"]
+            for f in frames
+            if f.get("method") == "event"
+            and f.get("params", {}).get("type") == "fusion.progress"
+        ]
+        assert any(item["phase"] == "WAITING_RESOURCE" for item in progress)
     finally:
         await host.close()

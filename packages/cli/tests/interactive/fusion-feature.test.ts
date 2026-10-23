@@ -1,3 +1,4 @@
+import { fusionWaitingLabel } from "../../src/interactive/fusion-summary"
 import { test, expect } from "bun:test"
 import { Capability, EventType } from "@za38/protocol"
 import { FusionFeature } from "../../src/interactive/features/fusion-feature"
@@ -71,7 +72,7 @@ for (const unknown of [false, true]) for (const historical of [false, true]) {
     expect((await new FusionFeature().execute("status", ctx)).status).toBe("accepted")
     const text = ctx.getState().timeline.flatMap(item => item.type === "message" ? [item.message.content] : []).join("\n")
     expect(text).toContain("old-thread")
-    expect(text).toContain("/fusion resolve")
+    expect(text).toContain(unknown ? "/fusion resolve" : "自动继续")
     expect((await new FusionFeature().execute(unknown ? "resolve --stopped 已核查相关命令停止" : "resolve", ctx)).status).toBe("accepted")
     expect(calls).toHaveLength(1)
     expect(calls[0].task_id).toBe("owner-task")
@@ -330,7 +331,7 @@ test("workspace blocker with unknown effects shows in-place stop confirmation", 
   expect(text).toContain("/fusion resolve --stopped")
 })
 
-test("a stopped workspace owner keeps the ordinary cancellation instructions", async () => {
+test("a stopped workspace owner shows automatic continuation", async () => {
   const { fusionSummary } = await import("../../src/interactive/fusion-summary")
   const text = fusionSummary({
     profile: { profile_id: "duo" }, phase: "WAITING_USER", round: 0,
@@ -339,7 +340,7 @@ test("a stopped workspace owner keeps the ordinary cancellation instructions", a
       reason: "run_paused", requires_inspection: false,
     },
   } as any)
-  expect(text).toContain("/fusion resolve")
+  expect(text).toContain("自动继续")
   expect(text).not.toContain("/fusion recover")
 })
 
@@ -531,11 +532,11 @@ test("工作区占用显示原会话与处理方式，未派单不能当作完�
     workspace_blocker: { task_id: "owner", thread_id: "older-thread", phase: "WAITING_USER", round: 4, reason: "rework_limit", requires_inspection: false },
   }
   const text = fusionSummary(task)
-  expect(text).toContain("工作区被另一任务占用")
+  expect(text).toContain("文件范围被另一任务预留")
   expect(text).toContain("older-thread")
   expect(text).toContain("已达到返工上限")
   expect(text).not.toContain("/resume")
-  expect(text).toContain("/fusion resolve")
+  expect(text).toContain("自动继续")
   expect(text).toContain("尚未派单")
   expect(text).not.toContain("检查及审阅通过")
   const unknown = fusionSummary({ ...task, workspace_blocker: { ...task.workspace_blocker, requires_inspection: true } })
@@ -565,4 +566,22 @@ test("a workspace owner from another project has no misleading current-dialog ca
   const notice = JSON.stringify(ctx.getState())
   expect(notice).toContain("原项目")
   expect(notice).not.toContain("/fusion resolve")
+})
+
+test("ordinary unknown operation is inspected and released in current conversation", async () => {
+  const { ctx, calls } = context()
+  let blocker: any = { task_id: null, thread_id: null, phase: null, round: 0, reason: null, requires_inspection: true, kind: "command", paths: ["./"], operation_id: "access-1", sequence: 7 }
+  ctx.gateway.inspectFusion = async () => ({ task: null, workspace_blocker: blocker })
+  ctx.gateway.releaseFusionOperation = async params => { calls.push(params); blocker = null; return { released: true } }
+  const feature = new FusionFeature()
+  expect((await feature.execute("resolve", ctx)).status).toBe("rejected")
+  expect(calls).toHaveLength(0)
+  expect((await feature.execute("resolve --stopped 已确认所有相关命令停止", ctx)).status).toBe("accepted")
+  expect(calls).toEqual([{ operation_id: "access-1", expected_sequence: 7, stopped_inspection_note: "已确认所有相关命令停止" }])
+})
+
+test("waiting for files or commands is shown separately from model response", () => {
+  expect(fusionWaitingLabel({ active: true, phase: "WAITING_RESOURCE", workspace_blocker: { kind: "paths" } } as any)).toBe("等待文件写入权限")
+  expect(fusionWaitingLabel({ active: true, phase: "WORKER_RUNNING", resource_waits: [{ kind: "command" }] } as any)).toBe("等待其他命令结束")
+  expect(fusionWaitingLabel({ active: true, phase: "OUTCOME_UNKNOWN" } as any)).toBeNull()
 })

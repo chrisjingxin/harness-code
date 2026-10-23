@@ -11,13 +11,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import shlex
 import sqlite3
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -26,8 +28,18 @@ from langchain.agents.middleware.types import AgentMiddleware, hook_config
 from langchain_core.messages import AIMessage, ToolMessage
 
 from harness_agent.policy.bash_parser import parse_bash, strip_wrappers
+from harness_agent.runtime.fusion.resources import (
+    AccessPermit,
+    FusionResources,
+    scopes_overlap,
+)
 from harness_agent.runtime.fusion.roles import LEAD_CONTROLS, WORKER_CONTROLS
-from harness_agent.runtime.fusion.snapshot import normalize_paths, path_allowed
+from harness_agent.runtime.fusion.snapshot import (
+    capture_snapshot,
+    changed_paths,
+    normalize_paths,
+    path_allowed,
+)
 from harness_agent.runtime.fusion.store import (
     FusionError,
     FusionStateStore,
@@ -202,6 +214,10 @@ class FusionWriteGuard:
         self.workspace = workspace.resolve()
         self.key = workspace_key(workspace)
         self.context_provider = context_provider
+        self.resources = FusionResources(database_path, project_fingerprint, self.key)
+        self._permit: ContextVar[AccessPermit | None] = ContextVar(
+            "fusion-access-" + self.key, default=None
+        )
 
     def _connection(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -217,20 +233,46 @@ class FusionWriteGuard:
         *,
         path: str | None = None,
         host: bool = False,
+        check_resources: bool = True,
     ) -> tuple[str, int, int] | None:
-        lease = connection.execute(
-            "SELECT * FROM fusion_leases WHERE workspace_key=?", (self.key,)
-        ).fetchone()
+        permit = self._permit.get()
         task_id = getattr(context, "fusion_task_id", None)
-        if lease is None or lease["task_id"] is None:
-            if task_id:
+        relative = self._relative(path) if path is not None else "./"
+        if check_resources:
+            if (
+                permit
+                and not connection.execute(
+                    "SELECT 1 FROM fusion_access WHERE request_id=? AND project_fingerprint=? AND state IN ('running','unknown')",
+                    (permit.request_id, self.project),
+                ).fetchone()
+            ):
                 raise FusionError("FUSION_LEASE_BUSY")
+            for active in connection.execute(
+                "SELECT request_id,kind,paths_json FROM fusion_access WHERE workspace_key=? AND state IN ('running','unknown') AND kind!='reservation'",
+                (self.key,),
+            ):
+                if permit and active["request_id"] == permit.request_id:
+                    continue
+                if (
+                    active["kind"] != "file"
+                    or path is None
+                    or scopes_overlap([relative], json.loads(active["paths_json"]))
+                ):
+                    raise FusionError("FUSION_LEASE_BUSY")
+        if not task_id:
+            if check_resources:
+                for held in connection.execute(
+                    "SELECT * FROM fusion_reservations WHERE workspace_key=? AND owner IS NOT NULL",
+                    (self.key,),
+                ):
+                    if scopes_overlap([relative], json.loads(held["paths_json"])):
+                        raise FusionError("FUSION_LEASE_BUSY")
             return None
-        if (
-            not task_id
-            or lease["task_id"] != task_id
-            or lease["project_fingerprint"] != self.project
-        ):
+        lease = connection.execute(
+            "SELECT * FROM fusion_reservations WHERE workspace_key=? AND project_fingerprint=? AND task_id=? AND owner IS NOT NULL",
+            (self.key, self.project, task_id),
+        ).fetchone()
+        if lease is None:
             raise FusionError("FUSION_LEASE_BUSY")
         expected_owner = "host" if host else "sidekick"
         if lease["owner"] != expected_owner or lease["generation"] != getattr(
@@ -278,7 +320,12 @@ class FusionWriteGuard:
     def prepare(self, metadata: MutationMetadata) -> MutationMetadata:
         """准备时固定任务单和写者身份，批准后不能改用新范围。"""
         with self._connection() as connection:
-            token = self._check(connection, self.context_provider(), path=metadata.path)
+            token = self._check(
+                connection,
+                self.context_provider(),
+                path=metadata.path,
+                check_resources=False,
+            )
         return replace(metadata, fusion_authorization=token)
 
     @contextmanager
@@ -292,7 +339,11 @@ class FusionWriteGuard:
             if token != metadata.fusion_authorization:
                 raise FusionError("FUSION_LEASE_BUSY")
             if token:
-                operation_id = new_id("file")
+                operation_id = (
+                    self._permit.get().request_id
+                    if self._permit.get()
+                    else new_id("file")
+                )
                 task_id, revision, generation = token
                 row = connection.execute(
                     "SELECT version FROM fusion_tasks WHERE project_fingerprint=? AND task_id=?",
@@ -315,8 +366,8 @@ class FusionWriteGuard:
                 )
             connection.commit()
             connection.execute("BEGIN IMMEDIATE")
-            self._check(connection, self.context_provider(), path=metadata.path)
             try:
+                self._check(connection, self.context_provider(), path=metadata.path)
                 yield
             except BaseException:
                 if operation_id:
@@ -338,8 +389,74 @@ class FusionWriteGuard:
                 connection.rollback()
             connection.close()
 
+    def _relative(self, path: str) -> str:
+        if path.startswith(str(self.workspace) + "/"):
+            value = Path(path).relative_to(self.workspace).as_posix()
+        else:
+            value = path.lstrip("/")
+        return normalize_paths(self.workspace, [value])[0]
+
+    @asynccontextmanager
+    async def operation(
+        self,
+        kind: str,
+        *,
+        context: Any = None,
+        paths: Iterable[str] = ("./",),
+        host: bool = False,
+        request_id: str | None = None,
+    ) -> AsyncIterator[AccessPermit]:
+        """先排队再进入本机工具锁；嵌套文件契约和后端复查共用同一许可。"""
+        current = self._permit.get()
+        wanted = (
+            tuple(self._relative(path) for path in paths) if kind == "file" else ("./",)
+        )
+        covers = current is not None and (
+            current.kind in {"command", "snapshot"}
+            or current.kind == kind
+            and all(path_allowed(path, current.paths) for path in wanted)
+        )
+        if (
+            current
+            and current.task_id == getattr(context, "fusion_task_id", None)
+            and covers
+        ):
+            with self._connection() as connection:
+                live = connection.execute(
+                    "SELECT 1 FROM fusion_access WHERE request_id=? AND project_fingerprint=? AND state='running'",
+                    (current.request_id, self.project),
+                ).fetchone()
+            if live:
+                yield current
+                return
+        if getattr(getattr(context, "fusion_state", None), "inspection_only", False):
+            raise FusionError("FUSION_ROLE_DENIED")
+
+        async def notify(request: str, blocker: dict[str, Any] | None) -> None:
+            service = getattr(context, "fusion_service", None)
+            if service is not None:
+                await service.resource_wait(context, request, blocker)
+
+        async with self.resources.operation(
+            kind,
+            paths=wanted,
+            task_id=getattr(context, "fusion_task_id", None),
+            context=context,
+            host=host,
+            request_id=request_id,
+            on_wait=notify,
+        ) as permit:
+            token = self._permit.set(permit)
+            try:
+                yield permit
+            finally:
+                self._permit.reset(token)
+
     def check_command(self, context: Any, *, host: bool = False) -> None:
-        """命令实际执行前再次检查写者；普通执行不能借用 Fusion 写者。"""
+        """执行前验证当前许可与任务；后端只能复用 Host 私有上下文中的许可。"""
+        permit = self._permit.get()
+        if context is None and permit is not None:
+            context, host = permit.context, permit.host
         with self._connection() as connection:
             self._check(connection, context, host=host)
 
@@ -386,6 +503,8 @@ class FusionEffectMiddleware(AgentMiddleware):
             # 未知操作应立即核查；已结束或被接替的执行也不能再请求模型或补报告。
             return {"jump_to": "end"}
         if role == "sidekick":
+            if task.phase != "WORKER_RUNNING":
+                return {"jump_to": "end"}
             if task.data.get("report_id"):
                 return {"jump_to": "end"}
             rejection = _repeated_rejection(state)
@@ -488,8 +607,23 @@ class FusionEffectMiddleware(AgentMiddleware):
             "tool_search",
         }:
             return await handler(request)
+        if name in {"write_file", "edit_file", "delete_file"}:
+            try:
+                path = str(request.tool_call.get("args", {}).get("file_path", ""))
+                async with self.guard.operation("file", context=context, paths=[path]):
+                    return await handler(request)
+            except ValueError as exc:
+                return ToolMessage(
+                    content=getattr(exc, "code", "FUSION_PATH_INVALID"),
+                    tool_call_id=request.tool_call["id"],
+                    name=name,
+                    status="error",
+                )
         effect = None
+        permit = None
+        scope = self.guard.operation("command", context=context)
         try:
+            permit = await scope.__aenter__()
             self.guard.check_command(context)
             task_id = getattr(context, "fusion_task_id", None)
             if name == "execute" and task_id:
@@ -502,8 +636,26 @@ class FusionEffectMiddleware(AgentMiddleware):
                     context.execution_id,
                     name,
                     hashlib.sha256(command.encode()).hexdigest(),
+                    operation_id=permit.request_id,
                 )
+            source_before = None
+            order = None
+            if name == "execute" and task_id:
+                task = await self.store.get(task_id)
+                order = await self.store.load_record(
+                    task_id, "order", str(task.data["revision"])
+                )
+                source_paths = [
+                    "./",
+                    *await self.store.claimed_paths(self.guard.key),
+                    *order["allowed_paths"],
+                ]
+                source_before = await asyncio.to_thread(
+                    capture_snapshot, self.guard.workspace, source_paths
+                )
+            permit.stopped = False
             result = await handler(request)
+            permit.stopped = True
             if effect:
                 content = str(getattr(result, "content", "")).lower()
                 codes = re.findall(
@@ -513,9 +665,33 @@ class FusionEffectMiddleware(AgentMiddleware):
                 stopped = (
                     exit_code is not None and 0 <= exit_code <= 255 and exit_code != 124
                 )
+                if stopped and source_before is not None:
+                    source_after = await asyncio.to_thread(
+                        capture_snapshot, self.guard.workspace, source_paths
+                    )
+                    outside = [
+                        path
+                        for path in changed_paths(source_before, source_after)
+                        if not path_allowed(path, order["allowed_paths"])
+                    ]
+                    if outside:
+                        task = await self.store.get(task_id)
+                        await self.store.update(
+                            task_id,
+                            task.version,
+                            phase="WAITING_USER",
+                            data={"reason": "out_of_scope", "outside_paths": outside},
+                        )
+                        result = ToolMessage(
+                            content="FUSION_PATH_INVALID：命令执行期间，任务范围外的文件发生变化，已暂停本轮。请检查改动并调整 allowed_paths；不要原样重试。",
+                            tool_call_id=request.tool_call["id"],
+                            name=name,
+                            status="error",
+                        )
                 await self.store.finish_effect(
                     effect, succeeded=exit_code == 0, stopped=stopped
                 )
+                permit.stopped = stopped
                 if not stopped:
                     await self.store.pause(task_id)
             return result
@@ -533,10 +709,15 @@ class FusionEffectMiddleware(AgentMiddleware):
             )
         except BaseException:
             if effect:
-                import asyncio
-
                 await asyncio.shield(
-                    self.store.finish_effect(effect, succeeded=False, stopped=False)
+                    self.store.finish_effect(
+                        effect,
+                        succeeded=False,
+                        stopped=permit.stopped if permit is not None else True,
+                    )
                 )
                 await asyncio.shield(self.store.pause(context.fusion_task_id))
             raise
+        finally:
+            if permit is not None:
+                await scope.__aexit__(None, None, None)
