@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessageChunk
 
@@ -484,7 +485,8 @@ async def test_failed_model_attempt_does_not_emit_buffered_tool_signals() -> Non
 
 
 @pytest.mark.asyncio
-async def test_published_last_chunk_failure_does_not_retry_and_duplicate_output() -> None:
+@pytest.mark.parametrize("cause,expected", [(MalformedToolCallError(), "工具调用格式"), (httpx.ReadError("RAW_STREAM_SECRET"), "连接"), (TimeoutError("RAW_STREAM_SECRET"), "超时")])
+async def test_published_last_chunk_failure_does_not_retry_and_duplicate_output(cause, expected) -> None:
     """last chunk 后 provider 仍失败时不得重放整个模型回合。"""
 
     class _LateFailureAgent:
@@ -508,7 +510,7 @@ async def test_published_last_chunk_failure_does_not_retry_and_duplicate_output(
                 )
                 object.__setattr__(last, "chunk_position", "last")
                 yield ("messages", (last, {}))
-                raise MalformedToolCallError()
+                raise cause
             retry = AIMessageChunk(content="DUPLICATE")
             object.__setattr__(retry, "chunk_position", "last")
             yield ("messages", (retry, {}))
@@ -526,6 +528,8 @@ async def test_published_last_chunk_failure_does_not_retry_and_duplicate_output(
 
     assert error.value.code == "PROVIDER_OUTPUT_INTERRUPTED"
     assert error.value.retryable is True
+    assert expected in str(error.value) and "不会自动重放" in str(error.value)
+    assert "RAW_STREAM_SECRET" not in str(error.value)
     assert agent.calls == 1
     assert [signal.type for signal in observer.signals] == [
         "content.delta",

@@ -27,7 +27,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field, fields
 from typing import Any, Literal, Protocol
 
-from harness_agent.runtime.provider_retry import is_provider_transient
+from harness_agent.runtime.provider_retry import (
+    is_provider_transient,
+    provider_failure_message,
+)
 
 # 单条工具 payload 的 1 MiB wire 上限；与 schema x-harness / host 同步。
 MAX_TOOL_PAYLOAD_BYTES = 1 * 1024 * 1024
@@ -407,7 +410,7 @@ async def execute(
         if published_before_failure and is_provider_transient(exc):
             raise ExecutionStreamError(
                 "PROVIDER_OUTPUT_INTERRUPTED",
-                "Provider stream failed after output was published",
+                provider_failure_message(exc, output_published=True),
             ) from exc
         raise
 

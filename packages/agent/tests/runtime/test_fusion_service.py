@@ -139,6 +139,118 @@ async def test_delegate_rework_same_session_and_review_only(tmp_path):
         await p.close()
 
 
+@pytest.mark.parametrize(
+    "initial,requested,reason",
+    [
+        (["a.py"], [], ""),
+        (["a.py"], ["a.py"], ""),
+        (["a.py"], ["a.py", "a.py"], ""),
+        (["a.py"], ["a.py"], "重复说明不是扩权"),
+        (["./"], ["a.py", "new/sub.py"], ""),
+        (["src/", "a.py"], ["src/new.py", "src/", "a.py"], ""),
+    ],
+)
+async def test_rework_covered_paths_keep_order_and_refresh_permission(
+    tmp_path, initial, requested, reason
+):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    try:
+        await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持接口",
+            allowed_paths=initial,
+            check_plan_ids=[],
+        )
+        before = await store.load_record(task.task_id, "order", "1")
+        generation = ctx.fusion_state.generation
+        result = await service.rework(
+            ctx, feedback="修正实现", allowed_paths=requested, reason=reason
+        )
+        assert result["phase"] == "REVIEWING" and result["round"] == 2
+        assert result["revision"] == 1
+        assert await store.load_record(task.task_id, "order", "1") == before
+        with pytest.raises(ValueError, match="FUSION_EVIDENCE_INCOMPLETE"):
+            await store.load_record(task.task_id, "order", "2")
+        assert ctx.fusion_state.generation > generation
+        assert len(rounds) == 2 and rounds[0][0] == rounds[1][0]
+    finally:
+        await p.close()
+
+
+@pytest.mark.parametrize("requested", [["b.py"], ["a.py", "b.py"], ["./"]])
+async def test_rework_actual_expansion_requires_reason(tmp_path, requested):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    try:
+        await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持接口",
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        with pytest.raises(ValueError, match="FUSION_PATH_INVALID"):
+            await service.rework(
+                ctx, feedback="修正实现", allowed_paths=requested, reason=" "
+            )
+        assert len(rounds) == 1
+        result = await service.rework(
+            ctx, feedback="补充相关文件", allowed_paths=requested, reason="补充配套实现"
+        )
+        assert result["revision"] == 2 and result["round"] == 2
+    finally:
+        await p.close()
+
+
+async def test_rework_expansion_error_explains_scope_and_reason(tmp_path, monkeypatch):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    ctx.fusion_service = service
+    try:
+        await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持接口",
+            allowed_paths=["a.py"],
+            check_plan_ids=[],
+        )
+        before = await store.get(task.task_id)
+        response = await _lead_tool(monkeypatch, ctx, "fusion_rework").ainvoke(
+            {"feedback": "补充实现", "allowed_paths": ["b.py"], "reason": ""}
+        )
+        error = json.loads(response)
+        assert error["error"] == "FUSION_PATH_INVALID"
+        assert error["field"] == "allowed_paths/reason"
+        assert "reason" in error["message"] and "原范围" in error["message"]
+        assert await store.get(task.task_id) == before and len(rounds) == 1
+    finally:
+        await p.close()
+
+
+@pytest.mark.parametrize(
+    "requested", [["../escape.py"], ["/a.py"], [".git/config"], ["link.py"]]
+)
+async def test_rework_validates_paths_even_when_whole_workspace_allowed(
+    tmp_path, requested
+):
+    p, store, task, ctx, service, rounds, root = await setup(tmp_path)
+    try:
+        await service.delegate(
+            ctx,
+            goal="修改实现",
+            brief="保持接口",
+            allowed_paths=["./"],
+            check_plan_ids=[],
+        )
+        (root / "link.py").symlink_to(root / "a.py")
+        with pytest.raises(ValueError, match="FUSION_PATH_INVALID"):
+            await service.rework(
+                ctx, feedback="修正实现", allowed_paths=requested, reason="补充"
+            )
+        assert len(rounds) == 1
+    finally:
+        await p.close()
+
+
 async def test_workspace_busy_waits_with_owner_then_resumes_first_order(tmp_path):
     """正常冲突由 Host 排队，旧任务结束后同一次工具调用自动继续。"""
     p, store, task, ctx, service, rounds, root = await setup(tmp_path)

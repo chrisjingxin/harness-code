@@ -35,6 +35,7 @@ from harness_agent.runtime.provider_retry import (
     is_provider_error,
     is_provider_rate_limited,
     is_provider_transient,
+    provider_failure_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -752,24 +753,24 @@ def _provider_terminal_error(error: BaseException) -> ManagedAgentExecutionError
     if _error_code(error) == "MALFORMED_TOOL_CALL":
         return ManagedAgentExecutionError(
             "MALFORMED_TOOL_CALL",
-            "Model returned malformed tool call after retry budget was exhausted",
+            provider_failure_message(error),
             retryable=True,
         )
     if is_provider_rate_limited(error):
         return ManagedAgentExecutionError(
             "PROVIDER_RATE_LIMITED",
-            "Provider rate limit budget exhausted",
+            provider_failure_message(error),
             retryable=True,
         )
     if is_provider_transient(error):
         return ManagedAgentExecutionError(
             "PROVIDER_RETRY_EXHAUSTED",
-            "Provider retry budget exhausted",
+            provider_failure_message(error),
             retryable=True,
         )
     return ManagedAgentExecutionError(
         "PROVIDER_REQUEST_REJECTED",
-        "Provider rejected the model request",
+        provider_failure_message(error),
         retryable=False,
     )
 

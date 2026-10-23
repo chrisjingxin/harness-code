@@ -288,6 +288,7 @@ class BuildRunAdapter:
             if (
                 run.preparation.fusion_binding is not None
                 and not run.preparation.fusion_binding.inspection_only
+                and run.preparation.fusion_binding.resume_pending
                 and not fusion_continued
             ):
                 try:

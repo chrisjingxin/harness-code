@@ -38,6 +38,7 @@ from harness_agent.runtime.execution_stream import (
     ExecutionSignal,
     StreamInteractionRequest,
 )
+from harness_agent.runtime.fusion.followup import classify_fusion_followup
 from harness_agent.runtime.fusion.guard import FusionEffectMiddleware, FusionWriteGuard
 from harness_agent.runtime.fusion.profile import (
     FrozenFusionCheckPlan,
@@ -83,7 +84,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class FusionRunBinding:
-    """只携带任务和冻结角色身份，运行阶段不再决定模型。"""
+    """固定任务、角色身份及本轮恢复方式，运行阶段不再猜测用户意图。"""
 
     task_id: str
     profile: FrozenFusionProfile
@@ -91,6 +92,7 @@ class FusionRunBinding:
     sidekick_profile_key: str
     owner_id: str
     inspection_only: bool = False
+    resume_pending: bool = False
 
 
 class FusionWorkerObserver(ManagedChildObserver):
@@ -233,21 +235,14 @@ class FusionRuntime:
         task = await self.store.active(command.thread_id)
         created_task = False
         inspection_only = False
+        followup = classify_fusion_followup(command.input.message)
         if task:
             if task.data.get("reason") == "workspace_busy":
                 task = await self.store.reconcile(task.task_id)
             inspection_only = (
                 task.phase in {"OUTCOME_UNKNOWN", "WAITING_RESOURCE"}
                 or task.data.get("reason") == "resource_wait_paused"
-                and command.input.message.strip().lower()
-                not in {
-                    "继续",
-                    "继续等待",
-                    "继续排队",
-                    "继续原任务",
-                    "continue",
-                    "resume",
-                }
+                and followup == "inspect"
                 or task.data.get("reason") == "workspace_busy"
             )
             if not inspection_only and (
@@ -372,6 +367,7 @@ class FusionRuntime:
                     worker.runtime_profile.profile_key,
                     self.owner_id,
                     inspection_only,
+                    followup == "resume" and not inspection_only,
                 ),
             )
         except BaseException:

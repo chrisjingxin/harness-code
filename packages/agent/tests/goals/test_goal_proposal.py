@@ -906,7 +906,8 @@ async def test_proposal_adapter_exhausted_gateway_error_is_stable_and_retryable(
         assert outcome.code == "PROVIDER_RETRY_EXHAUSTED"
         assert outcome.retryable is True
         assert "Error code" not in outcome.message
-        assert "502" not in outcome.message
+        assert "HTTP 502" in outcome.message
+        assert "上游服务" in outcome.message
         pending = (await store.inspect("thread-1")).pending
         assert pending is not None
         assert pending.status == "failed"

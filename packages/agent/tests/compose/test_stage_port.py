@@ -167,6 +167,40 @@ async def test_managed_stage_port_runs_understand_through_real_delegator() -> No
     assert "child-" in checkpoint_ns
 
 
+async def test_managed_stage_preserves_safe_provider_reason(tmp_path) -> None:
+    import httpx
+    import openai
+
+    class LoginFailedEngine(_FakeEngine):
+        async def astream(self, stream_input, **kwargs):
+            self.calls.append({"messages": stream_input, "kwargs": kwargs})
+            yield ("messages", (AIMessage(content=""), {}))
+            raise openai.AuthenticationError(
+                "RAW_GATEWAY_SECRET",
+                response=httpx.Response(401, request=httpx.Request("POST", "https://example.invalid/v1")),
+                body={"type": "upstream_error", "message": "[cn-cli] 登录态失效，请重新登录 RAW_BODY_SECRET"},
+            )
+
+    engine = LoginFailedEngine(output="")
+    registry, root = await _registry_with_root()
+    port = ManagedStageAgentPort(
+        registry=registry,
+        pool=_FakePool(_FakeLease(engine)),
+        resolve_spec=lambda _key, **kwargs: _FakeSpec(),
+        config_home=tmp_path,
+        workspace=tmp_path,
+    )
+    with pytest.raises(AgentDelegationError) as caught:
+        await port.run(StageRequest(
+            stage="work-item-task", task="实现搜索功能", parent_ref=root,
+            profile_key="stage-profile", cancellation_token=RunCancellationToken(),
+        ))
+    assert caught.value.code == "COMPOSE_STAGE_EXECUTION_FAILED"
+    assert "HTTP 401" in str(caught.value) and "重新登录" in str(caught.value)
+    assert "RAW_" not in str(caught.value)
+    assert len(engine.calls) == 1
+
+
 async def test_managed_stage_port_uses_readonly_planning_spec() -> None:
     """Understand/Plan 请求只读 planning spec，Build 才使用可写 headless spec。"""
     engine = _FakeEngine(

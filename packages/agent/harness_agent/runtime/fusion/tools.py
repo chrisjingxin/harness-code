@@ -87,7 +87,7 @@ class ReworkInput(Input):
     allowed_paths: list[str] = Field(
         default_factory=list,
         max_length=256,
-        description="空列表沿用原范围；增加范围必须填写 reason。"
+        description="空列表或已授权的路径沿用原范围，不需要 reason；只有超出原范围时才必须填写 reason。"
         + PATH_SCOPE_DESCRIPTION,
     )
     reason: str = Field(default="", max_length=4000)
@@ -180,6 +180,11 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
                         }
                     )
                 hints = {
+                    "FUSION_PATH_INVALID": (
+                        "allowed_paths/reason",
+                        PATH_SCOPE_DESCRIPTION
+                        + "返工只有超出原范围才需填写非空 reason；仅修改原范围时可留空 allowed_paths 和 reason。",
+                    ),
                     "FUSION_CHECK_INVALID": (
                         "check_plan_ids",
                         "只选择配置中的检查 ID；留空会使用组合的全部检查。",

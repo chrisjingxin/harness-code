@@ -121,8 +121,11 @@ def install_inspection_model(monkeypatch):
 
 
 @pytest.mark.parametrize("state", ["unknown", "workspace_busy", "changed_profile"])
+@pytest.mark.parametrize(
+    "message", ["你看下测试进程是否属于当前会话", "继续返工，把问题修好"]
+)
 async def test_blocked_task_answers_readonly_question_without_changing_task_or_owner(
-    tmp_path, monkeypatch, state
+    tmp_path, monkeypatch, state, message
 ):
     calls, names, contexts = install_inspection_model(monkeypatch)
     (tmp_path / "a.py").write_text("unchanged")
@@ -178,7 +181,7 @@ async def test_blocked_task_answers_readonly_question_without_changing_task_or_o
                     "fusion_profile_id": "duo",
                     "input": {
                         "kind": "user",
-                        "message": "你看下测试进程是否属于当前会话",
+                        "message": message,
                     },
                 },
             }
@@ -395,16 +398,24 @@ async def test_inspection_stops_after_three_invalid_tool_requests(
 
 
 @pytest.mark.parametrize(
-    "message,readonly",
+    "message,readonly,resume_pending",
     [
-        ("检查谁占用了文件", True),
-        ("看看代码", True),
-        ("继续等待", False),
-        ("继续", False),
+        ("检查谁占用了文件", True, False),
+        ("看看代码", True, False),
+        ("继续等待", False, True),
+        ("继续", False, True),
+        ("继续返工", False, True),
+        ("继续返工，把问题修好", False, False),
+        ("继续返工：\n1. 修复空输入。\n2. 补充测试。", False, False),
+        ("请修复 a.py 的边界问题", False, False),
+        ("为什么不能继续返工？", True, False),
+        ("请不要继续返工", True, False),
+        ("继续之前先检查谁占用文件", True, False),
+        ("“继续返工”是什么意思", True, False),
     ],
 )
 async def test_paused_queue_questions_are_readonly_and_explicit_continue_resumes(
-    tmp_path, monkeypatch, message, readonly
+    tmp_path, monkeypatch, message, readonly, resume_pending
 ):
     from tests.host.test_fusion_run import make_host
 
@@ -446,6 +457,7 @@ async def test_paused_queue_questions_are_readonly_and_explicit_continue_resumes
             persistence,
         )
         assert prepared.fusion_binding.inspection_only is readonly
+        assert prepared.fusion_binding.resume_pending is resume_pending
     finally:
         if prepared is not None and prepared.on_abandon is not None:
             await prepared.on_abandon()

@@ -2105,11 +2105,12 @@ async def test_public_provider_output_failure_marks_run_retryable_without_replay
     assert agent.calls == 1
     assert [event.type for event in events].count("content.delta") == 1
     assert events[-1].type == "run.failed"
-    assert events[-1].payload["error"] == {
-        "code": "PROVIDER_OUTPUT_INTERRUPTED",
-        "message": "Provider stream failed after output was published",
-        "retryable": True,
-    }
+    error = events[-1].payload["error"]
+    assert set(error) == {"code", "message", "retryable"}
+    assert error["code"] == "PROVIDER_OUTPUT_INTERRUPTED"
+    assert error["retryable"] is True
+    assert "工具调用格式无效" in error["message"]
+    assert "不会自动重放" in error["message"]
     await coordinator.close()
 
 

@@ -24,6 +24,7 @@ from harness_agent.runtime.provider_retry import (
     is_provider_error,
     is_provider_rate_limited,
     is_provider_transient,
+    provider_failure_message,
     run_with_provider_retry,
 )
 
@@ -218,20 +219,20 @@ def _provider_draft_outcome(error: BaseException) -> AdapterOutcome:
         return AdapterOutcome(
             "failed",
             "PROVIDER_RATE_LIMITED",
-            "Provider rate limit budget exhausted",
+            provider_failure_message(error),
             retryable=True,
         )
     if is_provider_transient(error):
         return AdapterOutcome(
             "failed",
             "PROVIDER_RETRY_EXHAUSTED",
-            "Provider retry budget exhausted",
+            provider_failure_message(error),
             retryable=True,
         )
     return AdapterOutcome(
         "failed",
         "PROVIDER_REQUEST_REJECTED",
-        "Provider rejected the model request",
+        provider_failure_message(error),
         retryable=False,
     )
 

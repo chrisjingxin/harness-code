@@ -360,7 +360,16 @@ class FusionService:
             order = await self.store.load_record(
                 task.task_id, "order", str(task.data["revision"])
             )
-            if allowed_paths:
+            requested = (
+                normalize_paths(self.workspace, allowed_paths) if allowed_paths else ()
+            )
+            # 重复原路径或目录内的子路径没有增加权限；仍先校验全部输入，避免绕过非法路径检查。
+            additions = [
+                path
+                for path in requested
+                if not path_allowed(path, order["allowed_paths"])
+            ]
+            if additions:
                 if not reason.strip():
                     raise FusionError("FUSION_PATH_INVALID")
                 order = {
@@ -368,7 +377,7 @@ class FusionService:
                     "revision": order["revision"] + 1,
                     "allowed_paths": list(
                         normalize_paths(
-                            self.workspace, [*order["allowed_paths"], *allowed_paths]
+                            self.workspace, [*order["allowed_paths"], *additions]
                         )
                     ),
                     "expansion_reason_digest": hashlib.sha256(

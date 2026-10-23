@@ -479,8 +479,9 @@ class ManagedStageAgentPort:
             except ManagedAgentExecutionError as exc:
                 if exc.code == "RUN_CANCELLED":
                     raise asyncio_cancelled() from exc
+                # 执行器已生成可公开的原因；只传错误码会让阶段界面再次丢失处理指引。
                 raise AgentDelegationError(
-                    "COMPOSE_STAGE_EXECUTION_FAILED", exc.code
+                    "COMPOSE_STAGE_EXECUTION_FAILED", str(exc)
                 ) from exc
             return {"final": str(result.final_content)}
 

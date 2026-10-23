@@ -103,3 +103,13 @@ test("迟到的重复开始和正文不能复活已结束的 Sidekick", () => {
   const groups = segmentTimeline(visible).filter(segment => segment.kind === "group").map(segment => segment.group)
   expect(groups.find(group => group.fusion?.role === "sidekick")?.terminal).toBe(true)
 })
+
+
+test("模型故障的具体原因和下一步显示在共享时间线", () => {
+  const message = "上游账号 cn-cli 的登录已失效（HTTP 401）。请在代理控制台重新登录，完成授权后回到当前对话继续。"
+  const state = applyAgentEvent(liveFusionTimeline(), fusionEvent(EventType.RUN_FAILED, {
+    error: { code: "PROVIDER_REQUEST_REJECTED", message, retryable: false },
+  }, 7))
+  expect(JSON.stringify(scopeTimeline(state.timeline, "root"))).toContain(message)
+  expect(state.activity.kind).toBe("failed")
+})
