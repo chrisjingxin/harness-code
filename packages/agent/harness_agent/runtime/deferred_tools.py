@@ -78,7 +78,7 @@ class DeferredToolMiddleware(AgentMiddleware):
 
         return self._fallback_store, ""
 
-    def _visible(self, tools: Sequence[object], revealed: frozenset[str]) -> list[BaseTool]:
+    def _visible(self, tools: Sequence[object], revealed: frozenset[str]) -> list[BaseTool | dict[str, Any]]:
         """保持上游顺序，仅保留常驻与已 reveal 的工具。"""
         return [
             tool
@@ -130,16 +130,25 @@ class DeferredToolMiddleware(AgentMiddleware):
         return response
 
     def _record_reveal_from_response(self, runtime: object, response: Any) -> None:
-        """从 tool_search 的执行结果中提取命中的工具名并更新当前 Thread。"""
+        """从 tool_search 的执行结果中提取命中的工具名并更新当前 Thread。
+
+        关键词搜索（返回体带分页字段 total）只 reveal 携带 input_schema 的头部
+        强匹配；非头部命中只给名字+描述，不占后续轮次的 bind_tools 上下文。
+        select:/裸名精确模式（无分页字段）全量 reveal——模型点名要的参数路径。
+        """
         content = getattr(response, "content", response)
         if isinstance(content, str) and content.strip().startswith("{"):
             try:
                 data = json.loads(content)
                 if isinstance(data, dict):
+                    results = data.get("results", [])
+                    is_keyword_mode = "total" in data
                     hit_names = [
                         item["name"]
-                        for item in data.get("results", [])
-                        if isinstance(item, dict) and item.get("name")
+                        for item in results
+                        if isinstance(item, dict)
+                        and item.get("name")
+                        and (not is_keyword_mode or item.get("input_schema") is not None)
                     ]
                     if hit_names:
                         store, thread_id = self._resolve_store_and_thread(runtime)

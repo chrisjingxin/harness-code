@@ -73,6 +73,35 @@ def test_tool_search_searches_real_mcp_tools():
     assert entry["input_schema"]["properties"]["repo"]["type"] == "string"
 
 
+def test_tool_search_search_hint_uses_marked_server_name(tmp_path):
+    """D-1：search_hint 优先读加载时写入的 _harness_mcp_server_name，而非切名称前缀。
+
+    服务器名本身含下划线时（如 my_server），首个下划线前缀启发式会猜错归属。
+    """
+    tool = _fake_mcp_tool("my_server_search", "搜索我的服务器")
+    object.__setattr__(tool, "_harness_mcp_server_name", "my_server")
+    tools = create_harness_tools(str(tmp_path), mcp_tools=[tool])
+    search = _tool_search_instance(tools)
+
+    result = json.loads(search.invoke({"query": "搜索"}))
+
+    entry = result["results"][0]
+    assert entry["search_hint"] == "my_server"
+
+
+def test_tool_search_search_hint_falls_back_to_prefix_without_marker(tmp_path):
+    """D-1：未标记服务器名的工具（如手工构造）退化为首个下划线前缀启发式。"""
+    tools = create_harness_tools(
+        str(tmp_path),
+        mcp_tools=[_fake_mcp_tool("github_create_issue", "创建 issue")],
+    )
+    search = _tool_search_instance(tools)
+
+    result = json.loads(search.invoke({"query": "issue"}))
+
+    assert result["results"][0]["search_hint"] == "github"
+
+
 def test_tool_search_select_by_name():
     """select: 模式可在注册的 MCP 工具中精确选择。"""
     tools = create_harness_tools(
@@ -90,11 +119,11 @@ def test_tool_search_select_by_name():
     assert "missing" in result["note"]
 
 
-def test_tool_search_ignores_nameless_tools():
+def test_tool_search_ignores_nameless_tools(tmp_path):
     """没有 name 的工具不进入候选，不破坏搜索。"""
     nameless = _fake_mcp_tool("gh_search", "搜索")
     object.__setattr__(nameless, "name", "")
-    tools = create_harness_tools("/tmp", mcp_tools=[nameless])
+    tools = create_harness_tools(str(tmp_path), mcp_tools=[nameless])
     search = _tool_search_instance(tools)
 
     result = json.loads(search.invoke({"query": "search"}))
@@ -102,10 +131,10 @@ def test_tool_search_ignores_nameless_tools():
     assert result["results"] == []
 
 
-def test_tool_search_includes_deferred_builtin():
+def test_tool_search_includes_deferred_builtin(tmp_path):
     """延迟加载模式：内置低频工具进入候选（is_mcp=False），且不暴露打分标记。"""
     tools = create_harness_tools(
-        "/tmp",
+        str(tmp_path),
         deferred_builtin_names=frozenset({"lsp", "web_search"}),
     )
     search = _tool_search_instance(tools)

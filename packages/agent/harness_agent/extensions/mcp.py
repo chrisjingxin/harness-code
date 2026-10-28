@@ -50,10 +50,10 @@ import math
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlsplit
 
 from harness_agent.diagnostic_log.runtime import ensure_log
@@ -347,6 +347,37 @@ def _mark_mcp_tool(tool: Any, server_name: str) -> None:
                 metadata["harness_mcp_server_name"] = server_name
 
 
+def mcp_server_name_of(tool: Any) -> str | None:
+    """读取 ``_mark_mcp_tool`` 写入的归属服务器名；未标记时返回 None。
+
+    写入有三层兑底（__setattr__ → 实例属性 → metadata），读取需对应三层；
+    diagnostic_log/middleware.py 也按同序读取，避免两处不一致。
+    """
+    marked = getattr(tool, "_harness_mcp_server_name", None)
+    if isinstance(marked, str) and marked:
+        return marked
+    metadata = getattr(tool, "metadata", None)
+    if isinstance(metadata, dict):
+        fallback = metadata.get("harness_mcp_server_name")
+        if isinstance(fallback, str) and fallback:
+            return fallback
+    return None
+
+
+def _tool_belongs_to_server(tool: Any, server_name: str) -> bool:
+    """判断工具是否归属指定服务器。
+
+    优先读 ``mcp_server_name_of`` 的标记；未标记的工具（如加载异常路径）退化
+    为 ``{server_name}_`` 前缀匹配，此时可能因服务器名互相为前缀而误判，但
+    标记路径是常态，退化路径仅作兼容兑底。
+    """
+    marked = mcp_server_name_of(tool)
+    if marked is not None:
+        return marked == server_name
+    name = getattr(tool, "name", "")
+    return isinstance(name, str) and name.startswith(f"{server_name}_")
+
+
 def mcp_config_fingerprint(configs: list[McpServerConfig]) -> str:
     """计算 MCP 配置的脱敏 SHA-256 指纹。
 
@@ -555,7 +586,10 @@ class McpConnectionManager:
     def get_server_statuses(self) -> list[dict[str, object]]:
         """返回每个 MCP 服务器的连接状态和工具列表。
 
-        工具名通过 ``{server_name}_`` 前缀从已加载工具中匹配归属。
+        工具归属读加载时 ``_mark_mcp_tool`` 写入的标记；服务器名可含下划线且
+        互相为前缀（my / my_server），按 ``{server}_`` 前缀匹配会让较短名（my）
+        多认领较长名（my_server）的工具。未标记的工具（异常路径）按前缀退化
+        匹配（标记缺失本身已在 ``_mark_mcp_tool`` 的兑底路径处理）。
         """
         runtime = self._current_resource.value
         result: list[dict[str, object]] = []
@@ -568,11 +602,9 @@ class McpConnectionManager:
                 "error": "not connected",
             }))
             entry.setdefault("source", config.source)
-            # 按服务器名称前缀匹配归属工具
-            prefix = f"{config.name}_"
             entry["tool_names"] = [
                 t.name for t in runtime.tools
-                if hasattr(t, "name") and t.name.startswith(prefix)
+                if hasattr(t, "name") and _tool_belongs_to_server(t, config.name)
             ]
             result.append(entry)
         return result
@@ -599,7 +631,7 @@ class McpConnectionManager:
         if callable(close):
             result = close()
             if asyncio.iscoroutine(result) or hasattr(result, "__await__"):
-                await result
+                await cast(Awaitable[object], result)
         runtime.client = None
         runtime.tools = []
         runtime.connected = False
@@ -676,10 +708,10 @@ class McpConnectionManager:
         runtime = self._set_current_snapshot(snapshot)
 
         # 复制未删除服务器的工具到新 snapshot；旧 runtime 列表保持不变。
-        prefix = f"{name}_"
+        # 归属判定与 get_server_statuses 一致：优先读标记，避免服务器名互前缀误删。
         runtime.tools = [
             tool for tool in old_runtime.tools
-            if not (hasattr(tool, "name") and tool.name.startswith(prefix))
+            if not (hasattr(tool, "name") and _tool_belongs_to_server(tool, name))
         ]
         runtime.server_statuses = {
             server_name: dict(status)
@@ -784,6 +816,13 @@ class McpConnectionManager:
             for tool in attempt.tools:
                 tool_name = getattr(tool, "name", None)
                 if isinstance(tool_name, str) and tool_name in seen_tool_names:
+                    # D-1 同类：同名工具（如 my/server_search 与 my_server/search）
+                    # 第一个赢、第二个静默丢弃，模型与用户都无法诊断，记 warning 兜底。
+                    logger.warning(
+                        "MCP server %r tool %r conflicts with an already-loaded tool; skipped",
+                        name,
+                        tool_name,
+                    )
                     continue
                 if isinstance(tool_name, str):
                     seen_tool_names.add(tool_name)

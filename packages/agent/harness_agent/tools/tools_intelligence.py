@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 _VALID_LSP_ACTIONS = ("definition", "references", "diagnostics", "hover")
 _MAX_SEARCH_RESULTS = 20
+_MAX_SCHEMA_RESULTS = 5
+"""关键词搜索中只有头部强匹配携带完整 input_schema；其余只给名字+描述，
+模型需要参数时用 select:<name> 精确查询取回（避免一次搜索烧掉 6k-16k token）。"""
 
 # 停用词：参考 Qwen Code TOOL_SEARCH_STOP_WORDS，过滤噪声词避免淹没打分。
 _TOOL_SEARCH_STOP_WORDS = frozenset({
@@ -44,7 +47,7 @@ async def lsp(
     line: int | None = None,
     column: int | None = None,
     workspace_root: str = "",
-    manager: "PluginLspManager | None" = None,
+    manager: PluginLspManager | None = None,
 ) -> dict[str, Any]:
     """通过语言服务协议获取代码智能信息。
 
@@ -101,6 +104,9 @@ async def lsp(
 def tool_search(
     query: str,
     available_tools: list[dict[str, Any]] | None = None,
+    *,
+    limit: int = _MAX_SEARCH_RESULTS,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """搜索可用的 MCP 外部工具。
 
@@ -117,8 +123,13 @@ def tool_search(
             search_hint（提升匹配的策展词，如服务器名）、is_mcp（MCP 工具加权）
             与 input_schema（工具参数 JSON Schema）。
 
+        limit: 关键词搜索单页返回上限（默认 20）。
+        offset: 关键词搜索翻页偏移。
+
     Returns:
-        {"results": [{"name", "description", "search_hint", "input_schema"}]}
+        关键词搜索返回 {"results", "total", "hasMore", "nextOffset"}，results 中
+        仅前 ``_MAX_SCHEMA_RESULTS`` 名携带 input_schema；select:/裸名模式返回
+        {"results"} 且全部携带 input_schema（模型点名要参数的路径）。
     """
     if not available_tools:
         return {"results": [], "note": "无已注册的 MCP 工具"}
@@ -176,21 +187,43 @@ def tool_search(
             scored.append((score, entry))
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    results = [_result_entry(entry) for _, entry in scored[:_MAX_SEARCH_RESULTS]]
+    total = len(scored)
+    safe_offset = max(0, offset)
+    safe_limit = max(1, min(limit, _MAX_SEARCH_RESULTS))
+    page = scored[safe_offset:safe_offset + safe_limit]
+    results = [
+        _result_entry(entry, include_schema=(safe_offset + rank) < _MAX_SCHEMA_RESULTS)
+        for rank, (_, entry) in enumerate(page)
+    ]
     if not results:
+        # offset 越界（total > 0 但本页为空）与“关键词真的没命中”是两种语义：
+        # 前者照常带 total/hasMore，后者才提示换关键词，避免模型误判为查询词不对。
+        if total > 0:
+            return {"results": [], "total": total, "hasMore": False, "nextOffset": None}
         return {"results": [], "note": "未找到匹配工具，可尝试更宽泛的关键词"}
-    return {"results": results}
+    next_offset = safe_offset + len(results)
+    response: dict[str, Any] = {
+        "results": results,
+        "total": total,
+        "hasMore": next_offset < total,
+        "nextOffset": next_offset if next_offset < total else None,
+    }
+    if any("input_schema" not in entry for entry in results):
+        response["schema_hint"] = (
+            "仅头部强匹配携带参数 schema；其余工具参数可用 select:<name> 精确查询获取"
+        )
+    return response
 
 
-def _result_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    """把候选条目投影为搜索结果；旧字段 name/description 保持不变以向后兼容。"""
+def _result_entry(entry: dict[str, Any], *, include_schema: bool = True) -> dict[str, Any]:
+    """把候选条目投影为搜索结果；name/description 恒定携带（reveal 解析依赖 name）。"""
     result: dict[str, Any] = {
         "name": str(entry.get("name", "")),
         "description": str(entry.get("description", "")),
     }
     if entry.get("search_hint"):
         result["search_hint"] = str(entry["search_hint"])
-    if entry.get("input_schema") is not None:
+    if include_schema and entry.get("input_schema") is not None:
         result["input_schema"] = entry["input_schema"]
     return result
 

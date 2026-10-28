@@ -239,3 +239,65 @@ def test_tool_search_limit():
     result = tool_search("工具", available_tools=tools)
 
     assert len(result["results"]) == 20
+
+
+def test_tool_search_only_top_hits_carry_schema():
+    """D-2：关键词搜索只给头部强匹配带 input_schema，其余给名字+描述省 token。
+
+    deferred 机制目的是省 context，20 条全带 schema 每次搜索烧 6k-16k token，
+    机制自我否定。排名分靠后的候选只提供名称与描述，需参数时模型可用
+    select:<name> 精确查询取回 schema。
+    """
+    # 让排名可预期：名称命中的工具分数高于描述命中的工具。
+    # 避开停用词（search/find/tool 会被过滤，见 _TOOL_SEARCH_STOP_WORDS）。
+    tools = [
+        _mcp_tool(f"lookup_repo_{i}", "检索仓库")
+        for i in range(8)
+    ] + [
+        _mcp_tool(f"helper_{i}", "lookup 辅助工具")
+        for i in range(8)
+    ]
+    result = tool_search("lookup", available_tools=tools)
+
+    assert result["results"]
+    entries = result["results"]
+    with_schema = [e for e in entries if "input_schema" in e]
+    without_schema = [e for e in entries if "input_schema" not in e]
+    # 只有头部强匹配带 schema（上限 5 条），其余不带
+    assert 1 <= len(with_schema) <= 5
+    assert without_schema, "非头部命中不应携带 input_schema"
+    # 无 schema 的条目仍保留 name/description（reveal 解析依赖 name）
+    assert all(e["name"] for e in without_schema)
+    # 返回体给出获取完整 schema 的提示
+    assert result.get("schema_hint"), "应提示模型用 select 取回完整 schema"
+
+
+def test_tool_search_select_mode_still_returns_schema():
+    """D-2：select: 精确选择是模型点名要 schema 的路径，必须保留完整 schema。"""
+    tools = [_mcp_tool("github_create_issue", "创建 issue")]
+    result = tool_search("select:github_create_issue", available_tools=tools)
+
+    entry = result["results"][0]
+    assert entry["input_schema"]["properties"]["repo"]["type"] == "string"
+
+
+def test_tool_search_limit_offset_pagination():
+    """D-2：limit/offset 分页，返回 hasMore/nextOffset 供翻页。"""
+    tools = [
+        {"name": f"tool_{i:02d}", "description": "通用工具", "is_mcp": False}
+        for i in range(30)
+    ]
+    page1 = tool_search("工具", available_tools=tools, limit=10)
+
+    assert len(page1["results"]) == 10
+    assert page1["total"] == 30
+    assert page1["hasMore"] is True
+    assert page1["nextOffset"] == 10
+
+    page2 = tool_search("工具", available_tools=tools, limit=10, offset=10)
+    assert [e["name"] for e in page2["results"]][0] == "tool_10"
+
+    page3 = tool_search("工具", available_tools=tools, limit=10, offset=20)
+    assert len(page3["results"]) == 10
+    assert page3["hasMore"] is False
+    assert page3["nextOffset"] is None

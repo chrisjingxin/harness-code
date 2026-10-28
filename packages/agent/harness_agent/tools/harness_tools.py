@@ -17,8 +17,10 @@ from langchain_core.tools import StructuredTool
 
 from harness_agent.tools.tools_web import web_fetch as _web_fetch_impl
 from harness_agent.tools.tools_web import web_search as _web_search_impl
+from harness_agent.extensions.mcp import mcp_server_name_of
 from harness_agent.tools.tools_intelligence import lsp as _lsp_impl
 from harness_agent.tools.tools_intelligence import tool_search as _tool_search_impl
+from harness_agent.tools.tools_intelligence import _MAX_SEARCH_RESULTS
 from harness_agent.tools.tools_memory import memory_save as _memory_save_impl
 from harness_agent.tools.tools_memory import memory_search as _memory_search_impl
 from harness_agent.tools.tools_mode import enter_plan_mode as enter_plan_mode_impl
@@ -131,16 +133,21 @@ def create_harness_tools(
     ))
 
     # --- tool_search ---
-    def _tool_search(query: str) -> str:
-        """搜索可用的 MCP 外部工具。
+    def _tool_search(query: str, limit: int = _MAX_SEARCH_RESULTS, offset: int = 0) -> str:
+        """搜索可用的 MCP 外部工具，返回工具名/描述/所属服务器与分页信息。
+
+        仅头部强匹配携带参数 schema；其余工具可用 select:<name> 精确查询取回。
 
         Args:
-            query: 搜索关键词，匹配工具名称或描述。
+            query: 搜索关键词，匹配工具名称或描述；select:name1,name2 精确选择。
+            limit: 单页返回上限（默认 20）。
+            offset: 翻页偏移（默认 0）。
         """
         # 把运行时真实 MCP 工具投影为搜索候选：名称、描述、服务器名
-        # search_hint 与参数 schema。MCP 工具名按 ``{server}_{tool}`` 拼接
-        # （extensions/mcp.py 归属匹配同前缀），首个下划线前即服务器名；
-        # 服务器名规范不允许空格，此启发式对合法配置成立。
+        # search_hint 与参数 schema。服务器归属优先读加载时写入的
+        # ``_harness_mcp_server_name``（extensions/mcp.py `_mark_mcp_tool`）；
+        # 服务器名本身可含下划线且互相为前缀（my / my_server），
+        # 切首个下划线前缀会猜错，仅作为未标记工具的退化路径。
         candidates: list[dict[str, object]] = []
         for tool in mcp_tools or ():
             name = str(getattr(tool, "name", ""))
@@ -149,7 +156,7 @@ def create_harness_tools(
             candidates.append({
                 "name": name,
                 "description": str(getattr(tool, "description", "") or ""),
-                "search_hint": name.split("_", 1)[0],
+                "search_hint": mcp_server_name_of(tool) or name.split("_", 1)[0],
                 "is_mcp": True,
                 "input_schema": _tool_input_schema(tool),
             })
@@ -161,7 +168,10 @@ def create_harness_tools(
                 "is_mcp": False,
                 "input_schema": _tool_input_schema(tool),
             })
-        return json.dumps(_tool_search_impl(query, available_tools=candidates or None), ensure_ascii=False)
+        return json.dumps(
+            _tool_search_impl(query, available_tools=candidates or None, limit=limit, offset=offset),
+            ensure_ascii=False,
+        )
 
     tools.append(StructuredTool.from_function(
         func=_tool_search,

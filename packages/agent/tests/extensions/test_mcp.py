@@ -458,14 +458,19 @@ class TestMcpServerStatuses:
         ]
         mgr = _manager(configs)
 
-        # 构造带名称前缀的 mock 工具
+        # 构造带名称前缀的 mock 工具（每个 server 返回各自的工具对象；
+        # 去重在打标记之前，重复名字直接被跳过，先连接的服务器标记生效）
         tool_a = MagicMock()
         tool_a.name = "alpha_search"
         tool_b = MagicMock()
         tool_b.name = "beta_query"
 
+        async def get_tools(*, server_name=None):
+            assert isinstance(server_name, str)
+            return {"alpha": [tool_a], "beta": [tool_b]}[server_name]
+
         mock_client = MagicMock()
-        mock_client.get_tools = AsyncMock(return_value=[tool_a, tool_b])
+        mock_client.get_tools = AsyncMock(side_effect=get_tools)
 
         with patch(
             "langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client
@@ -572,14 +577,17 @@ class TestMcpServerStatuses:
         tool_fs_write.name = "fs_write_file"
         tool_git_log = MagicMock()
         tool_git_log.name = "git_log"
-        # 不匹配任何服务器前缀的工具
+        # 不匹配任何服务器前缀的工具（由 git 提供，验证归属不看名字前缀）
         tool_other = MagicMock()
         tool_other.name = "unknown_tool"
 
+        async def get_tools(*, server_name=None):
+            if server_name == "fs":
+                return [tool_fs_read, tool_fs_write]
+            return [tool_git_log, tool_other]
+
         mock_client = MagicMock()
-        mock_client.get_tools = AsyncMock(
-            return_value=[tool_fs_read, tool_fs_write, tool_git_log, tool_other]
-        )
+        mock_client.get_tools = AsyncMock(side_effect=get_tools)
 
         with patch(
             "langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client
@@ -591,7 +599,42 @@ class TestMcpServerStatuses:
         git_status = next(s for s in statuses if s["name"] == "git")
 
         assert fs_status["tool_names"] == ["fs_read_file", "fs_write_file"]
-        assert git_status["tool_names"] == ["git_log"]
+        # unknown_tool 由 git 提供：标记归属按真实来源，不看名字前缀。
+        assert git_status["tool_names"] == ["git_log", "unknown_tool"]
+
+    @pytest.mark.asyncio
+    async def test_tool_attribution_uses_marked_server_name(self):
+        """D-1：归属优先读 _harness_mcp_server_name，而非名称前缀。
+
+        服务器名含下划线且互为前缀时（my / my_server），``my_`` 前缀会同时
+        匹配两个服务器的工具，让较短名（my）多认领。
+        """
+        configs = [
+            McpServerConfig(name="my", transport="stdio", command="cmd-my"),
+            McpServerConfig(name="my_server", transport="stdio", command="cmd-mys"),
+        ]
+        mgr = _manager(configs)
+
+        tool_a = MagicMock()
+        tool_a.name = "my_lookup"
+        tool_b = MagicMock()
+        tool_b.name = "my_server_search"
+
+        async def get_tools(*, server_name=None):
+            assert isinstance(server_name, str)
+            return {"my": [tool_a], "my_server": [tool_b]}[server_name]
+
+        mock_client = MagicMock()
+        mock_client.get_tools = AsyncMock(side_effect=get_tools)
+
+        with patch(
+            "langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client
+        ):
+            await mgr.connect_all()
+
+        statuses = {item["name"]: item for item in mgr.get_server_statuses()}
+        assert statuses["my"]["tool_names"] == ["my_lookup"]
+        assert statuses["my_server"]["tool_names"] == ["my_server_search"]
 
 
 class TestMcpHotConnectDisconnect:
@@ -633,7 +676,7 @@ class TestMcpHotConnectDisconnect:
             result = await manager.add_server(config)
 
         assert result["status"] == "failed"
-        assert "refused" in result["error"]
+        assert "refused" in str(result["error"])
         assert len(manager.get_tools()) == 0
 
     @pytest.mark.asyncio
@@ -671,6 +714,32 @@ class TestMcpHotConnectDisconnect:
     def test_remove_nonexistent_server(self) -> None:
         manager = _manager()
         assert manager.remove_server("nonexistent") is False
+
+    def test_remove_server_does_not_remove_prefix_sibling(self) -> None:
+        """D-1：移除 my 时不应误删 my_server 的工具（前缀互含的边界）。"""
+        from harness_agent.extensions.mcp import _mark_mcp_tool, build_mcp_snapshot
+
+        snapshot = build_mcp_snapshot(
+            [
+                McpServerConfig(name="my", transport="stdio", command="x"),
+                McpServerConfig(name="my_server", transport="stdio", command="y"),
+            ],
+            revision="test",
+        )
+        manager = McpConnectionManager(snapshot)
+        tool_my = MagicMock()
+        tool_my.name = "my_lookup"
+        tool_sibling = MagicMock()
+        tool_sibling.name = "my_server_search"
+        _mark_mcp_tool(tool_my, "my")
+        _mark_mcp_tool(tool_sibling, "my_server")
+        runtime = manager._current_resource.value
+        runtime.tools = [tool_my, tool_sibling]
+
+        assert manager.remove_server("my") is True
+        remaining = [t.name for t in manager.get_tools()]
+        assert "my_server_search" in remaining
+        assert "my_lookup" not in remaining
 
     @pytest.mark.asyncio
     async def test_apply_snapshot_replaces_runtime_input(self) -> None:

@@ -152,6 +152,91 @@ def test_wrap_tool_call_intercepts_tool_search_and_reveals():
     assert "server_b_tool" not in visible
 
 
+def test_keyword_search_reveals_only_schema_carrying_hits():
+    """R-1：关键词搜索只 reveal 带 schema 的头部命中，非头部命中不占后续轮次上下文。
+
+    D-2 后关键词结果仅前 _MAX_SCHEMA_RESULTS 名带 input_schema，其余只给名字+描述；
+    若仍把全部 20 条 reveal，每个工具的完整 schema 会在之后每轮 bind_tools 时带进请求，
+    D-2 省的 token 被后续轮次吃回。select:/裸名模式（返回体无 total 字段）保持全量 reveal。
+    """
+    store = ThreadDeferredToolStore()
+    middleware = DeferredToolMiddleware(resident=RESIDENT)
+
+    snapshot = _make_test_snapshot("thread-test")
+    context = RunContext(
+        thread_id="thread-test",
+        run_id="run-1",
+        approval_mode="auto",
+        context_snapshot=snapshot,
+        deferred_tool_store=store,
+    )
+    runtime = type("Runtime", (), {"context": context})()
+
+    request = ToolCallRequest(
+        tool_call={"name": "tool_search", "args": {"query": "server"}, "id": "tc1"},
+        tool=_tool("tool_search"),
+        runtime=runtime,
+        state={},
+    )
+
+    # 关键词搜索返回体：带分页字段（total/hasMore），前 5 名带 schema，其余不带。
+    search_result_json = json.dumps({
+        "results": [
+            {"name": "server_a_tool", "description": "A", "input_schema": {"type": "object"}},
+            {"name": "server_b_tool", "description": "B"},
+        ],
+        "total": 2,
+        "hasMore": False,
+        "nextOffset": None,
+    })
+
+    def _handler(req: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content=search_result_json, tool_call_id="tc1")
+
+    middleware.wrap_tool_call(request, _handler)
+
+    # 只有带 schema 的头部命中被 reveal；不带 schema 的不登记
+    assert store.get_revealed("thread-test") == frozenset({"server_a_tool"})
+
+
+def test_select_search_reveals_all_named_hits():
+    """R-1：select:/裸名模式（返回体无分页字段）保持全量 reveal——模型点名要的。"""
+    store = ThreadDeferredToolStore()
+    middleware = DeferredToolMiddleware(resident=RESIDENT)
+
+    snapshot = _make_test_snapshot("thread-test")
+    context = RunContext(
+        thread_id="thread-test",
+        run_id="run-1",
+        approval_mode="auto",
+        context_snapshot=snapshot,
+        deferred_tool_store=store,
+    )
+    runtime = type("Runtime", (), {"context": context})()
+
+    request = ToolCallRequest(
+        tool_call={"name": "tool_search", "args": {"query": "select:server_a_tool,server_b_tool"}, "id": "tc1"},
+        tool=_tool("tool_search"),
+        runtime=runtime,
+        state={},
+    )
+
+    # select: 模式返回体：无 total/hasMore，全部带 schema。
+    search_result_json = json.dumps({
+        "results": [
+            {"name": "server_a_tool", "description": "A", "input_schema": {"type": "object"}},
+            {"name": "server_b_tool", "description": "B", "input_schema": {"type": "object"}},
+        ]
+    })
+
+    middleware.wrap_tool_call(
+        request,
+        lambda r: ToolMessage(content=search_result_json, tool_call_id="tc1"),
+    )
+
+    assert store.get_revealed("thread-test") == frozenset({"server_a_tool", "server_b_tool"})
+
+
 def test_tool_search_reveal_ignores_empty_names_and_persists_across_runs():
     """空工具名不登记；同一 Thread 的 reveal 跨 Run（新 RunContext）保持可见。"""
     store = ThreadDeferredToolStore()
