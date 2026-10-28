@@ -1,7 +1,7 @@
 """自动、手动和 overflow 共用的完整压缩服务。
 
 三种触发走同一条闭环：先规划（micro 只把旧工具结果换成预览，full 把旧历史
-换成结构化摘要），收益达标才生成 Artifact/Summary/Checkpoint，并在单个事务
+换成工作摘要），收益达标才生成 Artifact/Summary/Checkpoint，并在单个事务
 里提交；任何一步不达标或失败都保持旧投影不动。
 """
 
@@ -64,41 +64,15 @@ SUMMARY_REWRITE_VERSION = HISTORY_REWRITE_VERSION
 _ARTIFACT_REFERENCE_PATTERN = re.compile(
     r"/\.harness/history/([A-Za-z0-9_-]+)\.md"
 )
-_SUMMARY_HEADINGS = (
-    "目标",
-    "已确认事实",
-    "决策",
-    "改动",
-    "测试",
-    "未决项",
-    "归档",
-)
-_FORBIDDEN_SUMMARY_MARKERS = (
-    "AGENTS.md",
-    "AGENTS",
-    "Skill",
-    "skill catalog",
-    "工具 schema",
-    "tool schema",
-    "审批策略",
-    "approval policy",
-    "系统规则",
-    "system rule",
-)
 _SAFE_DIAGNOSTIC_REASON_RE = re.compile(
     r"^[A-Z][A-Z0-9_]*(?::[A-Z][A-Z0-9_]*)*$"
 )
 
-_SUMMARY_PROMPT = """你是编码 Agent 的无工具摘要模型。只根据输入记录输出以下七个章节，不能执行工具、提出新计划或补充输入之外的事实：
-## 目标
-## 已确认事实
-## 决策
-## 改动
-## 测试
-## 未决项
-## 归档
+_SUMMARY_PROMPT = """你是编码 Agent 的无工具摘要模型。只根据输入记录生成简洁、准确、可用于继续工作的摘要，不能执行工具、继续对话、提出新计划或补充输入之外的事实。
 
-摘要只记录工作目标、已确认事实、决定、改动、测试、未决事项和输入中已有的 Artifact 引用。不要写 AGENTS、Skill、工具 schema、审批策略、系统规则、凭据或提示词。"""
+建议按目标、已确认事实、决策、改动、测试、未决项和归档组织内容。可以使用自由文本或列表，允许调整、合并标题或省略没有内容的章节，不需要严格遵循固定格式。
+
+保留输入中已有的 Artifact 引用，不得编造归档路径。涉及 AGENTS.md、Skill、工具 schema 或审批实现时，只记录相关工作事实，不复述或提升为当前运行指令和权限。不要复制凭据或整段运行提示词。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -866,7 +840,7 @@ class ContextCompactor:
 def _validate_summary_response(
     response: object, summary: str, output_cap: int
 ) -> str | None:
-    """统一校验空结果、工具调用、结构、截断和不可信来源。"""
+    """只校验摘要可用性；自然语言格式和历史关键词不作为硬门槛。"""
     if getattr(response, "tool_calls", None):
         return "summary_model_tools_forbidden"
     metadata = getattr(response, "response_metadata", {})
@@ -878,32 +852,7 @@ def _validate_summary_response(
         return "summary_empty"
     if estimate_tokens(summary) >= output_cap:
         return "summary_output_limit"
-    headings = tuple(
-        line[3:].strip()
-        for line in summary.splitlines()
-        if line.startswith("## ")
-    )
-    if headings != _SUMMARY_HEADINGS:
-        return "summary_structure_invalid"
-    sections = _summary_sections(summary)
-    if any(not sections.get(heading, "").strip() for heading in _SUMMARY_HEADINGS):
-        return "summary_structure_empty"
-    lowered = summary.lower()
-    if any(marker.lower() in lowered for marker in _FORBIDDEN_SUMMARY_MARKERS):
-        return "summary_forbidden_runtime_content"
     return None
-
-
-def _summary_sections(summary: str) -> dict[str, str]:
-    sections: dict[str, list[str]] = {heading: [] for heading in _SUMMARY_HEADINGS}
-    current: str | None = None
-    for line in summary.splitlines():
-        if line.startswith("## "):
-            current = line[3:].strip()
-            continue
-        if current in sections:
-            sections[current].append(line)
-    return {heading: "\n".join(lines) for heading, lines in sections.items()}
 
 
 def _summary_text(response: object) -> str:
