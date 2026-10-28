@@ -176,7 +176,7 @@ def create_harness_tools(
     tools.append(StructuredTool.from_function(
         func=_tool_search,
         name="tool_search",
-        description="搜索可用的 MCP 外部工具。支持 select:name1,name2 精确选择，或用关键词模糊搜索工具名称、描述与所属服务器，返回工具参数 schema。",
+        description="搜索可用的 MCP 外部工具。支持 select:name1,name2 精确选择，或用关键词模糊搜索工具名称、描述与所属服务器。关键词搜索仅前 5 条强匹配携带参数 schema，其余工具可用 select:<name> 精确查询取回；结果支持 limit/offset 翻页。",
     ))
 
     # --- memory_save ---

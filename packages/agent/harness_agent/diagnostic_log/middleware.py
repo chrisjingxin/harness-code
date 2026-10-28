@@ -10,6 +10,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain.tools.tool_node import ToolCallRequest
 from harness_agent.diagnostic_log.runtime import ensure_log, safe_context_value
+from harness_agent.extensions.mcp import mcp_server_name_of
 from harness_agent.policy.tool_risk import get_tool_kind
 from harness_agent.runtime.run_context import RunContext
 
@@ -149,15 +150,12 @@ def _diagnostic_tool_kind(request: ToolCallRequest, tool_name: str) -> str:
 
 
 def _diagnostic_mcp_server_name(request: ToolCallRequest) -> str | None:
-    """只读取 MCP owner 写入的已校验配置名，不从工具名反推。"""
-    tool = getattr(request, "tool", None)
-    name = safe_context_value(getattr(tool, "_harness_mcp_server_name", None))
-    if name is not None:
-        return name
-    metadata = getattr(tool, "metadata", None)
-    if isinstance(metadata, dict):
-        return safe_context_value(metadata.get("harness_mcp_server_name"))
-    return None
+    """只读取 MCP owner 写入的已校验配置名，不从工具名反推。
+
+    读取顺序复用 ``mcp_server_name_of``，不在这里维护第二份；外面再套
+    ``safe_context_value``，让不合白名单的名字（含空格、超长）不进日志。
+    """
+    return safe_context_value(mcp_server_name_of(getattr(request, "tool", None)))
 
 
 def _duration_ms(started: float) -> int:

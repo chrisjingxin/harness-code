@@ -14,6 +14,7 @@ from harness_agent.extensions.mcp import (
     build_mcp_snapshot,
     expand_env_vars,
     mcp_config_fingerprint,
+    mcp_server_name_of,
     parse_mcp_config,
 )
 
@@ -635,6 +636,52 @@ class TestMcpServerStatuses:
         statuses = {item["name"]: item for item in mgr.get_server_statuses()}
         assert statuses["my"]["tool_names"] == ["my_lookup"]
         assert statuses["my_server"]["tool_names"] == ["my_server_search"]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tool_name_logs_warning(self, caplog):
+        """跨服务器同名工具只保留第一个，但必须留 warning 供排查。"""
+        caplog.set_level("WARNING", logger="harness_agent.extensions.mcp")
+        configs = [
+            McpServerConfig(name="a", transport="stdio", command="cmd-a"),
+            McpServerConfig(name="b", transport="stdio", command="cmd-b"),
+        ]
+        mgr = _manager(configs)
+
+        tool_a = MagicMock()
+        tool_a.name = "dup"
+        tool_b = MagicMock()
+        tool_b.name = "dup"
+
+        async def get_tools(*, server_name=None):
+            assert isinstance(server_name, str)
+            return {"a": [tool_a], "b": [tool_b]}[server_name]
+
+        mock_client = MagicMock()
+        mock_client.get_tools = AsyncMock(side_effect=get_tools)
+
+        with patch(
+            "langchain_mcp_adapters.client.MultiServerMCPClient", return_value=mock_client
+        ):
+            await mgr.connect_all()
+
+        assert [tool.name for tool in mgr.get_tools()] == ["dup"]
+        conflicts = [r.getMessage() for r in caplog.records if "conflicts" in r.getMessage()]
+        assert len(conflicts) == 1, caplog.text
+        assert "'b'" in conflicts[0] and "'dup'" in conflicts[0]
+
+
+def test_mcp_server_name_of_reads_metadata_fallback():
+    """属性写入失败时 owner 退到 metadata，读取必须同样看到，且属性优先。"""
+
+    class _Tool:
+        metadata: dict[str, str] = {"harness_mcp_server_name": "my_server"}
+        _harness_mcp_server_name: str | None = None
+
+    assert mcp_server_name_of(_Tool()) == "my_server"
+
+    marked = _Tool()
+    marked._harness_mcp_server_name = "my"
+    assert mcp_server_name_of(marked) == "my"
 
 
 class TestMcpHotConnectDisconnect:

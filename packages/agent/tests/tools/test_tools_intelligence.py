@@ -301,3 +301,19 @@ def test_tool_search_limit_offset_pagination():
     assert len(page3["results"]) == 10
     assert page3["hasMore"] is False
     assert page3["nextOffset"] is None
+
+
+def test_tool_search_offset_beyond_total_keeps_total():
+    """offset 越界仍要带 total/hasMore，不能退化成“关键词没命中”提示。"""
+    tools = [
+        {"name": f"tool_{i:02d}", "description": "通用工具", "is_mcp": False}
+        for i in range(3)
+    ]
+
+    out = tool_search("工具", available_tools=tools, limit=10, offset=100)
+
+    assert out["results"] == []
+    assert out["total"] == 3
+    assert out["hasMore"] is False
+    assert out["nextOffset"] is None
+    assert "note" not in out
