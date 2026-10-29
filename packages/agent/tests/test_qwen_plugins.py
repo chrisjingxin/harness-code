@@ -15,7 +15,13 @@ from typing import Any
 
 import pytest
 
-from harness_agent.config.config import ExecutionSettings, ModelCatalog, ModelProfile, ModelSettings
+from harness_agent.config.config import (
+    ExecutionSettings,
+    ExperimentalSettings,
+    ModelCatalog,
+    ModelProfile,
+    ModelSettings,
+)
 from harness_agent.extensions.mcp import build_mcp_snapshot
 from harness_agent.extensions.plugin_skills import (
     SkillError as PluginSkillError,
@@ -24,7 +30,7 @@ from harness_agent.extensions.plugin_skills import (
 )
 from harness_agent.plugins.manager import PluginManager
 from harness_agent.plugins.model import PluginError
-from harness_agent.protocol.generated import EventEnvelope
+from harness_agent.protocol.generated import EventEnvelope, PROTOCOL_MINOR
 from harness_agent.runtime.agent_catalog import (
     AgentCatalog,
     DelegationPolicy,
@@ -1153,7 +1159,7 @@ api_key_env = "HARNESS_PHASE1_FAKE_KEY"
     installed_record = server._plugin_manager.store.read_registry().plugins[0]
     try:
         initialize_params = {
-                "protocol": {"major": 3, "min_minor": 0, "max_minor": 8},
+                "protocol": {"major": 3, "min_minor": 0, "max_minor": PROTOCOL_MINOR},
             "client": {"name": "test", "version": "0.1.0", "kind": "test"},
             "capabilities": {
                 "requests": ["run.multithread", "skills.read", "threads.read"],
@@ -2657,6 +2663,7 @@ async def test_host_injects_qwen_context_once_and_gates_same_child_for_plugin_ag
     server._config = SimpleNamespace(
         model_catalog=_model_catalog(),
         execution=ExecutionSettings(),
+        experimental=ExperimentalSettings(),
         agent_engine_pool=SimpleNamespace(
             max_profiles=2,
             idle_ttl_seconds=600,
@@ -2933,6 +2940,7 @@ async def test_qwen_managed_plugin_delegation_projects_child_stream_to_parent_ev
     server._config = SimpleNamespace(
         model_catalog=_model_catalog(),
         execution=ExecutionSettings(),
+        experimental=ExperimentalSettings(),
         agent_engine_pool=SimpleNamespace(
             max_profiles=2,
             idle_ttl_seconds=600,
