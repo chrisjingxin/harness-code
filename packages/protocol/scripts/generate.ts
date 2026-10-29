@@ -268,6 +268,30 @@ function renderContractFixtures(root: Schema, meta: Metadata): string {
     envelope.type = name
     envelope.payload = sample(root, { $ref: entry.payload! })
     addValueFixtures(valid, invalid, "event", name, envelope, root.$defs.eventBase)
+    if (name === "fusion.progress") {
+      // 未知用量和明确零缓存须通过两端相同校验，连接秘密不得混入统计。
+      const payload = structuredClone(envelope.payload) as Record<string, unknown>
+      payload.usage = {
+        lead: { profile_id: "pro", calls: 1, input_tokens: 50, output_tokens: 5, cached_input_tokens: 0, complete: true, cache_complete: false, cache_hit_rate: null },
+        sidekick: null, estimate: null,
+      }
+      payload.stagnation = { kind: "repeated_unresolved", round: 2, message: "换策略" }
+      payload.exploration = { exploration_id: "explore-1", status: "running" }
+      const value = { ...envelope, payload }
+      valid.push({ kind: "event", name, case: "role_usage", value })
+      const negative = structuredClone(value)
+      ;(negative.payload.usage as { lead: { input_tokens: number } }).lead.input_tokens = -1
+      invalid.push({ kind: "event", name, case: "negative_usage", value: negative })
+      const secret = structuredClone(value)
+      ;(secret.payload.usage as { lead: Record<string, unknown> }).lead.api_key = "fake"
+      invalid.push({ kind: "event", name, case: "secret_in_usage", value: secret })
+    }
+    if (name === "fusion.execution") {
+      const value = { ...envelope, payload: { ...(envelope.payload as Record<string, unknown>), kind: "exploration", round: 0 } }
+      valid.push({ kind: "event", name, case: "readonly_explore", value })
+      invalid.push({ kind: "event", name, case: "implementation_round_zero", value: { ...value, payload: { ...value.payload, kind: "implementation" } } })
+    }
+
   }
   const firstEvent = Object.entries(meta.events)[0]
   if (firstEvent) {
@@ -328,6 +352,10 @@ function addValueFixtures(
 
 function sample(root: Schema, input: Schema): unknown {
   const definition = input.$ref ? resolveRef(root, input.$ref) : input
+  if (input.$ref?.endsWith("/fusionExecutionPayload")) {
+    // 实施从第一轮起；只读探索的零轮由专用 fixture 覆盖。
+    return { task_id: "x", role: "sidekick", round: 1, model: "x", status: "running" }
+  }
   if (input.$ref?.endsWith("/controlHolder")) {
     // role 与 attachment_id 存在 if/then 联动约束；sample 必须产出合法组合。
     return { connection_id: "x", role: "owner", attachment_id: null }

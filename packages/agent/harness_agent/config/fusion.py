@@ -33,6 +33,8 @@ class FusionProfileSettings:
     sidekick_profile_id: str
     check_plan_ids: tuple[str, ...] = ()
     max_rework_rounds: int = 3
+    lead_prompt_append: str = field(default="", repr=False)
+    sidekick_prompt_append: str = field(default="", repr=False)
 
     def redacted(self) -> dict[str, object]:
         """生成不携带模型连接配置的组合摘要。"""
@@ -41,6 +43,16 @@ class FusionProfileSettings:
             "sidekick_profile_id": self.sidekick_profile_id,
             "check_plan_ids": list(self.check_plan_ids),
             "max_rework_rounds": self.max_rework_rounds,
+            **(
+                {
+                    "prompt_appends": {
+                        "lead": bool(self.lead_prompt_append),
+                        "sidekick": bool(self.sidekick_prompt_append),
+                    }
+                }
+                if self.lead_prompt_append or self.sidekick_prompt_append
+                else {}
+            ),
         }
 
 
@@ -67,7 +79,8 @@ class FusionSettings:
         """供 config.show 展示 ID 和超时，不输出检查命令。"""
         return {
             "profiles": {
-                name: profile.redacted() for name, profile in sorted(self.profiles.items())
+                name: profile.redacted()
+                for name, profile in sorted(self.profiles.items())
             },
             "check_plans": {
                 name: {"timeout_seconds": plan.timeout_seconds}
@@ -78,7 +91,7 @@ class FusionSettings:
 
 
 _FIELDS = {
-    "profiles": {"lead_profile_id", "sidekick_profile_id", "check_plan_ids", "max_rework_rounds"},
+    "profiles": {"lead_profile_id", "sidekick_profile_id", "check_plan_ids", "max_rework_rounds", "lead_prompt_append", "sidekick_prompt_append"},
     "check_plans": {"command", "cwd", "timeout_seconds"},
 }
 
@@ -144,6 +157,8 @@ def parse_fusion_settings(
             sidekick_profile_id=sidekick,
             check_plan_ids=checks,
             max_rework_rounds=_integer(profile.get("max_rework_rounds", 3), f"{path}.max_rework_rounds", minimum=0),
+            lead_prompt_append=_prompt_append(profile.get("lead_prompt_append", "")),
+            sidekick_prompt_append=_prompt_append(profile.get("sidekick_prompt_append", "")),
         )
     return FusionSettings(profiles=profiles, check_plans=check_plans)
 
@@ -185,4 +200,13 @@ def _integer(value: object, path: str, *, minimum: int) -> int:
     """拒绝布尔值和非整数，并实施字段下限。"""
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise FusionConfigError(f"{path} must be an integer >= {minimum}")
+    return value
+
+
+def _prompt_append(value: object) -> str:
+    """可信追加有界且不回显正文，不能借配置放大角色能力。"""
+    if not isinstance(value, str) or len(value) > 8000 or "\x00" in value:
+        raise FusionConfigError(
+            "fusion.profiles prompt append must be a string up to 8000 characters without NUL"
+        )
     return value

@@ -335,7 +335,7 @@ async def test_rejects_invalid_evidence(tmp_path, failure):
                     "summary": "failed",
                 }
 
-            service.prepare_check = prepared_check(failed)
+            service.acceptance.prepare_check = prepared_check(failed)
         if failure == "source":
             with pytest.raises(FusionError, match="FUSION_INPUT_INVALID"):
                 await service.delegate(
@@ -393,7 +393,7 @@ async def test_unknown_check_does_not_start_next_round(tmp_path):
                 "summary": "unknown",
             }
 
-        service.prepare_check = prepared_check(unknown)
+        service.acceptance.prepare_check = prepared_check(unknown)
         result = await service.delegate(
             ctx,
             goal="g",
@@ -592,14 +592,14 @@ async def test_explicit_continue_checks_saved_report_without_worker_replay(
         await store.mark_delivery("saved-dispatch", "accepted")
         await store.pause(task.task_id)
         check_calls = []
-        original = service.prepare_check
+        original = service.acceptance.prepare_check
 
         async def check(context, plan, lease):
             check_calls.append(plan.plan_id)
             execute = await original(context, plan, lease)
             return await execute()
 
-        service.prepare_check = prepared_check(check)
+        service.acceptance.prepare_check = prepared_check(check)
         if drift:
             (root / "a.py").write_text("external edit")
         await service.continue_pending(ctx)
@@ -630,8 +630,9 @@ async def test_resume_reuses_saved_check_receipt_and_runs_only_remaining_plan(tm
         ),
     )
     service.profile_provider = lambda task_id: frozen
+    service.acceptance.profile_provider = service.profile_provider
     calls = []
-    original_check = service.prepare_check
+    original_check = service.acceptance.prepare_check
     original_save = store.save_record
 
     async def check(context, plan, lease):
@@ -644,7 +645,7 @@ async def test_resume_reuses_saved_check_receipt_and_runs_only_remaining_plan(tm
         if kind == "check":
             raise RuntimeError("模拟回执保存后进程退出")
 
-    service.prepare_check = prepared_check(check)
+    service.acceptance.prepare_check = prepared_check(check)
     store.save_record = crash_after_check
     try:
         with pytest.raises(RuntimeError, match="模拟回执保存"):
@@ -762,11 +763,11 @@ def test_control_path_schema_explains_new_paths(schema_name):
     assert "calc.py" in description and "tests/" in description
 
 
-def test_lead_prompt_distinguishes_read_paths_from_delegation_paths():
-    from harness_agent.runtime.fusion.roles import LEAD_PROMPT
+def test_delegation_schema_distinguishes_read_paths_from_delegation_paths():
+    from harness_agent.runtime.fusion.tools import PATH_SCOPE_DESCRIPTION
 
-    assert "相对路径" in LEAD_PROMPT and "不存在" in LEAD_PROMPT
-    assert "/calc.py" in LEAD_PROMPT and "calc.py" in LEAD_PROMPT
+    assert "相对路径" in PATH_SCOPE_DESCRIPTION and "不存在" in PATH_SCOPE_DESCRIPTION
+    assert "/calc.py" in PATH_SCOPE_DESCRIPTION and "calc.py" in PATH_SCOPE_DESCRIPTION
 
 
 async def test_unknown_value_error_is_not_exposed_to_model(monkeypatch):
@@ -969,14 +970,14 @@ async def test_approval_preparation_does_not_hold_directory_permission(tmp_path)
     p, store, task, ctx, service, rounds, root = await setup(tmp_path, checks=True)
     started = asyncio.Event()
     approved = asyncio.Event()
-    prepare = service.prepare_check
+    prepare = service.acceptance.prepare_check
 
     async def approval(context, plan, lease):
         started.set()
         await approved.wait()
         return await prepare(context, plan, lease)
 
-    service.prepare_check = approval
+    service.acceptance.prepare_check = approval
     pending = asyncio.create_task(
         service.delegate(
             ctx,

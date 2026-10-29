@@ -69,6 +69,8 @@ class StreamSession:
     )
     last_call_usage: dict[str, int] = field(default_factory=dict)
     call_usages: list[dict[str, int]] = field(default_factory=list)
+    # 每次模型调用的原始已知字段；空字典表示调用发生但未报告用量。
+    usage_observations: list[dict[str, int]] = field(default_factory=list)
     tool_stream_ids: dict[str, str] = field(default_factory=dict)
     tool_result_ids: dict[str, str] = field(default_factory=dict)
     tool_names: dict[str, str] = field(default_factory=dict)
@@ -104,6 +106,8 @@ class StreamSession:
         只能原地清空再写入，否则失败重试后统计会被拆到两个字典里。
         """
         for item in fields(self):
+            if item.name == "usage_observations":
+                continue
             value = deepcopy(snapshot[item.name])
             if item.name == "usage" and isinstance(self.usage, dict) and isinstance(value, dict):
                 self.usage.clear()
@@ -1026,6 +1030,7 @@ def start_model_round(session: StreamSession) -> None:
     """开始新模型回合，并清理上一回合的正文与 Tool 临时状态。"""
     if session.last_call_usage:
         session.call_usages.append(dict(session.last_call_usage))
+    session.usage_observations.append({})
     session.model_round_active = True
     session.model_round_has_tool_results = False
     session.last_call_usage = {}
@@ -1105,6 +1110,9 @@ def update_usage(session: StreamSession, usage: Any, chunk: Any = None) -> None:
                 usage = token_usage
     if not isinstance(usage, Mapping):
         return
+    from harness_agent.runtime.model_usage import observe_usage
+
+    observe_usage(session, usage, chunk)
     call_input = int(usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
     call_output = int(usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0)
     session.last_call_usage = {

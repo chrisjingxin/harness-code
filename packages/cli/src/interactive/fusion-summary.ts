@@ -114,7 +114,11 @@ export function fusionSummary(task: FusionTaskStatus): string {
   const waiting = waits.length ? `；正在等待${waits[0]?.kind === "command" ? "另一条命令结束" : `文件 ${waits[0]?.paths?.join("、") || "写入权限"}`}，可用后自动继续` : ""
   const recovery = task.phase === "OUTCOME_UNKNOWN" ? `；${FUSION_RECOVERY_GUIDANCE}` : ""
   const round = task.round === 0 ? "尚未派单" : `第 ${task.round} 轮`
-  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}${waiting}${recovery}`
+  const exploration = task.exploration?.status === "running" ? "；Sidekick 只读探索中" : ""
+  const hint = task.stagnation ? `；${task.stagnation.message}` : ""
+  const usage = fusionUsageSummary(task)
+  const warnings = Array.isArray(profile.pairing_warnings) ? `；${profile.pairing_warnings.filter(value => typeof value === "string").join("；")}` : ""
+  return `Fusion ${String(profile.profile_id)}：${PHASE_LABELS[task.phase] ?? task.phase}；Lead ${modelId(profile.lead)}，Sidekick ${modelId(profile.sidekick)}；${verification}；${round}${reason}${pending}${owner}${waiting}${recovery}${exploration}${usage}${hint}${warnings}`
 }
 
 /** 等待资源时给出真实原因，避免把排队显示为模型一直没有响应。 */
@@ -124,4 +128,19 @@ export function fusionWaitingLabel(task: FusionTaskStatus | null | undefined): s
   if (blocker?.requires_inspection) return "等待操作停止状态核查"
   if (blocker) return blocker.kind === "command" ? "等待其他命令结束" : "等待文件写入权限"
   return task.phase === "WAITING_RESOURCE" ? "等待文件写入权限" : null
+}
+
+/** 缺失统计显示未知；金额只使用 Host 算好的配置估算。 */
+function fusionUsageSummary(task: FusionTaskStatus): string {
+  const usage = task.usage
+  if (!usage) return ""
+  const roles = (["lead", "sidekick"] as const).flatMap(role => {
+    const value = usage[role]
+    if (!value) return []
+    const cache = value.cache_hit_rate === null ? "缓存未知" : `缓存 ${Math.round(value.cache_hit_rate * 100)}%`
+    return [`${role === "lead" ? "Lead" : "Sidekick"} 输入 ${value.input_tokens} / 输出 ${value.output_tokens}，${cache}${value.complete ? "" : "，统计不完整"}`]
+  }).join("；")
+  const price = usage.estimate
+  const estimate = price ? `；金额按配置估算 ${price.currency}：Lead ${price.lead_cost ?? "未知"}，Sidekick ${price.sidekick_cost ?? "未知"}；Sidekick 同量按 Lead 单价的假设差额 ${price.estimated_saving ?? "未知"}（非账单）` : ""
+  return `；${roles}${estimate}`
 }

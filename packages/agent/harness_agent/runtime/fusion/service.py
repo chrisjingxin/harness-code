@@ -20,7 +20,6 @@ from harness_agent.runtime.fusion.profile import (
 )
 from harness_agent.runtime.fusion.snapshot import (
     capture_snapshot,
-    changed_paths,
     normalize_paths,
     path_allowed,
     snapshot_from_entries,
@@ -61,16 +60,29 @@ class FusionService:
             [RunContext, FrozenFusionCheckPlan, FusionLease],
             Awaitable[Callable[[], Awaitable[Mapping[str, object]]]],
         ],
+        explorer: Callable[[RunContext, FusionTask, str, str], Awaitable[str]]
+        | None = None,
     ) -> None:
         """注入状态、冻结配置和 Host 执行端口，每个任务内串行控制操作。"""
         self.store = store
         self.workspace = workspace
         self.profile_provider = profile_provider
         self.worker = worker
+        self.explorer = explorer
         self.guard = guard
-        self.prepare_check = prepare_check
         self._locks: dict[str, asyncio.Lock] = {}
         self.resources = guard.resources
+        from harness_agent.runtime.fusion.acceptance import FusionAcceptance
+
+        self.acceptance = FusionAcceptance(
+            store=store,
+            workspace=workspace,
+            profile_provider=profile_provider,
+            guard=guard,
+            prepare_check=prepare_check,
+            begin_phase=self._begin_phase,
+            emit=self._emit,
+        )
 
     async def _task(self, context: RunContext, role: str | None = None) -> FusionTask:
         task_id = getattr(context, "fusion_task_id", None)
@@ -82,7 +94,7 @@ class FusionService:
         inspection = (
             context.fusion_role == "lead" and context.fusion_state.inspection_only
         )
-        if inspection and role:
+        if (inspection or context.fusion_state.exploration_only) and role:
             raise FusionError("FUSION_ROLE_DENIED")
         if role and not task.active:
             raise FusionError("FUSION_TASK_CONFLICT")
@@ -107,10 +119,113 @@ class FusionService:
                 getattr(context, "agent_id", None),
             )
 
+    async def explore(self, context: RunContext, *, question: str) -> dict[str, object]:
+        """同任务串行调查，不授予写权限，也不创建实施轮次或票据。"""
+        task = await self._task(context, "lead")
+        async with self._locks.setdefault(task.task_id, asyncio.Lock()):
+            task = await self._task(context, "lead")
+            if (
+                self.explorer is None
+                or task.phase not in {"READY", "REVIEWING", "WAITING_USER"}
+                or not question.strip()
+                or len(question) > 8000
+            ):
+                raise FusionError("FUSION_TASK_CONFLICT")
+            if any(
+                not effect["stopped"]
+                for effect in await self.store.effects(task.task_id)
+            ):
+                raise FusionError("FUSION_OUTCOME_UNKNOWN")
+            from harness_agent.runtime.verification import redact_verification_text
+
+            exploration_id = new_id("exploration")
+            task = await self.store.update(
+                task.task_id,
+                task.version,
+                data={
+                    "exploration": {
+                        "exploration_id": exploration_id,
+                        "status": "running",
+                    }
+                },
+            )
+            self._emit(context, task)
+            status, summary = "failed", ""
+            try:
+                summary = redact_verification_text(
+                    (await self.explorer(context, task, question, exploration_id))[
+                        :8000
+                    ]
+                )
+                status = "completed"
+                return {
+                    "exploration_id": exploration_id,
+                    "summary": summary,
+                    "verification": "unverified",
+                    "message": "只读调查摘要；请核实关键文件后再作实施判断。",
+                }
+            except asyncio.CancelledError:
+                status = "cancelled"
+                raise
+            finally:
+
+                async def finish() -> None:
+                    await self.store.save_record(
+                        task.task_id,
+                        "exploration",
+                        exploration_id,
+                        {
+                            "status": status,
+                            "summary": summary,
+                            "verification": "unverified",
+                        },
+                    )
+                    current = await self.store.get(task.task_id)
+                    current = await self.store.update(
+                        current.task_id,
+                        current.version,
+                        data={
+                            "exploration": {
+                                "exploration_id": exploration_id,
+                                "status": status,
+                            }
+                        },
+                    )
+                    self._emit(context, current)
+
+                await asyncio.shield(finish())
+
+    async def record_usage(
+        self, context: RunContext, event_id: str, calls: list[dict[str, int]]
+    ) -> None:
+        """无需取得派单锁：Worker 调用期间 Lead 已持有控制锁。"""
+        # 故障核查可能使用新配置；不能改旧任务、票据或用旧单价计费。
+        if context.fusion_state.inspection_only:
+            return
+        task = await self.store.get(context.fusion_task_id)
+        if task.thread_id != context.thread_id:
+            raise FusionError("FUSION_ROLE_DENIED")
+        role = context.fusion_role
+        frozen = self.profile_provider(task.task_id)
+        profile = frozen.lead_profile if role == "lead" else frozen.sidekick_profile
+        task = await self.store.record_usage(
+            task.task_id,
+            event_id,
+            role=role,
+            profile_id=profile.profile_id,
+            calls=calls,
+        )
+        self._emit(context, task)
+
     async def status(self, context: RunContext) -> dict[str, object]:
         """压缩后可读取安全状态和票据身份。"""
         task = await self._task(context)
         result = task.to_record()
+        from harness_agent.runtime.fusion.guidance import next_action
+
+        result["next_action"] = next_action(
+            task.phase, task.data.get("revision", 0), task.data.get("reason")
+        )
         if task.data.get("revision"):
             order = await self.store.load_record(
                 task.task_id, "order", str(task.data["revision"])
@@ -150,6 +265,14 @@ class FusionService:
     async def resume(self, task_id: str) -> FusionTask:
         """用户新消息到达时恢复可审阅票据；不重放 Worker 或检查命令。"""
         task = await self.store.reconcile(task_id)
+        if task.data.get("exploration", {}).get("status") == "running":
+            task = await self.store.update(
+                task.task_id,
+                task.version,
+                data={
+                    "exploration": {**task.data["exploration"], "status": "interrupted"}
+                },
+            )
         if task.phase == "OUTCOME_UNKNOWN":
             raise FusionError("FUSION_OUTCOME_UNKNOWN")
         if task.data.get("reason") == "workspace_busy":
@@ -243,7 +366,7 @@ class FusionService:
                     await self.store.mark_delivery(
                         task.data["operation_id"], "result_recorded"
                     )
-                    await self._verify(context, task, order)
+                    await self.acceptance.verify(context, task, order)
 
     async def finish_direct(
         self, context: RunContext, *, summary: str
@@ -580,6 +703,9 @@ class FusionService:
         report = await self.store.load_record(task.task_id, "report", report_id)
         await self.store.mark_delivery(operation_id, "result_recorded")
         if report["status"] != "completed" or report["unresolved"]:
+            from harness_agent.runtime.fusion.guidance import record_round_outcome
+
+            task = await record_round_outcome(self.store, task, report, [])
             task = await self.store.update(
                 task.task_id,
                 task.version,
@@ -588,248 +714,7 @@ class FusionService:
             )
             self._emit(context, task)
             return task.to_record()
-        return await self._verify(context, task, order)
-
-    async def _verify(
-        self,
-        context: RunContext,
-        task: FusionTask,
-        order: Mapping[str, Any],
-    ) -> dict[str, object]:
-        """核对当前候选，复用已保存的检查记录后运行剩余计划。"""
-        report_id = task.data["report_id"]
-        report = await self.store.load_record(task.task_id, "report", report_id)
-        task, lease = await self._begin_phase(context, task, "CHECKING")
-        context.fusion_state.generation = lease.generation
-        candidate = await asyncio.to_thread(
-            capture_snapshot, self.workspace, order["allowed_paths"]
-        )
-        if report["snapshot_digest"] != candidate["digest"] or (
-            task.data.get("candidate_digest")
-            and task.data["candidate_digest"] != candidate["digest"]
-        ):
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={
-                    "reason": "candidate_changed",
-                    "ticket_id": None,
-                    "verification": "unverified",
-                },
-            )
-            self._emit(context, task)
-            return task.to_record()
-        changes = changed_paths(order["baseline"], candidate)
-        outside = [
-            name for name in changes if not path_allowed(name, order["allowed_paths"])
-        ]
-        if outside:
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={"reason": "out_of_scope", "changed_paths": list(changes)},
-            )
-            self._emit(context, task)
-            return {
-                **task.to_record(),
-                "changed_paths": list(changes),
-                "outside_paths": outside,
-            }
-        task = await self.store.update(
-            task.task_id,
-            task.version,
-            phase="CHECKING",
-            data={"candidate_digest": candidate["digest"]},
-        )
-        self._emit(context, task)
-        cycle = task.data.get("verification_cycle")
-        saved_checks = {
-            item["plan_id"]: item
-            for item in await self.store.list_records(task.task_id, "check")
-            if item["operation_id"] == task.data["operation_id"]
-            and item.get("verification_cycle") == cycle
-        }
-        started_plans = list(task.data.get("check_started_plan_ids", []))
-        if any(name not in saved_checks for name in started_plans):
-            task = await self.store.update(
-                task.task_id,
-                task.version,
-                phase="WAITING_USER",
-                data={"reason": "check_receipt_missing"},
-            )
-            self._emit(context, task)
-            return task.to_record()
-        plans = [
-            plan
-            for plan in self.profile_provider(task.task_id).check_plans
-            if plan.plan_id in order["check_plan_ids"]
-        ]
-        # 审批在任何目录许可之外完成；消费准备结果前仍会重查策略和候选文件。
-        executors = {
-            plan.plan_id: await self.prepare_check(context, plan, lease)
-            for plan in plans
-        }
-        task = await self.store.get(task.task_id)
-        checks = []
-        workspace_digest = None
-        async with self.guard.operation(
-            "command" if plans else "snapshot", context=context, host=True
-        ) as permit:
-            source_paths = [
-                "./",
-                *await self.store.claimed_paths(task.workspace_key),
-                *order["allowed_paths"],
-            ]
-            source = await asyncio.to_thread(
-                capture_snapshot, self.workspace, source_paths
-            )
-            workspace_digest = source["digest"]
-            current = await asyncio.to_thread(
-                capture_snapshot, self.workspace, order["allowed_paths"]
-            )
-            if current["digest"] != candidate["digest"]:
-                task = await self.store.get(task.task_id)
-                task = await self.store.update(
-                    task.task_id,
-                    task.version,
-                    phase="WAITING_USER",
-                    data={
-                        "reason": "candidate_changed",
-                        "ticket_id": None,
-                        "verification": "unverified",
-                    },
-                )
-                self._emit(context, task)
-                return task.to_record()
-            if saved_checks and any(
-                check.get("workspace_digest") != workspace_digest
-                for check in saved_checks.values()
-            ):
-                # 旧检查有完整停止回执，但其他源码更新过，整组重新检查，不拼接过期证据。
-                saved_checks = {}
-                started_plans = []
-                cycle = new_id("verification")
-                task = await self.store.get(task.task_id)
-                task = await self.store.update(
-                    task.task_id,
-                    task.version,
-                    data={"verification_cycle": cycle, "check_started_plan_ids": []},
-                )
-            for plan in plans:
-                if plan.plan_id in saved_checks:
-                    saved = saved_checks[plan.plan_id]
-                    if (
-                        saved["revision"] != order["revision"]
-                        or saved["command_digest"] != plan.command_digest
-                    ):
-                        raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-                    checks.append(saved)
-                    continue
-                task = await self.store.get(task.task_id)
-                started_plans.append(plan.plan_id)
-                task = await self.store.update(
-                    task.task_id,
-                    task.version,
-                    data={"check_started_plan_ids": started_plans},
-                )
-                effect_id = await self.store.begin_effect(
-                    task.task_id,
-                    lease.generation,
-                    context.execution_id,
-                    "check",
-                    plan.command_digest,
-                )
-                context.fusion_state.check_effect_id = effect_id
-                await asyncio.to_thread(self.resources.bind_effect, permit, effect_id)
-                before = await asyncio.to_thread(
-                    capture_snapshot, self.workspace, source_paths
-                )
-                permit.stopped = False
-                try:
-                    check = dict(await executors[plan.plan_id]())
-                    permit.stopped = check.get("stopped") is True
-                except BaseException:
-                    await asyncio.shield(
-                        self.store.finish_effect(
-                            effect_id, succeeded=False, stopped=permit.stopped
-                        )
-                    )
-                    await asyncio.shield(self.store.pause(task.task_id))
-                    raise
-                await self.store.finish_effect(
-                    effect_id,
-                    succeeded=check.get("exit_code") == 0,
-                    stopped=permit.stopped,
-                )
-                if not permit.stopped:
-                    task = await self.store.pause(task.task_id)
-                    self._emit(context, task)
-                    return task.to_record()
-                after = await asyncio.to_thread(
-                    capture_snapshot, self.workspace, source_paths
-                )
-                check = {
-                    **check,
-                    "revision": order["revision"],
-                    "operation_id": task.data["operation_id"],
-                    "verification_cycle": cycle,
-                    "command_digest": plan.command_digest,
-                    "before_digest": before["digest"],
-                    "after_digest": after["digest"],
-                    "workspace_digest": workspace_digest,
-                    "source_changed": before["digest"] != after["digest"],
-                }
-                checks.append(check)
-                await self.store.save_record(
-                    task.task_id, "check", new_id("check"), check
-                )
-                if check["source_changed"]:
-                    break
-        ticket_id = new_id("ticket")
-        success = all(
-            check.get("exit_code") == 0 and not check.get("source_changed")
-            for check in checks
-        ) and len(checks) == len(order["check_plan_ids"])
-        verification = (
-            "verified"
-            if checks and success
-            else "review_only"
-            if not order["check_plan_ids"]
-            else "unverified"
-        )
-        await self.store.save_record(
-            task.task_id,
-            "ticket",
-            ticket_id,
-            {
-                "ticket_id": ticket_id,
-                "revision": order["revision"],
-                "report_id": report_id,
-                "candidate": candidate,
-                "changed_paths": list(changes),
-                "checks": checks,
-                "verification": verification,
-                "success": success,
-                "workspace_digest": workspace_digest,
-                "source_paths": source_paths,
-            },
-        )
-        task = await self.store.get(task.task_id)
-        task = await self.store.update(
-            task.task_id,
-            task.version,
-            phase="REVIEWING",
-            data={"ticket_id": ticket_id, "verification": verification},
-        )
-        self._emit(context, task)
-        return {
-            **task.to_record(),
-            "changed_paths": list(changes),
-            "checks": checks,
-            "requirements": order["requirements"],
-        }
+        return await self.acceptance.verify(context, task, order)
 
     async def submit_result(
         self,
@@ -885,130 +770,18 @@ class FusionService:
         requirements: Sequence[Mapping[str, Any]],
         test_review_reason: str,
     ) -> dict[str, object]:
-        """核对票据、候选快照、检查和逐项证据，再接受任务。"""
+        """服务负责角色与串行控制，证据核对交给独立验收组件。"""
         task = await self._task(context, "lead")
         async with self._locks.setdefault(task.task_id, asyncio.Lock()):
             task = await self._task(context, "lead")
-            if task.phase != "REVIEWING" or task.data.get("ticket_id") != ticket_id:
-                raise FusionError("FUSION_REPORT_STALE")
-            if decision == "reject":
-                task = await self.store.update(
-                    task.task_id,
-                    task.version,
-                    phase="WAITING_USER",
-                    data={"reason": "review_rejected"},
-                )
-                self._emit(context, task)
-                return task.to_record()
-            if decision != "accept":
-                raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-            task, lease = await self._begin_phase(context, task, "REVIEWING")
-            context.fusion_state.generation = lease.generation
-            ticket = await self.store.load_record(task.task_id, "ticket", ticket_id)
-            order = await self.store.load_record(
-                task.task_id, "order", str(task.data["revision"])
+            return await self.acceptance.review(
+                context,
+                task,
+                ticket_id=ticket_id,
+                decision=decision,
+                requirements=requirements,
+                test_review_reason=test_review_reason,
             )
-            if ticket["revision"] != order["revision"] or ticket[
-                "report_id"
-            ] != task.data.get("report_id"):
-                raise FusionError("FUSION_REPORT_STALE")
-            current = await asyncio.to_thread(
-                capture_snapshot, self.workspace, order["allowed_paths"]
-            )
-            if current["digest"] != ticket["candidate"]["digest"]:
-                raise FusionError("FUSION_REPORT_STALE")
-            if order["check_plan_ids"]:
-                async with self.guard.operation("snapshot", context=context, host=True):
-                    source = await asyncio.to_thread(
-                        capture_snapshot, self.workspace, ticket["source_paths"]
-                    )
-                if source["digest"] != ticket["workspace_digest"]:
-                    task = await self.store.get(task.task_id)
-                    task = await self.store.update(
-                        task.task_id,
-                        task.version,
-                        data={
-                            "verification_cycle": new_id("verification"),
-                            "check_started_plan_ids": [],
-                            "ticket_id": None,
-                            "verification": "unverified",
-                            "reason": "workspace_changed",
-                        },
-                    )
-                    return await self._verify(context, task, order)
-            if not ticket["success"] or ticket["verification"] == "unverified":
-                raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-            expected = {requirement["id"] for requirement in order["requirements"]}
-            if (
-                len(requirements) != len(expected)
-                or {item.get("id") for item in requirements} != expected
-            ):
-                raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-            for item in requirements:
-                if item.get("satisfied") is not True or not item.get("evidence"):
-                    raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-                for evidence in item["evidence"]:
-                    if evidence.startswith("file:"):
-                        path = evidence[5:]
-                        normalize_paths(self.workspace, [path])
-                        if path not in current["entries"]:
-                            raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-                    elif evidence.startswith("check:"):
-                        if not any(
-                            check["plan_id"] == evidence[6:]
-                            and check.get("exit_code") == 0
-                            for check in ticket["checks"]
-                        ):
-                            raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-                    else:
-                        raise FusionError("FUSION_EVIDENCE_INCOMPLETE")
-            if (
-                any(
-                    "tests" in Path(path).parts
-                    or Path(path).name.startswith("test_")
-                    or ".test." in path
-                    for path in ticket["changed_paths"]
-                )
-                and not test_review_reason.strip()
-            ):
-                raise FusionError("FUSION_TEST_REVIEW_REQUIRED")
-            if any(
-                not effect["stopped"]
-                for effect in await self.store.effects(task.task_id)
-            ):
-                raise FusionError("FUSION_OUTCOME_UNKNOWN")
-            async with self.guard.operation("snapshot", context=context, host=True):
-                final = await asyncio.to_thread(
-                    capture_snapshot, self.workspace, order["allowed_paths"]
-                )
-                if final["digest"] != ticket["candidate"]["digest"]:
-                    raise FusionError("FUSION_REPORT_STALE")
-                if (
-                    order["check_plan_ids"]
-                    and (
-                        await asyncio.to_thread(
-                            capture_snapshot, self.workspace, ticket["source_paths"]
-                        )
-                    )["digest"]
-                    != ticket["workspace_digest"]
-                ):
-                    raise FusionError("FUSION_REPORT_STALE")
-                task = await self.store.get(task.task_id)
-                await self.store.save_record(
-                    task.task_id,
-                    "review",
-                    new_id("review"),
-                    {
-                        "ticket_id": ticket_id,
-                        "requirements": list(requirements),
-                        "test_review_digest": hashlib.sha256(
-                            test_review_reason.encode()
-                        ).hexdigest(),
-                    },
-                )
-                task = await self.store.complete_task(task.task_id, task.version)
-            self._emit(context, task)
-            return task.to_record()
 
     def final_gate(self, context: RunContext) -> FinalOutputGate:
         """自然结束不等于任务完成，只给同一执行一次收敛机会。"""

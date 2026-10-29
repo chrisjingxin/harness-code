@@ -7123,6 +7123,15 @@
           "items": {
             "$ref": "#/$defs/fusionWorkspaceBlocker"
           }
+        },
+        "usage": {
+          "$ref": "#/$defs/fusionUsage"
+        },
+        "stagnation": {
+          "$ref": "#/$defs/fusionStagnation"
+        },
+        "exploration": {
+          "$ref": "#/$defs/fusionExploration"
         }
       },
       "required": [
@@ -7185,7 +7194,7 @@
         },
         "round": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 0
         },
         "model": {
           "type": "string",
@@ -7198,6 +7207,12 @@
             "cancelled",
             "failed"
           ]
+        },
+        "kind": {
+          "enum": [
+            "implementation",
+            "exploration"
+          ]
         }
       },
       "required": [
@@ -7207,7 +7222,30 @@
         "model",
         "status"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "round": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "exploration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "fusionWorkspaceBlocker": {
       "type": "object",
@@ -7325,6 +7363,210 @@
       },
       "required": [
         "released"
+      ],
+      "additionalProperties": false
+    },
+    "fusionRoleUsage": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "cache_complete": {
+          "type": "boolean"
+        },
+        "cache_hit_rate": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "profile_id",
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "complete",
+        "cache_complete",
+        "cache_hit_rate"
+      ],
+      "additionalProperties": false
+    },
+    "fusionUsageEstimate": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "lead_cost": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidekick_cost": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidekick_at_lead_price": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimated_saving": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "currency",
+        "lead_cost",
+        "sidekick_cost",
+        "sidekick_at_lead_price",
+        "estimated_saving"
+      ],
+      "additionalProperties": false
+    },
+    "fusionUsage": {
+      "type": "object",
+      "properties": {
+        "lead": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fusionRoleUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidekick": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fusionRoleUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimate": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/fusionUsageEstimate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "lead",
+        "sidekick",
+        "estimate"
+      ],
+      "additionalProperties": false
+    },
+    "fusionStagnation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "repeated_unresolved",
+            "repeated_check_failure"
+          ]
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "round",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "fusionExploration": {
+      "type": "object",
+      "properties": {
+        "exploration_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        }
+      },
+      "required": [
+        "exploration_id",
+        "status"
       ],
       "additionalProperties": false
     }

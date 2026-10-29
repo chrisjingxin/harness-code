@@ -12,6 +12,7 @@ import { fusionSummary } from "./fusion-summary"
 export type FusionExecution = {
   taskId: string
   role: "lead" | "sidekick"
+  kind?: "implementation" | "exploration"
   round: number
   model: string
   status: "running" | "completed" | "cancelled" | "failed"
@@ -61,7 +62,7 @@ export function applyFusionExecutionEvent(timeline: TimelineItem[], event: Event
     if (!lead || !event.execution_id || event.execution_id === event.parent_execution_id
       || event.agent_id !== "fusion-sidekick") return timeline
     return registerExecution(timeline, event, {
-      taskId: payload.task_id, role: "sidekick", round: payload.round, model: payload.model, status: payload.status,
+      taskId: payload.task_id, role: "sidekick", round: payload.round, model: payload.model, status: payload.status, kind: payload.kind ?? "implementation",
     })
   }
   if (event.type === EventType.FUSION_PROGRESS) {
@@ -98,7 +99,7 @@ function registerExecution(timeline: TimelineItem[], event: EventEnvelope, execu
   if (existing?.type === "message") {
     const previous = existing.message.fusionExecution!
     if (previous.status !== "running" || previous.taskId !== execution.taskId
-      || previous.role !== execution.role || previous.round !== execution.round || previous.model !== execution.model) return timeline
+      || previous.role !== execution.role || previous.kind !== execution.kind || previous.round !== execution.round || previous.model !== execution.model) return timeline
     return execution.status === "running" ? timeline
       : finishExecution(timeline, event.run_id, executionId, execution.status)
   }

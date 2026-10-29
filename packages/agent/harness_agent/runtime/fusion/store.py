@@ -145,6 +145,17 @@ class FusionTask:
             "workspace_blocker": self.data.get("workspace_blocker"),
             "write_paths": list(self.data.get("write_paths", [])),
             "resource_waits": list(self.data.get("resource_waits", {}).values()),
+            **(
+                {"exploration": self.data["exploration"]}
+                if "exploration" in self.data
+                else {}
+            ),
+            **({"usage": self.data["usage"]} if "usage" in self.data else {}),
+            **(
+                {"stagnation": self.data["stagnation"]}
+                if self.data.get("stagnation")
+                else {}
+            ),
         }
 
 
@@ -1574,6 +1585,47 @@ class FusionStateStore:
                 )
 
         await self._transaction(action)
+
+    async def record_usage(
+        self,
+        task_id: str,
+        event_id: str,
+        *,
+        role: str,
+        profile_id: str,
+        calls: list[dict[str, int]],
+    ) -> FusionTask:
+        """调用事实与累计值在同一短事务提交，重复事件不重复扣算。"""
+        from harness_agent.runtime.fusion.usage import aggregate_usage, usage_record
+
+        if role not in {"lead", "sidekick"} or not calls or not event_id:
+            raise FusionError("FUSION_USAGE_INVALID")
+        fact = {"role": role, "profile_id": profile_id, "calls": calls}
+
+        async def action() -> FusionTask:
+            task = await self._get(task_id)
+            if task.data["profile"][role]["id"] != profile_id:
+                raise FusionError("FUSION_USAGE_PROFILE_CONFLICT")
+            cursor = await self.connection.execute(
+                "SELECT data_json FROM fusion_evidence WHERE project_fingerprint=? AND task_id=? AND evidence_id=?",
+                (self.project, task_id, event_id),
+            )
+            existing = await cursor.fetchone()
+            if existing:
+                if existing[0] != encode(fact):
+                    raise FusionError("FUSION_USAGE_EVENT_CONFLICT")
+                return task
+            roles = dict(task.data.get("usage", {}))
+            roles[role] = aggregate_usage(roles.get(role), profile_id, calls)
+            summary = usage_record(roles, task.data["profile"].get("pricing", {}))
+            await self.connection.execute(
+                "INSERT INTO fusion_evidence VALUES(?,?,?,?,?)",
+                (self.project, task_id, event_id, "usage", encode(fact)),
+            )
+            # 统计只改变数据和版本，不改变终态、轮次、票据或写者代号。
+            return await self._update(task, data={"usage": summary})
+
+        return await self._transaction(action)
 
     async def load_record(
         self, task_id: str, kind: str, record_id: str

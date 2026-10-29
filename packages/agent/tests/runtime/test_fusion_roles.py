@@ -101,3 +101,23 @@ def test_inspection_role_is_readonly_and_has_distinct_runtime_identity(tmp_path)
     assert str(tmp_path) in worker.prompt
     assert "虚拟" in worker.prompt and "find /" in worker.prompt
     assert unused.runtime_profile.profile_key == worker.runtime_profile.profile_key
+
+
+def test_prompts_focus_on_delegation_and_append_changes_runtime_identity(tmp_path):
+    from dataclasses import replace
+    from harness_agent.runtime.fusion.roles import resolve_fusion_specs
+
+    frozen = profile()
+    lead, worker = resolve_fusion_specs(_spec(tmp_path), frozen)
+    assert (
+        "fusion_explore" in lead.prompt
+        and "核实" in lead.prompt
+        and "一次" in lead.prompt
+    )
+    assert "WAITING_RESOURCE" not in lead.prompt
+    assert "Sidekick" in lead.prompt and "blocked" in worker.prompt
+    custom = replace(frozen, lead_prompt_append="团队要求：先列风险")
+    changed, _ = resolve_fusion_specs(_spec(tmp_path), custom)
+    assert changed.prompt_template_fingerprint != lead.prompt_template_fingerprint
+    assert changed.runtime_profile.profile_key != lead.runtime_profile.profile_key
+    assert changed.capability_view == lead.capability_view

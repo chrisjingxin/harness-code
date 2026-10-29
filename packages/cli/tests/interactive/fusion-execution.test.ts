@@ -113,3 +113,14 @@ test("模型故障的具体原因和下一步显示在共享时间线", () => {
   expect(JSON.stringify(scopeTimeline(state.timeline, "root"))).toContain(message)
   expect(state.activity.kind).toBe("failed")
 })
+
+test("只读探索显示独立标题，迟到帧不能更改探索身份", () => {
+  let state = startFusion()
+  state = applyAgentEvent(state, fusionEvent(EventType.FUSION_EXECUTION, { task_id: "fusion-test", role: "sidekick", kind: "exploration", round: 0, model: "fast-model", status: "running" }, 2, "explorer", "root-r"))
+  state = applyAgentEvent(state, fusionEvent(EventType.CONTENT_DELTA, { text: "调查依据" }, 3, "explorer", "root-r"))
+  const groups = segmentTimeline(scopeTimeline(state.timeline, "root")).filter(segment => segment.kind === "group").map(segment => segment.group)
+  expect(groups.map(activityGroupTitle)).toContain("Sidekick · fast-model · 只读探索")
+  state = applyAgentEvent(state, fusionEvent(EventType.FUSION_EXECUTION, { task_id: "fusion-test", role: "sidekick", round: 0, model: "fast-model", status: "completed" }, 4, "explorer", "root-r"))
+  const marker = state.timeline.find(item => item.type === "message" && item.message.fusionExecution?.role === "sidekick")
+  expect(marker?.type === "message" && marker.message.fusionExecution?.status).toBe("running")
+})

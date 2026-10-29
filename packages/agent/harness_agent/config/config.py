@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from harness_agent.config.model_pricing import ModelPricing, parse_model_pricing
+
 import os
 import stat
 import tomllib
@@ -152,6 +154,7 @@ class ModelProfile:
     settings: ModelSettings
     source: str
     is_default: bool = False
+    pricing: ModelPricing | None = None
 
     def picker_summary(self, environ: Mapping[str, str] | None = None) -> dict[str, object]:
         """返回 `/model` 可显示的脱敏字段，绝不暴露 endpoint、Header 或凭据来源名称。"""
@@ -823,6 +826,7 @@ def _merge_profile_values(base: dict[str, object], override: dict[str, object]) 
         "headers",
         "headers_env",
         "reasoning",
+        "pricing",
     }
     unknown = set(override) - allowed
     if unknown:
@@ -831,7 +835,7 @@ def _merge_profile_values(base: dict[str, object], override: dict[str, object]) 
         )
     merged = dict(base)
     for key, value in override.items():
-        if key in {"headers", "headers_env", "reasoning"}:
+        if key in {"headers", "headers_env", "reasoning", "pricing"}:
             if not isinstance(value, dict):
                 raise ConfigError(f"models.profiles.<name>.{key} must be a TOML table")
             existing = merged.get(key, {})
@@ -948,6 +952,14 @@ def _apply_cli_overrides(
     sources["execution"] = ConfigSource.CLI.value
 
 
+def _parse_pricing(value: object) -> ModelPricing | None:
+    """把价格解析错误收敛到配置层的安全错误。"""
+    try:
+        return parse_model_pricing(value)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
 def _parse_model_catalog(models: Mapping[str, object], source: str) -> ModelCatalog | None:
     """解析所有命名 Profile 与角色绑定，并保持旧单 Profile 配置可直接运行。"""
     profiles = models.get("profiles", {})
@@ -969,6 +981,7 @@ def _parse_model_catalog(models: Mapping[str, object], source: str) -> ModelCata
             profile_id=configured_id,
             settings=_parse_model_settings(values),
             source=str(profile_sources.get(configured_id, source)),
+            pricing=_parse_pricing(values.get("pricing")),
         )
     roles = models.get("roles", {})
     if not isinstance(roles, dict):

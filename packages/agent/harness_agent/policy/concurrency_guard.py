@@ -50,7 +50,7 @@ class ConcurrencyGuardMiddleware(AgentMiddleware):
         tool_name = str(tool_call.get("name", ""))
         args = tool_call.get("args") or {}
 
-        if tool_name in {"task", "fusion_delegate", "fusion_rework"}:
+        if tool_name in {"task", "fusion_delegate", "fusion_rework", "fusion_explore"}:
             # task 只是编排入口；真正的子 Agent 工具调用会再次进入同一 Host
             # 锁。这里持有非重入写锁会让 Managed/Inline child 自锁。
             return await handler(request)

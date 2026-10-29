@@ -121,6 +121,8 @@ class FusionRunState:
     # Host 固定的只读核查模式，不代表用户确认操作已停止。
     inspection_only: bool = False
     check_effect_id: str | None = None
+    # Host 固定的探索身份；与实施 Worker 使用不同图和 checkpoint。
+    exploration_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

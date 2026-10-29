@@ -11,32 +11,21 @@ AgentHost -- 准备 --> Lead/Sidekick Spec -- 复用 --> AgentEnginePool
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import shlex
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from langgraph.runtime import get_runtime
 
 from harness_agent.config.config import ConfigError
-from harness_agent.host.run_coordinator import RunPreparation, RunRef, StartRun
+from harness_agent.host.run_coordinator import RunPreparation, StartRun
 from harness_agent.runtime.agent_spec import ResolvedAgentSpec
 from harness_agent.runtime.execution_binding import (
-    MANAGED_EXECUTION_CHECKPOINT_PREFIX,
-    AgentExecutionBinding,
-    ExecutionMode,
-    ExecutionRef,
-    ExecutionStatus,
     ResolvedExecutionBinding,
     SelectionOrigin,
     ThreadExecutionSelection,
-)
-from harness_agent.runtime.execution_stream import (
-    CONTENT_DELTA,
-    ExecutionSignal,
-    StreamInteractionRequest,
 )
 from harness_agent.runtime.fusion.followup import classify_fusion_followup
 from harness_agent.runtime.fusion.guard import FusionEffectMiddleware, FusionWriteGuard
@@ -54,19 +43,7 @@ from harness_agent.runtime.fusion.store import (
     FusionTask,
     new_id,
 )
-from harness_agent.runtime.interactions import InteractionRequest
-from harness_agent.runtime.managed_agent_executor import (
-    ManagedAgentExecutionError,
-    ManagedAgentExecutor,
-    ManagedAgentRequest,
-    ManagedAgentResult,
-    ManagedAgentRuntime,
-    ManagedChildObserver,
-    acquire_pooled_agent_runtime,
-)
-from harness_agent.runtime.provider_retry import BoundedProviderRetry
 from harness_agent.runtime.run_context import (
-    FusionRunState,
     RunContext,
     current_approval_mode,
 )
@@ -95,78 +72,6 @@ class FusionRunBinding:
     resume_pending: bool = False
 
 
-class FusionWorkerObserver(ManagedChildObserver):
-    """实时转发 Sidekick 过程和真实审批；不写父 Transcript，不主动提问。"""
-
-    def __init__(
-        self,
-        host: AgentHost,
-        parent: RunContext,
-        ref: ExecutionRef,
-        namespace: str,
-        *,
-        task: FusionTask,
-        model: str,
-    ) -> None:
-        """固定本轮执行来源及持续 checkpoint，审批由父 Run 接收。"""
-        super().__init__(
-            event_port=parent.event_port,
-            execution_ref=ref.execution_id,
-            parent_execution_ref=ref.parent_execution_id,
-            agent_id="fusion-sidekick",
-        )
-        self.host = host
-        self.parent = parent
-        self.ref = ref
-        self.namespace = namespace
-        self._execution_payload = {
-            "task_id": task.task_id,
-            "role": "sidekick",
-            "round": task.data["round"],
-            "model": model,
-        }
-
-    def emit(self, signal: ExecutionSignal) -> None:
-        """正文与主 Agent 一样实时转发；身份始终使用本轮冻结值。"""
-        if signal.type == CONTENT_DELTA:
-            self._emit(signal.type, signal.payload)
-        else:
-            super().emit(signal)
-
-    async def on_execution_complete(self, result: ManagedAgentResult) -> None:
-        """正文已经实时显示，结束时不再重复追加最终内容。"""
-        return None
-
-    def emit_status(
-        self, status: Literal["running", "completed", "cancelled", "failed"]
-    ) -> None:
-        """一轮开始前及释放前公布起止事实，不把执行结束当作任务验收。"""
-        self._emit("fusion.execution", {**self._execution_payload, "status": status})
-
-    async def interact(self, request: StreamInteractionRequest) -> object:
-        """通过父 Run 的串行审批生成 LangGraph 恢复值，不自动批准。"""
-        if request.type != "approval":
-            raise FusionError("FUSION_ROLE_DENIED")
-        interaction = InteractionRequest(
-            request_id=request.request_id,
-            type=request.type,
-            payload=request.payload,
-            interrupt_id=request.interrupt_id,
-            questions=request.questions,
-            action_count=request.action_count,
-            serial_context={
-                **(request.serial_context or {}),
-                "checkpoint_namespace": self.namespace,
-            },
-            execution_id=self.ref.execution_id,
-            parent_execution_id=self.ref.parent_execution_id,
-            agent_id="fusion-sidekick",
-        )
-        return await self.host._run_coordinator.collect_child_approvals(
-            RunRef(self.parent.thread_id, self.parent.run_id), interaction
-        )
-
-
 class FusionRuntime:
     """一个 Host 持有一个服务，任务事实仍按项目和 Thread 隔离。"""
 
@@ -193,11 +98,53 @@ class FusionRuntime:
             context_provider=context_provider,
         )
         self.effect_middleware = FusionEffectMiddleware(self.guard, self.store)
+        from harness_agent.host.fusion_worker import FusionWorkerRunner
+        from harness_agent.runtime.fusion.roles import resolve_exploration_spec
+
+        runner = FusionWorkerRunner(host, persistence, self.store)
+
+        async def implement(parent: RunContext, task: FusionTask, message: str) -> None:
+            await runner.run(
+                parent,
+                task,
+                message,
+                spec=self.worker_specs[task.task_id],
+                service=self.service,
+            )
+
+        async def explore(
+            parent: RunContext, task: FusionTask, message: str, exploration_id: str
+        ) -> str:
+            spec = resolve_exploration_spec(
+                self.worker_specs[task.task_id], self.profiles[task.task_id]
+            )
+            from harness_agent.runtime.agent_engine import AgentEnginePoolCapacityError
+            from harness_agent.runtime.managed_agent_executor import (
+                ManagedAgentExecutionError,
+            )
+
+            try:
+                return await runner.run(
+                    parent,
+                    task,
+                    message,
+                    spec=spec,
+                    service=self.service,
+                    exploration_id=exploration_id,
+                )
+            except AgentEnginePoolCapacityError as exc:
+                raise FusionError("FUSION_EXPLORATION_BUSY") from exc
+            except ManagedAgentExecutionError as exc:
+                if exc.code == "RUNTIME_POOL_CAPACITY_EXHAUSTED":
+                    raise FusionError("FUSION_EXPLORATION_BUSY") from exc
+                raise
+
         self.service = FusionService(
             store=self.store,
             workspace=host._workspace,
             profile_provider=self.profiles.__getitem__,
-            worker=self.run_worker,
+            worker=implement,
+            explorer=explore,
             guard=self.guard,
             prepare_check=self.prepare_check,
         )
@@ -384,230 +331,6 @@ class FusionRuntime:
                 await index_lease.release()
             await reservation.release()
             raise
-
-    async def run_worker(
-        self, parent: RunContext, task: FusionTask, message: str
-    ) -> None:
-        """每轮新执行 ID，同一任务保持 checkpoint；共享审批、取消和用量。"""
-        host = self.host
-        spec = self.worker_specs[task.task_id]
-        profile = spec.runtime_profile
-        registry = host._run_coordinator.execution_registry
-        ref = ExecutionRef(
-            parent.thread_id,
-            parent.run_id,
-            new_id("fusion-worker"),
-            parent.execution_id,
-        )
-        stable_id = (
-            MANAGED_EXECUTION_CHECKPOINT_PREFIX
-            + hashlib.sha256(
-                f"{self.persistence.project_fingerprint}:{parent.thread_id}:{task.task_id}:{task.worker_session_id}".encode()
-            ).hexdigest()
-        )
-        restore_checkpoint_id = None
-        if task.data.get("checkpoint_id") or task.data.get("round", 0) > 1:
-            saved = await self.persistence.checkpointer.aget_tuple(
-                self.persistence.graph_config(stable_id)
-            )
-            completed_id = task.data.get("completed_checkpoint_id")
-            interrupted = task.data.get("worker_checkpoint_interrupted") is True
-            if task.data.get("checkpoint_id") != stable_id and not (
-                interrupted
-                and task.data.get("checkpoint_id") is None
-                and completed_id is None
-            ):
-                raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
-            if interrupted:
-                # 只从上一完整记录续接；半轮工具不重放，已改文件留在工作区供重新读取。
-                if completed_id:
-                    config = self.persistence.graph_config(stable_id)
-                    config["configurable"]["checkpoint_id"] = completed_id
-                    completed = await self.persistence.checkpointer.aget_tuple(config)
-                    if completed is None:
-                        raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
-                    restore_checkpoint_id = completed_id
-                else:
-                    await self.persistence.delete_execution_checkpoint(stable_id)
-            elif (
-                saved is None
-                or not completed_id
-                or saved.checkpoint["id"] != completed_id
-            ):
-                raise FusionError("FUSION_WORKER_CHECKPOINT_INVALID")
-        await registry.accept(
-            AgentExecutionBinding(
-                ref=ref,
-                agent_id="fusion-sidekick",
-                mode=ExecutionMode.MANAGED,
-                depth=1,
-                model=spec.model_view,
-                policy_fingerprint=spec.effective_policy.fingerprint,
-                engine_profile_key=profile.profile_key,
-                definition_fingerprint=spec.definition_fingerprint,
-            )
-        )
-        task = await self.store.update(
-            task.task_id,
-            task.version,
-            data={"worker_execution_id": ref.execution_id, "checkpoint_id": stable_id},
-        )
-        from harness_agent.diagnostic_log.runtime import bind_execution_log
-        from harness_agent.threads.deferred_store import ThreadDeferredToolStore
-
-        log = bind_execution_log(
-            parent.diagnostic_log,
-            thread_id=ref.thread_id,
-            run_id=ref.run_id,
-            execution_id=ref.execution_id,
-            parent_execution_id=ref.parent_execution_id,
-            agent_id="fusion-sidekick",
-        )
-        index_lease = None
-        if host._code_index_manager is not None:
-            index_lease = await host._code_index_manager.acquire_query()
-        snapshot = ContextLifecycle(host._workspace, home=host._config_home).prepare(
-            thread_id=parent.thread_id, spec=spec
-        )
-        context = RunContext(
-            thread_id=parent.thread_id,
-            run_id=parent.run_id,
-            context_snapshot=snapshot,
-            skill_registry=spec.skill_registry,
-            approval_mode=parent.approval_mode,
-            approval_state=parent.approval_state,
-            approval_mode_provider=lambda: current_approval_mode(
-                parent, fallback=parent.approval_mode
-            ),
-            interaction_port=lambda interaction: (
-                host._run_coordinator.request_child_interaction(
-                    RunRef(ref.thread_id, ref.run_id), interaction
-                )
-            ),
-            event_port=parent.event_port,
-            record_approval=parent.record_approval,
-            profile_key=profile.profile_key,
-            checkpoint_thread_id=stable_id,
-            execution_id=ref.execution_id,
-            parent_execution_id=ref.parent_execution_id,
-            agent_id="fusion-sidekick",
-            cancellation_token=parent.cancellation_token,
-            plan_constraint=parent.plan_constraint,
-            delegation_policy=spec.effective_policy.delegation,
-            workspace_root_registry=host._workspace_root_registry.readonly_view()
-            if host._workspace_root_registry
-            else None,
-            snapshot_store=host._snapshot_store,
-            deferred_tool_store=ThreadDeferredToolStore(),
-            diagnostic_log=log,
-            usage_ledger=parent.usage_ledger,
-            code_index_query_lease=index_lease,
-            fusion_task_id=task.task_id,
-            fusion_role="sidekick",
-            fusion_state=FusionRunState(
-                parent.fusion_state.revision, parent.fusion_state.generation
-            ),
-            fusion_service=self.service,
-        )
-
-        def release() -> None:
-            host._snapshot_store.close_thread(stable_id)
-
-        def graph_config(_: str) -> Mapping[str, object]:
-            nonlocal restore_checkpoint_id
-            config = self.persistence.graph_config(stable_id)
-            if restore_checkpoint_id is not None:
-                config["configurable"]["checkpoint_id"] = restore_checkpoint_id
-                restore_checkpoint_id = None
-            return config
-
-        async def acquire() -> ManagedAgentRuntime:
-            return await acquire_pooled_agent_runtime(
-                pool=host._ensure_agent_engine_pool(host._config),
-                profile=profile,
-                run_context=context,
-                graph_config=graph_config,
-                on_release=release,
-            )
-
-        async def start(_: str) -> None:
-            await registry.start(ref)
-
-        request = ManagedAgentRequest(
-            execution_ref=ref.execution_id,
-            parent_execution_ref=ref.parent_execution_id,
-            run_id=ref.run_id,
-            input=message,
-            checkpoint_namespace=task.worker_session_id,
-            output_policy="passthrough",
-            runtime_provider=acquire,
-            is_cancelled=lambda: parent.cancellation_token.cancelled,
-            idempotency_key=task.data["operation_id"],
-            execution_starter=start,
-            agent_spec=spec,
-            final_output_gate=self.service.final_gate(context),
-            provider_retry=BoundedProviderRetry(
-                max_attempts=spec.model_settings.max_retries + 1
-            ),
-            diagnostic_log=log,
-            model_profile_id=spec.model_profile_id,
-            usage_ledger=parent.usage_ledger,
-            on_resume_consumed=lambda: host._run_coordinator.child_resume_consumed(
-                RunRef(parent.thread_id, parent.run_id)
-            ),
-        )
-        observer = FusionWorkerObserver(
-            host, parent, ref, stable_id, task=task, model=spec.model_view.model
-        )
-        observer.emit_status("running")
-        checkpoint_finished = False
-        try:
-            await ManagedAgentExecutor().execute(request, observer)
-            saved = await self.persistence.checkpointer.aget_tuple(
-                self.persistence.graph_config(stable_id)
-            )
-            if saved is not None:
-                current = await self.store.get(task.task_id)
-                await self.store.update(
-                    task.task_id,
-                    current.version,
-                    data={"completed_checkpoint_id": saved.checkpoint["id"]},
-                )
-            checkpoint_finished = True
-            await registry.finalize(ref, status=ExecutionStatus.COMPLETED)
-            observer.emit_status("completed")
-        except BaseException as exc:
-            cancelled = parent.cancellation_token.cancelled or isinstance(
-                exc, asyncio.CancelledError
-            )
-            await registry.finalize(
-                ref,
-                status=ExecutionStatus.CANCELLED
-                if cancelled
-                else ExecutionStatus.FAILED,
-            )
-            observer.emit_status("cancelled" if cancelled else "failed")
-            if (
-                isinstance(exc, ManagedAgentExecutionError)
-                and exc.code == "RUN_CANCELLED"
-            ):
-                raise asyncio.CancelledError from exc
-            raise
-        finally:
-            release()
-            try:
-                if index_lease is not None:
-                    await index_lease.release()
-            finally:
-                # Managed 执行已经退出；这里仅确认派发收尾，不替命令推断 stopped。
-                await asyncio.shield(
-                    self.store.record_worker_stopped(
-                        task.task_id,
-                        task.data["operation_id"],
-                        ref.execution_id,
-                        interrupted=not checkpoint_finished,
-                    )
-                )
 
     async def prepare_check(
         self, context: RunContext, plan: FrozenFusionCheckPlan, lease: FusionLease

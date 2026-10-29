@@ -193,3 +193,20 @@ def test_untrusted_project_fusion_configuration_is_rejected(tmp_path: Path) -> N
     _write(tmp_path / ".harness" / "config.toml", MODELS + FUSION)
     with pytest.raises(ConfigError, match="Project configuration is not supported"):
         load_config(workspace=tmp_path, home=tmp_path / "home", environ={})
+
+
+def test_trusted_prompt_appends_are_private_bounded_and_preserved(tmp_path):
+    body = FUSION.replace(
+        'check_plan_ids = ["unit"]',
+        'check_plan_ids = ["unit"]\nlead_prompt_append = "先分析业务边界：fake-private-style"\nsidekick_prompt_append = "报告需列文件"',
+    )
+    config = _load(tmp_path, body)
+    selection = config.fusion.require_profile("default")
+    assert "fake-private-style" in selection.lead_prompt_append
+    assert "fake-private-style" not in json.dumps(config.redacted({})) + repr(selection)
+    assert config.redacted({})["fusion"]["profiles"]["default"]["prompt_appends"] == {
+        "lead": True,
+        "sidekick": True,
+    }
+    with pytest.raises(ConfigError):
+        _load(tmp_path, body.replace('fake-private-style', 'a' * 8001))

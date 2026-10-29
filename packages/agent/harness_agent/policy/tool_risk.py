@@ -21,6 +21,7 @@ class ToolKind(Enum):
 TOOL_KIND_MAP: dict[str, ToolKind] = {
     "fusion_status": ToolKind.READ,
     "fusion_delegate": ToolKind.AGENT,
+    "fusion_explore": ToolKind.AGENT,
     "fusion_rework": ToolKind.AGENT,
     "fusion_finish_direct": ToolKind.INTERACT,
     "fusion_review_result": ToolKind.INTERACT,

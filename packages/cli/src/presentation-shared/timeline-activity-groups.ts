@@ -136,7 +136,7 @@ export function activityGroupTitle(group: TimelineActivityGroup): string {
 
 function fusionTitle(execution: FusionExecution): string {
   const title = `${execution.role === "lead" ? "Lead" : "Sidekick"} · ${execution.model}`
-  return execution.role === "sidekick" ? `${title} · 第 ${execution.round} 轮` : title
+  return execution.role === "sidekick" ? execution.kind === "exploration" ? `${title} · 只读探索` : `${title} · 第 ${execution.round} 轮` : title
 }
 
 /** 状态行说明当前正在执行的角色；耗时明确属于本次 Run。 */

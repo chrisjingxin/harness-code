@@ -213,3 +213,38 @@ def test_no_checks_is_an_explicit_review_only_configuration(tmp_path: Path) -> N
     profile = replace(config.fusion.require_profile("default"), check_plan_ids=())
     config = replace(config, fusion=FusionSettings(profiles={"default": profile}))
     assert _resolve(config).check_plans == ()
+
+
+def test_prompt_append_and_prices_are_frozen_and_fingerprinted(tmp_path):
+    from harness_agent.config.model_pricing import parse_model_pricing
+
+    config = _config(tmp_path)
+    before = _resolve(config)
+    selected = replace(
+        config.fusion.profiles["default"], lead_prompt_append="fake-private-style"
+    )
+    updated = replace(
+        config, fusion=replace(config.fusion, profiles={"default": selected})
+    )
+    frozen = _resolve(updated)
+    assert frozen.config_fingerprint != before.config_fingerprint
+    assert "fake-private-style" not in repr(frozen) + json.dumps(frozen.to_record())
+    catalog = updated.model_catalog
+    models = dict(catalog.profiles)
+    models["fast"] = replace(
+        models["fast"],
+        pricing=parse_model_pricing(
+            {"currency": "USD", "input_per_million": 2, "output_per_million": 6}
+        ),
+    )
+    priced = _resolve(replace(updated, model_catalog=replace(catalog, profiles=models)))
+    assert priced.config_fingerprint != frozen.config_fingerprint
+
+
+def test_same_model_alias_on_different_endpoints_does_not_warn(tmp_path):
+    config = _model_override(
+        _model_override(_config(tmp_path), "pro", name="default"),
+        "fast",
+        name="default",
+    )
+    assert not _resolve(config).pairing_warnings

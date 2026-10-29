@@ -51,6 +51,9 @@ class FrozenFusionProfile:
     check_plans: tuple[FrozenFusionCheckPlan, ...]
     max_rework_rounds: int
     config_fingerprint: str
+    lead_prompt_append: str = field(default="", repr=False)
+    sidekick_prompt_append: str = field(default="", repr=False)
+    pairing_warnings: tuple[str, ...] = ()
 
     def to_record(self) -> dict[str, object]:
         """供持久化和协议使用，禁止输出连接配置和检查正文。"""
@@ -61,6 +64,19 @@ class FrozenFusionProfile:
             "check_plan_ids": [plan.plan_id for plan in self.check_plans],
             "max_rework_rounds": self.max_rework_rounds,
             "config_fingerprint": self.config_fingerprint,
+            **(
+                {"pairing_warnings": list(self.pairing_warnings)}
+                if self.pairing_warnings
+                else {}
+            ),
+            "pricing": {
+                "lead": self.lead_profile.pricing.to_record()
+                if self.lead_profile.pricing
+                else None,
+                "sidekick": self.sidekick_profile.pricing.to_record()
+                if self.sidekick_profile.pricing
+                else None,
+            },
         }
 
 
@@ -117,6 +133,28 @@ def resolve_fusion_profile(
                 for plan in checks
             ],
             "max_rework_rounds": selection.max_rework_rounds,
+            **(
+                {
+                    "prompt_appends": {
+                        "lead": selection.lead_prompt_append,
+                        "sidekick": selection.sidekick_prompt_append,
+                    }
+                }
+                if selection.lead_prompt_append or selection.sidekick_prompt_append
+                else {}
+            ),
+            **(
+                {
+                    "pricing": {
+                        "lead": lead.pricing.to_record() if lead.pricing else None,
+                        "sidekick": sidekick.pricing.to_record()
+                        if sidekick.pricing
+                        else None,
+                    }
+                }
+                if lead.pricing or sidekick.pricing
+                else {}
+            ),
         }
     )
     return FrozenFusionProfile(
@@ -128,6 +166,9 @@ def resolve_fusion_profile(
         check_plans=tuple(checks),
         max_rework_rounds=selection.max_rework_rounds,
         config_fingerprint=fingerprint,
+        lead_prompt_append=selection.lead_prompt_append,
+        sidekick_prompt_append=selection.sidekick_prompt_append,
+        pairing_warnings=_pairing_warnings(lead, sidekick),
     )
 
 
@@ -181,3 +222,30 @@ def _freeze_check(
         timeout_seconds=plan.timeout_seconds,
         command_digest=hashlib.sha256(plan.command.encode("utf-8")).hexdigest(),
     )
+
+
+def _pairing_warnings(lead: ModelProfile, sidekick: ModelProfile) -> tuple[str, ...]:
+    """只按实际设置和显式价格提醒，不按模型别名或窗口大小猜测。"""
+    warnings = []
+    if model_settings_fingerprint(
+        profile_name="pairing", model=lead.settings
+    ) == model_settings_fingerprint(profile_name="pairing", model=sidekick.settings):
+        warnings.append(
+            "两侧使用完全相同的模型连接与设置；请确认这是预期配对，实际节省仍取决于单价和用量。"
+        )
+    a, b = lead.pricing, sidekick.pricing
+    if (
+        a
+        and b
+        and a.currency == b.currency
+        and b.input_per_million >= a.input_per_million
+        and b.output_per_million >= a.output_per_million
+        and (
+            b.input_per_million > a.input_per_million
+            or b.output_per_million > a.output_per_million
+        )
+    ):
+        warnings.append(
+            "配置的 Sidekick 输入和输出单价均不低于 Lead；请核对单价，缓存和实际用量也会影响估算。"
+        )
+    return tuple(warnings)

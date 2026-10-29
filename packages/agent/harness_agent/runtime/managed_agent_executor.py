@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -287,6 +288,8 @@ class ManagedAgentRequest:
     # 内开始下一模型回合，不创建新的 DelegationTarget 或 execution。
     final_output_gate: FinalOutputGate | None = None
     usage_ledger: object | None = None
+    # 仅传已观测 token；Host 可持久化角色用量，不接收提示词或连接信息。
+    on_model_usage: Callable[[str, list[dict[str, int]]], Awaitable[None]] | None = None
 
     def __post_init__(self) -> None:
         """在取得昂贵 runtime 前拒绝不完整的执行事实。"""
@@ -535,6 +538,26 @@ class ManagedAgentExecutor:
             attempt_started = self._clock()
             first_chunk_at: float | None = None
             usage_before = dict(session.usage)
+            usage_cursor = len(session.usage_observations)
+            usage_event_id = "usage-" + uuid.uuid4().hex
+
+            async def publish_usage(*, failed: bool = False) -> None:
+                if request.on_model_usage is None:
+                    return
+                from harness_agent.runtime.model_usage import observed_calls
+
+                calls = observed_calls(session, usage_cursor)
+                if not calls and not failed:
+                    return
+                calls = calls or [{}]
+                # 在失败回滚前保存观测事实；统计不能掩盖原始执行错误。
+                try:
+                    await asyncio.shield(request.on_model_usage(usage_event_id, calls))
+                except Exception:
+                    request.diagnostic_log.warn(
+                        "fusion.usage_unavailable", {"usage_event_id": usage_event_id}
+                    )
+
             attempt_snapshot = session.snapshot()
             active_started = (
                 request.timing.begin_active() if request.timing is not None else None
@@ -562,7 +585,7 @@ class ManagedAgentExecutor:
                     stream_input,
                     mark_first_chunk,
                 )
-                round_usage = _round_usage(session, usage_before)
+                round_usage = _round_usage(session, usage_before, usage_cursor)
                 request.diagnostic_log.info(
                     "model.completed",
                     {
@@ -572,7 +595,9 @@ class ManagedAgentExecutor:
                         "provider_first_chunk_ms": (
                             None
                             if first_chunk_at is None
-                            else max(0, round((first_chunk_at - attempt_started) * 1000))
+                            else max(
+                                0, round((first_chunk_at - attempt_started) * 1000)
+                            )
                         ),
                         "usage": round_usage,
                         "finish_reason": (
@@ -585,19 +610,26 @@ class ManagedAgentExecutor:
                 if callable(record):
                     record(
                         execution_id=request.execution_ref,
-                        agent_id=str(getattr(runtime.run_context, "agent_id", "") or "main"),
+                        agent_id=str(
+                            getattr(runtime.run_context, "agent_id", "") or "main"
+                        ),
                         profile_id=request.model_profile_id,
                         usage={
                             "input_tokens": round_usage.get("input_tokens"),
                             "output_tokens": round_usage.get("output_tokens"),
-                            "cached_input_tokens": round_usage.get("cached_input_tokens"),
+                            "cached_input_tokens": round_usage.get(
+                                "cached_input_tokens"
+                            ),
                         },
                     )
+                await publish_usage()
                 return result
             except asyncio.CancelledError:
+                await publish_usage(failed=True)
                 session.restore(attempt_snapshot)
                 raise
             except ExecutionStreamError as exc:
+                await publish_usage(failed=True)
                 _restore_failed_attempt(session, attempt_snapshot, exc)
                 _log_model_failure(
                     request,
@@ -626,6 +658,7 @@ class ManagedAgentExecutor:
                     retryable=exc.code == "PROVIDER_OUTPUT_INTERRUPTED",
                 ) from exc
             except Exception as exc:  # noqa: BLE001 - retry 边界需要判定任何错误
+                await publish_usage(failed=True)
                 _restore_failed_attempt(session, attempt_snapshot, exc)
                 _log_model_failure(
                     request,
@@ -808,8 +841,20 @@ def _log_model_failure(
     request.diagnostic_log.error("model.failed", fields)
 
 
-def _round_usage(session: Any, usage_before: Mapping[str, int]) -> dict[str, int | None]:
-    """优先使用本回合最后一次绝对用量，避免跨回合 session max 把 20 记成 10。"""
+def _round_usage(
+    session: StreamSession, usage_before: Mapping[str, int], cursor: int
+) -> dict[str, int | None]:
+    """累计当前图调用内的全部模型回合，旧的 Run 最大值仅作无观测时诊断。"""
+    from harness_agent.runtime.model_usage import observed_calls
+
+    calls = observed_calls(session, cursor)
+    if calls:
+        return {
+            key: sum(call[key] for call in calls)
+            if all(key in call for call in calls)
+            else None
+            for key in ("input_tokens", "output_tokens", "cached_input_tokens")
+        }
     raw = getattr(session, "last_call_usage", None) or {}
     if raw:
         return {

@@ -2059,6 +2059,57 @@
     },
     {
       "kind": "event",
+      "name": "fusion.progress",
+      "case": "role_usage",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x",
+          "usage": {
+            "lead": {
+              "profile_id": "pro",
+              "calls": 1,
+              "input_tokens": 50,
+              "output_tokens": 5,
+              "cached_input_tokens": 0,
+              "complete": true,
+              "cache_complete": false,
+              "cache_hit_rate": null
+            },
+            "sidekick": null,
+            "estimate": null
+          },
+          "stagnation": {
+            "kind": "repeated_unresolved",
+            "round": 2,
+            "message": "换策略"
+          },
+          "exploration": {
+            "exploration_id": "explore-1",
+            "status": "running"
+          }
+        }
+      }
+    },
+    {
+      "kind": "event",
       "name": "fusion.execution",
       "case": "valid",
       "value": {
@@ -2074,6 +2125,27 @@
           "round": 1,
           "model": "x",
           "status": "running"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "readonly_explore",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.execution",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "role": "sidekick",
+          "round": 0,
+          "model": "x",
+          "status": "running",
+          "kind": "exploration"
         }
       }
     },
@@ -7699,6 +7771,109 @@
     },
     {
       "kind": "event",
+      "name": "fusion.progress",
+      "case": "negative_usage",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x",
+          "usage": {
+            "lead": {
+              "profile_id": "pro",
+              "calls": 1,
+              "input_tokens": -1,
+              "output_tokens": 5,
+              "cached_input_tokens": 0,
+              "complete": true,
+              "cache_complete": false,
+              "cache_hit_rate": null
+            },
+            "sidekick": null,
+            "estimate": null
+          },
+          "stagnation": {
+            "kind": "repeated_unresolved",
+            "round": 2,
+            "message": "换策略"
+          },
+          "exploration": {
+            "exploration_id": "explore-1",
+            "status": "running"
+          }
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.progress",
+      "case": "secret_in_usage",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.progress",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "thread_id": "x",
+          "version": 1,
+          "phase": "READY",
+          "active": false,
+          "profile": {},
+          "worker_session_id": "x",
+          "revision": 1,
+          "round": 1,
+          "verification": "verified",
+          "reason": "x",
+          "report_id": "x",
+          "ticket_id": "x",
+          "usage": {
+            "lead": {
+              "profile_id": "pro",
+              "calls": 1,
+              "input_tokens": 50,
+              "output_tokens": 5,
+              "cached_input_tokens": 0,
+              "complete": true,
+              "cache_complete": false,
+              "cache_hit_rate": null,
+              "api_key": "fake"
+            },
+            "sidekick": null,
+            "estimate": null
+          },
+          "stagnation": {
+            "kind": "repeated_unresolved",
+            "round": 2,
+            "message": "换策略"
+          },
+          "exploration": {
+            "exploration_id": "explore-1",
+            "status": "running"
+          }
+        }
+      }
+    },
+    {
+      "kind": "event",
       "name": "fusion.execution",
       "case": "wrong_type",
       "value": null
@@ -7740,6 +7915,27 @@
           "round": 1,
           "model": "x",
           "status": "running"
+        }
+      }
+    },
+    {
+      "kind": "event",
+      "name": "fusion.execution",
+      "case": "implementation_round_zero",
+      "value": {
+        "event_id": "x",
+        "type": "fusion.execution",
+        "thread_id": "x",
+        "run_id": "x",
+        "sequence": 1,
+        "timestamp_ms": 1,
+        "payload": {
+          "task_id": "x",
+          "role": "sidekick",
+          "round": 0,
+          "model": "x",
+          "status": "running",
+          "kind": "implementation"
         }
       }
     },

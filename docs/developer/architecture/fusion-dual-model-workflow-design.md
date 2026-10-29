@@ -1,6 +1,6 @@
 # Harness Code 双模型协作（Fusion）设计与实现
 
-> P0 闭环已实现。开发基线：Harness Code `dev_wdl / 68afe9f`，dsh-model-fusion `fcb2693`；协议更新至 **v3.11**。实施与测试记录见 [HC-183 Task](../task/archive/HC-183-双模型协作.md)。P1 用量历史、成本展示和 P2 缓存、Lead 接管未纳入首版。
+> P0 闭环已实现。开发基线：Harness Code `dev_wdl / 68afe9f`，dsh-model-fusion `fcb2693`；协议更新至 **v3.11**。实施与测试记录见 [HC-183 Task](../task/archive/HC-183-双模型协作.md)。HC-189 已补角色用量、配置价格估算、只读探索和重复失败提示；缓存保活、运行中直接插话、Lead 写入接管、跨任务 checkpoint 复用未启用。
 >
 > 本文同时说明设计和实际代码。代码位置以“文件 + 符号”定位；`packages/...` 相对 Harness Code 仓库，`src/...` 相对 dsh-model-fusion 仓库。使用方法见 [模型配置](../../user/模型配置.md#fusion-双模型组合)。
 
@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | 固定两个真实模型 | `host/native-selection.ts`、`host/settings.ts` | `config/fusion.py`、`runtime/fusion/profile.py` |
 | 判断、派单、直接问答和审阅 | `host/coordinator.ts` | `runtime/fusion/service.py` |
-| 返工继续同一个子会话 | `host/native-worker.ts` | `host/fusion_runtime.py::run_worker` |
-| Host 运行检查，Lead 逐项验收 | `host/native-checks.ts`、`evidence/gate.ts` | `runtime/verification.py`、`FusionService.review` |
+| 返工继续同一个子会话 | `host/native-worker.ts` | `host/fusion_worker.py::FusionWorkerRunner.run` |
+| Host 运行检查，Lead 逐项验收 | `host/native-checks.ts`、`evidence/gate.ts` | `runtime/verification.py`、`runtime/fusion/acceptance.py::FusionAcceptance.review` |
 | 只读 Lead、单写者、持久化和安全恢复 | `host/native-role-sandbox.ts`、`execution/write-lease.ts`、`task/sqlite-store.ts`、`recovery/reconcile.ts` | `roles.py`、`guard.py`、`store.py` |
 
 Harness Code 复用现有 ModelProfile、AgentEnginePool、ManagedAgentExecutor、Snapshot 文件工具、审批和 ThreadPersistence，没有新建模型客户端或另一套 Run 系统。
@@ -89,12 +89,15 @@ flowchart LR
 | `config/fusion.py`、`config.py`、`config_manifest.py` | 可信配置、合并、引用校验和脱敏摘要 | 用户模板、配置测试 |
 | `runtime/fusion/profile.py::resolve_fusion_profile` | 校验两模型、目录和池容量，冻结本任务输入 | 配置指纹、恢复比较 |
 | `runtime/fusion/roles.py::resolve_fusion_specs` | 从基础 Spec 分别派生角色和实际模型 | 能力白名单、提示词、Profile 指纹 |
-| `runtime/fusion/tools.py::create_fusion_tools` | 模型可见的六个控制工具 | `tool_risk.py`、`approval_policy.py` |
-| `runtime/fusion/service.py::FusionService` | 派单、返工、续接、检查、逐项审阅和最终输出门禁 | 状态机、票据、失败测试 |
+| `runtime/fusion/tools.py::create_fusion_tools` | 模型可见的七个控制工具 | `tool_risk.py`、`approval_policy.py` |
+| `runtime/fusion/service.py::FusionService` | 派单、探索、返工、续接和最终输出门禁 | 状态机、票据、失败测试 |
+| `runtime/fusion/acceptance.py::FusionAcceptance` | 独立检查、快照、票据和逐项审阅 | 真实命令、重检和来源变化 |
+| `host/fusion_worker.py::FusionWorkerRunner` | 实施/探索执行、独立 checkpoint、真实子审批及取消收尾 | 原生 Host、registry、Pool、取消 |
+| `runtime/model_usage.py`、`runtime/fusion/usage.py` | 已观测用量与价格估算，未知值不算零 | 重试、恢复、缓存和价格完整性 |
 | `runtime/fusion/store.py::FusionStateStore` | 任务、文件预留、排队、派发、证据及停止记录 | schema 验证、事务和崩溃测试 |
 | `runtime/fusion/snapshot.py` | 独立文件快照、路径规范化和改动清单 | 范围快照、源码版本、不跟随 symlink、严格失败 |
 | `runtime/fusion/guard.py` | 文件准备/提交守卫与 Shell 副作用登记 | Snapshot 文件契约、审批恢复、停止确认 |
-| `host/fusion_runtime.py::FusionRuntime` | Host 装配、持续 Worker、真实子审批和检查端口 | Pool、registry、索引和 checkpoint 生命周期 |
+| `host/fusion_runtime.py::FusionRuntime` | Host 装配、角色冻结和检查端口 | Pool、registry、索引和 checkpoint 生命周期 |
 | `runtime/verification.py::ManagedVerificationPort` | 共用 backend、权限、审批、超时和执行锁 | Compose 调用方；旧 `compose/verification.py` 已删除 |
 | `host/agent_host.py`、`run_coordinator.py`、`run_execution.py` | 启动、幂等绑定、RPC、Run 事件和取消 | 普通 Build、Shell、Goal、Compose 和旧连接 |
 | `threads/thread_persistence.py::fusion_state_store` | 复用共享 SQLite 连接与项目隔离 | 数据库打开、验证和关闭 |
@@ -300,26 +303,18 @@ Host 从任务创建时保存的 `source_message` 直接生成原文引用和 `r
 
 测试使用可控模型、虚构凭据和临时工作区。所有最终命令、全量结果及已有基线问题记录在 Task；不得把 Mock 测试描述成真实商业模型联调。
 
-继续扩展时优先保持这些约束：共用模型/Run/审批路径；以数据库和当前文件决定状态；对副作用先登记、再执行；角色能力、协议、测试和用户说明同步修改。P1/P2 必须另行确认范围和验收标准。
+继续扩展时优先保持这些约束：共用模型/Run/审批路径；以数据库和当前文件决定状态；对副作用先登记、再执行；角色能力、协议、测试和用户说明同步修改。后续能力以对应 Task/Spec 确认范围和验收标准。
 
-## 五、派单占用修复（2026-10-20）
+## 五、现行规则与历史背景
 
-本节记录 HC-186 之前的故障背景。整目录单写者及普通冲突返回 `FUSION_LEASE_BUSY` 的路径已由第 4 节文件预留、自动排队替代。`LEASE_BUSY` 也从未等于模型会话或进程卡住。
-
-当时的修复链路（已替代）：`start_round` 在原子事务中发现占用 → 返回安全占用摘要 → 当前任务记录 `WAITING_USER/workspace_busy` → `FusionEffectMiddleware.abefore_model` 在下一次模型请求前结束本轮。没有任务单、消息、轮次或子执行被部分登记，也不自动取消占用者。
-
-- `workspace_blocker` 在既有任务 JSON 中保存，仅包含占用任务/会话 ID、阶段、轮次、安全原因及待核查标记；协议增加严格可空字段，不新增 SQLite 表。
-- 查询和显式继续都核对数据库里的实际写者。占用仍在时不请求模型；占用解除时查询只提示可继续，用户新消息才恢复原首轮派单。
-- `fusion_rework` 在没有任务单时返回 `FUSION_FIRST_ORDER_REQUIRED`；已有任务单而尚无票据仍允许按原规则返工。
-- TUI/Web 共用占用文案及会话引导；较早发出的状态查询不能覆盖较新的进度。问答历史的“已处理”不表示任务完成。
-- 测试覆盖真实 Host、Pool、图、Snapshot 文件工具、可信检查及审阅：占用只产生一次 Lead 请求，仍占用时的新消息产生零模型请求；旧任务正常取消后，同一任务完成首轮创建和验证。
+文件协调、审阅与恢复以第 4 节为准。旧的整目录单写者和早期补丁流程已移入 [历史记录](../project/Fusion历史改造记录.md)，不再作为当前操作方法。
 
 ## 六、两角色实时过程（2026-10-21）
 
 Lead 和 Sidekick 共用一页时间线，按执行顺序显示独立的角色过程区。返工产生新的 Sidekick 执行和轮次；Lead 随后审阅时显示在其后，不能为排版把记录重新排序。
 
 ```text
-FusionRuntime.run_worker
+FusionWorkerRunner.run
   → FusionWorkerObserver.emit_status(running)
   → ManagedAgentExecutor(passthrough) → 实时正文 / 工具事件
   → emit_status(completed / failed / cancelled)
@@ -343,65 +338,29 @@ FusionRuntime.run_worker
 - TUI/Web 原有 Timeline 负责输出、工具详情和滚动。当前角色显示在状态行；每项任务的 Fusion 状态说明原位更新一条，避免状态版本增长造成重复长消息。
 - 过程只保留在当前 Controller 及 Web 接管状态里，不新增过程持久表；重启后的历史恢复沿用原 Transcript。该展示状态不参与权限授予、写者释放或任务验收。
 
-## 七、模型长等待和重复拒绝的收尾（2026-10-21）
+## 七、请求超时与单轮重复拒绝
 
-`models.profiles.<ID>.timeout_seconds` 同时用于 HTTP 网络等待与一次流式响应的总时长。前者会被数据或心跳刷新，后者不会。统一模型适配器 `_ReasoningAwareChatOpenAI._astream` 从请求开始计时，经 `_astream_response` 保持原解析、工具与 usage 路径；响应到期抛 `MODEL_RESPONSE_TIMEOUT` 并关闭流，用户取消原样传播。Lead、Sidekick 和使用该适配器的普通模型遵守同一配置，非流式调用仍沿原 HTTP 超时。
+模型 profile 的 timeout_seconds 同时限制网络等待和一次流式响应总时长。重试由 ManagedAgentExecutor 唯一负责；已公开输出后不自动重放。取消、超时不能替命令推断停止。
 
-重试仍由 `ManagedAgentExecutor` 唯一拥有。空输出按 `max_retries` 限次重试；已经公开正文则返回原有 `PROVIDER_OUTPUT_INTERRUPTED`，不重放内容与副作用。本次不增加整个开发任务的总时限，也不根据超时清除写者或未知操作。
+实施 Worker 保存报告后直接结束；连续三次同工具同拒绝码时提交 blocked，Lead 连续三次控制工具被拒时暂停。探索只返回调查摘要，受阻时结束，不向实施报告通道提交结果。Plan、只读核查、目录和后台命令约束继续由实际工具边界执行。
 
-Sidekick 在 `FusionEffectMiddleware.abefore_model` 进入下一次请求前检查：
+早期修复过程和旧整目录限制见 [历史记录](../project/Fusion历史改造记录.md)，当前文件协调以第 4 节和 HC-186 为准。
 
-```text
-报告已保存？ → 是：结束本轮 → 原派单流程检查报告 → Host 检查 / Lead 处理
-     否
-连续三次同工具、同拒绝码？ → 是：现有 submit_result 保存 blocked → 结束本轮
-     否
-继续原模型和工具执行
-```
+## 八、角色用量、只读探索和反馈（HC-189）
 
-计数读取当前图中的真实 `ToolMessage`，不放进共享 Engine 或新增数据库字段。成功工具结果、不同拒绝以及新的人类消息打断计数。blocked 只表示这一轮受阻，不允许验收成功；未知副作用、取消及写者规则继续生效。
+Lead 的批量调查可以调用 fusion_explore：无 allowed_paths、无实施轮次、无写者租约、无验收票据。每次探索新建临时 checkpoint，结束或取消后清理，不能复用实施历史。权限视图只给读工具和 fusion_status；Guard 和 Service 再拒绝写、命令、报告和再次委派。父 Run 的取消、审批、事件与 Pool 仍是唯一运行路径。池容量为 2 时可以交替探索和实施；图被淘汰后从冻结 Spec 重新登记，返工仍用原 checkpoint。其他活动执行占满池时，探索返回明确的资源繁忙工具结果，Lead 可读关键文件或等待。探索起止写入任务数据及 evidence，状态带 exploration；崩溃留下的运行显示在恢复时收束为 interrupted，不重放探索。
 
-命令约束复用 `policy/bash_parser.py` 的语法树与 `strip_wrappers`：识别真实 `&` 后台节点，允许普通 Python 参数和 here-doc 的位运算；展开 `bash -lc`、`sh -ec` 等脚本后再检查。选项解析遇到脚本路径或 `--` 即停止，避免把脚本参数误当成 Shell 选项。不能可靠展开的 Shell 载荷含后台语法时仍拒绝，Git 修改与内部目录限制保留。`WORKER_PROMPT` 同时提示优先使用文件工具，以及受阻时提交报告。
+过程事件可带 kind=exploration，允许 round=0；实施仍从第一轮开始。CLI/Web 显示“Sidekick · 模型 · 只读探索”，不能把它排成实施第一轮或被迟到帧改成另一身份。
 
-对应回归为 `test_model_response_deadline.py`、`test_fusion_execution_limits.py`、`test_fusion_stall.py`；原 `test_fusion_streaming.py` 在报告提交前验证实时正文，不再依赖报告后的冗余模型请求。
+StreamSession 另存每次模型调用的已知用量；分片按最大累计值合并，多个模型调用按次累加。Managed 在每次 attempt 的成功、错误或取消边界把事实交给 Host；输出回滚不抹掉已观测消耗。FusionStateStore.record_usage 在同一短事务写唯一事件与累计，重复事件不重复计数；统计可以补入终态，但不改变 phase、generation、ticket。任务和进度通过 usage 字段公开角色输入/输出/缓存、完整性和可选估算。
 
+价格来自 models.profiles.<id>.pricing；同币种且必要字段完整时计算普通输入、缓存输入、输出。差额只把 Sidekick 相同 token 代入 Lead 价格，不是全 Lead 实验或账单。没报告缓存就是未知，不是零；失败无用量时显示不完整。统计范围是此功能观测到的任务调用，不包含额外摘要请求或故障只读核查；后者不能变更旧任务或套用已变化模型的旧单价。落库失败只写安全诊断，不覆盖执行错误。
 
-## 八、派单与恢复体验优化（HC-184，2026-10-21）
+可信 lead_prompt_append / sidekick_prompt_append 不回传正文，参与配置及角色 prompt 指纹；附加文字不能扩大硬能力。只在真实连接与设置相同、或已配置可比较价格时给配对提醒，不能按 default 别名或窗口大小推断。
 
-本节保留故障处理背景；目录写权限的当前规则以第 4 节和 HC-186 为准，正常范围冲突自动排队。
+最近相邻两轮有相同 unresolved，或同一检查有相同失败摘要时，stagnation 提示 Lead 换策略。重复读取同一轮不计数，提示不改变轮次上限或放开验收。
 
-详见 [HC-184 Spec](../spec/HC-184-双模型协作体验优化.md)。原文需求由 Host 生成、闲置自动让出目录、当前会话处理占用这三项共同简化流程，已有角色、检查与审阅门禁继续有效。
-
-### 1. 运行归属与目录写者
-
-任务终态不能被迟到回调恢复；已取消或被新 Run 接替的执行会在下次模型请求前停止，不再要求补报告，Root 收尾清理取消后的 checkpoint。
-
-任务 JSON 保存 `active_run={owner,run_id}`。`FusionRuntime.prepare` 用 `claim_run` 取得本轮归属，防止两个窗口同时执行同一个任务；目录 lease 则防止不同任务同时写目录。查询另一 Host 的活动执行不再暂停它。没有可靠退出记录的运行，不能仅因等待很久就接管。
-
-准备失败、Root 结束或正常 Host 关闭时，按准确 owner/run_id 清理归属。迟到的旧回调不能暂停新 Run。受理前放弃的新空任务标记取消；已有任务暂停并保留。RunCoordinator 的 `on_abandon` 统一处理准备成功后未能真正受理的分支。
-
-`begin_workspace_phase` 在一个短事务中取得目录并进入 Worker 执行、检查或审阅阶段，避免先取得目录、又因仍处于暂停阶段被其他窗口释放。首轮基线也在取得目录后读取。闲置释放不删除任务、不回滚文件；新 Run 恢复时重新取得目录并检查快照。
-
-### 2. 断流与停止事实
-
-Native Worker 真正退出并完成执行器收尾后，`record_worker_stopped` 按任务、派发和 execution ID 记录 stopped。模型断流或等待时取消，不再仅因 outbox 留在 dispatched 就误报结果不明。命令的停止事实仍单独判断；不能用“模型退出”推断所有命令已停。
-
-命令结果不明时，两角色立即结束模型循环。Worker 的最终输出门禁不会再因报告缺失追加模型请求，任务保持 OUTCOME_UNKNOWN；Root 退出重新生成待查清单，移除已停止的派发，只保留真正未确认停止的操作。
-
-模型已公开输出后断流，不自动重放响应。退出事实明确且没有未知命令时，任务进入 PAUSED，可直接发送“继续”；仍有不明命令时保留 OUTCOME_UNKNOWN。TUI/Web 共用明确的断流、继续和核查说明，原始协议错误码保留。中断恢复只用完整 checkpoint，不自动补跑半轮工具。
-
-### 3. 当前会话处理占用
-
-`/fusion resolve` 刷新当前任务及服务端占用者，读取占用任务当前版本，再按准确身份取消。成功后刷新当前任务，提示发送“继续”；不跳转旧 Thread。版本、占用者或当前对话变化时拒绝，避免结束错误任务。
-
-`cancel/resolve --stopped <核查说明>` 只接受用户明确输入的停止确认。Host 使用已有 Run 停止和空闲锁；Store 在一个事务中记录核查摘要、结束准确任务并释放目录。`recover --stopped` 则用于保留并继续当前任务。没有核查说明的未知操作继续拒绝释放。重复读取相同未知状态不增加版本。
-
-### 4. 错误和验证
-
-模型控制工具返回带 error、field、action 的安全结果；校验错误不回显输入或密钥。结果按失败工具显示；连续三次相同控制失败会暂停，避免反复猜参数。首次派单和返工仍按是否已有任务单区分。
-
-新增 `test_fusion_usability.py`、`test_fusion_management.py`，覆盖原文冻结、尾段保留、闲置让出、未知命令、原子核查取消、两个 Host 查询/启动、受理失败清理、第一/后续轮取消及流式断开后续接。CLI 回归覆盖当前会话 resolve、目标变化、切换会话、显式停止确认和流式失败提示；Protocol 共享样例覆盖停止说明的类型和长度。
-
+拆分按职责进行：FusionAcceptance 持有检查/审阅，FusionWorkerRunner 持有模型执行和收尾；Store 的任务、租约、effects 仍共同提交，不为缩短文件打散事务。建议取舍与证据边界见 [改进审查](../research/189-Fusion改进审查.md)，行为和测试见 [HC-189 规格](../spec/HC-189-双模型探索与度量.md)。
 
 ## HC-185：故障时可以只读核查
 

@@ -162,6 +162,7 @@ def _repeated_rejection(
         "FUSION_CHECK_INVALID",
         "FUSION_INPUT_INVALID",
         "FUSION_FIRST_ORDER_REQUIRED",
+        "FUSION_EXPLORATION_BUSY",
         "FUSION_REPORT_STALE",
         "FUSION_EVIDENCE_INCOMPLETE",
         "FUSION_TEST_REVIEW_REQUIRED",
@@ -235,6 +236,8 @@ class FusionWriteGuard:
         host: bool = False,
         check_resources: bool = True,
     ) -> tuple[str, int, int] | None:
+        if getattr(getattr(context, "fusion_state", None), "exploration_only", False):
+            raise FusionError("FUSION_ROLE_DENIED")
         permit = self._permit.get()
         task_id = getattr(context, "fusion_task_id", None)
         relative = self._relative(path) if path is not None else "./"
@@ -502,6 +505,17 @@ class FusionEffectMiddleware(AgentMiddleware):
         ):
             # 未知操作应立即核查；已结束或被接替的执行也不能再请求模型或补报告。
             return {"jump_to": "end"}
+        if role == "sidekick" and context.fusion_state.exploration_only:
+            if _repeated_rejection(state) is not None:
+                return {
+                    "messages": [
+                        AIMessage(
+                            content="只读探索连续受阻，停止重复调用，请 Lead 调整调查问题。"
+                        )
+                    ],
+                    "jump_to": "end",
+                }
+            return None
         if role == "sidekick":
             if task.phase != "WORKER_RUNNING":
                 return {"jump_to": "end"}
@@ -570,6 +584,16 @@ class FusionEffectMiddleware(AgentMiddleware):
         """审批恢复后登记 Shell；取消无法证明停止时保留未知操作。"""
         name = request.tool_call["name"]
         context = getattr(request.runtime, "context", None)
+        if getattr(getattr(context, "fusion_state", None), "exploration_only", False):
+            from harness_agent.runtime.fusion.roles import READ_TOOLS
+
+            if name not in READ_TOOLS | {"fusion_status"}:
+                return ToolMessage(
+                    content="FUSION_ROLE_DENIED: 只读探索不能调用此工具。",
+                    tool_call_id=request.tool_call["id"],
+                    name=name,
+                    status="error",
+                )
         # 控制工具返回的业务拒绝也必须呈现为失败，模型才能修正而非当作成功。
         if (
             getattr(context, "fusion_task_id", None)

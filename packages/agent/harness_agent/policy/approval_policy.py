@@ -83,6 +83,7 @@ _DEFAULT_HITL_TOOLS = frozenset(
         "grep",
         "task",
         "fusion_delegate",
+        "fusion_explore",
         "fusion_rework",
         "web_fetch",
     }
@@ -100,6 +101,7 @@ _AUTO_EDIT_HITL_TOOLS = frozenset(
         "grep",
         "task",
         "fusion_delegate",
+        "fusion_explore",
         "fusion_rework",
         "web_fetch",
     }
@@ -116,6 +118,7 @@ _AUTO_HITL_TOOLS = frozenset(
         "grep",
         "task",
         "fusion_delegate",
+        "fusion_explore",
         "fusion_rework",
         "web_fetch",
     }

@@ -14,7 +14,7 @@ from harness_agent.runtime.run_context import require_run_context
 
 PATH_SCOPE_DESCRIPTION = (
     "使用项目相对路径，例如 calc.py、tests/test_calc.py；目录以 / 结尾，例如 tests/。"
-    "目标文件或目录可以不存在，由 Sidekick 创建。不能以 / 开头，"
+    "读取时的 /calc.py 是虚拟路径，派单改用 calc.py。目标文件或目录可以不存在，由 Sidekick 创建。不能以 / 开头，"
     "不接受 ..、通配符、符号链接或内部目录；只填写本次任务需要的范围。"
 )
 
@@ -63,6 +63,12 @@ class DirectInput(Input):
     """直接问答的完成说明。"""
 
     summary: str = Field(min_length=1, max_length=8000)
+
+
+class ExploreInput(Input):
+    """一次只读调查，无写范围和验收计划。"""
+
+    question: str = Field(min_length=1, max_length=8000)
 
 
 class DelegateInput(Input):
@@ -119,6 +125,7 @@ class SubmitInput(Input):
 
 
 TOOLS = {
+    "fusion_explore": ("explore", ExploreInput, "让 Sidekick 批量只读探索代码，给出路径和依据；不能写文件或执行命令，不产生实施票据。关键结论需 Lead 读取核实。"),
     "fusion_finish_direct": (
         "finish_direct",
         DirectInput,
@@ -128,7 +135,7 @@ TOOLS = {
         "delegate",
         DelegateInput,
         "派单给 Sidekick；Host 自动保存原始需求，实施细节填写 goal/brief。allowed_paths 使用项目相对路径，"
-        "新文件无需预先创建。等待报告和 Host 检查。",
+        "新文件无需预先创建。等待报告和 Host 检查。仅没有首轮任务单时可用；已有任务先 fusion_status 再返工。排队会自动继续，不重复派单。",
     ),
     "fusion_rework": (
         "rework",
@@ -140,7 +147,7 @@ TOOLS = {
         ReviewInput,
         "逐项审阅当前票据。证据格式为 file:相对路径 或 check:检查ID。",
     ),
-    "fusion_status": ("status", EmptyInput, "读取当前任务、阶段、版本、报告与票据。"),
+    "fusion_status": ("status", EmptyInput, "读取当前任务、原始要求、范围、版本、票据、用量和建议动作；压缩或新消息后先查询，按最新票据继续。"),
     "fusion_submit_result": (
         "submit_result",
         SubmitInput,
@@ -180,6 +187,7 @@ def create_fusion_tools(role: str) -> tuple[StructuredTool, ...]:
                         }
                     )
                 hints = {
+                    "FUSION_EXPLORATION_BUSY": ("question", "只读探索所需的模型资源暂忙。Lead 可先读取关键文件，或等其他执行结束后再试；无需结束其他正常任务。"),
                     "FUSION_PATH_INVALID": (
                         "allowed_paths/reason",
                         PATH_SCOPE_DESCRIPTION

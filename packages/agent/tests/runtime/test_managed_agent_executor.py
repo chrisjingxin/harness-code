@@ -1010,3 +1010,45 @@ async def test_executor_returns_echo_content_when_runtime_has_no_agent() -> None
     assert result.final_content == "修复当前问题"
     assert runtime.checkpoint_namespaces == []
     assert runtime.release_calls == 1
+
+
+async def test_usage_hook_covers_each_attempt_without_replaying_or_leaking_content():
+    runtime = _Runtime(
+        _FakeAgent(
+            [
+                httpx.ReadError("fake-private-body"),
+                [("messages", (AIMessageChunk(content="ok"), {}))],
+            ]
+        )
+    )
+    request = _request(runtime)
+    object.__setattr__(
+        request,
+        "provider_retry",
+        BoundedProviderRetry(max_attempts=2, base_delay_seconds=0),
+    )
+    observed = []
+
+    async def record(event_id, calls):
+        observed.append((event_id, calls))
+
+    object.__setattr__(request, "on_model_usage", record)
+    await ManagedAgentExecutor(sleep=lambda _: asyncio.sleep(0)).execute(
+        request, _Observer()
+    )
+    assert len(observed) == 2 and len({item[0] for item in observed}) == 2
+    assert all(item[1] == [{}] for item in observed)
+    assert "fake-private-body" not in repr(observed)
+
+
+async def test_graph_that_stops_before_model_does_not_invent_a_billable_call():
+    runtime = _Runtime(_FakeAgent([[("updates", {"heartbeat": True})]]))
+    request = _request(runtime)
+    observed = []
+
+    async def record(event_id, calls):
+        observed.append((event_id, calls))
+
+    object.__setattr__(request, "on_model_usage", record)
+    await ManagedAgentExecutor().execute(request, _Observer())
+    assert observed == []

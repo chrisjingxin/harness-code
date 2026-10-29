@@ -24,6 +24,7 @@ from harness_agent.runtime.run_context import ApprovalModeState, RunPlanConstrai
 
 _ALL_HITL_TOOLS = {
     "fusion_delegate",
+    "fusion_explore",
     "fusion_rework",
     "execute",
     "write_file",

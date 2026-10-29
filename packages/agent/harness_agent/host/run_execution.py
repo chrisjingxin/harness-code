@@ -342,6 +342,11 @@ class BuildRunAdapter:
                 fusion_gate_impl = context.fusion_service.final_gate(context)
             return await fusion_gate_impl(output)
 
+        async def fusion_usage(event_id, calls):
+            context = run.run_context
+            if context is not None and context.fusion_service is not None:
+                await context.fusion_service.record_usage(context, event_id, calls)
+
         request = ManagedAgentRequest(
             execution_ref=run.root_execution_ref.execution_id,
             parent_execution_ref=None,
@@ -367,6 +372,7 @@ class BuildRunAdapter:
             final_output_gate=fusion_gate
             if run.preparation.fusion_binding is not None
             else None,
+            on_model_usage=fusion_usage if run.preparation.fusion_binding is not None else None,
             usage_ledger=getattr(run, "usage_ledger", None),
             model_profile_id=(
                 run.execution_binding.actual_primary.profile_id

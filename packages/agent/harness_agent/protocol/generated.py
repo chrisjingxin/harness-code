@@ -7,7 +7,7 @@ from harness_agent.protocol.runtime import event_model, schema_model
 
 PROTOCOL_MAJOR = 3
 PROTOCOL_MINOR = 11
-PROTOCOL_SCHEMA_SHA256 = "771c2519a62d26ce5d29268094155e8266ae55878732eeac7929b9a3e5901043"
+PROTOCOL_SCHEMA_SHA256 = "8b5275df318f878aed90aa759ffde5a8b7de614c3059f40190c26dc0ec555735"
 MAX_FRAME_BYTES = 8388608
 MAX_TOOL_PAYLOAD_BYTES = 1048576
 CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate","fusion.status","fusion.recover","fusion.cancel","fusion.release"]
@@ -1109,6 +1109,9 @@ class FusionTaskStatusWire(TypedDict):
     workspace_blocker: NotRequired[FusionWorkspaceBlockerWire | None]
     write_paths: NotRequired[list[str]]
     resource_waits: NotRequired[list[FusionWorkspaceBlockerWire]]
+    usage: NotRequired[FusionUsageWire]
+    stagnation: NotRequired[FusionStagnationWire]
+    exploration: NotRequired[FusionExplorationWire]
 
 class FusionStatusResultWire(TypedDict):
     task: FusionTaskStatusWire | None
@@ -1120,6 +1123,7 @@ class FusionExecutionPayloadWire(TypedDict):
     round: int
     model: str
     status: Literal["running", "completed", "cancelled", "failed"]
+    kind: NotRequired[Literal["implementation", "exploration"]]
 
 class FusionWorkspaceBlockerWire(TypedDict):
     task_id: str | None
@@ -1140,6 +1144,37 @@ class FusionReleaseParamsWire(TypedDict):
 
 class FusionReleaseResultWire(TypedDict):
     released: bool
+
+class FusionRoleUsageWire(TypedDict):
+    profile_id: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int
+    complete: bool
+    cache_complete: bool
+    cache_hit_rate: float | None
+
+class FusionUsageEstimateWire(TypedDict):
+    currency: str
+    lead_cost: str | None
+    sidekick_cost: str | None
+    sidekick_at_lead_price: str | None
+    estimated_saving: str | None
+
+class FusionUsageWire(TypedDict):
+    lead: FusionRoleUsageWire | None
+    sidekick: FusionRoleUsageWire | None
+    estimate: FusionUsageEstimateWire | None
+
+class FusionStagnationWire(TypedDict):
+    kind: Literal["repeated_unresolved", "repeated_check_failure"]
+    round: int
+    message: str
+
+class FusionExplorationWire(TypedDict):
+    exploration_id: str
+    status: Literal["running", "completed", "failed", "cancelled", "interrupted"]
 
 CommandsBindParamsWire = CommandBindingsParamsWire
 CommandsBindResultWire = CommandBindingsResultWire
