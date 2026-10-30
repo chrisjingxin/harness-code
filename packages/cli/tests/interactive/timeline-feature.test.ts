@@ -18,7 +18,10 @@ test("重复/倒序 Event 被丢弃，sequence 缺口只追加诊断并继续", 
       .map(item => item.message.content)
       .join("")
     expect(contents).toBe("AC")
-    expect(notices(snapshot)).toContain("sequence-gap: expected 2, got 3")
+    // 必须恰好一条：序号检查只能有 acceptSequence 这一个决策点。
+    expect(notices(snapshot).split("\n").filter(line => line.startsWith("sequence-gap"))).toEqual([
+      "sequence-gap: expected 2, got 3",
+    ])
   } finally {
     await harness.controller.close()
   }

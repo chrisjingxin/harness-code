@@ -751,7 +751,6 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.skillFeature.armedSkill = undefined
     this.confirmation = null
     this.interactionFeature.settlePendingInteraction(this.featureContext)
-    this.timelineFeature.resetSequence()
   }
 
   /** 新建 Thread 唯一领域入口：/new 命令结果与确认对话框共用；保留全局 Catalog（侧栏历史立即可切回）。 */
