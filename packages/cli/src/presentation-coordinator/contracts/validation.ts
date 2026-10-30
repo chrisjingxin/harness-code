@@ -129,37 +129,60 @@ function exactFields(value: Record<string, unknown>, fields: readonly string[]):
   return keys.length === fields.length && fields.every(field => field in value)
 }
 
-/** InteractiveIntent 类型白名单；payload 语义由 Controller 校验，这里只做形状防御。 */
-const INTENT_TYPES = new Set([
-  "input.submit",
-  "command.execute",
-  "run.cancel",
-  "catalog.refresh",
-  "thread.open",
-  "model.select",
-  "skill.arm",
-  "skill.clear",
-  "skill.set-enabled",
-  "mcp.add",
-  "mcp.remove",
-  "interaction.respond",
-  "confirmation.resolve",
-  "approval-mode.cycle",
-  "approval-mode.set",
-  "child-timeline.open",
-  "child-timeline.leave",
-])
+/**
+ * InteractiveIntent 类型白名单；payload 语义由 Controller 校验，这里只做形状防御。
+ *
+ * 用 Record 绑定到 `InteractiveIntent["type"]`：联合类型里新增或删除一种意图，而这里没有同步，
+ * 编译会直接失败。这样校验器不会再和类型定义各写一份、悄悄失步（失步的后果是 Web 会话被断开）。
+ */
+const INTENT_TYPE_FLAGS: Record<InteractiveIntent["type"], true> = {
+  "input.submit": true,
+  "command.execute": true,
+  "run.cancel": true,
+  "catalog.refresh": true,
+  "thread.open": true,
+  "thread.undo": true,
+  "thread.redo": true,
+  "model.select": true,
+  "skill.arm": true,
+  "skill.clear": true,
+  "skill.set-enabled": true,
+  "mcp.add": true,
+  "mcp.remove": true,
+  "interaction.respond": true,
+  "plan-view.close": true,
+  "goal-view.close": true,
+  "confirmation.resolve": true,
+  "approval-mode.cycle": true,
+  "work-mode.cycle": true,
+  "approval-mode.set": true,
+  "child-timeline.open": true,
+  "child-timeline.leave": true,
+}
+const INTENT_TYPES: ReadonlySet<string> = new Set(Object.keys(INTENT_TYPE_FLAGS))
+
+// 只做结构防御的数量上限；Agent 端 GOAL_MAX_CRITERIA 才是业务上限。
+const MAX_GOAL_CRITERIA = 256
+const INPUT_MODES: readonly string[] = ["build", "compose", "direct_shell"]
+const UNDO_MODES: readonly string[] = ["both", "conversation", "code"]
+const GOAL_DECISIONS: readonly string[] = ["accepted", "edited", "rejected", "cancelled"]
 
 // executionId 与 threadId 都是运行资源标识，沿用 thread.open 的 256 字符上限。
 const MAX_EXECUTION_ID_LENGTH = 256
 
 function isInteractiveIntent(value: unknown): value is InteractiveIntent {
   if (!isRecord(value)) return false
-  const type = value.type
-  if (typeof type !== "string" || !INTENT_TYPES.has(type)) return false
+  if (typeof value.type !== "string" || !INTENT_TYPES.has(value.type)) return false
+  // 上面的白名单已保证 value.type 属于 InteractiveIntent["type"]；下面的 switch 带穷尽检查。
+  const type = value.type as InteractiveIntent["type"]
   switch (type) {
-    case "input.submit":
-      return exactFields(value, ["type", "value"]) && isString(value.value, 64 * 1024)
+    case "input.submit": {
+      // mode 可选：与 InteractiveIntent.input.submit.mode? 一致，缺省时由 Controller 按当前模式处理。
+      const hasMode = value.mode !== undefined
+      return exactFields(value, hasMode ? ["type", "value", "mode"] : ["type", "value"])
+        && isString(value.value, 64 * 1024)
+        && (!hasMode || INPUT_MODES.includes(value.mode as string))
+    }
     case "command.execute": {
       // argument 与类型契约（InteractiveIntent.command.execute.argument?）一致为可选；
       // 键必须是 type/commandId/argument 子集且不得带未知键（长度 2 或 3）。
@@ -176,6 +199,15 @@ function isInteractiveIntent(value: unknown): value is InteractiveIntent {
       return exactFields(value, ["type", "catalog"])
         && (value.catalog === "threads" || value.catalog === "models" || value.catalog === "skills" || value.catalog === "mcp" || value.catalog === "agents")
     case "thread.open":
+      return exactFields(value, ["type", "threadId"]) && isNonEmptyString(value.threadId, 256)
+    case "thread.undo": {
+      const hasMode = value.mode !== undefined
+      return exactFields(value, hasMode ? ["type", "threadId", "targetTurnId", "mode"] : ["type", "threadId", "targetTurnId"])
+        && isNonEmptyString(value.threadId, 256)
+        && isNonEmptyString(value.targetTurnId, 256)
+        && (!hasMode || UNDO_MODES.includes(value.mode as string))
+    }
+    case "thread.redo":
       return exactFields(value, ["type", "threadId"]) && isNonEmptyString(value.threadId, 256)
     case "model.select":
       return exactFields(value, ["type", "profileId"]) && isNonEmptyString(value.profileId, 256)
@@ -195,6 +227,10 @@ function isInteractiveIntent(value: unknown): value is InteractiveIntent {
       return exactFields(value, ["type", "requestId", "response"])
         && isRequestId(value.requestId)
         && isInteractionResponse(value.response)
+    case "plan-view.close":
+    case "goal-view.close":
+    case "work-mode.cycle":
+      return exactFields(value, ["type"])
     case "confirmation.resolve":
       return exactFields(value, ["type", "confirmationId", "confirmed"])
         && isNonEmptyString(value.confirmationId, 128)
@@ -208,8 +244,11 @@ function isInteractiveIntent(value: unknown): value is InteractiveIntent {
         && isNonEmptyString(value.executionId, MAX_EXECUTION_ID_LENGTH)
     case "child-timeline.leave":
       return exactFields(value, ["type"])
-    default:
-      return false
+    default: {
+      // 穷尽检查：InteractiveIntent 新增类型而此处没有分支时，这一行会编译失败。
+      const unhandled: never = type
+      return unhandled
+    }
   }
 }
 
@@ -251,7 +290,24 @@ function isInteractionResponse(value: unknown): boolean {
     if (value.feedback !== undefined && !isString(value.feedback, 64 * 1024)) return false
     return true
   }
+  if (value.kind === "goal") return isGoalResponse(value)
   return false
+}
+
+/**
+ * Goal 审批响应：decision 取协议允许的四种；edited 必须带 criteria（编辑后的验收标准），
+ * 其余 decision 不带 criteria；feedback 任意 decision 均可选。数量/内容语义由 Agent 端校验。
+ */
+function isGoalResponse(value: Record<string, unknown>): boolean {
+  if (typeof value.decision !== "string" || !GOAL_DECISIONS.includes(value.decision)) return false
+  const allowed = value.decision === "edited" ? ["kind", "decision", "criteria", "feedback"] : ["kind", "decision", "feedback"]
+  const required = value.decision === "edited" ? ["kind", "decision", "criteria"] : ["kind", "decision"]
+  if (!Object.keys(value).every(key => allowed.includes(key)) || !required.every(key => key in value)) return false
+  if (value.feedback !== undefined && !isString(value.feedback, 64 * 1024)) return false
+  if (value.decision !== "edited") return true
+  return Array.isArray(value.criteria)
+    && value.criteria.length <= MAX_GOAL_CRITERIA
+    && value.criteria.every(item => isString(item, 64 * 1024))
 }
 
 /** WorkspaceIntent 白名单：5 个 intent，精确字段校验；路径语义由 Explorer 决定。 */

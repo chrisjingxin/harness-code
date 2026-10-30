@@ -408,6 +408,30 @@ test("interactive.intent 受理：intent.outcome 带 domain=interactive 且与 r
   })
 })
 
+test("Web 前端会发出的 plan/goal 视图关闭、工作模式切换与 Goal 审批响应不会被当成协议违规而断开会话", async () => {
+  const system = createSystem()
+  await flush()
+  const { ch } = await connectAndReady(system)
+
+  const intents: InteractiveIntent[] = [
+    { type: "plan-view.close" },
+    { type: "goal-view.close" },
+    { type: "work-mode.cycle" },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "accepted" } },
+  ]
+  for (const [index, intent] of intents.entries()) {
+    const requestId = `web-intent-${index}`
+    sendClient(ch, { type: "interactive.intent", requestId, revision: 1, intent })
+    // 能收到 intent.outcome（无论 accepted 还是 rejected），说明帧通过了校验并进入 Controller。
+    await waitFor(() => ch.sent.some(message => message.type === "intent.outcome" && message.requestId === requestId))
+  }
+
+  expect(ch.closed).toEqual([])
+  expect(system.coordinator.getSnapshot().phase).toBe("web-active")
+
+  await system.gateway.close()
+})
+
 test("重放同一 requestId：返回缓存 outcome 且 controller.dispatch 只调用一次", async () => {
   const system = createSystem()
   await flush()

@@ -106,6 +106,32 @@ const clientMessages: WebUiClientMessage[] = [
   { type: "interactive.intent", requestId: "r-16", revision: 1, intent: { type: "approval-mode.set", mode: "auto-edit" } },
   { type: "interactive.intent", requestId: "r-17", revision: 1, intent: { type: "child-timeline.open", executionId: "child-abc123" } },
   { type: "interactive.intent", requestId: "r-18", revision: 1, intent: { type: "child-timeline.leave" } },
+  // 以下意图在 InteractiveIntent 中已存在，Web 前端也会发出；校验器曾漏掉，导致会话被断开。
+  { type: "interactive.intent", requestId: "r-19", revision: 1, intent: { type: "plan-view.close" } },
+  { type: "interactive.intent", requestId: "r-20", revision: 1, intent: { type: "goal-view.close" } },
+  { type: "interactive.intent", requestId: "r-21", revision: 1, intent: { type: "work-mode.cycle" } },
+  { type: "interactive.intent", requestId: "r-22", revision: 1, intent: { type: "thread.redo", threadId: "t-1" } },
+  { type: "interactive.intent", requestId: "r-23", revision: 1, intent: { type: "thread.undo", threadId: "t-1", targetTurnId: "turn-3" } },
+  { type: "interactive.intent", requestId: "r-24", revision: 1, intent: { type: "thread.undo", threadId: "t-1", targetTurnId: "turn-3", mode: "code" } },
+  { type: "interactive.intent", requestId: "r-25", revision: 1, intent: { type: "input.submit", value: "ls", mode: "direct_shell" } },
+  ...(["accepted", "cancelled"] as const).map(decision => ({
+    type: "interactive.intent" as const,
+    requestId: `r-goal-${decision}`,
+    revision: 1,
+    intent: { type: "interaction.respond" as const, requestId: "g-1", response: { kind: "goal" as const, decision } },
+  })),
+  {
+    type: "interactive.intent",
+    requestId: "r-goal-rejected",
+    revision: 1,
+    intent: { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "rejected", feedback: "目标太宽泛" } },
+  },
+  {
+    type: "interactive.intent",
+    requestId: "r-goal-edited",
+    revision: 1,
+    intent: { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "edited", criteria: ["测试通过", "无新增 lint 错误"] } },
+  },
   { type: "workspace.intent", requestId: "w-1", revision: 1, intent: { type: "workspace.load" } },
   { type: "workspace.intent", requestId: "w-2", revision: 1, intent: { type: "workspace.refresh" } },
   { type: "workspace.intent", requestId: "w-3", revision: 1, intent: { type: "workspace.toggle-directory", path: "src" } },
@@ -133,6 +159,33 @@ const serverMessages: WebUiServerMessage[] = [
 test("parseClientFrame：全部合法帧 JSON 往返后形状不变", () => {
   for (const message of clientMessages) {
     expect(parseClientFrame(JSON.stringify(message))).toEqual(message)
+  }
+})
+
+function intentFrame(intent: unknown): string {
+  return JSON.stringify({ type: "interactive.intent", requestId: "r-x", revision: 1, intent })
+}
+
+test("parseClientFrame：新增意图仍然精确字段校验，多余字段与非法取值一律拒绝", () => {
+  const invalid: unknown[] = [
+    { type: "plan-view.close", extra: 1 },
+    { type: "goal-view.close", extra: 1 },
+    { type: "work-mode.cycle", extra: 1 },
+    { type: "thread.redo" },
+    { type: "thread.redo", threadId: "" },
+    { type: "thread.undo", threadId: "t-1" },
+    { type: "thread.undo", threadId: "t-1", targetTurnId: "turn-3", mode: "everything" },
+    { type: "thread.undo", threadId: "t-1", targetTurnId: "turn-3", extra: 1 },
+    { type: "input.submit", value: "x", mode: "root" },
+    { type: "input.submit", value: "x", extra: 1 },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "maybe" } },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "edited" } },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "edited", criteria: [1] } },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "accepted", extra: 1 } },
+    { type: "interaction.respond", requestId: "g-1", response: { kind: "goal", decision: "accepted", feedback: 1 } },
+  ]
+  for (const intent of invalid) {
+    expect(parseClientFrame(intentFrame(intent)), JSON.stringify(intent)).toBeUndefined()
   }
 })
 
