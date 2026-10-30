@@ -838,13 +838,37 @@ def test_tools_section_rejects_invalid_values(tmp_path: Path):
         _load_with_tools(tmp_path, "\n[tools]\nunknown_field = 1\n")
 
 
+def test_mcp_tool_timeout_defaults_to_60_seconds(tmp_path: Path):
+    """未配置时 MCP 工具调用时限为 60 秒。"""
+    config = _load_with_tools(tmp_path, "")
+    assert config.tools.mcp_tool_timeout_seconds == 60
+
+
+def test_mcp_tool_timeout_accepts_integer_and_float(tmp_path: Path):
+    config = _load_with_tools(tmp_path, "\n[tools]\nmcp_tool_timeout_seconds = 600\n")
+    assert config.tools.mcp_tool_timeout_seconds == 600
+
+    config = _load_with_tools(tmp_path, "\n[tools]\nmcp_tool_timeout_seconds = 2.5\n")
+    assert config.tools.mcp_tool_timeout_seconds == 2.5
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "0.5", "3601", "true", '"60"'])
+def test_mcp_tool_timeout_rejects_invalid_values(tmp_path: Path, raw: str):
+    """范围 1-3600 秒；布尔与字符串不静默当数字用。"""
+    with pytest.raises(ConfigError, match="mcp_tool_timeout_seconds"):
+        _load_with_tools(tmp_path, f"\n[tools]\nmcp_tool_timeout_seconds = {raw}\n")
+
+
 def test_tools_section_in_redacted_summary(tmp_path: Path):
     """配置摘要包含脱敏后的 tools 开关。"""
     config = _load_with_tools(tmp_path, "\n[tools]\ntool_search_defer = false\n")
 
     summary = config.redacted()
 
-    assert summary["tools"] == {"tool_search_defer": "off"}
+    assert summary["tools"] == {
+        "tool_search_defer": "off",
+        "mcp_tool_timeout_seconds": 60,
+    }
     assert "tools" in summary["sources"]
 
 

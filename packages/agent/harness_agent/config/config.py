@@ -25,7 +25,11 @@ from harness_agent.config.config_manifest import (
     ConfigManifestError,
     ConfigSource,
 )
-from harness_agent.extensions.mcp import McpServerConfig, parse_mcp_config
+from harness_agent.extensions.mcp import (
+    DEFAULT_TOOL_TIMEOUT_SECONDS,
+    McpServerConfig,
+    parse_mcp_config,
+)
 
 
 class ConfigError(ValueError):
@@ -269,8 +273,8 @@ class AgentEnginePoolSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolSearchSettings:
-    """tool_search 延迟加载开关（设计 D9）。
+class ToolsSettings:
+    """``[tools]`` 配置：tool_search 延迟加载开关（设计 D9）与 MCP 工具调用时限。
 
     - ``off``：全部工具注入模型，保持稳定前缀（缓存友好）；tool_search 仅作
       发现辅助（Phase 1 语义）。
@@ -282,10 +286,15 @@ class ToolSearchSettings:
     """
 
     defer: Literal["auto", "on", "off"] = "auto"
+    # 单次 MCP 工具调用的最长等待秒数，超时后中止并告知模型（1-3600）。
+    mcp_tool_timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
 
     def redacted(self) -> dict[str, object]:
         """返回适合诊断展示的稳定开关摘要。"""
-        return {"tool_search_defer": self.defer}
+        return {
+            "tool_search_defer": self.defer,
+            "mcp_tool_timeout_seconds": self.mcp_tool_timeout_seconds,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,7 +443,7 @@ class Za38Config:
     sources: Mapping[str, str]
     mcp_servers: tuple[McpServerConfig, ...] = ()
     model_catalog: ModelCatalog | None = None
-    tools: ToolSearchSettings = field(default_factory=ToolSearchSettings)
+    tools: ToolsSettings = field(default_factory=ToolsSettings)
     compose: ComposeSettings = field(default_factory=ComposeSettings)
     ui: UiSettings = field(default_factory=UiSettings)
     diagnostics: DiagnosticsSettings = field(default_factory=DiagnosticsSettings)
@@ -1134,9 +1143,9 @@ def _parse_agent_engine_pool(values: Mapping[str, object]) -> AgentEnginePoolSet
     )
 
 
-def _parse_tools(values: Mapping[str, object]) -> ToolSearchSettings:
-    """解析 ``[tools]`` 的 tool_search 延迟加载开关（D9）。"""
-    allowed = {"tool_search_defer"}
+def _parse_tools(values: Mapping[str, object]) -> ToolsSettings:
+    """解析 ``[tools]``：tool_search 延迟加载开关（D9）与 MCP 工具调用时限。"""
+    allowed = {"tool_search_defer", "mcp_tool_timeout_seconds"}
     unknown = set(values) - allowed
     if unknown:
         raise ConfigError(
@@ -1152,7 +1161,15 @@ def _parse_tools(values: Mapping[str, object]) -> ToolSearchSettings:
         defer = normalized  # type: ignore[assignment]
     else:
         raise ConfigError("tools.tool_search_defer must be 'auto', true, or false")
-    return ToolSearchSettings(defer=defer)
+    timeout = values.get("mcp_tool_timeout_seconds", DEFAULT_TOOL_TIMEOUT_SECONDS)
+    # bool 是 int 的子类，必须先排除，否则 ``true`` 会被当成 1 秒。
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not 1 <= timeout <= 3600
+    ):
+        raise ConfigError("tools.mcp_tool_timeout_seconds must be a number between 1 and 3600")
+    return ToolsSettings(defer=defer, mcp_tool_timeout_seconds=timeout)
 
 
 def _parse_compose(values: Mapping[str, object]) -> ComposeSettings:

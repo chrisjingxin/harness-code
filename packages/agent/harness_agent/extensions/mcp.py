@@ -356,6 +356,58 @@ def _duplicate_tools_message(skipped_names: Sequence[str]) -> str | None:
     return f"{len(skipped_names)} 个工具与已加载工具重名，已忽略: {shown}{extra}"
 
 
+def build_tool_timeout_interceptor(timeout_seconds: float) -> Any:
+    """构造 MCP 工具调用的超时拦截器，避免卡死的服务器让整个 Run 一直挂着。
+
+    流程：放行调用 → 超过时限 → 取消底层调用（回收 stdio 子进程/HTTP 连接）
+    → 返回一段说明文字给模型。
+
+    超时后返回普通文本结果，而不是抛异常或标记 ``isError``：适配器会把
+    ``isError`` 转成 ``ToolException``，而 ToolNode 默认不处理这类异常，
+    会直接抛出，连带中断整个 Run。
+
+    Args:
+        timeout_seconds: 单次工具调用的时限（秒），必须大于 0。
+    """
+    if timeout_seconds <= 0:
+        raise ValueError("MCP_TOOL_TIMEOUT_INVALID")
+
+    async def _interceptor(request: Any, handler: Any) -> Any:
+        deadline = asyncio.timeout(timeout_seconds)
+        try:
+            async with deadline:
+                return await handler(request)
+        except TimeoutError:
+            # handler 自己抛出的 TimeoutError（如下游连接超时）不是我们的时限到了，
+            # 原样上抛，避免被误报成"超过 N 秒"。
+            if not deadline.expired():
+                raise
+            from mcp.types import CallToolResult, TextContent
+
+            logger.warning(
+                "MCP server %r tool %r timed out after %ss",
+                request.server_name,
+                request.name,
+                timeout_seconds,
+            )
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"[调用超时] MCP 服务器 {request.server_name} 的工具 {request.name} "
+                            f"超过 {timeout_seconds:g} 秒未返回，已停止等待。"
+                            "取消只是尽力而为，服务器端可能仍在执行；若这是写入、部署等"
+                            "非幂等操作，请先确认其实际状态，再决定是否重试。"
+                        ),
+                    )
+                ],
+                isError=False,
+            )
+
+    return _interceptor
+
+
 def mcp_server_name_of(tool: Any) -> str | None:
     """读取 ``_mark_mcp_tool`` 写入的归属服务器名；未标记时返回 None。
 
@@ -545,8 +597,14 @@ class McpConnectionManager:
         snapshot: McpConfigSnapshot | Sequence[McpServerConfig],
         *,
         diagnostic_log: Any | None = None,
+        tool_timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> None:
-        """保存初始快照，并把每个连接快照置于 Host owner 之下。"""
+        """保存初始快照，并把每个连接快照置于 Host owner 之下。
+
+        ``tool_timeout_seconds`` 是单次工具调用的最长等待时间，对应
+        ``[tools].mcp_tool_timeout_seconds``；同一 manager 的所有服务器共用。
+        """
+        self._tool_timeout_seconds = tool_timeout_seconds
         if not isinstance(snapshot, McpConfigSnapshot):
             snapshot = build_mcp_snapshot(snapshot, revision="legacy")
         self._resources: dict[str, list[SharedResourceHandle[_McpRuntime]]] = {}
@@ -790,7 +848,11 @@ class McpConnectionManager:
 
         config_by_name = {config.name: config for config in configs if config.name in connections}
         try:
-            runtime.client = MultiServerMCPClient(connections, tool_name_prefix=True)
+            runtime.client = MultiServerMCPClient(
+                connections,
+                tool_name_prefix=True,
+                tool_interceptors=[build_tool_timeout_interceptor(self._tool_timeout_seconds)],
+            )
         except Exception as exc:
             logger.warning("MCP client construction failed: %s; continuing", exc)
             runtime.tools = []

@@ -1079,6 +1079,135 @@ class TestMcpConfigFingerprintExpanded:
         assert mcp_config_fingerprint(c1) == mcp_config_fingerprint(c2)
 
 
+# --- 工具调用超时 ---
+
+
+def _call_request(name: str = "slow_tool", server: str = "srv"):
+    from langchain_mcp_adapters.interceptors import MCPToolCallRequest
+
+    return MCPToolCallRequest(name=name, args={}, server_name=server)
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_interceptor_passes_through_fast_results():
+    """调用在时限内返回时，拦截器原样放行。"""
+    from harness_agent.extensions.mcp import build_tool_timeout_interceptor
+
+    interceptor = build_tool_timeout_interceptor(1)
+
+    async def handler(request):
+        return "ok"
+
+    assert await interceptor(_call_request(), handler) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_interceptor_aborts_hung_call_with_readable_result():
+    """卡死的调用被中止，模型拿到说明文字；不能抛异常，否则会连带中断整个 Run。
+
+    结果不用 ``isError=True``：适配器会把它转成 ToolException，而 ToolNode
+    默认不处理这类异常，会直接抛出。
+    """
+    from mcp.types import CallToolResult
+
+    from harness_agent.extensions.mcp import build_tool_timeout_interceptor
+
+    interceptor = build_tool_timeout_interceptor(0.05)
+    cancelled = asyncio.Event()
+
+    async def hung_handler(request):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    result = await interceptor(_call_request("slow_tool", "srv"), hung_handler)
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is False
+    text = result.content[0].text
+    assert "slow_tool" in text and "srv" in text
+    assert cancelled.is_set(), "超时必须取消底层调用，才能回收子进程/连接"
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_interceptor_does_not_swallow_inner_timeout_error():
+    """handler 自己抛出的 TimeoutError 不是我们的时限到了，不能被误报成"超时 N 秒"。"""
+    from harness_agent.extensions.mcp import build_tool_timeout_interceptor
+
+    interceptor = build_tool_timeout_interceptor(30)
+
+    async def handler(request):
+        raise TimeoutError("inner")
+
+    with pytest.raises(TimeoutError, match="inner"):
+        await interceptor(_call_request(), handler)
+
+
+@pytest.mark.asyncio
+async def test_tool_timeout_result_warns_server_may_still_be_running():
+    """取消只是尽力而为：文案必须提醒非幂等操作先确认状态，不能鼓励直接重试。"""
+    from harness_agent.extensions.mcp import build_tool_timeout_interceptor
+
+    interceptor = build_tool_timeout_interceptor(0.05)
+
+    async def hung_handler(request):
+        await asyncio.sleep(30)
+
+    result = await interceptor(_call_request(), hung_handler)
+
+    text = result.content[0].text
+    assert "仍在执行" in text
+    assert "先确认" in text
+    assert "稍后重试" not in text
+
+
+def test_tool_timeout_interceptor_rejects_non_positive_timeout():
+    from harness_agent.extensions.mcp import build_tool_timeout_interceptor
+
+    with pytest.raises(ValueError):
+        build_tool_timeout_interceptor(0)
+
+
+@pytest.mark.asyncio
+async def test_connect_all_installs_tool_timeout_interceptor():
+    """MultiServerMCPClient 必须带上超时拦截器，DEFAULT_TOOL_TIMEOUT_SECONDS 才真正生效。"""
+    mgr = _manager([McpServerConfig(name="a", transport="stdio", command="cmd-a")])
+    client = MagicMock()
+    client.get_tools = AsyncMock(return_value=[])
+
+    with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=client) as client_class:
+        await mgr.connect_all()
+
+    interceptors = client_class.call_args.kwargs["tool_interceptors"]
+    assert len(interceptors) == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_all_uses_configured_tool_timeout():
+    """管理器把配置的时限交给拦截器，而不是写死默认值。"""
+    mgr = McpConnectionManager(
+        build_mcp_snapshot(
+            [McpServerConfig(name="a", transport="stdio", command="cmd-a")], revision="test"
+        ),
+        tool_timeout_seconds=7,
+    )
+    client = MagicMock()
+    client.get_tools = AsyncMock(return_value=[])
+
+    with (
+        patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=client),
+        patch(
+            "harness_agent.extensions.mcp.build_tool_timeout_interceptor",
+            return_value=MagicMock(),
+        ) as build,
+    ):
+        await mgr.connect_all()
+
+    build.assert_called_once_with(7)
+
+
 # --- 同名工具冲突要让用户看得见 ---
 
 

@@ -175,6 +175,7 @@ from harness_agent.runtime.agent_spec import (
 )
 from harness_agent.extensions.skills import SkillCatalogManager, SkillError as CatalogSkillError
 from harness_agent.extensions.mcp import (
+    DEFAULT_TOOL_TIMEOUT_SECONDS,
     McpConfigError,
     McpConfigSnapshot,
     McpConnectionManager,
@@ -1323,7 +1324,15 @@ class AgentHost:
         调用方必须持有 `_mcp_state_lock`，从而保证新 spec 不会同时绑定旧 manager
         和新 snapshot。
         """
-        manager = McpConnectionManager(snapshot, diagnostic_log=self._diagnostic_log)
+        manager = McpConnectionManager(
+            snapshot,
+            diagnostic_log=self._diagnostic_log,
+            tool_timeout_seconds=(
+                self._config.tools.mcp_tool_timeout_seconds
+                if self._config is not None
+                else DEFAULT_TOOL_TIMEOUT_SECONDS
+            ),
+        )
         await manager.connect_all()
         owner = SharedResourceOwner(
             manager,

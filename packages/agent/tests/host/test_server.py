@@ -2010,7 +2010,7 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
     import harness_agent.runtime.execution as execution_module
     import harness_agent.extensions.providers.harness_gateway as gateway_module
     from harness_agent.extensions.mcp import McpConnectionManager, build_mcp_snapshot
-    from harness_agent.config.config import ToolSearchSettings
+    from harness_agent.config.config import ToolsSettings
     from harness_agent.host.agent_host import AgentHost
     from harness_agent.runtime.agent_spec import skill_catalog_fingerprint
     from harness_agent.runtime.agent_engine_profile import component_fingerprint
@@ -2091,7 +2091,7 @@ async def test_default_engine_builder_passes_one_host_lock_to_each_profile(
 
     server = AgentHost(allow_echo=True, workspace=tmp_path)
     server._config = SimpleNamespace(
-        tools=ToolSearchSettings(defer="off"),
+        tools=ToolsSettings(defer="off"),
         model_catalog=None,
     )
     server._mcp_manager = McpConnectionManager(mcp_snapshot)
@@ -2125,7 +2125,7 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
     import harness_agent.runtime.agent as agent_module
     import harness_agent.threads.context_window as context_window_module
     import harness_agent.extensions.providers.harness_gateway as gateway_module
-    from harness_agent.config.config import ExecutionSettings, ModelSettings, ToolSearchSettings
+    from harness_agent.config.config import ExecutionSettings, ModelSettings, ToolsSettings
     from harness_agent.extensions.mcp import build_mcp_snapshot
     from harness_agent.host.agent_host import AgentHost
     from harness_agent.runtime.agent_engine import AgentEnginePool
@@ -2220,7 +2220,7 @@ async def test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager
     )
     server = AgentHost(allow_echo=True, workspace=tmp_path)
     server._config = SimpleNamespace(
-        tools=ToolSearchSettings(defer="off"),
+        tools=ToolsSettings(defer="off"),
         model_catalog=None,
     )
     server._provider_client_pool = ProviderPool()  # type: ignore[assignment]
@@ -2251,7 +2251,7 @@ async def test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view(
     import harness_agent.runtime.agent as agent_module
     import harness_agent.threads.context_window as context_window_module
     import harness_agent.extensions.providers.harness_gateway as gateway_module
-    from harness_agent.config.config import ExecutionSettings, ModelSettings, ToolSearchSettings
+    from harness_agent.config.config import ExecutionSettings, ModelSettings, ToolsSettings
     from harness_agent.extensions.mcp import (
         McpConnectionManager,
         McpServerConfig,
@@ -2369,7 +2369,7 @@ async def test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view(
     )
     server = AgentHost(allow_echo=True, workspace=tmp_path)
     server._config = SimpleNamespace(
-        tools=ToolSearchSettings(defer="off"),
+        tools=ToolsSettings(defer="off"),
         model_catalog=None,
     )
     server._provider_client_pool = ProviderPool()  # type: ignore[assignment]
@@ -4413,3 +4413,25 @@ async def _append(frames: list[dict[str, Any]], message: dict[str, Any]) -> None
 
 def _event_count(frames: list[dict[str, Any]], event_type: str) -> int:
     return sum(frame.get("params", {}).get("type") == event_type for frame in frames)
+
+
+@pytest.mark.asyncio
+async def test_replace_mcp_generation_uses_configured_tool_timeout(tmp_path, monkeypatch):
+    """[tools].mcp_tool_timeout_seconds 必须传到新建的 MCP manager。"""
+    from types import SimpleNamespace
+
+    from harness_agent.config.config import ToolsSettings
+    from harness_agent.extensions.mcp import McpConnectionManager, build_mcp_snapshot
+    from harness_agent.host.agent_host import AgentHost
+
+    async def skip_connect(self: McpConnectionManager) -> None:
+        return None
+
+    monkeypatch.setattr(McpConnectionManager, "connect_all", skip_connect)
+    server = AgentHost(allow_echo=True, workspace=tmp_path)
+    server._config = SimpleNamespace(tools=ToolsSettings(mcp_tool_timeout_seconds=300))
+
+    await server._replace_mcp_generation(build_mcp_snapshot([], "test"))
+
+    assert server._mcp_manager is not None
+    assert server._mcp_manager._tool_timeout_seconds == 300
