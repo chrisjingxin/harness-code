@@ -12,15 +12,17 @@ import re
 import shlex
 
 from harness_agent.policy.bash_parser import strip_wrappers
+from harness_agent.policy.tool_risk import TOOL_KIND_MAP, ToolKind
 
 # ---------------------------------------------------------------------------
 # 工具分类常量
 # ---------------------------------------------------------------------------
 
-_READ_ONLY_TOOLS = frozenset({
-    "ls", "read_file", "glob", "grep",
-    "web_search", "lsp", "tool_search", "memory_search",
-})
+# 只读集合直接取自工具风险目录（TOOL_KIND_MAP），不在这里再手写一份，
+# 否则新增只读工具时容易漏改，被当成未知工具而拿到独占写锁。
+_READ_ONLY_TOOLS = frozenset(
+    name for name, kind in TOOL_KIND_MAP.items() if kind is ToolKind.READ
+)
 """始终可并行的只读工具。"""
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})

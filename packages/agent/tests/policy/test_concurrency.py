@@ -13,6 +13,7 @@ from harness_agent.policy.concurrency import (
     is_shell_command_read_only,
 )
 from harness_agent.policy.concurrency_guard import ConcurrencyGuardMiddleware
+from harness_agent.policy.tool_risk import TOOL_KIND_MAP, ToolKind
 
 
 # ---------------------------------------------------------------------------
@@ -22,11 +23,19 @@ from harness_agent.policy.concurrency_guard import ConcurrencyGuardMiddleware
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["ls", "read_file", "glob", "grep"],
+    ["ls", "read_file", "glob", "grep", "codebase_explore"],
 )
 def test_read_only_tools_are_concurrency_safe(tool_name: str):
     """只读工具始终可安全并行。"""
     assert is_concurrency_safe(tool_name, {}) is True
+
+
+def test_every_read_kind_tool_is_concurrency_safe():
+    """工具风险目录里标为 READ 的工具，并发判定必须与之一致（单一事实源）。"""
+    read_tools = [name for name, kind in TOOL_KIND_MAP.items() if kind is ToolKind.READ]
+    assert read_tools  # 防止目录被清空后断言空转
+    for name in read_tools:
+        assert is_concurrency_safe(name, {}) is True, name
 
 
 @pytest.mark.parametrize(
