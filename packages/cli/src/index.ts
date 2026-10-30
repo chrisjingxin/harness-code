@@ -92,6 +92,8 @@ type RunningAgent = {
 type ExecuteDependencies = {
   startAgent?: (command: Command) => Promise<RunningAgent>
   readSettingValue?: (secretStdin: boolean) => Promise<string>
+  /** 交互界面入口；测试用它替换真实终端渲染，其余生命周期保持真实。 */
+  runTui?: typeof runTui
 }
 
 type TerminalStream = { isTTY?: boolean }
@@ -603,7 +605,7 @@ export async function execute(
           diagnostics: agent.log,
         })
       }
-      await runTui({
+      await (dependencies.runTui ?? runTui)({
         controller,
         gateway,
         workspaceExplorer,

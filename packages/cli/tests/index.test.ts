@@ -27,19 +27,92 @@ import {
 } from "../src/ipc/command-binding"
 import { parseArgs } from "../src/args"
 import { CLI_VERSION } from "../src/interactive/runtime"
+import { runtime as baseTestRuntime } from "./interactive/harness"
 
-test("CLI shutdown 顺序：runTui 返回后 gateway → coordinator → controller.close，agent.stop 最后", () => {
-  const source = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
-  const runTuiAt = source.indexOf("await runTui(")
-  const gatewayCloseAt = source.indexOf("await webUiGateway?.close()")
-  const coordinatorCloseAt = source.indexOf("await presentationCoordinator?.close()")
-  const controllerCloseAt = source.indexOf("await controller?.close()")
-  const agentStopAt = source.indexOf("await agent.stop()")
-  expect(runTuiAt).toBeGreaterThan(-1)
-  expect(gatewayCloseAt).toBeGreaterThan(runTuiAt)
-  expect(coordinatorCloseAt).toBeGreaterThan(gatewayCloseAt)
-  expect(controllerCloseAt).toBeGreaterThan(coordinatorCloseAt)
-  expect(agentStopAt).toBeGreaterThan(controllerCloseAt)
+/** 只实现 request；订阅类方法（on / setRequestHandler 等）统一返回空取消函数。 */
+function fakeAgentClient() {
+  return new Proxy({}, {
+    get: (_target, key) => (key === "then" ? undefined : key === "request" ? async () => ({}) : () => () => {}),
+  })
+}
+
+/** 构造最小 fake Agent：只记录 stop 调用，其余交给真实的 controller / coordinator。 */
+function interactiveFakeAgent(events: string[]) {
+  return async () => ({
+    client: fakeAgentClient() as never,
+    runtime: { ...baseTestRuntime } as never,
+    log: { event: () => {}, close: async () => {} } as never,
+    stop: async () => {
+      events.push("agent.stop")
+    },
+  })
+}
+
+/** 在交互模式下伪装成真实终端，避免 validateInteractiveTerminal 拒绝启动。 */
+async function withFakeTty<T>(run: () => Promise<T>): Promise<T> {
+  const stdinTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
+  const stdoutTty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY")
+  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true })
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true })
+  try {
+    return await run()
+  } finally {
+    if (stdinTty) Object.defineProperty(process.stdin, "isTTY", stdinTty)
+    else delete (process.stdin as { isTTY?: boolean }).isTTY
+    if (stdoutTty) Object.defineProperty(process.stdout, "isTTY", stdoutTty)
+    else delete (process.stdout as { isTTY?: boolean }).isTTY
+  }
+}
+
+test("CLI shutdown 顺序：runTui 返回后 explorer → coordinator → controller 依次关闭，agent.stop 最后", async () => {
+  const events: string[] = []
+  const root = await mkdtemp(resolve(tmpdir(), "za38-shutdown-test-"))
+  await withFakeTty(() =>
+    execute(parseArgs([], root), {
+      startAgent: interactiveFakeAgent(events),
+      runTui: async options => {
+        const spy = (name: string, target: { close: () => Promise<void> | void } | undefined) => {
+          const original = target!.close.bind(target)
+          target!.close = async () => {
+            events.push(`${name}.close`)
+            await original()
+          }
+        }
+        spy("explorer", options.workspaceExplorer as never)
+        spy("coordinator", options.webHandoff as never)
+        spy("controller", options.controller as never)
+        events.push("runTui.return")
+      },
+    }),
+  )
+  expect(events).toEqual([
+    "runTui.return",
+    "explorer.close",
+    "coordinator.close",
+    "controller.close",
+    "agent.stop",
+  ])
+})
+
+test("CLI shutdown：runTui 抛错时仍然关闭各层并停止 agent，错误原样抛出", async () => {
+  const events: string[] = []
+  const root = await mkdtemp(resolve(tmpdir(), "za38-shutdown-error-test-"))
+  await expect(
+    withFakeTty(() =>
+      execute(parseArgs([], root), {
+        startAgent: interactiveFakeAgent(events),
+        runTui: async options => {
+          const original = options.controller.close.bind(options.controller)
+          options.controller.close = async () => {
+            events.push("controller.close")
+            await original()
+          }
+          throw new Error("tui boom")
+        },
+      }),
+    ),
+  ).rejects.toThrow("tui boom")
+  expect(events).toEqual(["controller.close", "agent.stop"])
 })
 
 test("不存在的工作区会给出明确错误", () => {
@@ -206,16 +279,28 @@ test("version 与 help 不启动 sidecar，stdout 为版本或用法", async () 
   expect(printed[1] ?? "").toContain("-n")
 })
 
-test("harness logs 命令路由在 startAgent 之前，不创建 sidecar、不调用 spawn", () => {
+test("harness logs 命令路由在 startAgent 之前，不创建 sidecar、不调用 spawn", async () => {
   const logsCmd = parseArgs(["logs", "--run", "r1"])
   expect(logsCmd.kind).toBe("logs")
 
-  // 源码证据：execute 中 logs 处理在 startAgent 调用之前，保证 spawn=0
-  const src = readFileSync(resolve(import.meta.dir, "../src/index.ts"), "utf8")
-  const startAgentIdx = src.indexOf("const agent = await (dependencies.startAgent ?? startAgent)(command)")
-  const logsCheckIdx = src.indexOf('command.kind === "logs"')
-  expect(logsCheckIdx).toBeGreaterThan(-1)
-  expect(logsCheckIdx).toBeLessThan(startAgentIdx)
+  // 行为证据：真实走一遍 execute，startAgent 一次都不能被调用（即不会 spawn sidecar）。
+  let started = 0
+  const originalLog = console.log
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  console.log = () => {}
+  process.stdout.write = (() => true) as never
+  try {
+    await execute(logsCmd, {
+      startAgent: async () => {
+        started += 1
+        throw new Error("startAgent must not run for logs")
+      },
+    }).catch(() => {}) // 日志文件不存在时查询可能报错，这里只关心是否启动了 sidecar
+  } finally {
+    console.log = originalLog
+    process.stdout.write = originalWrite
+  }
+  expect(started).toBe(0)
 
   const querySource = readFileSync(resolve(import.meta.dir, "../src/diagnostic-log/query.ts"), "utf8")
   expect(querySource).not.toContain("child_process")

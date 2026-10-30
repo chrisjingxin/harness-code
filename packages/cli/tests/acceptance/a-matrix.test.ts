@@ -68,9 +68,7 @@ test("A-05 TUI→Web→TUI 连续性：E2E 脚本与真实浏览器用例存在"
 test("A-06 dispatch 均返回 Typed IntentOutcome，拒绝不清空草稿", () => {
   const types = readFileSync(resolve(interactiveRoot, "types.ts"), "utf8")
   expect(types).toContain("dispatch(intent: InteractiveIntent): Promise<IntentOutcome>")
-  // 拒绝保留草稿的端到端断言由 adapter parity 与 adapter 测试覆盖。
-  const parity = readFileSync(resolve(import.meta.dir, "../interactive/adapter-parity.test.ts"), "utf8")
-  expect(parity).toContain("保留草稿")
+  // 拒绝保留草稿的行为由 tests/interactive/adapter-parity.test.ts 真实执行断言，这里不再读取其源码。
 })
 
 test("A-07 interactive 对 ipc/react/opentui/dom/websocket 零依赖", () => {
@@ -91,9 +89,7 @@ test("A-09 Web 高亮用单例 Shiki Worker，未知/失败安全降级", () => 
   const syntaxSource = readAllSourceFiles(resolve(webRoot, "syntax"))
   expect(syntaxSource).toContain("shiki")
   expect(syntaxSource).toContain("Worker")
-  // 未知语言/超长代码块降级纯文本的断言由 tests/web/syntax 覆盖。
-  const workerTests = readFileSync(resolve(import.meta.dir, "../web/syntax/worker.test.ts"), "utf8")
-  expect(workerTests.length).toBeGreaterThan(0)
+  // 高亮结果、未知语言与超长代码块降级由 tests/web/syntax/worker.test.ts 真实执行断言。
 })
 
 test("A-10 Web 不用 dangerouslySetInnerHTML 渲染 Markdown/代码", () => {

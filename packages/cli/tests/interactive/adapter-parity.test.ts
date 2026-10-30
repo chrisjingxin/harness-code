@@ -208,13 +208,28 @@ describe("Adapter Parity (TUI vs Web)", () => {
     expect(tuiAdapter.getSnapshot().draft).toBe("我的草稿提问")
     expect(webAdapter.getSnapshot().draft).toBe("我的草稿提问")
 
-    // 2. 模拟被拒绝的场景：提交未知 Thread 打开
-    const notFoundIntent: InteractiveIntent = { type: "thread.open", threadId: "non-existent-thread" }
-    const outcome = await controller.dispatch(notFoundIntent)
+    // 2. 被拒绝的场景：两端各自经由「自己的 adapter」选择一个无法恢复的 Thread。
+    //    包一层 dispatch 记录共享 Controller 实际返回的 IntentOutcome，
+    //    以此证明请求确实走过 adapter，而不是测试直接调用 Controller。
+    const outcomes: IntentOutcome[] = []
+    const originalDispatch = controller.dispatch.bind(controller)
+    controller.dispatch = async (intent: InteractiveIntent) => {
+      const outcome = await originalDispatch(intent)
+      outcomes.push(outcome)
+      return outcome
+    }
 
-    expect(outcome.status).toBe("rejected")
-    if (outcome.status === "rejected") {
-      expect(outcome.code).toBe("not-found")
+    await tuiAdapter.dispatch({
+      type: "picker-select-thread",
+      thread: { threadId: "non-existent-thread", createdAtMs: 1, updatedAtMs: 2, firstMessage: "", latestMessage: "", messageCount: 0, title: null },
+    })
+    await webAdapter.dispatch({ type: "thread-select", threadId: "non-existent-thread" })
+
+    // 两端对同一意图得到相同的 rejected / not-found 结果
+    expect(outcomes).toHaveLength(2)
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe("rejected")
+      if (outcome.status === "rejected") expect(outcome.code).toBe("not-found")
     }
 
     // 3. 拒绝后草稿必须 100% 保留

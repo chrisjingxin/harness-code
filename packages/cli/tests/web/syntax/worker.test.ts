@@ -2,30 +2,32 @@ import { describe, expect, it } from "bun:test"
 import { processHighlightRequest } from "../../../src/web/syntax/worker"
 
 describe("Shiki Syntax Worker", () => {
-  it("应该能对支持的语言（JS/TS/Python/JSON/Bash/HTML）正确高亮并产出 Spans", async () => {
-    const jsRes = await processHighlightRequest({
-      requestId: 1,
-      language: "javascript",
-      code: "const greeting = 'hello';",
-    })
+  /** 取出被某个 scope 覆盖的原文片段（按 UTF-8 字节范围切片）。 */
+  function textOfScope(code: string, spans: readonly { startByte: number; endByte: number; scope: string }[], scope: string): string[] {
+    const bytes = new TextEncoder().encode(code)
+    return spans
+      .filter(span => span.scope === scope)
+      .map(span => new TextDecoder().decode(bytes.slice(span.startByte, span.endByte)))
+  }
+
+  it("应该能对支持的语言（JS/Python/JSON）正确高亮并产出带正确范围的 Spans", async () => {
+    const jsCode = "const greeting = 'hello';"
+    const jsRes = await processHighlightRequest({ requestId: 1, language: "javascript", code: jsCode })
     expect(jsRes.type).toBe("highlighted")
-    if (jsRes.type === "highlighted") {
-      expect(jsRes.spans.length).toBeGreaterThan(0)
-    }
+    if (jsRes.type !== "highlighted") throw new Error("unreachable")
+    expect(textOfScope(jsCode, jsRes.spans, "keyword")).toContain("const")
 
-    const pyRes = await processHighlightRequest({
-      requestId: 2,
-      language: "py",
-      code: "def add(a, b):\n  return a + b",
-    })
+    const pyCode = "def add(a, b):\n  return a + b"
+    const pyRes = await processHighlightRequest({ requestId: 2, language: "py", code: pyCode })
     expect(pyRes.type).toBe("highlighted")
+    if (pyRes.type !== "highlighted") throw new Error("unreachable")
+    expect(textOfScope(pyCode, pyRes.spans, "keyword")).toEqual(expect.arrayContaining(["def", "return"]))
 
-    const jsonRes = await processHighlightRequest({
-      requestId: 3,
-      language: "json",
-      code: '{"name": "harness"}',
-    })
+    const jsonCode = '{"name": "harness"}'
+    const jsonRes = await processHighlightRequest({ requestId: 3, language: "json", code: jsonCode })
     expect(jsonRes.type).toBe("highlighted")
+    if (jsonRes.type !== "highlighted") throw new Error("unreachable")
+    expect(textOfScope(jsonCode, jsonRes.spans, "string").join("")).toContain("harness")
   })
 
   it("应该对未知语言安全降级为 plain 且带有 unknown-language 原因", async () => {
