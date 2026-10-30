@@ -146,7 +146,7 @@ _BUILTIN_TOOL_SHAPES = (
     # --- 新增工具 ---
     {"name": "web_search", "parameters": {"query": "string", "num_results": "integer"}},
     {"name": "web_fetch", "parameters": {"url": "string", "format": "string"}},
-    {"name": "tool_search", "parameters": {"query": "string", "limit": "integer", "offset": "integer"}},
+    {"name": "tool_search", "parameters": {"query": "string", "limit": "integer", "offset": "integer", "server": "string"}},
     {"name": "enter_plan_mode", "parameters": {}},
     {"name": "exit_plan_mode", "parameters": {}},
     {"name": "memory_search", "parameters": {"query": "string"}},
@@ -806,7 +806,7 @@ def create_harness_agent(
     enable_skills: bool = True,
     checkpointer: Any = None,
     mcp_server_info: list | None = None,
-    mcp_unavailable_servers: Callable[[], Sequence[str]] | None = None,
+    mcp_unavailable_servers: Callable[[], Mapping[str, str]] | None = None,
     cwd: str | None = None,
     workdir: str | None = None,
     execution_context: Any | None = None,
@@ -853,7 +853,7 @@ def create_harness_agent(
         enable_skills: 启用技能系统。
         checkpointer: checkpoint saver。None 时用 MemorySaver。
         mcp_server_info: MCP 服务器信息列表。
-        mcp_unavailable_servers: 返回当前连接失败/被跳过的 MCP 服务器名的回调。
+        mcp_unavailable_servers: 返回当前不可用 MCP 服务器 ``{名字: failed|skipped}`` 的回调。
             ``tool_search`` 搜不到结果时用它提示模型"是服务器没连上，不是工具不存在"；
             每次搜索都重新读取，None 表示不提示。
         cwd: 工作目录。

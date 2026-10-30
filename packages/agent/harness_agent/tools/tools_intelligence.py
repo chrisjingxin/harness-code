@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -108,7 +108,8 @@ def tool_search(
     *,
     limit: int = _MAX_SEARCH_RESULTS,
     offset: int = 0,
-    unavailable_servers: Sequence[str] = (),
+    unavailable_servers: Mapping[str, str] | None = None,
+    server: str | None = None,
 ) -> dict[str, Any]:
     """搜索可用的 MCP 外部工具。
 
@@ -126,9 +127,12 @@ def tool_search(
             与 input_schema（工具参数 JSON Schema）。
         limit: 关键词搜索单页返回上限（默认 20）。
         offset: 关键词搜索翻页偏移。
-        unavailable_servers: 当前连接失败或被跳过的 MCP 服务器名。这些服务器
+        unavailable_servers: 当前不可用的 MCP 服务器，``{服务器名: 状态}``，状态为
+            ``failed``（连接失败）或 ``skipped``（缺环境变量被跳过）。这些服务器
             的工具根本不在候选里；搜不到结果时用它提示模型"可能是服务器没连上"，
-            而不是让模型误以为世上没有这个工具。
+            而不是让模型误以为世上没有这个工具，并区分两种状态各自的处理办法。
+        server: 只在该 MCP 服务器的工具里搜索（不区分大小写，按工具上的真实归属
+            匹配，不按名字前缀猜）。没有归属的工具（内置延迟工具）不会匹配。
 
     Returns:
         搜索成功时返回 ``{"results", "mode", "reveal", ...}``：
@@ -143,15 +147,26 @@ def tool_search(
 
         没有可展示的结果时只返回 ``{"results": [], "note": ...}``。
     """
+    unavailable = unavailable_servers or {}
     if not available_tools:
         return {
             "results": [],
-            "note": _with_unavailable_servers("无已注册的 MCP 工具", unavailable_servers),
+            "note": _with_unavailable_servers("无已注册的 MCP 工具", unavailable),
         }
 
     query = (query or "").strip()
     if not query:
         return {"results": [], "note": "查询不能为空，可尝试工具名或关键词"}
+
+    server = (server or "").strip() or None
+    all_tools = available_tools
+    if server is not None:
+        wanted = server.casefold()
+        available_tools = [
+            t for t in available_tools if str(t.get("server", "")).casefold() == wanted
+        ]
+        if not available_tools:
+            return {"results": [], "note": _unknown_server_note(server, all_tools, unavailable)}
 
     # 模式一：select: 精确选择（逗号分隔，大小写不敏感，去重）。
     select_match = re.match(r"^select:(.+)$", query, re.IGNORECASE)
@@ -177,8 +192,9 @@ def tool_search(
             "reveal": [item["name"] for item in results],
         }
         if missing:
+            scope = f"（已限定服务器 {server}）" if server else ""
             response["note"] = _with_unavailable_servers(
-                f"未找到工具: {', '.join(missing)}", unavailable_servers
+                f"未找到工具: {', '.join(missing)}{scope}", unavailable
             )
         return response
 
@@ -192,7 +208,7 @@ def tool_search(
     # 模式三：自由关键词打分。
     terms = _tokenize(query)
     if not terms:
-        return {"results": [], "note": _no_match_note(unavailable_servers)}
+        return {"results": [], "note": _no_match_note(unavailable)}
     required = [t[1:] for t in terms if t.startswith("+") and len(t) > 1]
     optional = [t for t in terms if not t.startswith("+")]
     # + 词既做必选预筛，也参与打分（Claude allScoringTerms 语义）。
@@ -231,7 +247,7 @@ def tool_search(
                 "hasMore": False,
                 "nextOffset": None,
             }
-        return {"results": [], "note": _no_match_note(unavailable_servers)}
+        return {"results": [], "note": _no_match_note(unavailable)}
     next_offset = safe_offset + len(results)
     response = {
         "results": results,
@@ -250,23 +266,42 @@ def tool_search(
     return response
 
 
-def _no_match_note(unavailable_servers: Sequence[str]) -> str:
+def _no_match_note(unavailable_servers: Mapping[str, str]) -> str:
     """关键词没有命中时的提示；有不可用服务器时一并点明。"""
     return _with_unavailable_servers("未找到匹配工具，可尝试更宽泛的关键词", unavailable_servers)
 
 
-def _with_unavailable_servers(note: str, unavailable_servers: Sequence[str]) -> str:
-    """在提示后追加"这些服务器当前不可用"，让模型区分"没有"与"暂时连不上"。
+def _with_unavailable_servers(note: str, unavailable_servers: Mapping[str, str]) -> str:
+    """在提示后追加"这些服务器当前不可用"，让模型区分"没有"与"暂时用不了"。
 
-    只列服务器名，不带连接错误原文：错误文本可能含 URL 或本机路径，
+    连接失败与缺环境变量被跳过的处理办法不同（前者查服务器，后者要用户设变量），
+    所以分开列。只列服务器名，不带错误原文：错误文本可能含 URL 或本机路径，
     没必要进入模型上下文。
     """
-    names = [name for name in unavailable_servers if name]
-    if not names:
+    skipped = [name for name, status in unavailable_servers.items() if name and status == "skipped"]
+    failed = [name for name, status in unavailable_servers.items() if name and status != "skipped"]
+    parts: list[str] = []
+    if failed:
+        parts.append(f"连接失败: {', '.join(failed)}（可提示用户检查服务器是否可达、配置是否正确）")
+    if skipped:
+        parts.append(
+            f"缺少环境变量被跳过: {', '.join(skipped)}（需要用户设置对应环境变量后重启）"
+        )
+    if not parts:
         return note
-    return (
-        f"{note}。注意：以下 MCP 服务器当前不可用，它们的工具暂时无法搜索或调用："
-        f"{', '.join(names)}。可提示用户检查这些服务器的连接状态"
+    return f"{note}。注意：以下 MCP 服务器当前不可用，它们的工具暂时无法搜索或调用：{'；'.join(parts)}"
+
+
+def _unknown_server_note(
+    server: str,
+    all_tools: list[dict[str, Any]],
+    unavailable_servers: Mapping[str, str],
+) -> str:
+    """server 过滤后一个工具都没有：列出实际有工具的服务器，帮模型改正拼写。"""
+    known = sorted({str(t["server"]) for t in all_tools if t.get("server")})
+    listing = f"；当前有工具的服务器: {', '.join(known)}" if known else ""
+    return _with_unavailable_servers(
+        f"没有名为 {server} 的 MCP 服务器的可用工具{listing}", unavailable_servers
     )
 
 
@@ -276,7 +311,10 @@ def _result_entry(entry: dict[str, Any], *, include_schema: bool = True) -> dict
         "name": str(entry.get("name", "")),
         "description": str(entry.get("description", "")),
     }
-    if entry.get("search_hint"):
+    if entry.get("server"):
+        result["server"] = str(entry["server"])
+    # search_hint 常与 server 同值，重复输出只会多占 token。
+    if entry.get("search_hint") and entry.get("search_hint") != entry.get("server"):
         result["search_hint"] = str(entry["search_hint"])
     if include_schema and entry.get("input_schema") is not None:
         result["input_schema"] = entry["input_schema"]

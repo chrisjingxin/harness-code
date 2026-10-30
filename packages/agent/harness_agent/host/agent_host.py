@@ -5627,7 +5627,7 @@ class AgentHost:
                 mcp_server_info=True if mcp_tools else None,
                 # 服务器没连上时它的工具不在候选里；让 tool_search 能说明原因。
                 mcp_unavailable_servers=(
-                    self._mcp_manager.unavailable_server_names
+                    self._mcp_manager.unavailable_servers
                     if self._mcp_manager is not None
                     else None
                 ),

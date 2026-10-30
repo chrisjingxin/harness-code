@@ -676,18 +676,21 @@ class McpConnectionManager:
             result.append(entry)
         return result
 
-    def unavailable_server_names(self) -> list[str]:
-        """返回当前连接失败或被跳过的服务器名，供 ``tool_search`` 提示模型。
+    def unavailable_servers(self) -> dict[str, str]:
+        """返回当前不可用的服务器 ``{名字: 状态}``，供 ``tool_search`` 提示模型。
 
-        只返回名字，不带错误原文：错误文本可能含 URL 或本机路径，不应进入模型上下文。
-        每次调用都读最新状态，服务器恢复后提示会自动消失。
+        状态是 ``failed``（连接失败或超时）或 ``skipped``（环境变量缺失被跳过），
+        两者的处理办法不同，所以不合并。只返回名字和状态，不带错误原文：错误文本
+        可能含 URL 或本机路径，不应进入模型上下文。每次调用都读最新状态，服务器
+        恢复后提示会自动消失。
         """
         runtime = self._current_resource.value
-        return [
-            config.name
-            for config in runtime.snapshot.servers
-            if runtime.server_statuses.get(config.name, {}).get("status") in ("failed", "skipped")
-        ]
+        result: dict[str, str] = {}
+        for config in runtime.snapshot.servers:
+            status = runtime.server_statuses.get(config.name, {}).get("status")
+            if status in ("failed", "skipped"):
+                result[config.name] = str(status)
+        return result
 
     def _create_resource(
         self,

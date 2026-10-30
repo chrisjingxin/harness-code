@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -53,7 +53,7 @@ def create_harness_tools(
     lsp_manager: Any | None = None,
     mcp_tools: Sequence[Any] | None = None,
     deferred_builtin_names: frozenset[str] | None = None,
-    mcp_unavailable_servers: Callable[[], Sequence[str]] | None = None,
+    mcp_unavailable_servers: Callable[[], Mapping[str, str]] | None = None,
 ) -> list[StructuredTool]:
     """创建所有 Harness 扩展工具的 BaseTool 实例列表。
 
@@ -67,7 +67,7 @@ def create_harness_tools(
             工具也进入 ``tool_search`` 候选（is_mcp=False 走内置权重），
             便于模型在延迟加载模式下发现它们。None 时保持 Phase 1 语义
             （候选仅 MCP 工具）。
-        mcp_unavailable_servers: 返回"当前连接失败/被跳过的 MCP 服务器名"的
+        mcp_unavailable_servers: 返回"当前不可用的 MCP 服务器"（``{名字: failed|skipped}``）的
             回调。服务器没连上时它的工具根本不在 ``mcp_tools`` 里，搜索会空手而归；
             ``tool_search`` 在没结果时用它提示模型是服务器不可用而不是工具不存在。
             每次搜索都重新调用，所以服务器状态变化后提示会随之更新；回调抛错
@@ -139,7 +139,12 @@ def create_harness_tools(
     ))
 
     # --- tool_search ---
-    def _tool_search(query: str, limit: int = _MAX_SEARCH_RESULTS, offset: int = 0) -> str:
+    def _tool_search(
+        query: str,
+        limit: int = _MAX_SEARCH_RESULTS,
+        offset: int = 0,
+        server: str | None = None,
+    ) -> str:
         """搜索可用的 MCP 外部工具，返回工具名/描述/所属服务器与分页信息。
 
         仅头部强匹配携带参数 schema；其余工具可用 select:<name> 精确查询取回。
@@ -148,6 +153,7 @@ def create_harness_tools(
             query: 搜索关键词，匹配工具名称或描述；select:name1,name2 精确选择。
             limit: 单页返回上限（默认 20）。
             offset: 翻页偏移（默认 0）。
+            server: 只搜索该 MCP 服务器的工具（服务器名见结果里的 server 字段）。
         """
         # 把运行时真实 MCP 工具投影为搜索候选：名称、描述、服务器名
         # search_hint 与参数 schema。服务器归属优先读加载时写入的
@@ -159,13 +165,17 @@ def create_harness_tools(
             name = str(getattr(tool, "name", ""))
             if not name:
                 continue
-            candidates.append({
+            owner = mcp_server_name_of(tool)
+            candidate: dict[str, object] = {
                 "name": name,
                 "description": str(getattr(tool, "description", "") or ""),
-                "search_hint": mcp_server_name_of(tool) or name.split("_", 1)[0],
+                "search_hint": owner or name.split("_", 1)[0],
                 "is_mcp": True,
                 "input_schema": _tool_input_schema(tool),
-            })
+            }
+            if owner:
+                candidate["server"] = owner
+            candidates.append(candidate)
         # 延迟加载模式（Phase 2）：内置低频工具同样可被发现（is_mcp=False）。
         for tool in deferred_builtin:
             candidates.append({
@@ -174,10 +184,10 @@ def create_harness_tools(
                 "is_mcp": False,
                 "input_schema": _tool_input_schema(tool),
             })
-        unavailable: Sequence[str] = ()
+        unavailable: Mapping[str, str] = {}
         if mcp_unavailable_servers is not None:
             try:
-                unavailable = tuple(mcp_unavailable_servers())
+                unavailable = dict(mcp_unavailable_servers())
             except Exception:
                 # 状态读取失败只影响"提示"，不能让搜索本身失败。
                 logger.debug("读取不可用 MCP 服务器列表失败", exc_info=True)
@@ -188,6 +198,7 @@ def create_harness_tools(
                 limit=limit,
                 offset=offset,
                 unavailable_servers=unavailable,
+                server=server,
             ),
             ensure_ascii=False,
         )

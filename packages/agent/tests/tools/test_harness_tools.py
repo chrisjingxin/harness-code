@@ -86,7 +86,9 @@ def test_tool_search_search_hint_uses_marked_server_name(tmp_path):
     result = json.loads(search.invoke({"query": "搜索"}))
 
     entry = result["results"][0]
-    assert entry["search_hint"] == "my_server"
+    # 归属服务器名由 server 字段携带；search_hint 与其同值时不重复输出。
+    assert entry["server"] == "my_server"
+    assert "search_hint" not in entry
 
 
 def test_tool_search_search_hint_falls_back_to_prefix_without_marker(tmp_path):
@@ -196,7 +198,7 @@ def test_exit_plan_mode_description_submits_written_plan():
 
 def test_tool_search_reports_unavailable_servers_when_no_candidates() -> None:
     """所有 MCP 服务器都没连上时，tool_search 点出服务器名，而不是只说"无已注册"。"""
-    tools = create_harness_tools("/tmp", mcp_unavailable_servers=lambda: ["github"])
+    tools = create_harness_tools("/tmp", mcp_unavailable_servers=lambda: {"github": "failed"})
 
     payload = json.loads(_tool_search_instance(tools).invoke({"query": "issue"}))
 
@@ -206,11 +208,11 @@ def test_tool_search_reports_unavailable_servers_when_no_candidates() -> None:
 
 def test_tool_search_unavailable_servers_are_read_at_call_time() -> None:
     """服务器状态会变（比如稍后恢复），所以每次搜索都重新读，不在构建工具时固化。"""
-    unavailable = ["github"]
+    unavailable = {"github": "failed"}
     tools = create_harness_tools(
         "/tmp",
         mcp_tools=[_fake_mcp_tool("slack_post", "发送消息")],
-        mcp_unavailable_servers=lambda: list(unavailable),
+        mcp_unavailable_servers=lambda: dict(unavailable),
     )
     search = _tool_search_instance(tools)
 
@@ -223,7 +225,7 @@ def test_tool_search_unavailable_servers_are_read_at_call_time() -> None:
 def test_tool_search_survives_failing_unavailable_provider() -> None:
     """状态读取失败只丢掉提示，不能让 tool_search 本身报错。"""
 
-    def _boom() -> list[str]:
+    def _boom() -> dict[str, str]:
         raise RuntimeError("status unavailable")
 
     tools = create_harness_tools(
@@ -235,3 +237,19 @@ def test_tool_search_survives_failing_unavailable_provider() -> None:
     payload = json.loads(_tool_search_instance(tools).invoke({"query": "slack"}))
 
     assert payload["results"][0]["name"] == "slack_post"
+
+
+def test_tool_search_server_argument_filters_by_marked_server() -> None:
+    """server 参数读加载时写入的归属标记；my 与 my_server 互为前缀也不串。"""
+    first = _fake_mcp_tool("my_server_search", "read docs")
+    object.__setattr__(first, "_harness_mcp_server_name", "my")
+    second = _fake_mcp_tool("my_server_search_all", "read docs")
+    object.__setattr__(second, "_harness_mcp_server_name", "my_server")
+    tools = create_harness_tools("/tmp", mcp_tools=[first, second])
+
+    payload = json.loads(
+        _tool_search_instance(tools).invoke({"query": "docs", "server": "my"})
+    )
+
+    assert [r["name"] for r in payload["results"]] == ["my_server_search"]
+    assert payload["results"][0]["server"] == "my"

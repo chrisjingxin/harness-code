@@ -389,7 +389,7 @@ def test_tool_search_schema_hint_only_when_results_were_trimmed():
 
 def test_tool_search_no_tools_mentions_unavailable_servers():
     """所有服务器都没连上时，note 要点出服务器名，而不是只说"无已注册"。"""
-    result = tool_search("anything", unavailable_servers=["github", "slack"])
+    result = tool_search("anything", unavailable_servers={"github": "failed", "slack": "failed"})
 
     assert result["results"] == []
     assert "github" in result["note"] and "slack" in result["note"]
@@ -399,7 +399,7 @@ def test_tool_search_no_match_mentions_unavailable_servers():
     """有候选但没命中时，若有服务器不可用，提示里要带上它们。"""
     tools = [_mcp_tool("srv_a", "a")]
 
-    result = tool_search("zzzqqq", available_tools=tools, unavailable_servers=["github"])
+    result = tool_search("zzzqqq", available_tools=tools, unavailable_servers={"github": "failed"})
 
     assert result["results"] == []
     assert "github" in result["note"]
@@ -409,3 +409,113 @@ def test_tool_search_without_unavailable_servers_keeps_original_notes():
     """没有不可用服务器时，提示文案保持不变。"""
     assert "github" not in tool_search("anything")["note"]
     assert tool_search("zzzqqq", available_tools=[_mcp_tool("srv_a", "a")])["note"] == "未找到匹配工具，可尝试更宽泛的关键词"
+
+
+def test_tool_search_unavailable_note_distinguishes_failed_from_skipped():
+    """连接失败与缺环境变量的处理方式不同，提示要分别说清，不能都写"检查连接"。"""
+    result = tool_search(
+        "anything",
+        unavailable_servers={"github": "failed", "slack": "skipped"},
+    )
+
+    note = result["note"]
+    assert "连接失败" in note and "github" in note
+    assert "环境变量" in note and "slack" in note
+
+
+def test_tool_search_unavailable_note_omits_absent_category():
+    """只有一类不可用时，不出现另一类的说明。"""
+    note = tool_search("anything", unavailable_servers={"github": "failed"})["note"]
+
+    assert "环境变量" not in note
+
+
+# --- server 过滤 ---
+
+
+def _server_tool(name: str, server: str | None, description: str = "d") -> dict:
+    entry = {"name": name, "description": description, "is_mcp": True}
+    if server is not None:
+        entry["server"] = server
+        entry["search_hint"] = server
+    return entry
+
+
+def test_tool_search_server_filter_keeps_only_that_servers_tools():
+    """server 过滤按真实归属，而不是工具名前缀：my_server_search 不属于服务器 my。"""
+    tools = [
+        _server_tool("my_server_search", "my", "read docs"),
+        _server_tool("my_server_search_x", "my_server", "read docs"),
+    ]
+
+    result = tool_search("docs", available_tools=tools, server="my")
+
+    assert [r["name"] for r in result["results"]] == ["my_server_search"]
+    assert result["reveal"] == ["my_server_search"]
+
+
+def test_tool_search_results_carry_server_name():
+    """结果带上所属服务器，模型才知道下一次可以用哪个值过滤。"""
+    result = tool_search("ping", available_tools=[_server_tool("a_ping", "a")])
+
+    assert result["results"][0]["server"] == "a"
+
+
+def test_tool_search_server_filter_is_case_insensitive():
+    result = tool_search("ping", available_tools=[_server_tool("a_ping", "GitHub")], server="github")
+
+    assert [r["name"] for r in result["results"]] == ["a_ping"]
+
+
+def test_tool_search_server_filter_unknown_server_lists_known_ones():
+    """服务器名写错时，告诉模型有哪些服务器，而不是只说"没找到"。"""
+    tools = [_server_tool("a_ping", "alpha"), _server_tool("b_ping", "beta")]
+
+    result = tool_search("ping", available_tools=tools, server="gamma")
+
+    assert result["results"] == []
+    assert "gamma" in result["note"]
+    assert "alpha" in result["note"] and "beta" in result["note"]
+
+
+def test_tool_search_server_filter_on_unavailable_server_says_so():
+    """被过滤的服务器正好连不上时，note 要点明原因，别让模型以为它没有工具。"""
+    tools = [_server_tool("a_ping", "alpha")]
+
+    result = tool_search(
+        "ping",
+        available_tools=tools,
+        server="github",
+        unavailable_servers={"github": "failed"},
+    )
+
+    assert result["results"] == []
+    assert "github" in result["note"] and "连接失败" in result["note"]
+
+
+def test_tool_search_server_filter_applies_to_select_mode():
+    tools = [_server_tool("a_ping", "alpha"), _server_tool("b_ping", "beta")]
+
+    result = tool_search("select:a_ping,b_ping", available_tools=tools, server="alpha")
+
+    assert [r["name"] for r in result["results"]] == ["a_ping"]
+    assert "b_ping" in result["note"]
+
+
+def test_tool_search_server_filter_excludes_builtin_tools():
+    """内置延迟工具没有所属服务器，指定 server 时不应混进结果。"""
+    tools = [
+        _server_tool("a_ping", "alpha", "ping"),
+        {"name": "web_search", "description": "ping the web", "is_mcp": False},
+    ]
+
+    result = tool_search("ping", available_tools=tools, server="alpha")
+
+    assert [r["name"] for r in result["results"]] == ["a_ping"]
+
+
+def test_tool_search_server_filter_excludes_unmarked_tools():
+    """没有归属标记的工具不靠猜名字前缀，指定 server 时一律不匹配。"""
+    result = tool_search("ping", available_tools=[_server_tool("a_ping", None)], server="a")
+
+    assert result["results"] == []

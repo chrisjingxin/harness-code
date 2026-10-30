@@ -1247,7 +1247,7 @@ async def test_duplicate_tool_name_is_reported_in_server_status():
 
 
 @pytest.mark.asyncio
-async def test_unavailable_server_names_lists_failed_and_skipped(monkeypatch):
+async def test_unavailable_servers_maps_failed_and_skipped(monkeypatch):
     """连接失败与被跳过（环境变量缺失）的服务器算不可用；已连接的不算。"""
     monkeypatch.delenv("HARNESS_TEST_MISSING_VAR", raising=False)
     configs = [
@@ -1269,8 +1269,8 @@ async def test_unavailable_server_names_lists_failed_and_skipped(monkeypatch):
     with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=client):
         await mgr.connect_all()
 
-    assert mgr.unavailable_server_names() == ["bad", "skipped"]
+    assert mgr.unavailable_servers() == {"bad": "failed", "skipped": "skipped"}
 
 
-def test_unavailable_server_names_empty_without_servers():
-    assert _manager().unavailable_server_names() == []
+def test_unavailable_servers_empty_without_servers():
+    assert _manager().unavailable_servers() == {}

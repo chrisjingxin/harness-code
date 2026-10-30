@@ -1353,7 +1353,7 @@ def test_create_harness_agent_passes_unavailable_mcp_servers_to_tool_search():
 
     agent = create_harness_agent(
         _make_fake_model(),
-        mcp_unavailable_servers=lambda: ["github"],
+        mcp_unavailable_servers=lambda: {"github": "failed"},
         enable_skills=False,
         enable_memory=False,
         enable_ask_user=False,
