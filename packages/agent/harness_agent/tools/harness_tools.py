@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -53,6 +53,7 @@ def create_harness_tools(
     lsp_manager: Any | None = None,
     mcp_tools: Sequence[Any] | None = None,
     deferred_builtin_names: frozenset[str] | None = None,
+    mcp_unavailable_servers: Callable[[], Sequence[str]] | None = None,
 ) -> list[StructuredTool]:
     """创建所有 Harness 扩展工具的 BaseTool 实例列表。
 
@@ -66,6 +67,11 @@ def create_harness_tools(
             工具也进入 ``tool_search`` 候选（is_mcp=False 走内置权重），
             便于模型在延迟加载模式下发现它们。None 时保持 Phase 1 语义
             （候选仅 MCP 工具）。
+        mcp_unavailable_servers: 返回"当前连接失败/被跳过的 MCP 服务器名"的
+            回调。服务器没连上时它的工具根本不在 ``mcp_tools`` 里，搜索会空手而归；
+            ``tool_search`` 在没结果时用它提示模型是服务器不可用而不是工具不存在。
+            每次搜索都重新调用，所以服务器状态变化后提示会随之更新；回调抛错
+            只丢掉提示，不影响搜索本身。
 
     Returns:
         可直接传入 create_deep_agent(tools=...) 的工具列表。
@@ -168,8 +174,21 @@ def create_harness_tools(
                 "is_mcp": False,
                 "input_schema": _tool_input_schema(tool),
             })
+        unavailable: Sequence[str] = ()
+        if mcp_unavailable_servers is not None:
+            try:
+                unavailable = tuple(mcp_unavailable_servers())
+            except Exception:
+                # 状态读取失败只影响"提示"，不能让搜索本身失败。
+                logger.debug("读取不可用 MCP 服务器列表失败", exc_info=True)
         return json.dumps(
-            _tool_search_impl(query, available_tools=candidates or None, limit=limit, offset=offset),
+            _tool_search_impl(
+                query,
+                available_tools=candidates or None,
+                limit=limit,
+                offset=offset,
+                unavailable_servers=unavailable,
+            ),
             ensure_ascii=False,
         )
 

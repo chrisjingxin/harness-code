@@ -1077,3 +1077,71 @@ class TestMcpConfigFingerprintExpanded:
             McpServerConfig(name="a", transport="stdio", command="x"),
         ]
         assert mcp_config_fingerprint(c1) == mcp_config_fingerprint(c2)
+
+
+# --- 同名工具冲突要让用户看得见 ---
+
+
+@pytest.mark.asyncio
+async def test_duplicate_tool_name_is_reported_in_server_status():
+    """被丢弃的同名工具要出现在该服务器的状态里，/mcp 面板才看得到。
+
+    服务器本身是连上的，所以 status 仍是 connected，只在 error 字段说明冲突；
+    不新增协议字段。
+    """
+    configs = [
+        McpServerConfig(name="a", transport="stdio", command="cmd-a"),
+        McpServerConfig(name="b", transport="stdio", command="cmd-b"),
+    ]
+    mgr = _manager(configs)
+    tool_a, tool_b, tool_b_ok = MagicMock(), MagicMock(), MagicMock()
+    tool_a.name = "dup"
+    tool_b.name = "dup"
+    tool_b_ok.name = "b_only"
+
+    async def get_tools(*, server_name=None):
+        return {"a": [tool_a], "b": [tool_b, tool_b_ok]}[server_name]
+
+    client = MagicMock()
+    client.get_tools = AsyncMock(side_effect=get_tools)
+    with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=client):
+        await mgr.connect_all()
+
+    statuses = {item["name"]: item for item in mgr.get_server_statuses()}
+    assert statuses["a"]["status"] == "connected" and "error" not in statuses["a"]
+    assert statuses["b"]["status"] == "connected"
+    assert "dup" in statuses["b"]["error"]
+    assert statuses["b"]["tool_names"] == ["b_only"]
+
+
+# --- 不可用服务器清单（给 tool_search 提示用） ---
+
+
+@pytest.mark.asyncio
+async def test_unavailable_server_names_lists_failed_and_skipped(monkeypatch):
+    """连接失败与被跳过（环境变量缺失）的服务器算不可用；已连接的不算。"""
+    monkeypatch.delenv("HARNESS_TEST_MISSING_VAR", raising=False)
+    configs = [
+        McpServerConfig(name="good", transport="stdio", command="cmd-good"),
+        McpServerConfig(name="bad", transport="stdio", command="cmd-bad"),
+        McpServerConfig(name="skipped", transport="stdio", command="${HARNESS_TEST_MISSING_VAR}"),
+    ]
+    mgr = _manager(configs)
+    good_tool = MagicMock()
+    good_tool.name = "good_ping"
+
+    async def get_tools(*, server_name=None):
+        if server_name == "bad":
+            raise RuntimeError("boom")
+        return [good_tool]
+
+    client = MagicMock()
+    client.get_tools = AsyncMock(side_effect=get_tools)
+    with patch("langchain_mcp_adapters.client.MultiServerMCPClient", return_value=client):
+        await mgr.connect_all()
+
+    assert mgr.unavailable_server_names() == ["bad", "skipped"]
+
+
+def test_unavailable_server_names_empty_without_servers():
+    assert _manager().unavailable_server_names() == []

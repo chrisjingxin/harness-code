@@ -27,7 +27,7 @@ from harness_agent.policy.capability_policy import (
     EffectiveCapabilityView,
     resolve_effective_capability_view,
 )
-from harness_agent.extensions.mcp import build_mcp_snapshot
+from harness_agent.extensions.mcp import build_mcp_snapshot, tool_belongs_to_server
 
 
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
@@ -689,13 +689,12 @@ def resolve_plugin_agent_spec(
         for tool, name in zip(mcp_tools, mcp_tool_names, strict=True)
         if name in capability_view.mcp_tool_names
     )
+    # 服务器归属读工具上的真实标记；服务器名互为前缀（repo / repo_x）时，
+    # 按名字前缀猜会把无关服务器带进有效快照。
     selected_servers = tuple(
         server
         for server in mcp_snapshot.servers
-        if any(
-            name.startswith(f"{server.name}_")
-            for name in capability_view.mcp_tool_names
-        )
+        if any(tool_belongs_to_server(tool, server.name) for tool in tools)
     )
     effective_mcp_snapshot = build_mcp_snapshot(
         selected_servers,
@@ -790,23 +789,24 @@ def _resolve_requested_mcp_tool_names(
         re.sub(r"[^A-Za-z0-9_]", "_", name).strip("_")
         for name in definition.requested_mcp_servers
     }
-    server_prefixes = tuple(
-        f"{server.name}_"
+    requested_servers = tuple(
+        server.name
         for server in snapshot.servers
         if server.source.startswith("plugin:")
         and server.source.endswith(f"/{plugin_name}")
         and any(server.name.endswith(f"__{name}") for name in requested)
     )
-    names = (
-        str(getattr(tool, "name", ""))
-        if not isinstance(tool, dict)
-        else str(tool.get("name", ""))
-        for tool in tools
-    )
+    # 这里决定 Agent 能拿到哪些工具，属于权限边界：必须按工具的真实归属判断，
+    # 不得按名字前缀，否则名字以 ``<服务器>_`` 开头的其他服务器的工具会被带进来。
     return tuple(
         sorted(
             name
-            for name in names
-            if name and any(name.startswith(prefix) for prefix in server_prefixes)
+            for tool in tools
+            if (
+                name := str(tool.get("name", ""))
+                if isinstance(tool, dict)
+                else str(getattr(tool, "name", ""))
+            )
+            and any(tool_belongs_to_server(tool, server) for server in requested_servers)
         )
     )

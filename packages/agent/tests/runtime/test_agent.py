@@ -1328,3 +1328,39 @@ async def test_defer_tools_isolated_across_multiple_threads():
     assert "server_b_tool" not in thread_b_binding
     assert "lsp" not in thread_b_binding
     assert "tool_search" in thread_b_binding
+
+
+def test_tool_search_static_shape_matches_real_tool_arguments():
+    """引擎指纹用的静态契约必须和 tool_search 的真实参数一致。
+
+    否则给 tool_search 加参数（如 limit/offset）后，指纹不变，已缓存的引擎
+    不会因工具 schema 变化而重建。
+    """
+    from harness_agent.runtime.agent import _BUILTIN_TOOL_SHAPES
+    from harness_agent.tools.harness_tools import create_harness_tools
+
+    real = next(t for t in create_harness_tools("/tmp") if t.name == "tool_search")
+    shape = next(s for s in _BUILTIN_TOOL_SHAPES if s["name"] == "tool_search")
+
+    assert set(shape["parameters"]) == set(real.args)
+
+
+def test_create_harness_agent_passes_unavailable_mcp_servers_to_tool_search():
+    """create_harness_agent 把"不可用服务器"回调接到 tool_search；没有候选时搜索会点名它们。"""
+    import json
+
+    from harness_agent.runtime.agent import create_harness_agent
+
+    agent = create_harness_agent(
+        _make_fake_model(),
+        mcp_unavailable_servers=lambda: ["github"],
+        enable_skills=False,
+        enable_memory=False,
+        enable_ask_user=False,
+    )
+    tool_node = agent.nodes["tools"].bound
+
+    result = json.loads(tool_node.tools_by_name["tool_search"].func("issue"))
+
+    assert result["results"] == []
+    assert "github" in result["note"]

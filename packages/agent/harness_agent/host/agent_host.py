@@ -5616,6 +5616,12 @@ class AgentHost:
                 model,
                 tools=mcp_tools or None,
                 mcp_server_info=True if mcp_tools else None,
+                # 服务器没连上时它的工具不在候选里；让 tool_search 能说明原因。
+                mcp_unavailable_servers=(
+                    self._mcp_manager.unavailable_server_names
+                    if self._mcp_manager is not None
+                    else None
+                ),
                 cwd=str(spec.workspace),
                 # 无头客户端不协商 question 能力时不注册 ask_user；审批仍由
                 # `_ProtocolInteractionAdapter` 在缺少 approval 能力时 fail closed。

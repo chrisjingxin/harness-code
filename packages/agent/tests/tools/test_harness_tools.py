@@ -192,3 +192,46 @@ def test_exit_plan_mode_description_submits_written_plan():
     assert "/.harness/plan.md" in description
     assert "write_file" in description
     assert "/plan exit" not in description
+
+
+def test_tool_search_reports_unavailable_servers_when_no_candidates() -> None:
+    """所有 MCP 服务器都没连上时，tool_search 点出服务器名，而不是只说"无已注册"。"""
+    tools = create_harness_tools("/tmp", mcp_unavailable_servers=lambda: ["github"])
+
+    payload = json.loads(_tool_search_instance(tools).invoke({"query": "issue"}))
+
+    assert payload["results"] == []
+    assert "github" in payload["note"]
+
+
+def test_tool_search_unavailable_servers_are_read_at_call_time() -> None:
+    """服务器状态会变（比如稍后恢复），所以每次搜索都重新读，不在构建工具时固化。"""
+    unavailable = ["github"]
+    tools = create_harness_tools(
+        "/tmp",
+        mcp_tools=[_fake_mcp_tool("slack_post", "发送消息")],
+        mcp_unavailable_servers=lambda: list(unavailable),
+    )
+    search = _tool_search_instance(tools)
+
+    assert "github" in json.loads(search.invoke({"query": "zzzqqq"}))["note"]
+
+    unavailable.clear()
+    assert "github" not in json.loads(search.invoke({"query": "zzzqqq"}))["note"]
+
+
+def test_tool_search_survives_failing_unavailable_provider() -> None:
+    """状态读取失败只丢掉提示，不能让 tool_search 本身报错。"""
+
+    def _boom() -> list[str]:
+        raise RuntimeError("status unavailable")
+
+    tools = create_harness_tools(
+        "/tmp",
+        mcp_tools=[_fake_mcp_tool("slack_post", "发送消息")],
+        mcp_unavailable_servers=_boom,
+    )
+
+    payload = json.loads(_tool_search_instance(tools).invoke({"query": "slack"}))
+
+    assert payload["results"][0]["name"] == "slack_post"

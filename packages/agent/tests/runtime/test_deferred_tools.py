@@ -133,7 +133,9 @@ def test_wrap_tool_call_intercepts_tool_search_and_reveals():
     )
 
     search_result_json = json.dumps({
-        "results": [{"name": "server_a_tool", "description": "A tool"}]
+        "results": [{"name": "server_a_tool", "description": "A tool"}],
+        "mode": "select",
+        "reveal": ["server_a_tool"],
     })
 
     def _handler(req: ToolCallRequest) -> ToolMessage:
@@ -152,12 +154,12 @@ def test_wrap_tool_call_intercepts_tool_search_and_reveals():
     assert "server_b_tool" not in visible
 
 
-def test_keyword_search_reveals_only_schema_carrying_hits():
-    """R-1：关键词搜索只 reveal 带 schema 的头部命中，非头部命中不占后续轮次上下文。
+def test_keyword_search_reveals_only_names_listed_in_reveal():
+    """关键词搜索只 reveal `reveal` 字段列出的名字，不看 results 里有没有 schema。
 
-    D-2 后关键词结果仅前 _MAX_SCHEMA_RESULTS 名带 input_schema，其余只给名字+描述；
-    若仍把全部 20 条 reveal，每个工具的完整 schema 会在之后每轮 bind_tools 时带进请求，
-    D-2 省的 token 被后续轮次吃回。select:/裸名模式（返回体无 total 字段）保持全量 reveal。
+    搜索模块决定"谁算头部强匹配"（规则只在 tools_intelligence 一处），reveal 只照单执行：
+    若仍把全部命中 reveal，每个工具的完整 schema 会在之后每轮 bind_tools 时带进请求，
+    省下的 token 会被后续轮次吃回。
     """
     store = ThreadDeferredToolStore()
     middleware = DeferredToolMiddleware(resident=RESIDENT)
@@ -179,28 +181,61 @@ def test_keyword_search_reveals_only_schema_carrying_hits():
         state={},
     )
 
-    # 关键词搜索返回体：带分页字段（total/hasMore），前 5 名带 schema，其余不带。
+    # 两条都带 schema，但 reveal 只列了 a：reveal 不得从 schema 反推。
     search_result_json = json.dumps({
         "results": [
             {"name": "server_a_tool", "description": "A", "input_schema": {"type": "object"}},
-            {"name": "server_b_tool", "description": "B"},
+            {"name": "server_b_tool", "description": "B", "input_schema": {"type": "object"}},
         ],
+        "mode": "keyword",
+        "reveal": ["server_a_tool"],
         "total": 2,
         "hasMore": False,
         "nextOffset": None,
     })
 
-    def _handler(req: ToolCallRequest) -> ToolMessage:
-        return ToolMessage(content=search_result_json, tool_call_id="tc1")
+    middleware.wrap_tool_call(
+        request,
+        lambda r: ToolMessage(content=search_result_json, tool_call_id="tc1"),
+    )
 
-    middleware.wrap_tool_call(request, _handler)
-
-    # 只有带 schema 的头部命中被 reveal；不带 schema 的不登记
     assert store.get_revealed("thread-test") == frozenset({"server_a_tool"})
 
 
+def test_search_response_without_reveal_field_reveals_nothing():
+    """返回体没有 reveal 字段（如“未找到”提示、旧格式）时不登记任何工具。"""
+    store = ThreadDeferredToolStore()
+    middleware = DeferredToolMiddleware(resident=RESIDENT)
+
+    snapshot = _make_test_snapshot("thread-test")
+    context = RunContext(
+        thread_id="thread-test",
+        run_id="run-1",
+        approval_mode="auto",
+        context_snapshot=snapshot,
+        deferred_tool_store=store,
+    )
+    runtime = type("Runtime", (), {"context": context})()
+    request = ToolCallRequest(
+        tool_call={"name": "tool_search", "args": {"query": "x"}, "id": "tc1"},
+        tool=_tool("tool_search"),
+        runtime=runtime,
+        state={},
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda r: ToolMessage(
+            content=json.dumps({"results": [{"name": "server_a_tool", "input_schema": {}}]}),
+            tool_call_id="tc1",
+        ),
+    )
+
+    assert store.get_revealed("thread-test") == frozenset()
+
+
 def test_select_search_reveals_all_named_hits():
-    """R-1：select:/裸名模式（返回体无分页字段）保持全量 reveal——模型点名要的。"""
+    """select:/裸名模式由搜索模块把全部点名命中列入 reveal——模型点名要的。"""
     store = ThreadDeferredToolStore()
     middleware = DeferredToolMiddleware(resident=RESIDENT)
 
@@ -221,12 +256,13 @@ def test_select_search_reveals_all_named_hits():
         state={},
     )
 
-    # select: 模式返回体：无 total/hasMore，全部带 schema。
     search_result_json = json.dumps({
         "results": [
             {"name": "server_a_tool", "description": "A", "input_schema": {"type": "object"}},
             {"name": "server_b_tool", "description": "B", "input_schema": {"type": "object"}},
-        ]
+        ],
+        "mode": "select",
+        "reveal": ["server_a_tool", "server_b_tool"],
     })
 
     middleware.wrap_tool_call(
@@ -261,7 +297,10 @@ def test_tool_search_reveal_ignores_empty_names_and_persists_across_runs():
     middleware.wrap_tool_call(
         request,
         lambda r: ToolMessage(
-            content=json.dumps({"results": [{"name": "server_a_tool"}, {"name": ""}]}),
+            content=json.dumps({
+                "results": [{"name": "server_a_tool"}, {"name": ""}],
+                "reveal": ["server_a_tool", ""],
+            }),
             tool_call_id="tc1",
         ),
     )
@@ -319,7 +358,10 @@ def test_deferred_tools_isolation_across_threads():
     middleware.wrap_tool_call(
         req_a,
         lambda r: ToolMessage(
-            content=json.dumps({"results": [{"name": "server_a_tool"}]}),
+            content=json.dumps({
+                "results": [{"name": "server_a_tool"}],
+                "reveal": ["server_a_tool"],
+            }),
             tool_call_id="tc_a",
         ),
     )

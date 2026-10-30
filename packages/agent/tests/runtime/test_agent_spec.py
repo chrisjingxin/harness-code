@@ -545,3 +545,112 @@ def test_plugin_spec_only_exposes_declared_skill_and_mcp_subsets(
     assert [server.name for server in resolved.mcp_snapshot.servers] == [
         requested_server.name
     ]
+
+
+def _resolve_repo_agent_with_overlapping_servers(tmp_path: Path):
+    """构造两个名字互为前缀的服务器，让 Agent 只请求其中较短的 ``repo``。
+
+    ``repo`` 的工具 ``x_foo`` 全名是 ``..._repo_x_foo``，恰好以另一个服务器
+    ``repo_x`` 的前缀 ``..._repo_x_`` 开头；``repo_x`` 的工具全名也以 ``..._repo_``
+    开头。按前缀猜归属时，两边都会认错。
+    """
+    from types import SimpleNamespace
+
+    base = "plugin__local__portable__"
+    repo_tool = f"{base}repo_x_foo"
+    other_tool = f"{base}repo_x_bar"
+    root = tmp_path / "plugin"
+    policy = root / "policies" / "review.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        "id: review\n"
+        "tools:\n"
+        f"  allow: [read_file, {repo_tool}, {other_tool}]\n"
+        "filesystem:\n"
+        "  read: ['**/*']\n"
+        "  write: []\n",
+        encoding="utf-8",
+    )
+    agent = root / "agents" / "reviewer.yaml"
+    agent.parent.mkdir()
+    agent.write_text(
+        "id: reviewer\n"
+        "description: Review\n"
+        "instructions: reviewer.md\n"
+        "model: {strategy: inherit}\n"
+        "policy: review\n"
+        "mcpServers: [repo]\n",
+        encoding="utf-8",
+    )
+    (agent.parent / "reviewer.md").write_text("Review safely.", encoding="utf-8")
+    models = ModelCatalog(
+        default_profile="fast",
+        profiles={"fast": _binding().primary_profile},
+        role_profiles={},
+    )
+    catalog = AgentCatalog(
+        model_catalog=models,
+        sources=(
+            PluginAgentSource(
+                "portable",
+                root,
+                format="agent-plugins-1.0",
+                agent_files=(agent,),
+                policy_files=(policy,),
+            ),
+        ),
+    )
+    parent = _spec(tmp_path)
+    requested = McpServerConfig(
+        name=f"{base}repo",
+        transport="stdio",
+        command="server",
+        source="plugin:local/portable",
+    )
+    overlapping = McpServerConfig(
+        name=f"{base}repo_x",
+        transport="stdio",
+        command="server",
+        source="plugin:local/portable",
+    )
+    # 与生产一致：工具在加载时已打上真实归属服务器名。
+    tools = (
+        SimpleNamespace(name=repo_tool, _harness_mcp_server_name=requested.name),
+        SimpleNamespace(name=other_tool, _harness_mcp_server_name=overlapping.name),
+    )
+    resolved = resolve_plugin_agent_spec(
+        definition=catalog.require_agent("reviewer"),
+        catalog=catalog,
+        parent_policy=parent.effective_policy,
+        model_catalog=models,
+        project_fingerprint=parent.project_fingerprint,
+        workspace=parent.workspace,
+        execution=parent.execution,
+        skill_registry=parent.skill_registry,
+        mcp_snapshot=build_mcp_snapshot((requested, overlapping), revision="plugins"),
+        mcp_tools=tools,
+        interactive=False,
+        inherited_model_profile_id=parent.model_profile_id,
+    )
+    return resolved, requested, repo_tool
+
+
+def test_plugin_spec_requested_server_does_not_claim_tools_of_prefix_sibling(
+    tmp_path: Path,
+) -> None:
+    """Agent 请求 ``repo`` 时，不得拿到名字以 ``repo_`` 开头的另一个服务器的工具。
+
+    这是权限边界：多拿到的工具来自 Agent 没有声明的服务器。
+    """
+    resolved, _requested, repo_tool = _resolve_repo_agent_with_overlapping_servers(tmp_path)
+
+    assert resolved.capability_view.mcp_tool_names == (repo_tool,)
+
+
+def test_plugin_spec_snapshot_only_contains_servers_that_own_selected_tools(
+    tmp_path: Path,
+) -> None:
+    """有效 MCP 快照只含真正提供所选工具的服务器，不含前缀碰巧匹配的服务器。"""
+    resolved, requested, _repo_tool = _resolve_repo_agent_with_overlapping_servers(tmp_path)
+
+    assert [server.name for server in resolved.mcp_snapshot.servers] == [requested.name]

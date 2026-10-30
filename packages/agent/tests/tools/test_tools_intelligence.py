@@ -317,3 +317,95 @@ def test_tool_search_offset_beyond_total_keeps_total():
     assert out["hasMore"] is False
     assert out["nextOffset"] is None
     assert "note" not in out
+
+
+# --- 搜索结果的 mode / reveal 约定：reveal 只照 `reveal` 字段办事，不再猜 ---
+
+
+def _many_tools(count: int) -> list[dict[str, object]]:
+    return [_mcp_tool(f"srv_op{i}", f"op {i}", hint="srv") for i in range(count)]
+
+
+def test_tool_search_keyword_declares_mode_and_reveal_top_hits():
+    """关键词搜索显式声明 mode=keyword，reveal 恰为带 schema 的头部命中。"""
+    result = tool_search("srv", available_tools=_many_tools(8))
+
+    assert result["mode"] == "keyword"
+    with_schema = [item["name"] for item in result["results"] if "input_schema" in item]
+    assert len(with_schema) == 5
+    assert result["reveal"] == with_schema
+
+
+def test_tool_search_keyword_reveal_ignores_missing_schema():
+    """头部命中是否 reveal 看排名，不看 input_schema 是否存在。
+
+    取不到 schema 的头部工具照样应当被 reveal，否则它永远只能靠 select: 取回。
+    """
+    tools = [_mcp_tool("srv_op0", "op 0", hint="srv"), _mcp_tool("srv_op1", "op 1", hint="srv")]
+    tools[0]["input_schema"] = None
+
+    result = tool_search("srv", available_tools=tools)
+
+    assert set(result["reveal"]) == {"srv_op0", "srv_op1"}
+
+
+def test_tool_search_select_declares_mode_and_reveals_all_named():
+    """select: 是点名取用，mode=select，所有命中都 reveal。"""
+    tools = [_mcp_tool("srv_a", "a"), _mcp_tool("srv_b", "b")]
+
+    result = tool_search("select:srv_a,srv_b", available_tools=tools)
+
+    assert result["mode"] == "select"
+    assert result["reveal"] == ["srv_a", "srv_b"]
+
+
+def test_tool_search_bare_name_declares_select_mode():
+    """裸名快路径与 select: 同属点名取用。"""
+    result = tool_search("srv_a", available_tools=[_mcp_tool("srv_a", "a")])
+
+    assert result["mode"] == "select"
+    assert result["reveal"] == ["srv_a"]
+
+
+def test_tool_search_second_page_reveals_nothing():
+    """翻到第二页的结果没有 schema，也不 reveal；模型要用就 select:。"""
+    result = tool_search("srv", available_tools=_many_tools(30), offset=20)
+
+    assert result["mode"] == "keyword"
+    assert result["reveal"] == []
+
+
+def test_tool_search_schema_hint_only_when_results_were_trimmed():
+    """schema_hint 只在确有结果被省略 schema 时出现；取不到 schema 的头部命中不算。"""
+    tools = [_mcp_tool("srv_op0", "op 0", hint="srv"), _mcp_tool("srv_op1", "op 1", hint="srv")]
+    tools[0]["input_schema"] = None
+
+    assert "schema_hint" not in tool_search("srv", available_tools=tools)
+    assert "schema_hint" in tool_search("srv", available_tools=_many_tools(8))
+
+
+# --- 不可用服务器提示：搜不到时别让模型以为"没有这个工具" ---
+
+
+def test_tool_search_no_tools_mentions_unavailable_servers():
+    """所有服务器都没连上时，note 要点出服务器名，而不是只说"无已注册"。"""
+    result = tool_search("anything", unavailable_servers=["github", "slack"])
+
+    assert result["results"] == []
+    assert "github" in result["note"] and "slack" in result["note"]
+
+
+def test_tool_search_no_match_mentions_unavailable_servers():
+    """有候选但没命中时，若有服务器不可用，提示里要带上它们。"""
+    tools = [_mcp_tool("srv_a", "a")]
+
+    result = tool_search("zzzqqq", available_tools=tools, unavailable_servers=["github"])
+
+    assert result["results"] == []
+    assert "github" in result["note"]
+
+
+def test_tool_search_without_unavailable_servers_keeps_original_notes():
+    """没有不可用服务器时，提示文案保持不变。"""
+    assert "github" not in tool_search("anything")["note"]
+    assert tool_search("zzzqqq", available_tools=[_mcp_tool("srv_a", "a")])["note"] == "未找到匹配工具，可尝试更宽泛的关键词"

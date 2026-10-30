@@ -130,26 +130,22 @@ class DeferredToolMiddleware(AgentMiddleware):
         return response
 
     def _record_reveal_from_response(self, runtime: object, response: Any) -> None:
-        """从 tool_search 的执行结果中提取命中的工具名并更新当前 Thread。
+        """从 tool_search 的执行结果中提取应 reveal 的工具名并更新当前 Thread。
 
-        关键词搜索（返回体带分页字段 total）只 reveal 携带 input_schema 的头部
-        强匹配；非头部命中只给名字+描述，不占后续轮次的 bind_tools 上下文。
-        select:/裸名精确模式（无分页字段）全量 reveal——模型点名要的参数路径。
+        只读返回体里的 ``reveal`` 字段，其余字段（results、total、input_schema）
+        一概不看。"哪些算头部强匹配、哪些是点名取用"由 ``tool_search`` 一处决定，
+        这里只照单执行：非头部命中不 reveal，避免它们的 schema 在后续每一轮
+        bind_tools 时被带进请求。没有 ``reveal`` 字段（如"未找到"提示）就什么都不登记。
         """
         content = getattr(response, "content", response)
         if isinstance(content, str) and content.strip().startswith("{"):
             try:
                 data = json.loads(content)
                 if isinstance(data, dict):
-                    results = data.get("results", [])
-                    is_keyword_mode = "total" in data
+                    reveal = data.get("reveal", [])
                     hit_names = [
-                        item["name"]
-                        for item in results
-                        if isinstance(item, dict)
-                        and item.get("name")
-                        and (not is_keyword_mode or item.get("input_schema") is not None)
-                    ]
+                        name for name in reveal if isinstance(name, str) and name
+                    ] if isinstance(reveal, list) else []
                     if hit_names:
                         store, thread_id = self._resolve_store_and_thread(runtime)
                         store.reveal(thread_id, hit_names)

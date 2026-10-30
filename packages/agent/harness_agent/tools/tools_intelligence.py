@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -107,6 +108,7 @@ def tool_search(
     *,
     limit: int = _MAX_SEARCH_RESULTS,
     offset: int = 0,
+    unavailable_servers: Sequence[str] = (),
 ) -> dict[str, Any]:
     """搜索可用的 MCP 外部工具。
 
@@ -122,17 +124,30 @@ def tool_search(
         available_tools: 已注册工具列表，每项含 name、description，可选
             search_hint（提升匹配的策展词，如服务器名）、is_mcp（MCP 工具加权）
             与 input_schema（工具参数 JSON Schema）。
-
         limit: 关键词搜索单页返回上限（默认 20）。
         offset: 关键词搜索翻页偏移。
+        unavailable_servers: 当前连接失败或被跳过的 MCP 服务器名。这些服务器
+            的工具根本不在候选里；搜不到结果时用它提示模型"可能是服务器没连上"，
+            而不是让模型误以为世上没有这个工具。
 
     Returns:
-        关键词搜索返回 {"results", "total", "hasMore", "nextOffset"}，results 中
-        仅前 ``_MAX_SCHEMA_RESULTS`` 名携带 input_schema；select:/裸名模式返回
-        {"results"} 且全部携带 input_schema（模型点名要参数的路径）。
+        搜索成功时返回 ``{"results", "mode", "reveal", ...}``：
+
+        - ``mode``：``"keyword"``（关键词打分）或 ``"select"``（点名取用）。
+        - ``reveal``：本次应让模型下一轮可见的工具名。这是搜索模块与
+          ``DeferredToolMiddleware`` 之间唯一的约定，"哪些算头部强匹配"的规则
+          只在这里决定，中间件只照单执行，不再从 total / input_schema 反推。
+        - 关键词模式另带 ``total / hasMore / nextOffset``，且仅排名前
+          ``_MAX_SCHEMA_RESULTS`` 的结果携带 input_schema 并进入 ``reveal``。
+        - select:/裸名模式的结果全部携带 input_schema 并进入 ``reveal``。
+
+        没有可展示的结果时只返回 ``{"results": [], "note": ...}``。
     """
     if not available_tools:
-        return {"results": [], "note": "无已注册的 MCP 工具"}
+        return {
+            "results": [],
+            "note": _with_unavailable_servers("无已注册的 MCP 工具", unavailable_servers),
+        }
 
     query = (query or "").strip()
     if not query:
@@ -156,22 +171,28 @@ def tool_search(
             elif entry is None:
                 missing.append(name)
         results = [_result_entry(entry) for entry in found]
+        response: dict[str, Any] = {
+            "results": results,
+            "mode": "select",
+            "reveal": [item["name"] for item in results],
+        }
         if missing:
-            results_note = f"未找到工具: {', '.join(missing)}"
-        else:
-            results_note = None
-        return {"results": results} if results_note is None else {"results": results, "note": results_note}
+            response["note"] = _with_unavailable_servers(
+                f"未找到工具: {', '.join(missing)}", unavailable_servers
+            )
+        return response
 
     # 模式二：裸工具名精确匹配快路径（Claude :194-205）。
     by_lower = {str(t.get("name", "")).lower(): t for t in available_tools}
     exact = by_lower.get(query.lower())
     if exact is not None:
-        return {"results": [_result_entry(exact)]}
+        item = _result_entry(exact)
+        return {"results": [item], "mode": "select", "reveal": [item["name"]]}
 
     # 模式三：自由关键词打分。
     terms = _tokenize(query)
     if not terms:
-        return {"results": [], "note": "未找到匹配工具，可尝试更宽泛的关键词"}
+        return {"results": [], "note": _no_match_note(unavailable_servers)}
     required = [t[1:] for t in terms if t.startswith("+") and len(t) > 1]
     optional = [t for t in terms if not t.startswith("+")]
     # + 词既做必选预筛，也参与打分（Claude allScoringTerms 语义）。
@@ -191,32 +212,66 @@ def tool_search(
     safe_offset = max(0, offset)
     safe_limit = max(1, min(limit, _MAX_SEARCH_RESULTS))
     page = scored[safe_offset:safe_offset + safe_limit]
+    # 是否算"头部强匹配"只看全局排名，这是 schema 展示与 reveal 共用的唯一规则。
+    is_top = [(safe_offset + rank) < _MAX_SCHEMA_RESULTS for rank in range(len(page))]
     results = [
-        _result_entry(entry, include_schema=(safe_offset + rank) < _MAX_SCHEMA_RESULTS)
-        for rank, (_, entry) in enumerate(page)
+        _result_entry(entry, include_schema=top)
+        for (_, entry), top in zip(page, is_top, strict=True)
     ]
+    reveal = [item["name"] for item, top in zip(results, is_top, strict=True) if top]
     if not results:
         # offset 越界（total > 0 但本页为空）与“关键词真的没命中”是两种语义：
         # 前者照常带 total/hasMore，后者才提示换关键词，避免模型误判为查询词不对。
         if total > 0:
-            return {"results": [], "total": total, "hasMore": False, "nextOffset": None}
-        return {"results": [], "note": "未找到匹配工具，可尝试更宽泛的关键词"}
+            return {
+                "results": [],
+                "mode": "keyword",
+                "reveal": [],
+                "total": total,
+                "hasMore": False,
+                "nextOffset": None,
+            }
+        return {"results": [], "note": _no_match_note(unavailable_servers)}
     next_offset = safe_offset + len(results)
-    response: dict[str, Any] = {
+    response = {
         "results": results,
+        "mode": "keyword",
+        "reveal": reveal,
         "total": total,
         "hasMore": next_offset < total,
         "nextOffset": next_offset if next_offset < total else None,
     }
-    if any("input_schema" not in entry for entry in results):
+    # 只有"因排名靠后而被省略 schema"才提示 select:；头部命中自身取不到
+    # schema 的情况，select: 也取不回来，提示反而误导。
+    if not all(is_top):
         response["schema_hint"] = (
             "仅头部强匹配携带参数 schema；其余工具参数可用 select:<name> 精确查询获取"
         )
     return response
 
 
+def _no_match_note(unavailable_servers: Sequence[str]) -> str:
+    """关键词没有命中时的提示；有不可用服务器时一并点明。"""
+    return _with_unavailable_servers("未找到匹配工具，可尝试更宽泛的关键词", unavailable_servers)
+
+
+def _with_unavailable_servers(note: str, unavailable_servers: Sequence[str]) -> str:
+    """在提示后追加"这些服务器当前不可用"，让模型区分"没有"与"暂时连不上"。
+
+    只列服务器名，不带连接错误原文：错误文本可能含 URL 或本机路径，
+    没必要进入模型上下文。
+    """
+    names = [name for name in unavailable_servers if name]
+    if not names:
+        return note
+    return (
+        f"{note}。注意：以下 MCP 服务器当前不可用，它们的工具暂时无法搜索或调用："
+        f"{', '.join(names)}。可提示用户检查这些服务器的连接状态"
+    )
+
+
 def _result_entry(entry: dict[str, Any], *, include_schema: bool = True) -> dict[str, Any]:
-    """把候选条目投影为搜索结果；name/description 恒定携带（reveal 解析依赖 name）。"""
+    """把候选条目投影为搜索结果；name/description 恒定携带，schema 按需附带。"""
     result: dict[str, Any] = {
         "name": str(entry.get("name", "")),
         "description": str(entry.get("description", "")),

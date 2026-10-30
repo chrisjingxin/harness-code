@@ -347,6 +347,15 @@ def _mark_mcp_tool(tool: Any, server_name: str) -> None:
                 metadata["harness_mcp_server_name"] = server_name
 
 
+def _duplicate_tools_message(skipped_names: Sequence[str]) -> str | None:
+    """把被丢弃的重名工具整理成给用户看的一句话；没有重名时返回 None。"""
+    if not skipped_names:
+        return None
+    shown = ", ".join(skipped_names[:5])
+    extra = f" 等 {len(skipped_names)} 个" if len(skipped_names) > 5 else ""
+    return f"{len(skipped_names)} 个工具与已加载工具重名，已忽略: {shown}{extra}"
+
+
 def mcp_server_name_of(tool: Any) -> str | None:
     """读取 ``_mark_mcp_tool`` 写入的归属服务器名；未标记时返回 None。
 
@@ -364,17 +373,17 @@ def mcp_server_name_of(tool: Any) -> str | None:
     return None
 
 
-def _tool_belongs_to_server(tool: Any, server_name: str) -> bool:
-    """判断工具是否归属指定服务器。
+def tool_belongs_to_server(tool: Any, server_name: str) -> bool:
+    """判断工具是否归属指定服务器；所有需要"工具属于哪个服务器"的地方必须用它。
 
-    优先读 ``mcp_server_name_of`` 的标记；未标记的工具（如加载异常路径）退化
-    为 ``{server_name}_`` 前缀匹配，此时可能因服务器名互相为前缀而误判，但
-    标记路径是常态，退化路径仅作兼容兑底。
+    优先读 ``mcp_server_name_of`` 的标记；未标记的工具（加载异常路径，或测试里
+    用 ``dict`` 表示的工具）退化为 ``{server_name}_`` 前缀匹配。退化路径在服务器名
+    互为前缀时会误判，所以不得在这个函数之外再写一份前缀匹配。
     """
     marked = mcp_server_name_of(tool)
     if marked is not None:
         return marked == server_name
-    name = getattr(tool, "name", "")
+    name = tool.get("name", "") if isinstance(tool, Mapping) else getattr(tool, "name", "")
     return isinstance(name, str) and name.startswith(f"{server_name}_")
 
 
@@ -604,10 +613,23 @@ class McpConnectionManager:
             entry.setdefault("source", config.source)
             entry["tool_names"] = [
                 t.name for t in runtime.tools
-                if hasattr(t, "name") and _tool_belongs_to_server(t, config.name)
+                if hasattr(t, "name") and tool_belongs_to_server(t, config.name)
             ]
             result.append(entry)
         return result
+
+    def unavailable_server_names(self) -> list[str]:
+        """返回当前连接失败或被跳过的服务器名，供 ``tool_search`` 提示模型。
+
+        只返回名字，不带错误原文：错误文本可能含 URL 或本机路径，不应进入模型上下文。
+        每次调用都读最新状态，服务器恢复后提示会自动消失。
+        """
+        runtime = self._current_resource.value
+        return [
+            config.name
+            for config in runtime.snapshot.servers
+            if runtime.server_statuses.get(config.name, {}).get("status") in ("failed", "skipped")
+        ]
 
     def _create_resource(
         self,
@@ -711,7 +733,7 @@ class McpConnectionManager:
         # 归属判定与 get_server_statuses 一致：优先读标记，避免服务器名互前缀误删。
         runtime.tools = [
             tool for tool in old_runtime.tools
-            if not (hasattr(tool, "name") and _tool_belongs_to_server(tool, name))
+            if not (hasattr(tool, "name") and tool_belongs_to_server(tool, name))
         ]
         runtime.server_statuses = {
             server_name: dict(status)
@@ -813,9 +835,11 @@ class McpConnectionManager:
                 continue
 
             loaded = 0
+            skipped_names: list[str] = []
             for tool in attempt.tools:
                 tool_name = getattr(tool, "name", None)
                 if isinstance(tool_name, str) and tool_name in seen_tool_names:
+                    skipped_names.append(tool_name)
                     # D-1 同类：同名工具（如 my/server_search 与 my_server/search）
                     # 第一个赢、第二个静默丢弃，模型与用户都无法诊断，记 warning 兜底。
                     logger.warning(
@@ -829,7 +853,13 @@ class McpConnectionManager:
                 _mark_mcp_tool(tool, name)
                 runtime.tools.append(tool)
                 loaded += 1
-            runtime.server_statuses[name] = _server_status(config, "connected")
+            # 服务器本身是连上的，所以 status 保持 connected；被丢弃的重名工具写进
+            # error 字段，/mcp 面板才看得到（复用现有字段，不新增协议字段）。
+            runtime.server_statuses[name] = _server_status(
+                config,
+                "connected",
+                error=_duplicate_tools_message(skipped_names),
+            )
             self._connected_at[name] = attempt.started
             self._log_connection_completed(
                 config,
