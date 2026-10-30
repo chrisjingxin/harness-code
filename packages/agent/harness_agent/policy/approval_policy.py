@@ -7,7 +7,7 @@
 由服务端保证无论调用来自何处，都必须走完严密的权限裁决流水线。
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│                 Harness 工具多级安全审批决策流水线 (L1 ~ L6)            │
+│                 Harness 工具多级安全审批决策流水线 (L1 ~ L5)            │
 └────────────────────────────────────────────────────────────────────────┘
 
     模型工具调用请求 (ToolCall: name, args)
@@ -34,9 +34,6 @@
     [L5 审批模式档位] ───> 按 plan / default / auto-edit / auto / yolo 查表裁决
            │
            ▼
-    [L6 插件扩展钩子] ───> 外部安全插件审查 (只能收紧拒绝，不可放宽)
-           │
-           ▼
         最终决策结果：Allow (直接执行) / Ask (等待用户确认) / Deny (硬拦截)
 """
 
@@ -44,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain.agents.middleware.types import AgentMiddleware, ContextT, ResponseT
 from langchain.tools.tool_node import ToolCallRequest
@@ -73,36 +70,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_HITL_TOOLS = frozenset(
-    {
-        "execute",
-        *FILESYSTEM_WRITE_TOOL_NAMES,
-        "ls",
-        "read_file",
-        "glob",
-        "grep",
-        "task",
-        "web_fetch",
-    }
-)
-# auto-edit 模式下编辑类工具必须纳入 HITL 集合：敏感路径（如 .git/config）的
-# 编辑仍需由预检弹窗确认；工作区内非敏感编辑由预检自动放行，不会真正弹窗。
-# 只读工具纳入是为了工作区外目录信任审批；工作区内读取由预检直接放行。
-_AUTO_EDIT_HITL_TOOLS = frozenset(
-    {
-        "execute",
-        *FILESYSTEM_WRITE_TOOL_NAMES,
-        "ls",
-        "read_file",
-        "glob",
-        "grep",
-        "task",
-        "web_fetch",
-    }
-)
-# auto 模式下编辑类工具同样必须纳入 HITL 集合：让编辑类调用经过四层过滤器
-# 判断——F1 快速通道自动放行，敏感路径与 F4 回退仍走弹窗审批。
-_AUTO_HITL_TOOLS = frozenset(
+# default / auto-edit / auto 三种模式共用同一组需要进入 HITL 的工具：
+# - 编辑类工具必须纳入：敏感路径（如 .git/config）的编辑仍需预检弹窗确认，工作区内
+#   非敏感编辑由预检自动放行；auto 模式下还要经过四层过滤器（F1 快速通道放行，
+#   敏感路径与 F4 回退仍走弹窗审批）。
+# - 只读工具纳入是为了工作区外目录信任审批；工作区内读取由预检直接放行。
+_HITL_TOOLS = frozenset(
     {
         "execute",
         *FILESYSTEM_WRITE_TOOL_NAMES,
@@ -162,37 +135,6 @@ def classify_plan_shell_command(command: object) -> PlanShellDecision:
     return "ask"
 
 
-# ---------------------------------------------------------------------------
-# Extension 权限钩子接口（预留，当前为空列表）
-# ---------------------------------------------------------------------------
-
-class ExtensionPermissionHook(Protocol):
-    """Extension/Plugin 权限钩子协议（预留接口）。
-
-    Extension 钩子只能收紧权限（deny 覆盖 allow），不能放宽（主流程 deny 不可覆盖）。
-    后续 /extension 功能上线时，用户自定义的权限逻辑通过此接口注册。
-    """
-
-    def check(
-        self, tool_name: str, tool_args: dict[str, Any], base_decision: str
-    ) -> Literal["allow", "deny", "passthrough"]:
-        """检查工具调用权限。
-
-        Args:
-            tool_name: 工具名称。
-            tool_args: 工具参数。
-            base_decision: 主审批管线的决策结果（"allow" 或 "ask"）。
-
-        Returns:
-            "deny" 收紧拒绝，"allow" 无实际效果（不可放宽），"passthrough" 不影响。
-        """
-        ...
-
-
-# 已注册的 Extension 权限钩子（当前为空，后续 /extension 功能填充）
-_extension_permission_hooks: list[ExtensionPermissionHook] = []
-
-
 def interrupt_on_for_approval_mode(
     approval_mode: ApprovalMode,
     *,
@@ -223,7 +165,7 @@ def interrupt_on_for_approval_mode(
         # 共享图只编译一次；模式切换不能重新创建 HumanInTheLoopMiddleware，
         # 因此把各模式的安全上限通道合并，真正是否暂停交给动态 preflight。
         tool_names = (
-            _DEFAULT_HITL_TOOLS
+            _HITL_TOOLS
             | _PLAN_DIRECTORY_TRUST_TOOLS
             | {"execute", "exit_plan_mode"}
         )
@@ -231,12 +173,8 @@ def interrupt_on_for_approval_mode(
         tool_names = frozenset({"execute"})
     elif approval_mode == "plan":
         tool_names = _PLAN_DIRECTORY_TRUST_TOOLS
-    elif approval_mode == "default":
-        tool_names = _DEFAULT_HITL_TOOLS
-    elif approval_mode == "auto-edit":
-        tool_names = _AUTO_EDIT_HITL_TOOLS
-    else:  # auto 模式
-        tool_names = _AUTO_HITL_TOOLS
+    else:  # default / auto-edit / auto 共用同一组工具
+        tool_names = _HITL_TOOLS
     if extra_interrupt_tools and (
         dynamic or approval_mode in {"default", "auto-edit", "auto"}
     ):
@@ -885,12 +823,5 @@ def evaluate_permission(
         return "ask"
 
     decision = mode_perm  # type: ignore[assignment]
-
-    # L6: Extension 权限钩子（预留，当前为空列表直接跳过）
-    if decision != "deny" and _extension_permission_hooks:
-        for hook in _extension_permission_hooks:
-            hook_result = hook.check(tool_name, tool_args, decision)
-            if hook_result == "deny":
-                return "deny"
 
     return decision
