@@ -34,19 +34,19 @@ export function ModelsPanel({
         query={query}
         placeholder="搜索 Model…"
         onSearch={value => dispatch({ type: "panel-search", panel: "models", query: value })}
-        onRefresh={() => dispatch({ type: "dock-panel-select", panel: "models" })}
+        onRefresh={() => dispatch({ type: "settings-panel-select", panel: "models" })}
         disabled={disabled}
       />
       {panelError ? (
         <PanelError
           message={panelError}
-          onRetry={() => dispatch({ type: "dock-panel-select", panel: "models" })}
+          onRetry={() => dispatch({ type: "settings-panel-select", panel: "models" })}
           disabled={disabled}
         />
       ) : catalog.status === "error" ? (
         <PanelError
           message={catalog.message}
-          onRetry={() => dispatch({ type: "dock-panel-select", panel: "models" })}
+          onRetry={() => dispatch({ type: "settings-panel-select", panel: "models" })}
           disabled={disabled}
         />
       ) : isLoading ? (

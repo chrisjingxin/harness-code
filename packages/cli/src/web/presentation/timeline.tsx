@@ -140,6 +140,7 @@ export function Timeline({
     const scroller = resolveScroller()
     if (!scroller) return
     const onScroll = (): void => {
+      if (snapshot.viewMode === "trace") return
       const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
       const near = distance <= BOTTOM_THRESHOLD_PX
       isNearBottomRef.current = near
@@ -148,10 +149,11 @@ export function Timeline({
     }
     scroller.addEventListener("scroll", onScroll, { passive: true })
     return () => scroller.removeEventListener("scroll", onScroll)
-  }, [resolveScroller])
+  }, [resolveScroller, snapshot.viewMode])
 
   /** Adapter 显式声明滚动意图时无条件跳到底部；空 → 非空转换都触发。 */
   useEffect(() => {
+    if (snapshot.viewMode === "trace") return
     const next = snapshot.scrollRequest
     if (next === lastScrollRequestRef.current) return
     lastScrollRequestRef.current = next
@@ -160,16 +162,17 @@ export function Timeline({
     isNearBottomRef.current = true
     setHasNewOutput(false)
     setShowScrollButton(false)
-  }, [snapshot.scrollRequest, scrollContainerToBottom])
+  }, [snapshot.scrollRequest, snapshot.viewMode, scrollContainerToBottom])
 
   /** 时间线内容变化时，若用户原本就在底部则继续跟随；否则保持位置并把按钮升级为「有新输出」。 */
   useLayoutEffect(() => {
+    if (snapshot.viewMode === "trace") return
     if (isNearBottomRef.current) {
       scrollContainerToBottom()
     } else {
       setHasNewOutput(true)
     }
-  }, [timeline, scrollContainerToBottom])
+  }, [timeline, snapshot.viewMode, scrollContainerToBottom])
 
   const handleScrollToBottom = useCallback(() => {
     scrollContainerToBottom()

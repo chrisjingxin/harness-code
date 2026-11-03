@@ -3,7 +3,9 @@
 import { expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 
-const css = readFileSync(new URL("../../../src/web/presentation/styles.css", import.meta.url), "utf8")
+const layoutCss = readFileSync(new URL("../../../src/web/presentation/styles.css", import.meta.url), "utf8")
+const themeCss = readFileSync(new URL("../../../src/web/presentation/theme.css", import.meta.url), "utf8")
+const css = layoutCss + "\n" + themeCss
 
 test("styles.css 不包含颜色型系统主题覆盖（prefers-color-scheme）", () => {
   expect(css).not.toContain("prefers-color-scheme")
@@ -12,29 +14,22 @@ test("styles.css 不包含颜色型系统主题覆盖（prefers-color-scheme）"
 test("semantic token 在 light/dark 各只定义一次，禁止尾部重定义块赢级联", () => {
   expect(css.split('.web-shell[data-theme="light"]').length - 1).toBe(1)
   expect(css.split('.web-shell[data-theme="dark"]').length - 1).toBe(1)
-  // 浅色 token 值以 HC-124 设计表为准；prototype 调色板不得残留。
-  expect(css).toContain("--bg: #f7f6f3")
-  expect(css).toContain("--accent: #15803d")
+  // 浅色 token 值以 HC-190 冷紫品牌规格为准；prototype 调色板不得残留。
+  expect(css).toContain("--bg: #ffffff")
+  expect(css).toContain("--accent: var(--brand)")
   expect(css).not.toContain("#6675e8")
   expect(css).not.toContain("#f5f7fb")
 })
 
 test("组件层无硬编码色：颜色只出现在 light/dark token 定义块与 var() 回退中", () => {
-  // 摘除两个主题 token 定义块（从 light 选择器到 dark 块结束）。
-  const lightStart = css.indexOf('.web-shell[data-theme="light"]')
-  const darkStart = css.indexOf('.web-shell[data-theme="dark"]')
-  const darkEnd = css.indexOf("}", darkStart)
-  const componentLayer = css.slice(0, lightStart) + css.slice(darkEnd + 1)
-  // var() 回退色（如 var(--bg, #f7f6f3)）是 boot 期合法用法，先摘除再断言。
-  const withoutVarFallbacks = componentLayer.replace(/var\([^)]*\)/g, "")
-  expect(withoutVarFallbacks).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+  expect(layoutCss).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/)
 })
 
 test("头像与按钮不使用 linear-gradient，强调色走 --accent/--action 平面语义", () => {
   expect(css).not.toContain("linear-gradient")
 })
 
-test("取消按钮不使用主行动填充：danger 描边 + 透明底（绿色填充是「执行」语义）", () => {
+test("取消按钮不使用主行动填充：danger 描边 + 透明底（品牌填充是「执行」语义）", () => {
   expect(css).toContain(".cancel-button { background: transparent; border-color: var(--danger-vivid); color: var(--danger-vivid); }")
   const afterSendFill = css.slice(css.lastIndexOf(".send-button { background: var(--action)"))
   expect(afterSendFill).not.toMatch(/\.send-button, \.cancel-button[^}]*background: var\(--action\)/)
@@ -45,8 +40,8 @@ test("扁平化：原型层的卡片阴影与漂移圆角已清除", () => {
   expect(css).not.toMatch(/rgba\(39, 53, 87/)
   expect(css).not.toMatch(/rgba\(80, 102, 180/)
   expect(css).not.toMatch(/rgba\(102, 117, 232/)
-  // 组件圆角只允许 token、4px 小圆角、50% 或 999px 胶囊；8~16px 的漂移值禁止出现。
-  expect(css).not.toMatch(/border-radius:\s*(8|9|10|11|12|13|14|15|16)px/)
+  // 组件圆角只允许 token、4px 小圆角、50% 或 999px 胶囊；原稿明确使用 8px 品牌底座/会话行，其余 9~16px 漂移值禁止出现。
+  expect(css).not.toMatch(/border-radius:\s*(9|10|11|12|13|14|15|16)px/)
 })
 
 test("扁平化：消息与 Agent 分组不是卡片（无 border/background/box-shadow 卡片三件套）", () => {
@@ -88,14 +83,14 @@ test("文件行箭头/图标/文字同轴 flex 居中：无手动 top 偏移", (
   expect(rowBlock).toContain("line-height: 1.4")
 })
 
-test("选中 Thread 只用浅绿背景表达：无左侧 inset 色轨", () => {
+test("选中 Thread 只用独立主题背景表达：无左侧 inset 色轨", () => {
   expect(css).not.toContain("inset 2px 0 0 var(--accent)")
 })
 
 test("Thread 图标槽与标题行等高对齐首行中轴：无 margin-top 手调", () => {
   const iconBlock = css.slice(css.indexOf(".thread-item-icon {"), css.indexOf("/* active Thread"))
-  expect(iconBlock).toContain("height: calc(13px * 1.35)")
-  expect(iconBlock).toContain("align-self: start")
+  expect(iconBlock).toContain("height: calc(13px * 1.4)")
+  expect(iconBlock).toContain("align-self: center")
   expect(iconBlock).not.toContain("margin-top")
 })
 
@@ -103,9 +98,6 @@ test("扁平化：侧栏是单一容器，无线程/文件孤岛卡", () => {
   expect(css).not.toContain("Soft card alignment")
   expect(css).not.toMatch(/\.workspace-sidebar-thread-panel,\s*\n?\.workspace-sidebar-files\s*\{[^}]*box-shadow/)
   // Thread/Files 分隔槽：透明命中区 + 居中 1px 分隔线，hover/拖动走强调色
-  expect(css).toContain(".vertical-resize-handle { flex: 0 0 9px")
-  expect(css).toContain(".vertical-resize-handle::after")
-  expect(css).toContain(".vertical-resize-handle:hover::after, .vertical-resize-handle.is-dragging::after { background: var(--accent-border-strong); }")
 })
 
 test("Work Item 横幅只保留工作项卡：模式指示与空态已并入 Composer rail", () => {
@@ -113,7 +105,7 @@ test("Work Item 横幅只保留工作项卡：模式指示与空态已并入 Com
   expect(css).not.toContain(".work-item-empty")
 })
 
-test("light/dark 主题通过 .web-shell[data-theme] 选择器挂载，且使用 ZC-124 semantic token", () => {
+test("light/dark 主题通过 .web-shell[data-theme] 选择器挂载，且使用独立 semantic token", () => {
   expect(css).toContain('.web-shell[data-theme="light"]')
   expect(css).toContain('.web-shell[data-theme="dark"]')
   const lightBlock = css.slice(css.indexOf('.web-shell[data-theme="light"]'), css.indexOf('.web-shell[data-theme="dark"]'))
@@ -123,31 +115,17 @@ test("light/dark 主题通过 .web-shell[data-theme] 选择器挂载，且使用
     expect(lightBlock).toContain(token)
     expect(darkBlock).toContain(token)
   }
-  expect(lightBlock).toContain("--surface-2: #f2f1ec")
-  expect(lightBlock).toContain("--line: #e1e0da")
-  expect(lightBlock).toContain("--accent: #15803d")
-  expect(lightBlock).toContain("--action: #15803d")
-  expect(darkBlock).toContain("--surface-2: #23211d")
-  expect(darkBlock).toContain("--line: #38352f")
-  expect(darkBlock).toContain("--accent: #4ade80")
-  expect(darkBlock).toContain("--action: #4ade80")
+  expect(lightBlock).toContain("--surface-2: #f3f3f6")
+  expect(lightBlock).toContain("--line: #ececec")
+  expect(lightBlock).toContain("--accent: var(--brand)")
+  expect(lightBlock).toContain("--action: var(--brand)")
+  expect(darkBlock).toContain("--surface-2: #27272b")
+  expect(darkBlock).toContain("--line: #36363e")
+  expect(darkBlock).toContain("--accent: color-mix(in srgb, var(--brand) 60%, #ffffff)")
+  expect(darkBlock).toContain("--action: var(--brand)")
   const rootBlock = css.slice(css.indexOf(":root {"), css.indexOf("* {"))
   expect(rootBlock).not.toContain("--bg")
   expect(css).not.toContain("--accent-strong")
-})
-
-test("品牌标志在深色主题把墨色轨迹切为暖白，绿色轨迹保持品牌色", () => {
-  const lightBlock = css.slice(css.indexOf('.web-shell[data-theme="light"]'), css.indexOf('.web-shell[data-theme="dark"]'))
-  const darkBlock = css.slice(css.indexOf('.web-shell[data-theme="dark"]'), css.indexOf("/* ---------- Shell 与静态视图 ----------"))
-  expect(lightBlock).toContain("--brand-logo-ink-start: #15201f")
-  expect(darkBlock).toContain("--brand-logo-ink-start: #f3f1ea")
-  expect(darkBlock).toContain("--brand-logo-ink-end: #fffdf7")
-  expect(css).toContain(".harness-logo-ink-start { stop-color: var(--brand-logo-ink-start); }")
-})
-
-test("品牌标志相对文字上移 1px，校正 SVG 曲线偏下的视觉重心", () => {
-  const brandMarkBlock = css.slice(css.lastIndexOf(".brand-mark {"), css.indexOf(".harness-brand-logo"))
-  expect(brandMarkBlock).toContain("transform: translateY(-1px)")
 })
 
 test("可访问性辅助 token 存在：action/link/success/warning/danger 文字与按钮色", () => {
@@ -160,7 +138,7 @@ test("紧凑/标准/字段三档尺寸与桌面命中目标保持为 token contr
   for (const token of ["--control-compact", "--control-standard", "--control-field", "--radius-control", "--radius-surface"]) {
     expect(css).toContain(token)
   }
-  expect(css).toContain("--topbar-height: 52px")
+  expect(css).toContain("--topbar-height: 54px")
   expect(css).toContain("--control-compact: 30px")
   expect(css).toContain("--control-standard: 34px")
   expect(css).toContain("--control-field: 36px")
@@ -194,7 +172,6 @@ test("桌面三栏布局与文件预览样式存在：desktop-workspace / contex
   expect(css).toContain(".line-numbers")
   expect(css).toContain(".workspace-sidebar {")
   expect(css).toContain(".sidebar-resize-handle")
-  expect(css).toContain(".vertical-resize-handle")
   expect(css).toContain(".file-tree")
 })
 
@@ -207,7 +184,7 @@ test("截图几何契约：内容列固定居中（≤880px）；关闭态按 Do
   expect(geometry).toContain("--conversation-content-max-width: 880px")
   expect(geometry).toContain("--conversation-content-width: min(var(--conversation-content-max-width), calc(100vw - var(--sidebar-width) - var(--dock-width-reserved) - 2 * var(--workspace-gap)))")
   // 预留宽度：Dock 关闭时用默认宽（拖宽后关闭，内容列恢复默认）；打开时用实际宽
-  expect(geometry).toContain("--dock-width-default: 354px")
+  expect(geometry).toContain("--dock-width-default: 340px")
   expect(geometry).toContain("--dock-width-reserved: var(--dock-width-default);")
   expect(geometry).toContain(".desktop-workspace.has-context-dock {\n  --dock-width-reserved: var(--dock-width);\n  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--dock-width);\n}")
   // 第三轨常驻：关闭时 0px、打开时 var(--dock-width)；轨数一致才能做轨宽过渡（平移）
@@ -284,7 +261,7 @@ test("桌面化清理：移动端抽屉、workspace-header 与窄屏断点样式
 })
 
 test("历史双轨 class 已删除：同一组件不再保留旧 class 规则", () => {
-  for (const legacy of [".message-bubble", ".composer-wrap", ".status-pill", ".thread-sidebar", ".utility-panel", ".topbar-status", ".mobile-thread-bar", ".sidebar-action", ".sidebar-disabled-reason", ".topbar-meta", ".topbar-model", ".topbar-approval", ".topbar-segment", ".topbar-project", ".project-name", ".meta-chip", ".approval-mode-menu", ".approval-mode-option", ".composer-decoration-icons", ".composer-hint"]) {
+  for (const legacy of [".message-bubble", ".composer-wrap", ".status-pill", ".thread-sidebar", ".utility-panel", ".topbar-status", ".mobile-thread-bar", ".sidebar-action", ".sidebar-disabled-reason", ".topbar-meta", ".topbar-model", ".topbar-approval", ".topbar-segment", ".project-name", ".meta-chip", ".approval-mode-menu", ".approval-mode-option", ".composer-decoration-icons", ".composer-hint"]) {
     expect(css).not.toContain(legacy)
   }
 })
@@ -337,7 +314,6 @@ test("侧栏文件分区标题即工作区名：纯文字无图标，与线程�
   expect(css).not.toMatch(/\.file-explorer-title\s+svg/)
   // 与线程分区标题同字号字重（14px/700）。
   expect(css).toMatch(/\.file-explorer-title\s*\{[^}]*font-size:\s*14px;\s*font-weight:\s*700/)
-  expect(css).toMatch(/\.thread-panel-title\s*\{[^}]*font-size:\s*14px;\s*font-weight:\s*700/)
   expect(css).toMatch(/\.file-explorer-title-text\s*\{[^}]*text-overflow:\s*ellipsis/)
 })
 

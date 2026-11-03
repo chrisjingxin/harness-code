@@ -10,7 +10,10 @@ import { WebApp } from "./presentation/web-app"
 import { closeHighlightService } from "./syntax/highlight-service"
 import { createWebUiClient, readUiToken, storeUiToken, type WebUiClient } from "./ui-client"
 import type { PresentationState } from "../presentation-coordinator"
+import "./presentation/theme.css"
 import "./presentation/styles.css"
+import "./presentation/workbench-views.css"
+import "./presentation/trace/trace.css"
 
 /**
  * 启动当前 handoff 页面；URL fragment 在创建任何 WebSocket 前被清除。

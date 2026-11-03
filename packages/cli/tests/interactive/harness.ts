@@ -540,6 +540,7 @@ function createPort(options: {
 }
 
 export function makeHarness(options: {
+  workspaceGit?: import("../../src/interactive/ports/workspace-git").WorkspaceGit
   workspace?: string
   initialThreadId?: string | null
   configError?: boolean
@@ -565,6 +566,7 @@ export function makeHarness(options: {
   }
   const controller = createInteractiveController({
     gateway: portState.port,
+    workspaceGit: options.workspaceGit,
     baseRuntime: runtimeOverride,
     ...(options.initialThreadId !== undefined ? { initialThreadId: options.initialThreadId } : {}),
     ...(options.scheduler !== undefined ? { scheduler: options.scheduler } : {}),

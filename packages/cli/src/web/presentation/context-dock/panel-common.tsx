@@ -4,35 +4,36 @@
 import { RefreshCw, Search } from "lucide-react"
 
 import type { FeatureAvailability } from "../../../interactive/selectors"
-import type { ContextDockPanel } from "../../application/adapter"
+import type { ContextDockPanel, SettingsPanel, WebPanel } from "../../application/adapter"
 
-/** Dock 主 tab：设计稿中的所有面板均在同一组标签内切换。 */
-export type DockTab = "code" | "models" | "skills" | "mcp" | "agents" | "status" | "help"
-
-export const DOCK_TABS: readonly DockTab[] = ["code", "models", "skills", "mcp", "agents", "status", "help"]
+/** 工作上下文与设置分类分开导航，共用既有面板标签和能力门禁。 */
+export const DOCK_TABS: readonly ContextDockPanel[] = ["code", "changes"]
+export const SETTINGS_PANELS: readonly SettingsPanel[] = ["models", "skills", "mcp", "agents", "status", "help"]
 
 /** 主 tab 可见性：只显示 capability 允许的 tab；Code/Status/Help 恒可见。 */
-export function tabVisible(tab: DockTab, availability: Pick<FeatureAvailability, "canOpenModelsPanel" | "canOpenSkillsPanel" | "canOpenMcpPanel" | "canOpenAgentsPanel">): boolean {
+export function tabVisible(tab: WebPanel, availability: Pick<FeatureAvailability, "canOpenModelsPanel" | "canOpenSkillsPanel" | "canOpenMcpPanel" | "canOpenAgentsPanel">): boolean {
   switch (tab) {
     case "models": return availability.canOpenModelsPanel
     case "skills": return availability.canOpenSkillsPanel
     case "mcp": return availability.canOpenMcpPanel
     case "agents": return availability.canOpenAgentsPanel
     case "code":
+    case "changes":
     case "status": return true
     case "help": return true
   }
 }
 
 /** 主 tab 与 Help 面板的展示标签。 */
-export function tabLabel(tab: ContextDockPanel): string {
+export function tabLabel(tab: WebPanel): string {
   switch (tab) {
-    case "code": return "代码"
+    case "code": return "文件"
+    case "changes": return "变更"
     case "models": return "模型"
     case "skills": return "技能"
     case "mcp": return "MCP"
     case "agents": return "Agent"
-    case "status": return "状态"
+    case "status": return "运行状态"
     case "help": return "帮助"
   }
 }

@@ -264,7 +264,7 @@ describe("Composer", () => {
       const manage = handle.container.querySelector<HTMLButtonElement>(".composer-menu-manage")
       expect(manage?.textContent).toContain("管理模型")
       act(() => { manage?.click() })
-      expect(intents).toContainEqual({ type: "dock-open", panel: "models" })
+      expect(intents).toContainEqual({ type: "settings-open", panel: "models" })
       expect(handle.container.querySelector(".composer-menu") === null).toBe(true)
     } finally {
       handle.unmount()

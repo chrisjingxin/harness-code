@@ -17,6 +17,10 @@ references: docs/developer/task/archive/HC-079-提供本地WebUI与受令牌保�
 completed_at: -
 ---
 
+## 2026-10-29 设计覆盖说明
+
+用户确认的新配色及三栏方案由 [HC-190](HC-190-Web主题布局与Git提交.md) 承接。与本次确认冲突的旧蓝色/绿色主题和外围布局目标，以 HC-190 Spec 为准；本任务的历史验证证据及其他未完成验收保持原义。HC-190 第一停点仅落地独立冷紫主题，文件树迁移与 Git 提交/推送仍待后续停点。
+
 ## 背景
 
 Web UI 已经具备 Thread、对话、Tool、Interaction、Composer、文件树和 Context Dock 等核心能力。HC-106/HC-107 完成了前两轮主题、Composer 和代码展示改造，但当前实现继续演进后，任务文档中的蓝色设计目标、实际暖单色 CSS 和响应式行为已经不再一致。

@@ -28,13 +28,13 @@ export function AgentsPanel({
         query={query}
         placeholder="搜索 Agent…"
         onSearch={value => dispatch({ type: "panel-search", panel: "agents", query: value })}
-        onRefresh={() => dispatch({ type: "dock-panel-select", panel: "agents" })}
+        onRefresh={() => dispatch({ type: "settings-panel-select", panel: "agents" })}
         disabled={disabled}
       />
       {catalog.status === "error" ? (
         <PanelError
           message={catalog.message}
-          onRetry={() => dispatch({ type: "dock-panel-select", panel: "agents" })}
+          onRetry={() => dispatch({ type: "settings-panel-select", panel: "agents" })}
           disabled={disabled}
         />
       ) : isLoading ? (

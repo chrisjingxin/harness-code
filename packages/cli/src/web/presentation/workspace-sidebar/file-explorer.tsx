@@ -1,7 +1,7 @@
 /** Files 分区：工作区名标题 + 刷新按钮 + 文件树（本版设计无文件过滤）。 */
 /** @jsxImportSource react */
 
-import { MoreHorizontal, RefreshCw } from "lucide-react"
+import { FolderOpen, RefreshCw } from "lucide-react"
 
 import { workspaceLabel } from "../../../interactive/runtime"
 import type { WebAdapterSnapshot, WebIntent } from "../../application/adapter"
@@ -23,7 +23,7 @@ export function FileExplorer({
       <div className="file-explorer-header">
         {/* 分区标题即工作区名（自顶栏迁入，2026-08-18 与用户确认）：与线程分区标题同为纯文字规格，悬停可见完整路径。 */}
         <span className="file-explorer-title" title={workspace}>
-          <span className="file-explorer-title-text">{workspaceLabel(workspace)}</span>
+          <FolderOpen size={14} aria-hidden="true" /><span className="file-explorer-title-text">{workspaceLabel(workspace)}</span>
         </span>
         <span className="file-explorer-actions">
           <button
@@ -36,7 +36,6 @@ export function FileExplorer({
           >
             <RefreshCw aria-hidden="true" size={14} />
           </button>
-          <span className="file-explorer-more" aria-hidden="true"><MoreHorizontal size={16} /></span>
         </span>
       </div>
       <FileTree snapshot={snapshot} dispatch={dispatch} disabled={disabled} />

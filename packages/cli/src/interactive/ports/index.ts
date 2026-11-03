@@ -9,3 +9,5 @@ export * from "./scheduler"
 export * from "./id-generator"
 export * from "./prompt-history-store"
 export * from "../types"
+
+export * from "./workspace-git"

@@ -20,6 +20,10 @@ export function parseClientFrame(value: unknown): WebUiClientMessage | undefined
   if (parsed === undefined) return undefined
   if (!isRecord(parsed)) return undefined
   const type = parsed.type
+  if (type === "trace.load") {
+    return exactFields(parsed, ["type", "requestId", "threadId"]) && isRequestId(parsed.requestId) && isNonEmptyString(parsed.threadId, 256)
+      ? { type, requestId: parsed.requestId, threadId: parsed.threadId } : undefined
+  }
   if (type === "interactive.intent") {
     if (!exactFields(parsed, ["type", "requestId", "revision", "intent"])) return undefined
     const requestId = parsed.requestId
@@ -52,6 +56,19 @@ export function parseServerFrame(value: unknown): WebUiServerMessage | undefined
   if (parsed === undefined) return undefined
   if (!isRecord(parsed)) return undefined
   const type = parsed.type
+  if (type === "trace.live") {
+    if (!exactFields(parsed, ["type", "revision", "span"]) || !isNonNegativeInt(parsed.revision) || !isTraceSpan(parsed.span)) return undefined
+    return { type, revision: parsed.revision, span: parsed.span }
+  }
+  if (type === "trace.span" || type === "trace.loaded") {
+    if (!isRequestId(parsed.requestId) || !isNonEmptyString(parsed.threadId, 256)) return undefined
+    if (type === "trace.span") {
+      if (!exactFields(parsed, ["type", "requestId", "threadId", "span"]) || !isTraceSpan(parsed.span) || parsed.span.threadId !== parsed.threadId) return undefined
+      return { type, requestId: parsed.requestId, threadId: parsed.threadId, span: parsed.span }
+    }
+    if (!exactFields(parsed, ["type", "requestId", "threadId", "spanCount", "hasAnyTrace", "error"]) || !isNonNegativeInt(parsed.spanCount) || parsed.spanCount > 100000 || !isBoolean(parsed.hasAnyTrace) || !(parsed.error === null || isNonEmptyString(parsed.error, 512))) return undefined
+    return { type, requestId: parsed.requestId, threadId: parsed.threadId, spanCount: parsed.spanCount, hasAnyTrace: parsed.hasAnyTrace, error: parsed.error }
+  }
   if (type === "handoff.token") {
     if (!exactFields(parsed, ["type", "token"])) return undefined
     if (!isNonEmptyString(parsed.token, MAX_UI_TOKEN_LENGTH)) return undefined
@@ -131,6 +148,7 @@ function exactFields(value: Record<string, unknown>, fields: readonly string[]):
 
 /** InteractiveIntent 类型白名单；payload 语义由 Controller 校验，这里只做形状防御。 */
 const INTENT_TYPES = new Set([
+  "git.refresh", "git.diff", "git.commit", "git.push",
   "input.submit",
   "command.execute",
   "run.cancel",
@@ -158,6 +176,10 @@ function isInteractiveIntent(value: unknown): value is InteractiveIntent {
   const type = value.type
   if (typeof type !== "string" || !INTENT_TYPES.has(type)) return false
   switch (type) {
+    case "git.refresh": return exactFields(value,["type"])
+    case "git.diff": return exactFields(value,["type","snapshot","path"]) && isNonEmptyString(value.snapshot,128) && isNonEmptyString(value.path,4096) && !value.path.includes("\0")
+    case "git.commit": return exactFields(value,["type","snapshot","paths","message","push"]) && isNonEmptyString(value.snapshot,128) && Array.isArray(value.paths) && value.paths.length > 0 && value.paths.length <= 1000 && value.paths.every(path => isNonEmptyString(path,4096) && !path.includes("\0")) && new Set(value.paths).size === value.paths.length && isNonEmptyString(value.message,8192) && !value.message.includes("\0") && isBoolean(value.push)
+    case "git.push": return exactFields(value,["type","snapshot","head"]) && isNonEmptyString(value.snapshot,128) && isNonEmptyString(value.head,128)
     case "input.submit":
       return exactFields(value, ["type", "value"]) && isString(value.value, 64 * 1024)
     case "command.execute": {
@@ -463,3 +485,18 @@ const RETURN_REASONS = new Set<ReturnReason>([
   "opener-failed",
   "cli-exit",
 ])
+
+/** Trace raw 保留完整 JSON；字段类型与数值有限性在边界检查。 */
+function isTraceSpan(value: unknown): value is import("./trace").TraceSpanEvent {
+  if (!isRecord(value)) return false
+  const fields = ["traceId", "spanId", "parentSpanId", "name", "type", "startTime", "endTime", "durationMs", "status", "metadata", "threadId", "raw"]
+  if (!Object.keys(value).every(key => fields.includes(key))) return false
+  const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v)
+  return isNonEmptyString(value.traceId, 512) && isNonEmptyString(value.spanId, 512)
+    && (value.parentSpanId === null || isNonEmptyString(value.parentSpanId, 512))
+    && typeof value.name === "string" && finite(value.startTime)
+    && (value.endTime === null || finite(value.endTime)) && (value.durationMs === null || finite(value.durationMs))
+    && (value.threadId === null || isNonEmptyString(value.threadId, 256)) && isRecord(value.raw)
+    && (value.metadata === undefined || isRecord(value.metadata)) && (value.type === undefined || typeof value.type === "string")
+    && (value.status === undefined || typeof value.status === "string")
+}

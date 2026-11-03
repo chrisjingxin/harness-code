@@ -59,6 +59,7 @@ export function makeInteractive(
   overrides: Partial<InteractiveSnapshot> = {},
 ): InteractiveSnapshot {
   return {
+    git: {busy:false,repository:null,diff:null,result:null,error:null},
     currentThreadId: null,
     activity: { kind: "home", label: "就绪" },
     activeRun: null,
@@ -87,6 +88,7 @@ export function makeInteractive(
 export function makeSnapshot(overrides: Partial<WebAdapterSnapshot> = {}): WebAdapterSnapshot {
   const panelSearch: PanelState = {
     code: { query: "", submitting: false, error: null },
+    changes: { query: "", submitting: false, error: null },
     models: { query: "", submitting: false, error: null },
     skills: { query: "", submitting: false, error: null },
     mcp: { query: "", submitting: false, error: null },
@@ -96,6 +98,8 @@ export function makeSnapshot(overrides: Partial<WebAdapterSnapshot> = {}): WebAd
   }
   return {
     interactive: makeInteractive(),
+    viewMode: "chat",
+    trace: { threadId: null, spans: [], loading: false, loaded: false, hasAnyTrace: false },
     draft: "",
     draftCursorOffset: 0,
     commandMenuOpen: false,
@@ -103,6 +107,7 @@ export function makeSnapshot(overrides: Partial<WebAdapterSnapshot> = {}): WebAd
     commandOptions: [],
     mentionMenu: { visible: false, selectedIndex: 0, windowStart: 0, browsePath: "", query: "", start: 0, end: 0, isQuoted: false },
     mentionSearch: { items: [], totalMatches: 0, truncated: false },
+    settings: { open: false, activePanel: "models" },
     contextDock: {
       open: false,
       activePanel: "code",
@@ -110,7 +115,7 @@ export function makeSnapshot(overrides: Partial<WebAdapterSnapshot> = {}): WebAd
       code: { tabs: [], activePath: null, previews: {}, previewErrors: {} },
     },
     workspaceTree: { status: "idle", rows: [], selectedPath: null, limited: false },
-    workspaceSidebar: { threadRatio: 0.38, threadRatioCustomized: false, selectedPath: null, widthPx: 280 },
+    workspaceSidebar: { selectedPath: null, widthPx: 280 },
     panelSearch,
     expandedTools: new Set<string>(),
     interactionDraft: null,

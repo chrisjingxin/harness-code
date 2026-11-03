@@ -87,6 +87,7 @@ export type CommandView = {
 
 /** 运行时视图：runtime/connection/selection 与运行控制可用性；UI 契约 runtime 分片。 */
 export type RuntimeView = {
+  readonly git: import("../ports/workspace-git").WorkspaceGitView
   readonly runtime: InteractiveRuntime
   readonly connection: InteractiveConnectionState
   readonly selection: InteractiveSnapshot["selection"]
