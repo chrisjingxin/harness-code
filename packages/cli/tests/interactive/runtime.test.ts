@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 
 import {
   createInteractiveRuntime,
@@ -30,7 +31,7 @@ test("从脱敏初始化结果提取可展示的运行上下文", () => {
   expect(runtime).toEqual({
     workspace: "/work/za38-cli",
     gitWorkspace: { kind: "branch", branch: "main", root: "/work/za38-cli" },
-    cliVersion: "0.1.0",
+    cliVersion: readFileSync(new URL("../../../../VERSION", import.meta.url), "utf8").trim(),
     modelName: "deepseek-v4-flash",
     modelConfigured: true,
     startupError: undefined,
@@ -40,6 +41,7 @@ test("从脱敏初始化结果提取可展示的运行上下文", () => {
     approvalModeWarning: undefined,
     capabilities: [],
     agentCommands: [],
+    commandRegistry: undefined,
     mcpSummary: undefined,
     showCacheHitRate: false,
   })

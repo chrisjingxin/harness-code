@@ -34,13 +34,13 @@ export function McpPanel({
         query={snapshot.panelSearch.mcp.query}
         placeholder="搜索 MCP…"
         onSearch={value => dispatch({ type: "panel-search", panel: "mcp", query: value })}
-        onRefresh={() => dispatch({ type: "dock-panel-select", panel: "mcp" })}
+        onRefresh={() => dispatch({ type: "settings-panel-select", panel: "mcp" })}
         disabled={disabled}
       />
       {catalog.status === "error" ? (
         <PanelError
           message={catalog.message}
-          onRetry={() => dispatch({ type: "dock-panel-select", panel: "mcp" })}
+          onRetry={() => dispatch({ type: "settings-panel-select", panel: "mcp" })}
           disabled={disabled}
         />
       ) : isLoading ? (

@@ -1,5 +1,7 @@
 /** Web Interactive Adapter：只拥有浏览器表现状态，通过 WebUiClient 消费共享 Core 视图并提交 intent。 */
 
+import { TraceStore } from "./trace-store"
+import type { TraceViewState } from "../presentation/trace/view-state"
 import type { ApprovalDecision, InteractiveApprovalMode, InteractiveIntent, InteractiveMcpInput, IntentOutcome, InteractiveSnapshot, InteractiveResponse, PresentationEffect } from "../../interactive/types"
 import type { CommandMenuItem } from "../../interactive/commands"
 import type { PresentationState, WorkspacePreviewView, WorkspaceTreeView } from "../../presentation-coordinator"
@@ -26,8 +28,14 @@ export type WebFrameScheduler = {
   flush(): void
 }
 
-/** Context Dock 语义面板标识；Code 面板承载文件预览，Help 只从顶栏更多菜单打开。 */
-export type ContextDockPanel = "code" | "models" | "skills" | "mcp" | "agents" | "status" | "help"
+/** 右侧工作上下文：文件预览与 Git 变更。 */
+export type ContextDockPanel = "code" | "changes"
+
+/** 居中设置窗口的分类，与右侧工作上下文独立。 */
+export type SettingsPanel = "models" | "skills" | "mcp" | "agents" | "status" | "help"
+
+/** 共享搜索与提交状态所覆盖的面板。 */
+export type WebPanel = ContextDockPanel | SettingsPanel
 
 /** 文件 Tab：路径 + 展示名 + canonical 语言 id（未知为 null）。 */
 export type WorkspaceFileTab = {
@@ -96,6 +104,8 @@ export type WebScrollRequest = "new-message" | "to-bottom" | null
 
 /** Web Adapter 发布的完整表现快照；领域事实来自共享 Core 视图（WebUiClient 缓存）。 */
 export type WebAdapterSnapshot = {
+  readonly viewMode: "chat" | "trace"
+  readonly trace: TraceViewState
   /** 由网关视图分片重组得到的 InteractiveSnapshot；与 TUI 看到的同一 Core 状态。 */
   readonly interactive: InteractiveSnapshot
   /** 当前输入草稿；提交后由 Adapter 自行清空。 */
@@ -130,19 +140,17 @@ export type WebAdapterSnapshot = {
   }
   /** 工作区文件树视图（来自网关分片）。 */
   readonly workspaceTree: WorkspaceTreeView
-  /** 左侧 WorkspaceSidebar 的本地表现状态。 */
+  /** 设置窗口关闭后保留上次分类，开合不影响右侧 Dock。 */
+  readonly settings: { readonly open: boolean; readonly activePanel: SettingsPanel }
+  /** 工作区本地表现状态：会话侧栏宽度与共享文件选中路径。 */
   readonly workspaceSidebar: {
-    /** Thread 分区占侧栏高度的比例；Files 分区 = 1 - ratio。 */
-    readonly threadRatio: number
-    /** 用户是否拖过 Thread/Files 分隔条；未拖动时分区高度随内容自适应（比例仅作上限），避免默认截断。 */
-    readonly threadRatioCustomized: boolean
     /** 文件树当前选中行；null 表示无选中。 */
     readonly selectedPath: string | null
     /** 侧栏宽度（px）；顶栏品牌列与侧栏共用，保证竖线连续对齐。 */
     readonly widthPx: number
   }
   /** 各面板局部状态（搜索词/提交/错误）。 */
-  readonly panelSearch: Readonly<Record<ContextDockPanel, WebPanelSearchState>>
+  readonly panelSearch: Readonly<Record<WebPanel, WebPanelSearchState>>
   /** 已展开的 Tool 卡片集合；按 runId+toolId 复合键维护，跨 Run 不冲突。 */
   readonly expandedTools: ReadonlySet<string>
   /** 当前 requestId 上的 Interaction 草稿；requestId 变化时原子重置。 */
@@ -171,6 +179,8 @@ export type WebAdapterSnapshot = {
 
 /** React / DOM 事件通过这些语义意图驱动 Adapter；不允许携带 DOM event。 */
 export type WebIntent =
+  | { type: "view-mode-set"; mode: "chat" | "trace" }
+  | Extract<InteractiveIntent, {type: `git.${string}`} >
   | { type: "draft-change"; value: string; cursorOffset?: number }
   | { type: "draft-cursor"; cursorOffset: number }
   | { type: "submit" }
@@ -188,10 +198,12 @@ export type WebIntent =
   | { type: "dock-open"; panel: ContextDockPanel }
   | { type: "dock-panel-select"; panel: ContextDockPanel }
   | { type: "dock-close" }
+  | { type: "settings-open"; panel?: SettingsPanel }
+  | { type: "settings-panel-select"; panel: SettingsPanel }
+  | { type: "settings-close" }
   | { type: "dock-width-change"; widthPx: number }
-  | { type: "sidebar-thread-ratio-change"; ratio: number }
   | { type: "sidebar-width-change"; widthPx: number }
-  | { type: "panel-search"; panel: ContextDockPanel; query: string }
+  | { type: "panel-search"; panel: WebPanel; query: string }
   | { type: "thread-select"; threadId: string }
   | { type: "thread-new" }
   | { type: "thread-refresh" }
@@ -284,19 +296,15 @@ type ContextDockState = {
 const MAX_FILE_TABS = 12
 const DOCK_WIDTH_MIN = 330
 const DOCK_WIDTH_MAX = 760
-const DOCK_WIDTH_INITIAL = 354
+const DOCK_WIDTH_INITIAL = 340
 /** 左侧侧栏宽度：控制三栏工作区的第一列，并可由用户拖动调整。 */
 const SIDEBAR_WIDTH_MIN = 220
 const SIDEBAR_WIDTH_MAX = 480
-const SIDEBAR_WIDTH_INITIAL = 296
+const SIDEBAR_WIDTH_INITIAL = 280
 /** 拖拽夹取的内容列下限：侧栏/Dock 拖拽都不能把中栏内容列压到该值以下（视口太窄时退回静态最小值）。 */
 const CONVERSATION_CONTENT_MIN = 480
 /** 三栏工作区列间距，与 styles.css 的 --workspace-gap 保持一致。 */
 const WORKSPACE_GAP_PX = 16
-const THREAD_RATIO_INITIAL = 0.45
-/** Thread 分区比例夹取区间：下限保证 Files 可见，上限保证 Thread 可见（CSS 另有 px 级 min）。 */
-const THREAD_RATIO_MIN = 0.2
-const THREAD_RATIO_MAX = 0.8
 /** Run 结束后延迟刷新工作区，等待文件系统写入落定。 */
 const RUN_END_REFRESH_DELAY_MS = 200
 
@@ -310,7 +318,10 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   private readonly listeners = new Set<(snapshot: WebAdapterSnapshot) => void>()
   private readonly unsubscribeState: () => void
   private readonly unsubscribeHandoff: () => void
+  private readonly unsubscribeTrace: () => void
 
+  private readonly traceStore: TraceStore
+  private viewMode: "chat" | "trace" = "chat"
   private snapshot: WebAdapterSnapshot
   private draft = ""
   private draftCursorOffset = 0
@@ -320,15 +331,14 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   private commandMenuIndex = 0
   private mentionMenu: WebMentionMenuState = emptyMentionMenu()
   private mentionMenuDismissal: { draft: string; start: number; end: number } | null = null
-  private readonly panelState: Record<ContextDockPanel, PanelState> = createEmptyPanelState()
+  private readonly panelState: Record<WebPanel, PanelState> = createEmptyPanelState()
   private contextDock: ContextDockState = {
-    open: false,
+    open: true,
     activePanel: "code",
     widthPx: DOCK_WIDTH_INITIAL,
     code: { tabs: [], activePath: null, previews: {}, previewErrors: {} },
   }
-  private threadRatio = THREAD_RATIO_INITIAL
-  private threadRatioCustomized = false
+  private settings: { open: boolean; activePanel: SettingsPanel } = { open: false, activePanel: "models" }
   private sidebarWidthPx = SIDEBAR_WIDTH_INITIAL
   private workspaceSelectedPath: string | null = null
   private theme: WebTheme = "light"
@@ -356,7 +366,10 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.setTimeoutFn = options.setTimeoutFn ?? ((callback, ms) => setTimeout(callback, ms))
     this.clearTimeoutFn = options.clearTimeoutFn ?? (handle => clearTimeout(handle as ReturnType<typeof setTimeout>))
     this.viewportWidthFn = options.viewportWidth ?? defaultViewportWidth
+    this.traceStore = new TraceStore(threadId => this.client.loadThreadTrace(threadId), () => this.schedulePublish(), message => { this.transientNotice = message })
     this.snapshot = this.buildSnapshot()
+    this.traceStore.replaceLive(this.client.getLiveTrace())
+    this.unsubscribeTrace = this.client.subscribeTrace(spans => this.traceStore.replaceLive(spans))
     this.unsubscribeState = this.client.subscribeState(() => this.onViewUpdate())
     this.unsubscribeHandoff = this.client.subscribeHandoff(state => this.onHandoffState(state))
     // 重连时 handoff.state(web-active) 可能在 Adapter 创建前就已到达，构造时补一次检查。
@@ -399,6 +412,11 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   async dispatch(intent: WebIntent): Promise<void> {
     if (this.closed) return
     switch (intent.type) {
+      case "view-mode-set":
+        this.viewMode = intent.mode
+        this.traceStore.select(this.getInteractive().currentThreadId, this.viewMode === "trace")
+        this.publishNow()
+        return
       case "draft-change":
         this.updateDraft(intent.value, intent.cursorOffset ?? intent.value.length)
         return
@@ -413,6 +431,8 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         this.publishNow()
         return
       case "command-menu-open":
+        this.viewMode = "chat"
+        this.traceStore.select(this.getInteractive().currentThreadId, false)
         this.openCommandMenu()
         return
       case "command-menu-close":
@@ -445,6 +465,13 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       case "mention-menu-parent":
         this.leaveMentionDirectory()
         return
+      case "git.refresh":
+      case "git.diff":
+      case "git.commit":
+      case "git.push":
+        await this.executeCoreIntent(intent)
+        if (intent.type === "git.commit") void this.client.workspaceIntent({type:"workspace.refresh"})
+        return
       case "dock-open":
         this.dockOpen(intent.panel)
         return
@@ -454,13 +481,20 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       case "dock-close":
         this.closeDock()
         return
-      case "dock-width-change":
-        this.contextDock = { ...this.contextDock, widthPx: clamp(intent.widthPx, DOCK_WIDTH_MIN, this.dockWidthMax()) }
+      case "settings-open":
+        this.openSettings(intent.panel)
+        return
+      case "settings-panel-select":
+        this.settings = { ...this.settings, activePanel: intent.panel }
+        this.refreshPanelCatalog(intent.panel)
         this.schedulePublish()
         return
-      case "sidebar-thread-ratio-change":
-        this.threadRatio = clamp(intent.ratio, THREAD_RATIO_MIN, THREAD_RATIO_MAX)
-        this.threadRatioCustomized = true
+      case "settings-close":
+        this.settings = { ...this.settings, open: false }
+        this.schedulePublish()
+        return
+      case "dock-width-change":
+        this.contextDock = { ...this.contextDock, widthPx: clamp(intent.widthPx, DOCK_WIDTH_MIN, this.dockWidthMax()) }
         this.schedulePublish()
         return
       case "sidebar-width-change":
@@ -603,6 +637,8 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       this.clearTimeoutFn(this.runEndTimer)
       this.runEndTimer = null
     }
+    this.unsubscribeTrace()
+    this.traceStore.close()
     this.unsubscribeState()
     this.unsubscribeHandoff()
     this.frameScheduler.cancel()
@@ -627,6 +663,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       const view = selectCodeIndexView(next)
       if (view) this.inspectOverlayState = { visible: true, kind: "code-index", title: view.title, body: view.body }
     }
+    this.traceStore.select(next.currentThreadId, this.viewMode === "trace")
     this.mergeWorkspacePreview()
     this.detectRunEnd(next)
     if (previous.activity.kind !== "compacting" && next.activity.kind === "compacting") {
@@ -639,9 +676,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       this.interactionDraft = null
       if (isExclusiveInteraction(next.interaction)) {
         this.clearRuntimeOverlays()
-        if (this.contextDock.open && this.contextDock.activePanel === "status") {
-          this.contextDock = { ...this.contextDock, open: false }
-        }
+        this.settings = { ...this.settings, open: false }
       }
       this.publishNow()
       return
@@ -738,6 +773,8 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     const interactive = this.getInteractive()
     return {
       interactive,
+      viewMode: this.viewMode,
+      trace: this.traceStore.getState(interactive.currentThreadId),
       draft: this.draft,
       draftCursorOffset: this.draftCursorOffset,
       composerSubmitting: this.composerSubmittingFlag,
@@ -760,8 +797,9 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
           previewErrors: { ...this.contextDock.code.previewErrors },
         },
       },
+      settings: { ...this.settings },
       workspaceTree: this.client.getState().workspaceTree,
-      workspaceSidebar: { threadRatio: this.threadRatio, threadRatioCustomized: this.threadRatioCustomized, selectedPath: this.workspaceSelectedPath, widthPx: this.sidebarWidthPx },
+      workspaceSidebar: { selectedPath: this.workspaceSelectedPath, widthPx: this.sidebarWidthPx },
       panelSearch: freezePanelState(this.panelState),
       expandedTools: new Set(this.expandedTools),
       interactionDraft: this.interactionDraft ? cloneInteractionDraft(this.interactionDraft) : null,
@@ -792,6 +830,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       confirmation: view.interaction.confirmation,
       catalogs: view.navigation.catalogs,
       commands: view.command.commands,
+      git: view.runtime.git,
       runtime: view.runtime.runtime,
       connection: view.runtime.connection,
       selection: view.runtime.selection,
@@ -1018,23 +1057,35 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.publishNow()
   }
 
-  /** 打开 Dock 到指定面板；打开 models/skills/mcp 时触发对应 catalog.refresh。 */
+  /** 打开右侧文件或变更面板。 */
   private dockOpen(panel: ContextDockPanel): void {
+    this.viewMode = "chat"
+    this.traceStore.select(this.getInteractive().currentThreadId, false)
     this.contextDock = { ...this.contextDock, open: true, activePanel: panel }
     this.closeHeaderMenu()
     this.schedulePublish()
-    this.refreshDockCatalog(panel)
+    this.refreshPanelCatalog(panel)
   }
 
   /** 在已打开的 Dock 内切换面板；不改变 open（已开则仅切面板）。 */
   private selectDockPanel(panel: ContextDockPanel): void {
     this.contextDock = { ...this.contextDock, activePanel: panel }
     this.schedulePublish()
-    this.refreshDockCatalog(panel)
+    this.refreshPanelCatalog(panel)
   }
 
-  /** Code/Status/Help 没有可刷新的 catalog；models/skills/mcp/agents 打开时刷新。 */
-  private refreshDockCatalog(panel: ContextDockPanel): void {
+  /** 设置独立于 Dock；打开时关闭菜单，保留上次分类和所有工作区草稿。 */
+  private openSettings(panel: SettingsPanel = this.settings.activePanel): void {
+    this.settings = { open: true, activePanel: panel }
+    this.commandMenuOpenFlag = false
+    this.closeHeaderMenu()
+    this.schedulePublish()
+    this.refreshPanelCatalog(panel)
+  }
+
+  /** Code/Status/Help 没有可刷新的 catalog；其余面板按归属刷新。 */
+  private refreshPanelCatalog(panel: WebPanel): void {
+    if (panel === "changes" && !this.getInteractive().git.busy) void this.executeCoreIntent({type:"git.refresh"})
     if (panel === "models" || panel === "skills" || panel === "mcp" || panel === "agents") {
       void this.client.submitIntent({ type: "catalog.refresh", catalog: panel })
     }
@@ -1068,7 +1119,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   }
 
   /** 写入面板搜索词；adapter 只记录表现状态，不直接驱动 Core。 */
-  private updatePanelSearch(panel: ContextDockPanel, query: string): void {
+  private updatePanelSearch(panel: WebPanel, query: string): void {
     this.panelState[panel] = { ...this.panelState[panel], query, error: null }
     this.schedulePublish()
   }
@@ -1091,6 +1142,8 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     const outcome = await this.executeCoreIntent({ type: "command.execute", commandId: "thread.new" })
     this.threadNewSubmittingFlag = false
     if (outcome.status === "accepted") {
+      this.viewMode = "chat"
+      this.traceStore.select(this.getInteractive().currentThreadId, false)
       this.draft = ""
       this.composerErrorStr = null
       this.commandMenuOpenFlag = false
@@ -1101,7 +1154,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.publishNow()
   }
 
-  /** 切换模型：能力门禁与不可用性都交由共享 Core 处理；rejected 不关闭 Dock 并显示错误。 */
+  /** 切换模型：能力门禁与不可用性都交由共享 Core 处理；rejected 保留设置并显示错误。 */
   private async selectModel(profileId: string): Promise<void> {
     this.panelState.models = { ...this.panelState.models, submitting: true, error: null }
     this.publishNow()
@@ -1116,7 +1169,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         },
       )
       if (outcome.status === "rejected") return
-      this.contextDock = { ...this.contextDock, open: false }
+      this.settings = { ...this.settings, open: false }
       this.panelState.models = { ...this.panelState.models, submitting: false }
       this.publishNow()
     } catch (error) {
@@ -1132,6 +1185,8 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
 
   /** 打开文件：新建/激活 Tab → Dock 切到 Code → 触发预览读取（MRU 排序，超出 12 个淘汰最旧）。 */
   private openFileTab(filePath: string): void {
+    this.viewMode = "chat"
+    this.traceStore.select(this.getInteractive().currentThreadId, false)
     const code = this.contextDock.code
     const existing = code.tabs.find(tab => tab.path === filePath)
     let tabs: readonly WorkspaceFileTab[]
@@ -1281,6 +1336,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   private async returnToTui(): Promise<void> {
     this.closeHeaderMenu()
     const interactive = this.getInteractive()
+    if (interactive.git.busy) { this.showTransientNotice("Git 操作进行中，请稍候。");return }
     if (interactive.activeRun) {
       this.showTransientNotice("当前任务结束或交互完成后可返回 TUI。")
       return
@@ -1302,6 +1358,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
 
   /** 退出 Harness：只发送 handoff.exit，不调用 process.exit。 */
   private async exitHarness(): Promise<void> {
+    if (this.getInteractive().git.busy) {this.showTransientNotice("Git 操作进行中，请稍候。");return}
     this.closeHeaderMenu()
     this.leavingFlag = true
     this.publishNow()
@@ -1341,10 +1398,10 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     for (const effect of outcome.effects) {
       switch (effect.type) {
         case "present":
-          if (effect.target === "models") this.dockOpen("models")
-          else if (effect.target === "skills") this.dockOpen("skills")
-          else if (effect.target === "agents") this.dockOpen("agents")
-          else if (effect.target === "status") this.dockOpen("status")
+          if (effect.target === "models") this.openSettings("models")
+          else if (effect.target === "skills") this.openSettings("skills")
+          else if (effect.target === "agents") this.openSettings("agents")
+          else if (effect.target === "status") this.openSettings("status")
           // threads：Thread 常驻左侧栏，无对应 Dock 面板可开。
           break
         case "request-handoff":
@@ -1537,9 +1594,10 @@ function connectionChanged(previous: InteractiveSnapshot["connection"], next: In
   return false
 }
 
-function createEmptyPanelState(): Record<ContextDockPanel, PanelState> {
+function createEmptyPanelState(): Record<WebPanel, PanelState> {
   return {
     code: { query: "", submitting: false, error: null },
+    changes: { query: "", submitting: false, error: null },
     models: { query: "", submitting: false, error: null },
     skills: { query: "", submitting: false, error: null },
     mcp: { query: "", submitting: false, error: null },
@@ -1549,10 +1607,10 @@ function createEmptyPanelState(): Record<ContextDockPanel, PanelState> {
   }
 }
 
-const PANEL_SLOTS: readonly ContextDockPanel[] = ["code", "models", "skills", "mcp", "agents", "status", "help"]
+const PANEL_SLOTS: readonly WebPanel[] = ["code", "changes", "models", "skills", "mcp", "agents", "status", "help"]
 
-function freezePanelState(state: Record<ContextDockPanel, PanelState>): Readonly<Record<ContextDockPanel, WebPanelSearchState>> {
-  const frozen: Record<ContextDockPanel, WebPanelSearchState> = {} as Record<ContextDockPanel, WebPanelSearchState>
+function freezePanelState(state: Record<WebPanel, PanelState>): Readonly<Record<WebPanel, WebPanelSearchState>> {
+  const frozen: Record<WebPanel, WebPanelSearchState> = {} as Record<WebPanel, WebPanelSearchState>
   for (const slot of PANEL_SLOTS) frozen[slot] = { ...state[slot] }
   return frozen
 }

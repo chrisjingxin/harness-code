@@ -1,5 +1,8 @@
 /** WebUiGateway 测试：真实 InteractiveController + 真实 Coordinator 驱动的分片发布与双域意图受理。 */
 
+import type { TraceHistorySource } from "../../src/trace-log/history"
+import type { TraceLiveSource } from "../../src/trace-log/runtime"
+import type { TraceSpanEvent } from "../../src/presentation-coordinator/contracts/trace"
 import { expect, test } from "bun:test"
 
 import { AsyncQueue } from "../../src/ipc/transport"
@@ -124,7 +127,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
 
 // ---- 系统装配 ---------------------------------------------------------------
 
-function createSystem(options: { controller?: InteractiveController; explorer?: FakeExplorer } = {}): TestSystem {
+function createSystem(options: { controller?: InteractiveController; explorer?: FakeExplorer; traceHistory?: TraceHistorySource; traceLive?: TraceLiveSource } = {}): TestSystem {
   const harness = makeHarness({ initialThreadId: "thread-1" })
   const controller = options.controller ?? harness.controller
   const explorer = options.explorer ?? createFakeExplorer()
@@ -155,7 +158,7 @@ function createSystem(options: { controller?: InteractiveController; explorer?: 
     uiTokenTtlMs: 60_000,
     scheduler,
   })
-  gateway = createWebUiGateway({ coordinator, controller, workspaceExplorer: explorer })
+  gateway = createWebUiGateway({ coordinator, controller, workspaceExplorer: explorer, traceHistory: options.traceHistory, traceLive: options.traceLive })
   return { controller, coordinator, gateway, explorer, server, openedUrls, timers }
 }
 
@@ -598,4 +601,74 @@ test("gateway close()：停止 controller/explorer 订阅与帧受理", async ()
   system.explorer.setTree({ status: "ready", rows: [], selectedPath: null, limited: false })
   await flush()
   expect(ch.sent.length).toBe(before)
+})
+
+function currentRevision(ch: FakeChannel): number {
+  return Math.max(...ch.sent.filter(m=>m.type === "state.replace" || m.type === "state.patch").map(m=>m.revision))
+}
+test("Git 写入拒绝旧 revision；同 requestId 重放仅提交一次且恢复发布结果", async()=>{
+  let commits=0
+  const repo={snapshot:"s",branch:"main",head:"old",files:[],upstream:null,blockedReason:null}
+  const h=makeHarness({workspaceGit:{status:async()=>repo,diff:async()=>({path:"a",text:"x",truncated:false}),commit:async()=>{commits++;return {sha:"new"}},push:async()=>{}}})
+  const system=createSystem({controller:h.controller});await flush();const {ch}=await connectAndReady(system)
+  await system.controller.dispatch({type:"git.refresh"});await flush()
+  const intent={type:"git.commit",snapshot:"s",paths:["a"],message:"x",push:false} as const
+  sendClient(ch,{type:"interactive.intent",requestId:"stale-git",revision:currentRevision(ch)-1,intent});await flush()
+  expect(commits).toBe(0);expect(ch.sent.find(m=>m.type==="intent.outcome"&&m.requestId==="stale-git")).toMatchObject({outcome:{status:"rejected"}})
+  const revision=currentRevision(ch)
+  sendClient(ch,{type:"interactive.intent",requestId:"once-git",revision,intent});await waitFor(()=>commits===1);await flush()
+  sendClient(ch,{type:"interactive.intent",requestId:"once-git",revision,intent});await flush();expect(commits).toBe(1)
+  expect(ch.sent.filter(m=>m.type==="intent.outcome"&&m.requestId==="once-git")).toHaveLength(2)
+  const restored=createFakeChannel();system.gateway.connectRenderer(restored.channel,"reconnect-token")
+  const frame=restored.sent.find(m=>m.type==="state.replace") as Extract<WebUiServerMessage,{type:"state.replace"}>
+  expect(frame.state.runtime.git.result?.sha).toBe("new")
+  await system.gateway.close();await system.controller.close()
+})
+test("非 active handoff 拒绝 Git 写入",async()=>{
+ let commits=0;const h=makeHarness({workspaceGit:{status:async()=>({snapshot:"s",branch:"main",head:"h",files:[],upstream:null,blockedReason:null}),diff:async()=>({path:"a",text:"x",truncated:false}),commit:async()=>{commits++;return {sha:"new"}},push:async()=>{}}})
+ const system=createSystem({controller:h.controller});await flush();const {ch}=await connectRenderer(system)
+ sendClient(ch,{type:"interactive.intent",requestId:"inactive",revision:1,intent:{type:"git.commit",snapshot:"s",paths:["a"],message:"x",push:false}});await flush();expect(commits).toBe(0);await system.gateway.close();await system.controller.close()
+})
+
+test("Git 写入在飞时即拒绝新 Prompt；重复 request 等待同一结果",async()=>{
+ let release!:()=>void,commits=0
+ const h=makeHarness({workspaceGit:{status:async()=>({snapshot:"s",branch:"main",head:"old",files:[],upstream:null,blockedReason:null}),diff:async()=>({path:"a",text:"x",truncated:false}),commit:async()=>{commits++;await new Promise<void>(r=>release=r);return {sha:"new"}},push:async()=>{}}})
+ const system=createSystem({controller:h.controller});await flush();const {ch}=await connectAndReady(system);await system.controller.dispatch({type:"git.refresh"});await flush()
+ const request={type:"interactive.intent",requestId:"pending-git",revision:currentRevision(ch),intent:{type:"git.commit",snapshot:"s",paths:["a"],message:"x",push:false}} as const
+ sendClient(ch,request);await waitFor(()=>h.controller.getSnapshot().git.busy)
+ sendClient(ch,request);sendClient(ch,{type:"interactive.intent",requestId:"while-busy",revision:currentRevision(ch),intent:{type:"input.submit",value:"hello"}})
+ await waitFor(()=>ch.sent.some(m=>m.type==="intent.outcome"&&m.requestId==="while-busy"))
+ expect(ch.sent.find(m=>m.type==="intent.outcome"&&m.requestId==="while-busy")).toMatchObject({outcome:{status:"rejected",code:"busy"}})
+ expect(commits).toBe(1);release();await waitFor(()=>ch.sent.filter(m=>m.type==="intent.outcome"&&m.requestId==="pending-git").length===2);await system.gateway.close();await system.controller.close()
+})
+
+
+test("Trace 历史与实时经过真实网关，连接回放、修订递增和关闭解绑", async () => {
+  const span: TraceSpanEvent = { traceId: "r", spanId: "s", parentSpanId: null, name: "test", threadId: "thread-1", startTime: 1, endTime: null, durationMs: null, raw: {} }
+  let listener: ((span: TraceSpanEvent) => void) | undefined
+  let unsubscribed = false
+  const system = createSystem({ traceHistory: { loadThread: async () => ({ spans: [span], hasAnyTrace: true }) }, traceLive: { snapshot: () => [span], subscribe: fn => { listener = fn; return () => { unsubscribed = true } } } })
+  const { ch } = await connectAndReady(system)
+  expect(ch.sent.find(message => message.type === "trace.live")).toMatchObject({ revision: 1, span })
+  listener?.({ ...span, endTime: 5, durationMs: 4 }); await flush()
+  expect(ch.sent.filter(message => message.type === "trace.live").at(-1)).toMatchObject({ revision: 2, span: { endTime: 5 } })
+  sendClient(ch, { type: "trace.load", requestId: "trace-1", threadId: "thread-1" })
+  await waitFor(() => ch.sent.some(message => message.type === "trace.loaded"))
+  expect(ch.sent.find(message => message.type === "trace.loaded")).toMatchObject({ requestId: "trace-1", spanCount: 1, error: null })
+  await system.gateway.close()
+  expect(unsubscribed).toBe(true)
+  await system.coordinator.close()
+})
+
+test("Trace 慢历史不阻塞归还控制权，归还中止读取且不发送迟到结果", async () => {
+  const pending = Promise.withResolvers<{ spans: []; hasAnyTrace: false }>()
+  let signal: AbortSignal | undefined
+  const system = createSystem({ traceHistory: { loadThread: async (_id, next) => { signal = next; return pending.promise } } })
+  const { ch } = await connectAndReady(system)
+  sendClient(ch, { type: "trace.load", requestId: "slow", threadId: "thread-1" }); await flush()
+  sendClient(ch, { type: "handoff.return" }); await flush()
+  expect(signal?.aborted).toBe(true)
+  pending.resolve({ spans: [], hasAnyTrace: false }); await flush()
+  expect(ch.sent.some(message => message.type === "trace.loaded")).toBe(false)
+  await system.gateway.close(); await system.coordinator.close()
 })

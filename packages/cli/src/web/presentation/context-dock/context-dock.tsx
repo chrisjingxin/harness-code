@@ -1,52 +1,48 @@
-/** Context Dock：右侧常驻面板；所有面板共用同一层主 tab，代码预览填满剩余高度。 */
+/** Context Dock：右侧常驻面板；文件与变更共用同一层主 tab，代码预览填满剩余高度。 */
 /** @jsxImportSource react */
 
 import { useEffect, useRef, useState } from "react"
-import { X } from "lucide-react"
+import { FolderTree, GitCompareArrows, PanelRightClose } from "lucide-react"
 
-import { selectNavigationView } from "../../../interactive/selectors"
 import type { ContextDockPanel, WebAdapterSnapshot, WebIntent } from "../../application/adapter"
+import { FileExplorer } from "../workspace-sidebar/file-explorer"
 import { CodePanel } from "./code/code-panel"
-import { HelpPanel } from "./help-panel"
-import { McpPanel } from "./mcp-panel"
-import { ModelsPanel } from "./models-panel"
-import { AgentsPanel } from "./agents-panel"
-import { SkillsPanel } from "./skills-panel"
-import { StatusPanel } from "./status-panel"
-import { DOCK_TABS, tabLabel, tabVisible } from "./panel-common"
+import { GitPanel } from "./git-panel"
+import { DOCK_TABS, tabLabel } from "./panel-common"
 
 /** 关闭时保持挂载（inert + aria-hidden，CSS visibility 隐藏），供开关平移过渡；所有面板共享同一组主 tab 和内容区域。 */
 export function ContextDock({
   snapshot,
   dispatch,
   disabled = false,
+  hidden = false,
 }: {
   snapshot: WebAdapterSnapshot
   dispatch: (intent: WebIntent) => void
   disabled?: boolean
+  hidden?: boolean
 }): React.ReactElement {
-  const { open, activePanel, widthPx } = snapshot.contextDock
+  const { activePanel, widthPx } = snapshot.contextDock
+  const open = snapshot.contextDock.open && !hidden
   const interactive = snapshot.interactive
-  const busy = Boolean(interactive.activeRun) || Boolean(interactive.interaction)
-  const busyReason = busy ? "当前任务结束后可用" : null
-  const { availability } = selectNavigationView(interactive)
   const header = (
     <header className="context-dock-header">
       <div className="context-dock-tabs" role="tablist" aria-label="Context Dock 面板" onKeyDown={event => handleTabListKeyDown(event, dispatch)}>
-        {DOCK_TABS.filter(tab => tabVisible(tab, availability)).map(tab => (
+        {DOCK_TABS.map(tab => (
           <button
             type="button"
             key={tab}
             role="tab"
             id={`dock-tab-${tab}`}
             aria-selected={activePanel === tab}
+            tabIndex={activePanel === tab ? 0 : -1}
             aria-controls="context-dock-panel"
             data-panel={tab}
             className={activePanel === tab ? "dock-tab is-selected" : "dock-tab"}
             disabled={disabled}
             onClick={() => dispatch({ type: "dock-panel-select", panel: tab })}
           >
-            {tabLabel(tab)}
+            {tab === "code" ? <FolderTree size={16} aria-hidden="true" /> : tab === "changes" ? <GitCompareArrows size={16} aria-hidden="true" /> : null}{tabLabel(tab)}{tab === "changes" && interactive.git.repository ? <span className="git-count">{interactive.git.repository.files.length}</span> : null}
           </button>
         ))}
       </div>
@@ -57,7 +53,7 @@ export function ContextDock({
         disabled={disabled}
         aria-label="关闭 Dock"
       >
-        <X aria-hidden="true" />
+        <PanelRightClose aria-hidden="true" />
       </button>
     </header>
   )
@@ -79,16 +75,12 @@ export function ContextDock({
         aria-labelledby={`dock-tab-${activePanel}`}
       >
         {activePanel === "code" ? (
-          <div className="context-dock-code-scroll">
-            <CodePanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} />
+          <div className={`context-dock-code-scroll${snapshot.contextDock.code.tabs.length ? " has-file-preview" : ""}`}>
+            <FileExplorer snapshot={snapshot} dispatch={dispatch} disabled={disabled} />
+            {snapshot.contextDock.code.tabs.length ? <CodePanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} /> : null}
           </div>
         ) : null}
-        {activePanel === "models" ? <ModelsPanel snapshot={snapshot} busyReason={busyReason} disabled={disabled} dispatch={dispatch} /> : null}
-        {activePanel === "skills" ? <SkillsPanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} /> : null}
-        {activePanel === "mcp" ? <McpPanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} /> : null}
-        {activePanel === "agents" ? <AgentsPanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} /> : null}
-        {activePanel === "status" ? <StatusPanel snapshot={snapshot} /> : null}
-        {activePanel === "help" ? <HelpPanel snapshot={snapshot} /> : null}
+        {activePanel === "changes" ? <GitPanel snapshot={snapshot} dispatch={dispatch} disabled={disabled} /> : null}
       </div>
     </aside>
   )

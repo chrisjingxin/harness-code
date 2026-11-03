@@ -41,6 +41,8 @@
  * └────────────────────────────────────────────────────────┘
  */
 
+import { WorkspaceGitFeature, gitWriteBlockedReason, type GitIntent } from "./features/workspace-git"
+
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
 import { builtinCommandCapabilities } from "./commands"
@@ -70,6 +72,8 @@ export class InteractiveControllerImpl implements InteractiveController {
   private confirmation: InteractiveConfirmation | null = null
   private closed = false
   private compactInFlight = false
+  private readonly workspaceGit: WorkspaceGitFeature
+  private coreMutations = 0
 
   // 专职业务子模块（Feature）：各管一块业务；Controller 只负责统一路由分发、状态汇总与生命周期协同。
   private readonly catalogFeature = new CatalogFeature()
@@ -105,6 +109,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   }
   constructor(options: InteractiveControllerOptions) {
     this.gateway = options.gateway
+    this.workspaceGit = new WorkspaceGitFeature(options.workspaceGit)
     const defaultRuntime: InteractiveRuntime = { workspace: "", cliVersion: "0.1.0", modelConfigured: false, executionMode: "local", approvalMode: DEFAULT_APPROVAL_MODE, capabilities: builtinCommandCapabilities }
     const rawRuntime = options.baseRuntime ?? defaultRuntime
     this.baseRuntime = { ...defaultRuntime, ...rawRuntime, capabilities: rawRuntime.capabilities ?? builtinCommandCapabilities }
@@ -174,8 +179,20 @@ export class InteractiveControllerImpl implements InteractiveController {
    * 还是切换会话、打开子代理时间线，前端都会将操作打包成一个意图（InteractiveIntent）传给本方法。
    * 本方法根据 intent.type 路由给具体的业务功能模块（Feature）进行校验与执行，
    * 并返回处理结果（status: accepted | rejected | completed）。
+   * Git 与其他修改操作共用互斥检查，避免启动 Run 等待期间穿插提交。
    */
   async dispatch(intent: InteractiveIntent): Promise<IntentOutcome> {
+    if (this.closed) return {status:"rejected",code:"connection-closed",message:"Controller is closed"}
+    const mutating = !["catalog.refresh","run.cancel","child-timeline.open","child-timeline.leave","plan-view.close","goal-view.close"].includes(intent.type)
+    if (this.workspaceGit.view.busy && mutating) return {status:"rejected",code:"busy",message:"Git 操作进行中，请稍候。"}
+    if (intent.type.startsWith("git.")) {
+      const blocked = this.coreMutations || this.threadFeature.openingThread ? "当前操作尚未结束，请稍候。" : gitWriteBlockedReason(this.getSnapshot())
+      return this.workspaceGit.execute(intent as GitIntent,blocked,()=>this.publish())
+    }
+    if (mutating) this.coreMutations++
+    try { return await this.dispatchCore(intent) } finally { if (mutating) this.coreMutations-- }
+  }
+  private async dispatchCore(intent: InteractiveIntent): Promise<IntentOutcome> {
     if (this.closed) return { status: "rejected", code: "connection-closed", message: "Controller is closed" }
     if (this.state.pendingOperation && blocksPendingOperation(intent)) {
       return { status: "rejected", code: "busy", message: "上下文正在压缩；完成前不能执行该操作" }
@@ -778,6 +795,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   }
   private buildSnapshot(): InteractiveSnapshot {
     return {
+      git: this.workspaceGit.view,
       currentThreadId: this.state.currentThreadId,
       activity: this.state.activity,
       activeRun: this.state.activeRun,

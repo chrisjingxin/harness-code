@@ -7,6 +7,9 @@
  * 二者都不进入 React props 或日志。
  */
 
+import { TraceLiveClient } from "./infrastructure/trace-live-client"
+import { TraceHistoryClient } from "./infrastructure/trace-history-client"
+import type { TraceLoadResult, TraceSpanEvent } from "../presentation-coordinator/contracts/trace"
 import type { InteractiveIntent, IntentOutcome } from "../interactive/types"
 import type { WorkspaceIntent, WorkspaceOutcome } from "../workspace/types"
 import { parseServerFrame, type PresentationState, type WebUiPatch, type WebUiState } from "../presentation-coordinator"
@@ -38,6 +41,11 @@ export type WebUiClientOptions = {
 
 export interface WebUiClient {
   /** 最近一次 replace/patch 合并后的完整视图；连接建立后始终非空。 */
+  /** 按当前连接读取历史；失败也返回终态。 */
+  loadThreadTrace(threadId: string): Promise<TraceLoadResult>
+  /** 当前连接实时缓存与订阅。 */
+  getLiveTrace(): readonly TraceSpanEvent[]
+  subscribeTrace(listener: (spans: readonly TraceSpanEvent[]) => void): () => void
   getState(): WebUiState
   /** 最近一次 handoff.state；未收到前为 tui-active 的保守默认。 */
   getHandoffState(): PresentationState
@@ -66,6 +74,18 @@ class WebUiClientImpl implements WebUiClient {
   private readonly onReconnectToken: ((token: string) => void) | undefined
   private readonly handoffListeners = new Set<(state: PresentationState) => void>()
   private readonly stateListeners = new Set<(state: WebUiState) => void>()
+
+  private readonly liveTrace = new TraceLiveClient()
+  getLiveTrace(): readonly TraceSpanEvent[] { return this.liveTrace.snapshot() }
+  subscribeTrace(listener: (spans: readonly TraceSpanEvent[]) => void): () => void { return this.liveTrace.subscribe(listener) }
+
+  private readonly trace = new TraceHistoryClient(message => {
+    if (this.closed || this.socket.readyState !== 1 || !isWebActive(this.handoffState)) return false
+    this.socket.send(JSON.stringify(message))
+    return true
+  })
+
+  loadThreadTrace(threadId: string): Promise<TraceLoadResult> { return this.trace.loadThread(threadId) }
 
   private state: WebUiState
   private handoffState: PresentationState = { phase: "tui-active" }
@@ -151,6 +171,7 @@ class WebUiClientImpl implements WebUiClient {
   close(): void {
     if (this.closed) return
     this.closed = true
+    this.liveTrace.close()
     this.socket.removeEventListener("message", this.onMessage)
     this.socket.removeEventListener("close", this.onClose)
     this.socket.removeEventListener("error", this.onError)
@@ -170,6 +191,13 @@ class WebUiClientImpl implements WebUiClient {
     const message = parseServerFrame(raw)
     if (message === undefined) return
     switch (message.type) {
+      case "trace.live":
+        this.liveTrace.receive(message)
+        return
+      case "trace.span":
+      case "trace.loaded":
+        this.trace.receive(message)
+        return
       case "handoff.token":
         this.onReconnectToken?.(message.token)
         return
@@ -210,6 +238,7 @@ class WebUiClientImpl implements WebUiClient {
   private handleClosed(reason: WebUiCloseReason): void {
     if (this.closed) return
     this.closed = true
+    this.liveTrace.close()
     this.settlePending({ status: "rejected", code: "connection-closed", message: "Web 会话连接已断开" })
     this.onClosed?.(reason)
   }
@@ -220,6 +249,7 @@ class WebUiClientImpl implements WebUiClient {
   }
 
   private settlePending(outcome: IntentOutcome): void {
+    this.trace.cancel()
     for (const pending of this.pending.values()) pending.resolve(outcome)
     this.pending.clear()
   }
@@ -288,7 +318,7 @@ function emptyState(): WebUiState {
     interaction: { interaction: null, confirmation: null },
     navigation: { catalogs: { threads: { status: "idle", items: [] }, models: { status: "idle", items: [] }, skills: { status: "idle", items: [] }, mcp: { status: "idle", items: [] }, agents: { status: "idle", items: [] } }, availability: { canOpenThread: false, canOpenModelsPanel: false, canOpenSkillsPanel: false, canOpenMcpPanel: false, canOpenAgentsPanel: false, hasSkillManage: false, hasMcpManage: false } },
     command: { commands: [], availability: { canSubmit: false } },
-    runtime: { runtime: { workspace: "", cliVersion: "0.1.0", modelConfigured: false, executionMode: "local", approvalMode: "auto", capabilities: [] }, connection: { status: "closed", message: "connecting" }, selection: { requestedModelProfileId: null, actualModel: null, armedSkill: null }, workMode: "build", composeState: null, codeIndex: null, availability: { canCancelRun: false, canToggleSkill: false, canManageMcp: false, canChangeModel: false } },
+    runtime: { git: {busy:false,repository:null,diff:null,result:null,error:null}, runtime: { workspace: "", cliVersion: "0.1.0", modelConfigured: false, executionMode: "local", approvalMode: "auto", capabilities: [] }, connection: { status: "closed", message: "connecting" }, selection: { requestedModelProfileId: null, actualModel: null, armedSkill: null }, workMode: "build", composeState: null, codeIndex: null, availability: { canCancelRun: false, canToggleSkill: false, canManageMcp: false, canChangeModel: false } },
     workItem: { workItem: null, threadMode: null, modeLocked: false },
     workspaceTree: { status: "idle", rows: [], selectedPath: null, limited: false },
     workspacePreview: { status: "idle" },

@@ -6,7 +6,6 @@ import { act } from "react"
 
 import { WorkspaceSidebar } from "../../../src/web/presentation/workspace-sidebar/workspace-sidebar"
 import type { WebAdapterSnapshot, WebIntent } from "../../../src/web/application/adapter"
-import type { WorkspaceTreeRow } from "../../../src/workspace/types"
 import { makeCatalog, makeInteractive, makeSnapshot, makeThread } from "./fixtures"
 import { registerTestDom, render, type RenderHandle } from "./render"
 
@@ -20,21 +19,8 @@ function mountSidebar(snapshot: WebAdapterSnapshot, intents: WebIntent[]): Rende
   )
 }
 
-function treeRow(overrides: Partial<WorkspaceTreeRow>): WorkspaceTreeRow {
-  return {
-    path: "src",
-    name: "src",
-    kind: "directory",
-    depth: 0,
-    expanded: false,
-    loading: false,
-    hasChildren: true,
-    ...overrides,
-  }
-}
-
 describe("WorkspaceSidebar", () => {
-  test("Thread 列表与 Files 分区同屏渲染；点击 thread dispatch thread-select", () => {
+  test("左侧仅保留 Thread 导航；点击 thread dispatch thread-select", () => {
     const intents: WebIntent[] = []
     const interactive = makeInteractive({
       currentThreadId: "thread-1",
@@ -53,8 +39,8 @@ describe("WorkspaceSidebar", () => {
       expect(items[0]?.textContent).toContain("你好")
       expect(items[0]?.querySelector(".thread-item-summary")?.textContent).toBe("已完成")
       expect(handle.container.textContent).not.toContain("thread-1")
-      expect(handle.container.querySelector(".file-explorer")).not.toBeNull()
-      expect(handle.container.querySelector(".file-tree")).not.toBeNull()
+      expect(handle.container.querySelector(".file-explorer")).toBeNull()
+      expect(handle.container.querySelector(".file-tree")).toBeNull()
       act(() => { items[1]?.click() })
       expect(intents).toContainEqual({ type: "thread-select", threadId: "thread-2" })
     } finally {
@@ -124,7 +110,7 @@ describe("WorkspaceSidebar", () => {
     }
   })
 
-  test("Thread 搜索框渲染且列表展示全部项；Files 分区同屏", () => {
+  test("Thread 搜索框渲染且列表展示全部项；文件树已迁出", () => {
     const interactive = makeInteractive({
       catalogs: {
         ...makeInteractive().catalogs,
@@ -135,59 +121,10 @@ describe("WorkspaceSidebar", () => {
     try {
       const search = handle.container.querySelector<HTMLInputElement>(".sidebar-search input")
       expect(search).not.toBeNull()
-      expect(search?.getAttribute("placeholder")).toBe("搜索线程...")
+      expect(search?.getAttribute("placeholder")).toBe("搜索对话")
       const items = handle.container.querySelectorAll<HTMLButtonElement>(".thread-item")
       expect(items.length).toBe(2)
-      expect(handle.container.querySelector(".file-explorer")).not.toBeNull()
-    } finally {
-      handle.unmount()
-    }
-  })
-
-  test("未拖动分隔条时 Thread 分区高度随内容自适应（比例为上限）；拖动后按显式比例固定", () => {
-    const intents: WebIntent[] = []
-    // 默认（未自定义）：不定高，max-height 取比例上限——短 Thread 列表不再被截成半行。
-    const adaptive = mountSidebar(makeSnapshot(), intents)
-    try {
-      const panel = adaptive.container.querySelector<HTMLElement>(".workspace-sidebar-thread-panel")
-      expect(panel?.getAttribute("data-thread-panel-geometry")).toBe("adaptive")
-      expect(panel?.style.height).toBe("")
-      expect(panel?.style.maxHeight).toContain("* 0.38")
-      // 上限内缩 15px：分区下缘不落在某行中间露出半行。
-      expect(panel?.style.maxHeight).toContain("- 15px")
-    } finally {
-      adaptive.unmount()
-    }
-    // 用户拖过分隔条后：按显式比例固定高度，拖动语义不变。
-    // happy-dom 会丢弃 height 上的 calc 乘法值（真实浏览器正常），分支由 data 属性与 maxHeight 佐证。
-    const customized = mountSidebar(makeSnapshot({
-      workspaceSidebar: { threadRatio: 0.5, threadRatioCustomized: true, selectedPath: null, widthPx: 280 },
-    }), intents)
-    try {
-      const panel = customized.container.querySelector<HTMLElement>(".workspace-sidebar-thread-panel")
-      expect(panel?.getAttribute("data-thread-panel-geometry")).toBe("fixed")
-      expect(panel?.style.maxHeight).toBe("")
-    } finally {
-      customized.unmount()
-    }
-  })
-
-  test("垂直分隔条拖动 dispatch sidebar-thread-ratio-change（向下拖动增大比例）", () => {
-    const intents: WebIntent[] = []
-    const handle = mountSidebar(makeSnapshot(), intents)
-    try {
-      const resizeHandle = handle.container.querySelector<HTMLElement>(".vertical-resize-handle")
-      expect(resizeHandle).not.toBeNull()
-      act(() => { resizeHandle!.dispatchEvent(new PointerEvent("pointerdown", { clientY: 100, bubbles: true })) })
-      act(() => { window.dispatchEvent(new PointerEvent("pointermove", { clientY: 160, bubbles: true })) })
-      act(() => { window.dispatchEvent(new PointerEvent("pointerup", { clientY: 160, bubbles: true })) })
-      const ratioIntent = intents.find(intent => intent.type === "sidebar-thread-ratio-change")
-      expect(ratioIntent?.type).toBe("sidebar-thread-ratio-change")
-      if (ratioIntent?.type === "sidebar-thread-ratio-change") {
-        // 起始 0.38：向下拖动必须增大比例（happy-dom 高度为 0 时回退 600px）。
-        expect(ratioIntent.ratio).toBeGreaterThan(0.38)
-        expect(ratioIntent.ratio).toBeLessThan(0.6)
-      }
+      expect(handle.container.querySelector(".file-explorer")).toBeNull()
     } finally {
       handle.unmount()
     }
@@ -213,39 +150,34 @@ describe("WorkspaceSidebar", () => {
     }
   })
 
-  test("Files 分区标题即工作区名：纯文字标题（与线程分区同规格），title 提示完整路径", () => {
-    const handle = mountSidebar(makeSnapshot(), [])
-    try {
-      const title = handle.container.querySelector(".file-explorer-title")
-      expect(title?.querySelector(".file-explorer-title-text")?.textContent).toBe("workspace")
-      // 不带图标：与线程分区标题形态一致。
-      expect(title?.querySelector("svg") === null).toBe(true)
-      expect(title?.getAttribute("title")).toBe("/workspace")
-      // 「文件」固定文案已移除，标题直接表达工作区。
-      expect(title?.textContent).not.toContain("文件")
-    } finally {
-      handle.unmount()
-    }
-  })
 
-  test("Files 分区渲染文件树行；目录行点击 dispatch workspace-directory-toggle", () => {
-    const intents: WebIntent[] = []
-    const workspaceTree = {
-      status: "ready" as const,
-      rows: [treeRow({}), treeRow({ path: "a.ts", name: "a.ts", kind: "file", hasChildren: false })],
-      selectedPath: null,
-      limited: false,
-    }
-    const handle = mountSidebar(makeSnapshot({ workspaceTree }), intents)
-    try {
-      const rows = handle.container.querySelectorAll<HTMLElement>(".file-row")
-      expect(rows.length).toBe(2)
-      act(() => { rows[0]!.click() })
-      expect(intents).toContainEqual({ type: "workspace-directory-toggle", path: "src" })
-      act(() => { rows[1]!.click() })
-      expect(intents).toContainEqual({ type: "workspace-file-open", path: "a.ts" })
-    } finally {
-      handle.unmount()
-    }
-  })
+})
+
+
+
+test("接管只读时新建、设置和文件入口不可执行", () => {
+  const intents: WebIntent[] = []
+  const handle = render(<WorkspaceSidebar snapshot={makeSnapshot()} dispatch={intent => intents.push(intent)} disabled />)
+  try {
+    const buttons = Array.from(handle.container.querySelectorAll<HTMLButtonElement>('button'))
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) { expect(button.disabled).toBe(true); act(() => button.click()) }
+    expect(intents).toHaveLength(0)
+  } finally { handle.unmount() }
+})
+
+
+
+test("左下仅保留设置与工具，直接打开弹窗", () => {
+  const intents: WebIntent[] = []
+  const handle = mountSidebar(makeSnapshot(), intents)
+  try {
+    const triggers = handle.container.querySelectorAll<HTMLButtonElement>(".workspace-tool-button")
+    expect(triggers.length).toBe(1)
+    expect(triggers[0]?.textContent).toBe("设置与工具")
+    expect(triggers[0]?.getAttribute("aria-haspopup")).toBe("dialog")
+    act(() => triggers[0]!.click())
+    expect(intents).toEqual([{ type: "settings-open" }])
+    expect(handle.container.querySelector('[role="menu"]')).toBeNull()
+  } finally { handle.unmount() }
 })

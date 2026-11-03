@@ -58,7 +58,7 @@ describe("FileTree 类型图标渲染", () => {
     const tree: WorkspaceTreeState = { status: "ready", rows, selectedPath, limited: false }
     const intents: WebIntent[] = []
     return render(
-      <FileTree snapshot={makeSnapshot({ workspaceTree: tree, workspaceSidebar: { threadRatio: 0.38, selectedPath, widthPx: 280 } })} dispatch={intent => intents.push(intent)} />,
+      <FileTree snapshot={makeSnapshot({ workspaceTree: tree, workspaceSidebar: { selectedPath, widthPx: 280 } })} dispatch={intent => intents.push(intent)} />,
     )
   }
 

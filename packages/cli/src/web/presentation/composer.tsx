@@ -368,7 +368,7 @@ export function Composer(props: {
                         className="composer-menu-option composer-menu-manage"
                         onClick={() => {
                           setModelMenuOpen(false)
-                          dispatch({ type: "dock-open", panel: "models" })
+                          dispatch({ type: "settings-open", panel: "models" })
                         }}
                       >
                         管理模型…
@@ -707,6 +707,7 @@ function placeholderFor(snapshot: WebAdapterSnapshot, activeRun: boolean): strin
 }
 
 function disabledReason(snapshot: WebAdapterSnapshot, propDisabled: boolean): string {
+  if (snapshot.interactive.git.busy) return "Git 操作进行中，请稍候"
   if (propDisabled) return "接管尚未完成，请稍候"
   if (snapshot.leaving) return "正在归还控制权"
   if (snapshot.interactive.activity.kind === "compacting") return "上下文压缩中，请稍候"

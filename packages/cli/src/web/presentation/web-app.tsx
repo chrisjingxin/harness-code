@@ -1,14 +1,19 @@
 /** Web React 工作台：组合桌面三栏布局与可访问性，不拥有 Agent 或命令业务状态。 */
 /** @jsxImportSource react */
 
-import { CircleDot, Ellipsis, Moon, Sun, Terminal, X } from "lucide-react"
+import { Ellipsis, FolderOpen, GitCompareArrows, Moon, PanelRight, Sun, Terminal, X } from "lucide-react"
 import { useCallback, useEffect, useRef } from "react"
 import { useSyncExternalStore } from "react"
 import { selectWorkItemView } from "../../interactive/selectors"
 import type { WebInteractiveAdapter, WebAdapterSnapshot, WebIntent, WebTheme } from "../application/adapter"
+import { workspaceLabel } from "../../interactive/runtime"
+import { threadDisplayTitle } from "../../presentation-shared/thread-title"
+import { activityLabel } from "../../presentation-shared/timeline-presenter"
 import { HarnessBrandLogo } from "./brand-logo"
+import { WorkbenchViews } from "./workbench-views"
 import { Composer } from "./composer"
 import { ContextDock } from "./context-dock/context-dock"
+import { SettingsDialog } from "./settings-dialog"
 import { DialogHost } from "./dialog"
 import { RuntimeOverlays } from "./runtime-overlays"
 import { InteractionForm } from "./interaction-form"
@@ -32,11 +37,14 @@ export function WebApp(props: {
     (intent: WebIntent) => props.adapter.dispatch(intent),
     [props.adapter],
   )
+  const showingTrace = snapshot.viewMode === "trace"
+  const dockVisible = snapshot.contextDock.open && !showingTrace
   const interactive = snapshot.interactive
   const connectionReadOnly = interactive.connection.status !== "open"
-  const readOnly = !props.active || snapshot.leaving || connectionReadOnly
-  const returnBlocked = Boolean(interactive.activeRun || interactive.interaction)
+  const readOnly = !props.active || snapshot.leaving || connectionReadOnly || interactive.git.busy
+  const returnBlocked = Boolean(interactive.activeRun || interactive.interaction || interactive.git.busy)
   const workItemView = selectWorkItemView(interactive)
+  const currentThread = interactive.catalogs.threads.items.find(thread => thread.thread_id === interactive.currentThreadId)
 
   const overflowTriggerRef = useRef<HTMLButtonElement | null>(null)
   const headerMenuRef = useRef<HTMLDivElement | null>(null)
@@ -46,11 +54,11 @@ export function WebApp(props: {
   useEffect(() => {
     if (snapshot.headerMenuOpen) {
       headerMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
-    } else if (wasHeaderMenuOpenRef.current) {
+    } else if (wasHeaderMenuOpenRef.current && !snapshot.settings.open) {
       overflowTriggerRef.current?.focus()
     }
     wasHeaderMenuOpenRef.current = snapshot.headerMenuOpen
-  }, [snapshot.headerMenuOpen])
+  }, [snapshot.headerMenuOpen, snapshot.settings.open])
 
   // 点击菜单外任意位置关闭 header menu。
   useEffect(() => {
@@ -83,13 +91,13 @@ export function WebApp(props: {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
-        if (!readOnly) onIntent({ type: "command-menu-open" })
+        if (!readOnly && !snapshot.settings.open) onIntent({ type: "command-menu-open" })
         return
       }
       if (event.key !== "Escape") return
       // Composer rail 下拉等内层浮层已 preventDefault 并自行关闭，这里不重复处理。
       if (event.defaultPrevented) return
-      // Escape 关闭顺序：确认 Dialog → BTW/查看浮层 → 命令菜单 → header overflow 菜单 → Context Dock → 执行中提示中断。
+      // Escape 关闭顺序：确认 Dialog → BTW/查看浮层 → 设置 → 命令菜单 → header overflow 菜单 → Context Dock → 执行中提示中断。
       if (interactive.confirmation) {
         // DialogHost 自己注册了 Escape handler；这里不再重复派发一次 resolve。
         return
@@ -99,13 +107,16 @@ export function WebApp(props: {
       } else if (snapshot.inspectOverlay.visible) {
         event.preventDefault()
         onIntent({ type: "inspect-overlay-close" })
+      } else if (snapshot.settings.open) {
+        event.preventDefault()
+        onIntent({ type: "settings-close" })
       } else if (snapshot.commandMenuOpen) {
         event.preventDefault()
         onIntent({ type: "command-menu-close" })
       } else if (snapshot.headerMenuOpen) {
         event.preventDefault()
         onIntent({ type: "header-menu-toggle", open: false })
-      } else if (snapshot.contextDock.open) {
+      } else if (dockVisible) {
         event.preventDefault()
         onIntent({ type: "dock-close" })
       } else if (!readOnly && interactive.activeRun) {
@@ -115,7 +126,7 @@ export function WebApp(props: {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [interactive.activeRun, interactive.confirmation, onIntent, readOnly, snapshot.btw.visible, snapshot.commandMenuOpen, snapshot.contextDock.open, snapshot.headerMenuOpen, snapshot.inspectOverlay.visible])
+  }, [interactive.activeRun, interactive.confirmation, onIntent, readOnly, snapshot.btw.visible, snapshot.commandMenuOpen, dockVisible, snapshot.headerMenuOpen, snapshot.inspectOverlay.visible, snapshot.settings.open])
 
   return (
     <div
@@ -127,72 +138,88 @@ export function WebApp(props: {
         "--dock-width": `${snapshot.contextDock.widthPx}px`,
       } as React.CSSProperties}
     >
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true"><HarnessBrandLogo /></span>
-          <span className="brand-copy">
-            <span className="brand-name">Harness Code</span>
-            <span className="brand-version">{interactive.runtime.cliVersion}</span>
-          </span>
-          <span className="brand-online"><CircleDot aria-hidden="true" size={11} />在线</span>
-        </div>
-        <div className="topbar-main">
-          {/* 顶栏中段不放控件：工作区标识已迁入侧栏文件分区标题，模型/审批下沉 Composer rail。 */}
-          <div className="topbar-actions">
-            <button type="button" className="button return-button" disabled={!props.active || snapshot.leaving || returnBlocked} title={returnBlocked ? "当前任务结束或交互完成后可返回 TUI" : "归还控制权并恢复 TUI"} onClick={() => { onIntent({ type: "return-to-tui" }) }}><Terminal aria-hidden="true" size={15} />返回 TUI</button>
-            {/* 主题切换提到顶栏：单图标按钮表达下一动作（light 显示 Moon/切深色，dark 显示 Sun/切浅色），不再占用菜单项。 */}
-            <button
-              type="button"
-              className="icon-button theme-toggle"
-              aria-label={snapshot.theme === "light" ? "切换到深色主题" : "切换到浅色主题"}
-              title={snapshot.theme === "light" ? "切换到深色主题" : "切换到浅色主题"}
-              onClick={() => { onIntent({ type: "theme-set", theme: nextTheme(snapshot.theme) }) }}
-            >
-              {snapshot.theme === "light" ? <Moon aria-hidden="true" size={16} /> : <Sun aria-hidden="true" size={16} />}
-            </button>
-            <button
-              type="button"
-              ref={overflowTriggerRef}
-              className="icon-button overflow-trigger"
-              aria-label="更多操作"
-              aria-haspopup="menu"
-              aria-expanded={snapshot.headerMenuOpen}
-              onClick={() => { onIntent({ type: "header-menu-toggle", open: !snapshot.headerMenuOpen }) }}
-            >
-              <Ellipsis aria-hidden="true" size={16} />
-            </button>
-            {snapshot.headerMenuOpen ? (
-              <div ref={headerMenuRef} className="header-menu" role="menu" aria-label="更多操作" onKeyDown={handleHeaderMenuKeyDown}>
-                <button type="button" role="menuitem" className="header-menu-item" onClick={() => { onIntent({ type: "dock-open", panel: "help" }) }}>帮助</button>
-                <button type="button" role="menuitem" className="header-menu-item" disabled={!props.active || snapshot.leaving} onClick={() => { onIntent({ type: "exit-harness" }) }}>退出 Harness</button>
-              </div>
-            ) : null}
+      <div className="workbench-content" inert={snapshot.settings.open} aria-hidden={snapshot.settings.open || undefined}>
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true"><HarnessBrandLogo /></span>
+            <span className="brand-copy">
+              <span className="brand-name">Harness Code</span>
+              <span className="brand-version">{interactive.runtime.cliVersion}</span>
+            </span>
           </div>
-        </div>
-      </header>
+          <div className="topbar-main">
+            <div className="topbar-project" title={interactive.runtime.workspace}>
+              <FolderOpen size={16} aria-hidden="true" /><span className="topbar-project-name">{workspaceLabel(interactive.runtime.workspace)}</span><span>/</span><span>工作台</span>
+            </div>
+            <div className="topbar-actions">
+              <button type="button" className="button return-button" disabled={!props.active || snapshot.leaving || returnBlocked} title={returnBlocked ? "当前任务结束或交互完成后可返回 TUI" : "归还控制权并恢复 TUI"} onClick={() => { onIntent({ type: "return-to-tui" }) }}><Terminal aria-hidden="true" size={15} />返回 TUI</button>
+              {/* 主题切换提到顶栏：单图标按钮表达下一动作（light 显示 Moon/切深色，dark 显示 Sun/切浅色），不再占用菜单项。 */}
+              <button
+                type="button"
+                className="icon-button theme-toggle"
+                aria-label={snapshot.theme === "light" ? "切换到深色主题" : "切换到浅色主题"}
+                title={snapshot.theme === "light" ? "切换到深色主题" : "切换到浅色主题"}
+                onClick={() => { onIntent({ type: "theme-set", theme: nextTheme(snapshot.theme) }) }}
+              >
+                {snapshot.theme === "light" ? <Moon aria-hidden="true" size={16} /> : <Sun aria-hidden="true" size={16} />}
+              </button>
+              <button type="button" className="icon-button dock-toggle" hidden={showingTrace} disabled={readOnly}
+                aria-label={snapshot.contextDock.open ? "收起右侧面板" : "展开右侧面板"}
+                aria-expanded={snapshot.contextDock.open}
+                onClick={() => onIntent(snapshot.contextDock.open ? { type: "dock-close" } : { type: "dock-open", panel: snapshot.contextDock.activePanel })}>
+                <PanelRight aria-hidden="true" size={16} />
+              </button>
+              <button
+                type="button"
+                ref={overflowTriggerRef}
+                className="icon-button overflow-trigger"
+                aria-label="更多操作"
+                aria-haspopup="menu"
+                aria-expanded={snapshot.headerMenuOpen}
+                onClick={() => { onIntent({ type: "header-menu-toggle", open: !snapshot.headerMenuOpen }) }}
+              >
+                <Ellipsis aria-hidden="true" size={16} />
+              </button>
+              {snapshot.headerMenuOpen ? (
+                <div ref={headerMenuRef} className="header-menu" role="menu" aria-label="更多操作" onKeyDown={handleHeaderMenuKeyDown}>
+                  <button type="button" role="menuitem" className="header-menu-item" onClick={() => { onIntent({ type: "settings-open", panel: "help" }) }}>帮助</button>
+                  <button type="button" role="menuitem" className="header-menu-item" disabled={!props.active || snapshot.leaving} onClick={() => { onIntent({ type: "exit-harness" }) }}>退出 Harness</button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
 
-      {snapshot.transientNotice ? <div className="notice-banner" role="status"><span>{snapshot.transientNotice}</span><button type="button" className="icon-button" aria-label="关闭通知" title="关闭通知" onClick={() => { onIntent({ type: "notice-dismiss" }) }}><X aria-hidden="true" size={14} /></button></div> : null}
-      {interactive.connection.status !== "open" ? <div className="connection-banner" role="alert">{interactive.connection.message}</div> : null}
-      {!props.active ? <div className="handoff-banner" role="status">浏览器正在等待 CLI 确认控制权，页面保持只读。</div> : null}
+        {snapshot.transientNotice ? <div className="notice-banner" role="status"><span>{snapshot.transientNotice}</span><button type="button" className="icon-button" aria-label="关闭通知" title="关闭通知" onClick={() => { onIntent({ type: "notice-dismiss" }) }}><X aria-hidden="true" size={14} /></button></div> : null}
+        {interactive.connection.status !== "open" ? <div className="connection-banner" role="alert">{interactive.connection.message}</div> : null}
+        {!props.active ? <div className="handoff-banner" role="status">浏览器正在等待 CLI 确认控制权，页面保持只读。</div> : null}
 
-      <div className={`desktop-workspace${snapshot.contextDock.open ? " has-context-dock" : ""}`}>
-        <WorkspaceSidebar snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
-        <main className="conversation-column">
-          <WorkItemBanner view={workItemView} />
-          <GoalBanner interactive={interactive} />
-          <div className="timeline-scroll">
-            <Timeline snapshot={snapshot} dispatch={onIntent} />
-          </div>
-          {/* Interaction 卡固定在 composer 上方；无待处理请求时渲染空占位。 */}
-          <div className="interaction-dock">
-            <InteractionForm snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
-          </div>
-          <Composer snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
-        </main>
-        {/* Context Dock 常驻渲染：关闭时 inert + aria-hidden + CSS visibility 隐藏，开关才有平移过渡的载体。 */}
-        <ContextDock snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
+        <div className={`desktop-workspace${dockVisible ? " has-context-dock" : ""}${showingTrace ? " is-trace-view" : ""}`}>
+          <WorkspaceSidebar snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
+          <main className="conversation-column">
+            <header className="conversation-heading">
+              <div className="conversation-heading-copy"><h1>{currentThread ? threadDisplayTitle(currentThread) : "新对话"}</h1><span>{interactive.workMode === "compose" ? "Compose" : "Build"} · {interactive.runtime.executionMode === "local" ? "本地工作区" : "远端沙箱"}</span></div>
+              <div className="conversation-heading-actions"><span className="conversation-run-status" role="status"><span className={`status-dot status-dot-${interactive.activity.kind}`} />{activityLabel(interactive.activity.kind)}</span><button type="button" className="icon-button" aria-label="查看文件变更" disabled={readOnly} onClick={() => onIntent({ type: "dock-open", panel: "changes" })}><GitCompareArrows size={16} aria-hidden="true" /></button></div>
+            </header>
+            <WorkbenchViews snapshot={snapshot} dispatch={onIntent} disabled={!props.active || snapshot.leaving}>
+            <WorkItemBanner view={workItemView} />
+            <GoalBanner interactive={interactive} />
+            <div className="timeline-scroll">
+              <Timeline snapshot={snapshot} dispatch={onIntent} />
+            </div>
+            {/* Interaction 卡固定在 composer 上方；无待处理请求时渲染空占位。 */}
+            <div className="interaction-dock">
+              <InteractionForm snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
+            </div>
+            <Composer snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
+            </WorkbenchViews>
+          </main>
+          {/* Context Dock 常驻渲染：关闭时 inert + aria-hidden + CSS visibility 隐藏，开关才有平移过渡的载体。 */}
+          <ContextDock snapshot={snapshot} dispatch={onIntent} disabled={readOnly} hidden={showingTrace} />
+        </div>
+
       </div>
-
+      <SettingsDialog snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
       <DialogHost snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
       <RuntimeOverlays snapshot={snapshot} dispatch={onIntent} />
     </div>

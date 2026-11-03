@@ -1,3 +1,4 @@
+import type { WorkspaceGit, WorkspaceGitView } from "./ports/workspace-git"
 /** Interactive Core 的共享契约：intent、result、snapshot、catalog 与 Interaction DTO。 */
 
 import type {
@@ -187,6 +188,10 @@ export type IntentOutcome =
 
 /** 表现层唯一的输入入口；不携带选中行、DOM event 或 OpenTUI key。 */
 export type InteractiveIntent =
+  | { type: "git.refresh" }
+  | { type: "git.diff"; snapshot: string; path: string }
+  | { type: "git.commit"; snapshot: string; paths: readonly string[]; message: string; push: boolean }
+  | { type: "git.push"; snapshot: string; head: string }
   | { type: "input.submit"; value: string; mode?: "build" | "compose" | "direct_shell" }
   | { type: "command.execute"; commandId: string; argument?: string }
   | { type: "run.cancel" }
@@ -212,6 +217,7 @@ export type InteractiveIntent =
 
 /** 两个 adapter 都需要的领域事实；不包含终端尺寸、DOM、颜色或组件状态。 */
 export type InteractiveSnapshot = {
+  readonly git: WorkspaceGitView
   readonly currentThreadId: string | null
   readonly activity: InteractiveActivity
   readonly activeRun: ActiveRun | null
@@ -272,6 +278,7 @@ export interface InteractiveController {
 /** 创建 InteractiveController 的依赖与一次性恢复输入。 */
 export type InteractiveControllerOptions = {
   gateway: AgentGateway
+  workspaceGit?: WorkspaceGit
   baseRuntime?: InteractiveRuntime
   /** 缺省表示不做启动恢复；显式 null 进入空首页；字符串调用 canonical threads.open。 */
   initialThreadId?: string | null

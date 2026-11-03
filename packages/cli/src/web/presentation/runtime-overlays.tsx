@@ -1,6 +1,7 @@
 /** 执行中 BTW 旁路面板与 Goal/Plan 查看浮层。 */
 /** @jsxImportSource react */
 
+import { useEffect, useRef } from "react"
 import { Copy, X } from "lucide-react"
 
 import type { WebAdapterSnapshot, WebIntent } from "../application/adapter"
@@ -13,10 +14,33 @@ export function RuntimeOverlays(props: {
 }): React.ReactNode {
   const { snapshot, dispatch } = props
   const { btw, inspectOverlay } = snapshot
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const suspended = Boolean(snapshot.interactive.confirmation)
+  useEffect(() => {
+    if ((!btw.visible && !inspectOverlay.visible) || suspended) return
+    const previous = document.activeElement as HTMLElement | null
+    overlayRef.current?.querySelector<HTMLButtonElement>("button")?.focus()
+    return () => {
+      if (previous?.isConnected && !previous.closest("[inert]")) previous.focus()
+    }
+  }, [btw.visible, inspectOverlay.visible, suspended])
+
   if (!btw.visible && !inspectOverlay.visible) return null
 
   return (
-    <>
+    <div ref={overlayRef} inert={suspended} aria-hidden={suspended || undefined} onKeyDown={event => {
+      if (event.key !== "Tab" || suspended) return
+      const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]'))
+      const first = controls[0]
+      const last = controls.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }}>
       {btw.visible ? (
         <div className="dialog-overlay runtime-overlay" role="dialog" aria-label="BTW 临时问答">
           <div className="dialog runtime-overlay-panel">
@@ -57,6 +81,6 @@ export function RuntimeOverlays(props: {
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

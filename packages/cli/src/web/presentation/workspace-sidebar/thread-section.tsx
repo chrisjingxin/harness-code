@@ -34,7 +34,7 @@ export function ThreadSection({
           <input
             type="search"
             value={query}
-            placeholder="搜索线程..."
+            placeholder="搜索对话"
             aria-label="搜索 Thread"
             onChange={event => setQuery(event.currentTarget.value)}
             disabled={disabled}
@@ -100,11 +100,13 @@ function ThreadList({
   }
   return (
     <ul className="sidebar-list" role="list">
-      {items.map(item => {
+      {items.map((item, index) => {
         const isActive = item.thread_id === currentThreadId
         const itemDisabled = disabled || (busy && !isActive)
         return (
           <li key={item.thread_id}>
+            {index === 0 || threadGroup(items[index - 1]!.updated_at_ms) !== threadGroup(item.updated_at_ms)
+              ? <div className="thread-group-label">{threadGroup(item.updated_at_ms)}</div> : null}
             <button
               type="button"
               className="thread-item"
@@ -116,7 +118,7 @@ function ThreadList({
               onClick={() => dispatch({ type: "thread-select", threadId: item.thread_id })}
             >
               <span className="thread-item-icon" aria-hidden="true">
-                <MessageCircle size={15} strokeWidth={1.8} />
+                <MessageCircle size={14} strokeWidth={1.5} />
               </span>
               <span className="thread-item-title">{threadDisplayTitle(item)}</span>
               <span className="thread-item-summary">{threadSubtitle(item, currentThreadId, busy, interaction)}</span>
@@ -165,4 +167,11 @@ function formatUpdated(updatedAtMs: number): string {
   if (dayDelta > 1 && dayDelta < 7) return `${dayDelta} 天前`
   if (dayDelta >= 7 && dayDelta < 14) return "1 周前"
   return updated.toLocaleDateString([], { month: "numeric", day: "numeric" })
+}
+
+/** 按本地日历日分组，避免夏令时导致一天不是 24 小时。 */
+function threadGroup(timestamp: number): string {
+  const now = new Date(), day = new Date(timestamp)
+  const delta = (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(day.getFullYear(), day.getMonth(), day.getDate())) / 86400000
+  return delta <= 0 ? "今天" : delta === 1 ? "昨天" : delta < 7 ? "最近七天" : "更早"
 }

@@ -1259,3 +1259,21 @@ test("task 派出卡展开后展示进入子时间线按钮并可点击", () => 
     handle.unmount()
   }
 })
+
+
+test("轨迹隐藏聊天时流式消息不覆盖原滚动位置", () => {
+  let update: ((mode: "chat" | "trace") => void) | undefined
+  function Host() {
+    const [snapshot, setSnapshot] = useState(makeSnapshot())
+    update = mode => setSnapshot(previous => makeSnapshot({ viewMode: mode, interactive: makeInteractive({ timeline: [...previous.interactive.timeline, message({ id: String(previous.interactive.timeline.length), role: "assistant", content: "新增" })] }) }))
+    return <div className="timeline-scroll"><Timeline snapshot={snapshot} dispatch={() => {}} /></div>
+  }
+  const handle = render(<Host />)
+  try {
+    const scroller = handle.container.querySelector<HTMLElement>(".timeline-scroll")!
+    Object.defineProperty(scroller, "scrollHeight", { value: 0, configurable: true })
+    scroller.scrollTop = 123
+    act(() => update?.("trace"))
+    expect(scroller.scrollTop).toBe(123)
+  } finally { handle.unmount() }
+})

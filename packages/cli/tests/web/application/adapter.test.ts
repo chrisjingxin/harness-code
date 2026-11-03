@@ -9,7 +9,6 @@ import {
   createDefaultFrameScheduler,
   createWebInteractiveAdapter,
   toolKey,
-  type ContextDockPanel,
   type WebAdapterSnapshot,
   type WebFrameScheduler,
   type WebIntent,
@@ -98,6 +97,9 @@ function createFakeClient(initial = makeInteractive()): WebUiClient & {
     returnCalls: 0,
     exitCalls: 0,
     closed: false,
+    getLiveTrace: () => [],
+    subscribeTrace: () => () => {},
+    loadThreadTrace: async () => ({ spans: [], hasAnyTrace: false, error: null }),
     getState() {
       return this.state
     },
@@ -153,6 +155,7 @@ function createFakeClient(initial = makeInteractive()): WebUiClient & {
     getSnapshotFromState(): InteractiveSnapshot {
       const view = this.state
       return {
+        git: view.runtime.git,
         currentThreadId: view.conversation.currentThreadId,
         activity: view.conversation.activity,
         activeRun: view.conversation.activeRun,
@@ -215,8 +218,8 @@ test("初始 snapshot：interactive 由五个分片重组，workspace 分片来�
   const snapshot = adapter.getSnapshot()
   expect(snapshot.interactive.currentThreadId).toBe("t-1")
   expect(snapshot.workspaceTree.status).toBe("idle")
-  expect(snapshot.workspaceSidebar).toEqual({ threadRatio: 0.45, threadRatioCustomized: false, selectedPath: null, widthPx: 296 })
-  expect(snapshot.contextDock).toMatchObject({ open: false, activePanel: "code", widthPx: 354 })
+  expect(snapshot.workspaceSidebar).toEqual({ selectedPath: null, widthPx: 280 })
+  expect(snapshot.contextDock).toMatchObject({ open: true, activePanel: "code", widthPx: 340 })
   expect(snapshot.contextDock.code).toEqual({ tabs: [], activePath: null, previews: {}, previewErrors: {} })
   expect(snapshot.expandedTools).toBeInstanceOf(Set)
 })
@@ -326,8 +329,8 @@ test("inspect-overlay 打开查看浮层；审批到来时关闭 BTW/查看/Stat
   await adapter.dispatch({ type: "draft-change", value: "/btw 旁路" })
   await adapter.dispatch({ type: "submit" })
   expect(adapter.getSnapshot().btw.status).toBe("error")
-  await adapter.dispatch({ type: "dock-open", panel: "status" })
-  expect(adapter.getSnapshot().contextDock.open).toBe(true)
+  await adapter.dispatch({ type: "settings-open", panel: "status" })
+  expect(adapter.getSnapshot().settings.open).toBe(true)
 
   client.pushInteractive(snapshot => ({
     ...snapshot,
@@ -335,7 +338,7 @@ test("inspect-overlay 打开查看浮层；审批到来时关闭 BTW/查看/Stat
   }))
   expect(adapter.getSnapshot().inspectOverlay.visible).toBe(false)
   expect(adapter.getSnapshot().btw.visible).toBe(false)
-  expect(adapter.getSnapshot().contextDock.open).toBe(false)
+  expect(adapter.getSnapshot().settings.open).toBe(false)
 })
 
 test("slash input、`//`、未知命令都只转交 client，不在 adapter 解释", async () => {
@@ -458,19 +461,20 @@ test("Web 空查询逐层进入目录、返回上级，最终只回填文件", a
   expect(adapter.getSnapshot().mentionMenu.visible).toBe(false)
 })
 
-// ---- Context Dock 基础 ------------------------------------------------------
+// ---- Context Dock 与设置基础 ------------------------------------------------------
 
-test("dock-open：打开并切到指定面板；models 触发 catalog.refresh", async () => {
+test("settings-open：打开并切到指定面板；models 触发 catalog.refresh", async () => {
   const { adapter, client } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "models" })
+  await adapter.dispatch({ type: "settings-open", panel: "models" })
   const snapshot = adapter.getSnapshot()
-  expect(snapshot.contextDock.open).toBe(true)
-  expect(snapshot.contextDock.activePanel).toBe("models")
+  expect(snapshot.settings.open).toBe(true)
+  expect(snapshot.settings.activePanel).toBe("models")
   expect(client.intents.some(intent => intent.type === "catalog.refresh" && intent.catalog === "models")).toBe(true)
 })
 
 test("models-catalog-refresh：仅刷新 models 目录，不改变 Dock 开合与当前面板", async () => {
   const { adapter, client } = makeAdapter()
+  await adapter.dispatch({ type: "dock-close" })
   await adapter.dispatch({ type: "models-catalog-refresh" })
   expect(client.intents).toContainEqual({ type: "catalog.refresh", catalog: "models" })
   const snapshot = adapter.getSnapshot()
@@ -478,27 +482,27 @@ test("models-catalog-refresh：仅刷新 models 目录，不改变 Dock 开合�
   expect(snapshot.contextDock.activePanel).toBe("code")
 })
 
-test("dock-panel-select：已开时仅切面板；skills/mcp 触发 catalog.refresh，code/status/help 不触发", async () => {
+test("面板刷新：设置分类按需刷新，文件/状态/帮助不触发目录刷新", async () => {
   const { adapter, client } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "status" })
+  await adapter.dispatch({ type: "settings-open", panel: "status" })
   const before = client.intents.length
   await adapter.dispatch({ type: "dock-panel-select", panel: "code" })
-  await adapter.dispatch({ type: "dock-panel-select", panel: "status" })
-  await adapter.dispatch({ type: "dock-panel-select", panel: "help" })
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("help")
+  await adapter.dispatch({ type: "settings-panel-select", panel: "status" })
+  await adapter.dispatch({ type: "settings-panel-select", panel: "help" })
+  expect(adapter.getSnapshot().settings.activePanel).toBe("help")
   expect(client.intents.length).toBe(before) // code/status/help 无 catalog.refresh
-  await adapter.dispatch({ type: "dock-panel-select", panel: "mcp" })
+  await adapter.dispatch({ type: "settings-panel-select", panel: "mcp" })
   expect(client.intents.at(-1)).toEqual({ type: "catalog.refresh", catalog: "mcp" })
 })
 
-test("dock-close：关闭但保留 activePanel，重新打开恢复上次面板", async () => {
+test("settings-close：关闭但保留 activePanel，重新打开恢复上次面板", async () => {
   const { adapter } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "skills" })
-  await adapter.dispatch({ type: "dock-close" })
-  expect(adapter.getSnapshot().contextDock.open).toBe(false)
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("skills")
-  await adapter.dispatch({ type: "dock-open", panel: "code" })
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("code")
+  await adapter.dispatch({ type: "settings-open", panel: "skills" })
+  await adapter.dispatch({ type: "settings-close" })
+  expect(adapter.getSnapshot().settings.open).toBe(false)
+  expect(adapter.getSnapshot().settings.activePanel).toBe("skills")
+  await adapter.dispatch({ type: "settings-open" })
+  expect(adapter.getSnapshot().settings.activePanel).toBe("skills")
 })
 
 test("dock-width-change：夹取 330-760", async () => {
@@ -511,18 +515,6 @@ test("dock-width-change：夹取 330-760", async () => {
   expect(adapter.getSnapshot().contextDock.widthPx).toBe(600)
 })
 
-test("sidebar-thread-ratio-change：夹取比例并写入 workspaceSidebar", async () => {
-  const { adapter } = makeAdapter()
-  expect(adapter.getSnapshot().workspaceSidebar.threadRatioCustomized).toBe(false)
-  await adapter.dispatch({ type: "sidebar-thread-ratio-change", ratio: 0.99 })
-  expect(adapter.getSnapshot().workspaceSidebar.threadRatio).toBe(0.8)
-  // 拖动过分隔条后标记 customized：分区从内容自适应切到显式比例固定高度。
-  expect(adapter.getSnapshot().workspaceSidebar.threadRatioCustomized).toBe(true)
-  await adapter.dispatch({ type: "sidebar-thread-ratio-change", ratio: 0.01 })
-  expect(adapter.getSnapshot().workspaceSidebar.threadRatio).toBe(0.2)
-  await adapter.dispatch({ type: "sidebar-thread-ratio-change", ratio: 0.5 })
-  expect(adapter.getSnapshot().workspaceSidebar.threadRatio).toBe(0.5)
-})
 
 test("sidebar-width-change：夹取 220-480 并写入 workspaceSidebar.widthPx", async () => {
   const { adapter } = makeAdapter()
@@ -535,23 +527,23 @@ test("sidebar-width-change：夹取 220-480 并写入 workspaceSidebar.widthPx",
 })
 
 test("dock-width-change：按视口动态夹取，保证内容列 ≥480px", async () => {
-  // 1280 − 296（默认侧栏）− 2×16（间距）− 480（内容列下限）= 472
+  // 1280 − 280（默认侧栏）− 2×16（间距）− 480（内容列下限）= 488
   const { adapter } = makeAdapter(createFakeClient(), createManualScheduler(), createManualTimer(), 1280)
   await adapter.dispatch({ type: "dock-width-change", widthPx: 9999 })
-  expect(adapter.getSnapshot().contextDock.widthPx).toBe(472)
+  expect(adapter.getSnapshot().contextDock.widthPx).toBe(488)
   await adapter.dispatch({ type: "dock-width-change", widthPx: 400 })
   expect(adapter.getSnapshot().contextDock.widthPx).toBe(400)
 })
 
 test("sidebar-width-change：按视口动态夹取，无论 Dock 开关都预留 Dock 当前宽度", async () => {
-  // Dock 默认关闭也要预留：1280 − 354（默认 Dock）− 2×16 − 480 = 414
+  // Dock 默认关闭也要预留：1280 − 340（默认 Dock）− 2×16 − 480 = 428
   const { adapter } = makeAdapter(createFakeClient(), createManualScheduler(), createManualTimer(), 1280)
   await adapter.dispatch({ type: "sidebar-width-change", widthPx: 9999 })
-  expect(adapter.getSnapshot().workspaceSidebar.widthPx).toBe(414)
+  expect(adapter.getSnapshot().workspaceSidebar.widthPx).toBe(428)
 })
 
 test("拖拽动态夹取：视口过窄算出的上限低于静态最小值时退回最小值", async () => {
-  // 900 − 296 − 32 − 480 = 92 < 330 → 退回 DOCK_WIDTH_MIN，窄窗下不再保证内容列下限（与现状一致）
+  // 900 − 280 − 32 − 480 = 108 < 330 → 退回 DOCK_WIDTH_MIN，窄窗下不再保证内容列下限（与现状一致）
   const { adapter } = makeAdapter(createFakeClient(), createManualScheduler(), createManualTimer(), 900)
   await adapter.dispatch({ type: "dock-width-change", widthPx: 500 })
   expect(adapter.getSnapshot().contextDock.widthPx).toBe(330)
@@ -728,30 +720,30 @@ test("workspace-refresh / workspace-preview-refresh：直接转发 workspace int
 
 // ---- 交互与生命周期 ----------------------------------------------------------
 
-test("present result：agents → dock-open agents 面板", async () => {
+test("present result：agents → settings-open agents 面板", async () => {
   const { adapter, client } = makeAdapter()
   client.nextOutcome = { status: "accepted", effects: [{ type: "present", target: "agents" }] }
   await adapter.dispatch({ type: "draft-change", value: "/agents" })
   await adapter.dispatch({ type: "submit" })
-  expect(adapter.getSnapshot().contextDock.open).toBe(true)
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("agents")
+  expect(adapter.getSnapshot().settings.open).toBe(true)
+  expect(adapter.getSnapshot().settings.activePanel).toBe("agents")
   expect(client.intents.some(intent => intent.type === "catalog.refresh" && intent.catalog === "agents")).toBe(true)
 })
 
-test("present result：models/skills → dock-open；threads 忽略", async () => {
+test("present result：models/skills → settings-open；threads 忽略", async () => {
   const { adapter, client } = makeAdapter()
   client.nextOutcome = { status: "accepted", effects: [{ type: "present", target: "models" }] }
   await adapter.dispatch({ type: "draft-change", value: "/models" })
   await adapter.dispatch({ type: "submit" })
-  expect(adapter.getSnapshot().contextDock.open).toBe(true)
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("models")
+  expect(adapter.getSnapshot().settings.open).toBe(true)
+  expect(adapter.getSnapshot().settings.activePanel).toBe("models")
   expect(client.intents.some(intent => intent.type === "catalog.refresh" && intent.catalog === "models")).toBe(true)
 
   client.nextOutcome = { status: "accepted", effects: [{ type: "present", target: "threads" }] }
   await adapter.dispatch({ type: "draft-change", value: "/threads" })
   await adapter.dispatch({ type: "submit" })
   // threads 常驻左侧：不打开 Dock，也不触发 catalog.refresh
-  expect(adapter.getSnapshot().contextDock.activePanel).toBe("models")
+  expect(adapter.getSnapshot().settings.activePanel).toBe("models")
 })
 
 test("request-handoff result 只显示本地通知，不调用 client 任何方法", async () => {
@@ -823,25 +815,27 @@ test("Thread/Model/Skill/MCP click 意图只携带稳定 ID 或 typed input", as
   expect(client.intents[1]).toEqual({ type: "model.select", profileId: "p-1" })
 })
 
-test("model-select rejected 时保持 Dock 打开并显示错误；不关闭", async () => {
+test("model-select rejected 时保持设置打开并显示错误；不关闭", async () => {
   const { adapter, client } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "models" })
+  await adapter.dispatch({ type: "settings-open", panel: "models" })
   client.nextOutcome = { status: "rejected", code: "busy", message: "运行中不能切换模型" }
   await adapter.dispatch({ type: "model-select", profileId: "p-1" })
   const snapshot = adapter.getSnapshot()
-  expect(snapshot.contextDock.open).toBe(true)
-  expect(snapshot.contextDock.activePanel).toBe("models")
+  expect(snapshot.settings.open).toBe(true)
+  expect(snapshot.settings.activePanel).toBe("models")
   expect(snapshot.panelSearch.models.error).toBe("运行中不能切换模型")
   expect(snapshot.panelSearch.models.submitting).toBe(false)
 })
 
-test("model-select accepted 后关闭 Dock 并清除 submitting", async () => {
+test("model-select accepted 后关闭设置 并清除 submitting", async () => {
   const { adapter, client } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "models" })
+  await adapter.dispatch({ type: "settings-open", panel: "models" })
   client.nextOutcome = { status: "accepted" }
   await adapter.dispatch({ type: "model-select", profileId: "p-1" })
   const snapshot = adapter.getSnapshot()
-  expect(snapshot.contextDock.open).toBe(false)
+  expect(snapshot.settings.open).toBe(false)
+  expect(snapshot.contextDock.open).toBe(true)
+  expect(snapshot.contextDock.activePanel).toBe("code")
   expect(snapshot.panelSearch.models.submitting).toBe(false)
 })
 
@@ -915,7 +909,7 @@ test("skill-arm / skill-clear rejected 时显示 transient notice", async () => 
 
 test("mcp-add rejected 时在面板内显示错误", async () => {
   const { adapter, client } = makeAdapter()
-  await adapter.dispatch({ type: "dock-open", panel: "mcp" })
+  await adapter.dispatch({ type: "settings-open", panel: "mcp" })
   client.nextOutcome = { status: "rejected", code: "agent-error", message: "MCP 服务器连接失败" }
   await adapter.dispatch({ type: "mcp-add", input: { name: "mcp-1" } as never })
   expect(adapter.getSnapshot().panelSearch.mcp.error).toBe("MCP 服务器连接失败")
@@ -1094,7 +1088,7 @@ test("header menu 关闭规则：选择主题/打开 Help/返回 TUI/退出都�
   const { adapter } = makeAdapter()
   await adapter.dispatch({ type: "header-menu-toggle", open: true })
   expect(adapter.getSnapshot().headerMenuOpen).toBe(true)
-  await adapter.dispatch({ type: "dock-open", panel: "help" })
+  await adapter.dispatch({ type: "settings-open", panel: "help" })
   expect(adapter.getSnapshot().headerMenuOpen).toBe(false)
   await adapter.dispatch({ type: "header-menu-toggle", open: true })
   await adapter.dispatch({ type: "theme-set", theme: "dark" })
@@ -1168,5 +1162,52 @@ test("child-timeline-open 与 child-timeline-leave 透传给 client", async () =
 test("close 幂等：第二次 close 不抛错、不再调用 frameScheduler.cancel 之外的操作", async () => {
   const { adapter } = makeAdapter()
   await adapter.close()
+  await adapter.close()
+})
+
+
+test("设置独立开合并记住分类，不改变 Dock 或输入草稿", async () => {
+  const { adapter } = makeAdapter()
+  await adapter.dispatch({ type: "dock-open", panel: "changes" })
+  await adapter.dispatch({ type: "draft-change", value: "未发送的消息" })
+  const dock = adapter.getSnapshot().contextDock
+  await adapter.dispatch({ type: "settings-open" })
+  expect(adapter.getSnapshot().settings).toEqual({ open: true, activePanel: "models" })
+  await adapter.dispatch({ type: "settings-panel-select", panel: "skills" })
+  await adapter.dispatch({ type: "settings-close" })
+  expect(adapter.getSnapshot().settings).toEqual({ open: false, activePanel: "skills" })
+  await adapter.dispatch({ type: "settings-open" })
+  expect(adapter.getSnapshot().settings).toEqual({ open: true, activePanel: "skills" })
+  expect(adapter.getSnapshot().contextDock).toEqual(dock)
+  expect(adapter.getSnapshot().draft).toBe("未发送的消息")
+})
+
+test("Composer 快捷切换模型不关闭文件预览", async () => {
+  const { adapter, client } = makeAdapter()
+  await adapter.dispatch({ type: "workspace-file-open", path: "a.ts" })
+  const dock = adapter.getSnapshot().contextDock
+  client.nextOutcome = { status: "accepted" }
+  await adapter.dispatch({ type: "model-select", profileId: "p-1" })
+  expect(adapter.getSnapshot().contextDock).toEqual(dock)
+  expect(adapter.getSnapshot().settings.open).toBe(false)
+})
+
+
+test("Trace 入口懒加载且普通发布不重复；打开文件回到聊天而不清草稿", async () => {
+  const client = createFakeClient(makeInteractive({ currentThreadId: "t1" }))
+  const requests: string[] = []
+  client.loadThreadTrace = async id => { requests.push(id); return { spans: [], hasAnyTrace: false, error: null } }
+  const adapter = createWebInteractiveAdapter({ client })
+  expect(requests).toEqual([])
+  await adapter.dispatch({ type: "draft-change", value: "draft" })
+  await adapter.dispatch({ type: "view-mode-set", mode: "trace" })
+  expect(requests).toEqual(["t1"])
+  client.pushInteractive(value => ({ ...value, workMode: "compose" }))
+  expect(requests).toHaveLength(1)
+  client.pushInteractive(value => ({ ...value, currentThreadId: "t2" }))
+  expect(requests).toEqual(["t1", "t2"])
+  await adapter.dispatch({ type: "dock-open", panel: "code" })
+  expect(adapter.getSnapshot().viewMode).toBe("chat")
+  expect(adapter.getSnapshot().draft).toBe("draft")
   await adapter.close()
 })

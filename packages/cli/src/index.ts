@@ -36,6 +36,9 @@
  *             进入 OpenTUI 界面    执行一段对话并流式输出    直接请求并打印结果后退出
  *             支持随时切换到网页    打印完后优雅退出
  */
+
+import { createTraceRuntime, type TraceRuntime } from "./trace-log/runtime"
+import { createWorkspaceGit } from "./infrastructure/workspace-git"
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { once } from "node:events"
@@ -86,6 +89,7 @@ type RunningAgent = {
   client: AgentClient
   runtime: InteractiveRuntime
   log: DiagnosticLog
+  trace: TraceRuntime
   stop: () => Promise<void>
 }
 
@@ -263,9 +267,11 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
     await lifecycle.close()
     throw new Error("Unable to create agent stdio pipes")
   }
+  const trace = createTraceRuntime({ startedAtMs, onError: () => log.error("logging.writer_failed", { failure_stage: "trace.capture", error_type: "TraceCaptureError", summary_code: "trace_capture_stopped", retryable: false }) })
   const stderrDrain = new SidecarStderrDrain()
   child.stderr.on("data", chunk => {
     stderrDrain.push(chunk)
+    trace.push(chunk)
   })
   const client = new AgentClient(new StdioRpcTransport(child.stdin, child.stdout), log)
   child.on("exit", code => {
@@ -326,6 +332,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
       client,
       runtime,
       log,
+      trace,
       stop: async () => {
         if (stopped) return
         stopped = true
@@ -348,6 +355,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
           ])
         }
         if (child.exitCode === null && child.signalCode === null) child.kill()
+        await trace.close()
         await lifecycle.close()
       },
     }
@@ -359,6 +367,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
     })
     await client.close().catch(() => undefined)
     if (child.exitCode === null && child.signalCode === null) child.kill()
+    await trace.close()
     await lifecycle.close()
     throw error
   }
@@ -576,6 +585,7 @@ export async function execute(
       const gateway = new AgentClientGateway(agent.client)
       controller = createInteractiveController({
         gateway,
+        workspaceGit: createWorkspaceGit(command.cwd),
         baseRuntime: agent.runtime,
       })
       if (!command.nonInteractive) {
@@ -599,6 +609,8 @@ export async function execute(
           diagnostics: agent.log,
         })
         webUiGateway = createWebUiGateway({
+          traceHistory: agent.trace,
+          traceLive: agent.trace,
           coordinator: presentationCoordinator,
           controller,
           workspaceExplorer,
