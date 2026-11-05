@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -194,30 +195,99 @@ def main() -> int:
 async def _run(scenario: str, fds: ProtocolFds, grace: float) -> int:
     """按场景选服务实现；退出码由服务层决定。
 
-    `stub*` 用本文件的假 Agent（只测传输层），`host` 起真实 `AgentHost` + 真实
-    `run_acp_stdio`（测端到端链路，含 Host 的 Run 生命周期）。
+    `stub*` 用本文件的假 Agent（只测传输层）；`host` / `tools` / `commands` /
+    `approval` / `trust` / `history` 起真实 `AgentHost` + 真实 `run_acp_stdio`
+    （测端到端链路，含 Host 的 Run 生命周期）。
     """
     streams = await open_streams(fds)
-    if scenario == "host":
-        return await _run_host(streams, grace)
-    if scenario == "tools":
-        return await _run_host(streams, grace, scripted_tools=True)
+    if scenario in _HOST_SCENARIOS:
+        return await _run_host(streams, grace, scenario)
     return await serve_acp_streams(_StubAgent(scenario), streams, grace_seconds=grace)
 
 
-async def _run_host(streams: AcpStreams, grace: float, *, scripted_tools: bool = False) -> int:
-    """用真实 Host 跑一轮；不碰真实模型与用户目录。
+_HOST_SCENARIOS = frozenset({"host", "tools", "commands", "approval", "trust", "history"})
+"""用真实 Host 跑的场景名；其余走传输层 stub。"""
 
-    默认是 echo 模式（只有文字事件）。`scripted_tools=True` 时注入脚本化 Agent，
-    产出一次完整的工具调用（started → 参数 → completed）再回一段文字，用来让官方 SDK
-    客户端真的看到 tool_call / tool_call_update。
+TRUST_DIRECTORY = "/ext"
+"""目录信任场景里待信任的外部目录。"""
+
+TRUST_TARGET_PATH = "/ext/a.txt"
+"""触发目录信任的那次调用要访问的目标路径。"""
+
+TRUST_TOOL_NAME = "write_file"
+"""目录信任场景用的工具名。
+
+必须是**非并发安全**的工具：`ls` 这类只读工具会被 `is_concurrency_safe` 直接归入
+auto-approve 分支，整批 `unsafe_indices` 为空时连中断都不会发出，目录信任根本不会弹。
+真实 Agent 里有 `needs_user_decision` 把它拎回 unsafe，但脚本化 Agent 绕过那层，所以
+这里直接用写工具（它本来就“始终不安全”）。
+"""
+
+TRUST_TOOL_ARGS: dict[str, object] = {"file_path": TRUST_TARGET_PATH, "content": "x"}
+"""目录信任场景的工具参数（与预置 presentation 的指纹必须完全一致）。"""
+
+HISTORY_THREAD_ID = "history-seed"
+"""历史场景预置的线程 id（`session/list` 与 `session/load` 都用它）。"""
+
+
+def _trust_hook(host_holder: dict[str, Any]) -> Any:
+    """返回一个在中断前预置目录信任 presentation 的钩子。
+
+    【为什么要预置】注入 Agent 时审批预检拿不到 `RunContext`，真实 Agent 里生成
+    `directory_trust` presentation 的那段不会执行；`ls` 又是并发安全工具，Host 会直接
+    自动放行。所以只能手工往当前 Run 的 presentation 缓存里写一条，让串行审批走到
+    目录信任分支。
+    """
+
+    def prefetch() -> None:
+        runs = list(host_holder["host"]._run_coordinator._runs.values())
+        runs[0].approval_presentations.remember(
+            TRUST_TOOL_NAME,
+            TRUST_TOOL_ARGS,
+            {
+                "kind": "directory_trust",
+                "directory": TRUST_DIRECTORY,
+                "target_path": TRUST_TARGET_PATH,
+                "tool_name": TRUST_TOOL_NAME,
+                "access": "write",
+                "shadows_workspace": False,
+            },
+        )
+
+    return prefetch
+
+
+async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
+    """用真实 Host 跑指定场景；不碰真实模型与用户目录。
+
+    场景表：
+      - `host`：echo 模式，只有文字事件；
+      - `tools`：脚本化 Agent，一次完整工具调用再回一段文字；
+      - `commands`：装一个带 `commands/audit.md` 的插件，回「命令完成」；
+      - `approval`：脚本化 HITL Agent，一次 `execute` 审批（带 `tool_call_id`）；
+      - `trust`：同上，但中断前预置目录信任 presentation；
+      - `history`：带真实线程存储的 Host，预置一条可回放的历史。
     """
     from harness_agent.host.acp.stdio import run_acp_stdio
     from harness_agent.host.agent_host import AgentHost
 
     workspace = os.environ.get("ACP_WORKSPACE")
     root = Path(workspace) if workspace else Path.cwd()
-    if scripted_tools:
+    home = Path(os.environ["HOME"])
+    if scenario == "commands":
+        from tests.support.acp_harness import (
+            ScriptedAgent,
+            install_command_plugin,
+            text,
+        )
+
+        install_command_plugin(home, home / "plugin-src")
+        host = AgentHost(
+            agent=ScriptedAgent([text("命令完成")]),
+            config_home=home,
+            workspace=root,
+        )
+    elif scenario == "tools":
         from tests.support.acp_harness import ScriptedAgent, text, tool_args, tool_result, tool_start
 
         host = AgentHost(
@@ -229,11 +299,70 @@ async def _run_host(streams: AcpStreams, grace: float, *, scripted_tools: bool =
                     text("读完了"),
                 ]
             ),
-            config_home=Path(os.environ["HOME"]),
+            config_home=home,
             workspace=root,
         )
+    elif scenario in {"approval", "trust"}:
+        from tests.support.acp_harness import (
+            ApprovalAgent,
+            flush,
+            text,
+            tool_args,
+            tool_result,
+            tool_start,
+        )
+
+        holder: dict[str, Any] = {}
+        tool_name = TRUST_TOOL_NAME if scenario == "trust" else "execute"
+        args = TRUST_TOOL_ARGS if scenario == "trust" else {"command": "npm test"}
+        agent = ApprovalAgent(
+            before=[
+                tool_start("call-1", tool_name),
+                tool_args("call-1", json.dumps(args)),
+                flush(),
+            ],
+            actions=[
+                {
+                    "name": tool_name,
+                    "args": args,
+                    "description": "跑一下",
+                    "tool_call_id": "call-1",
+                }
+            ],
+            before_interrupt=_trust_hook(holder) if scenario == "trust" else None,
+            on_approve=[
+                tool_result("call-1", "已执行"),
+                text("信任已登记" if scenario == "trust" else "批准后继续"),
+            ],
+            on_reject=[
+                tool_result("call-1", "User rejected the tool call", error=True),
+                text("已拒绝信任" if scenario == "trust" else "已拒绝"),
+            ],
+        )
+        holder["host"] = host = AgentHost(agent=agent, config_home=home, workspace=root)
+        if scenario == "trust":
+            # 测试用的 `WorkspaceRootRegistry` 会把任何绝对路径都解成 primary 根
+            # （`/ext/a.txt` 也不例外），于是「目标已被稳定作用域信任」的短路成立，
+            # 目录信任卡片会被静默跳过。恒为 False 等价于「第一次访问、还没信任过」。
+            host._run_coordinator._directory_trust_already_granted = (  # type: ignore[method-assign]
+                lambda _presentation, *, run_id: False
+            )
+    elif scenario == "history":
+        from tests.support.thread_fixtures import seed_thread
+
+        host = AgentHost(config_home=home, workspace=root)
+        store = await host._ensure_thread_persistence()
+        await seed_thread(
+            store,
+            HISTORY_THREAD_ID,
+            [
+                {"kind": "user", "content": "先看一眼"},
+                {"kind": "assistant", "content": "看完了。"},
+                {"kind": "tool", "content": "工具输出", "tool_name": "read_file"},
+            ],
+        )
     else:
-        host = AgentHost(allow_echo=True, config_home=Path(os.environ["HOME"]), workspace=root)
+        host = AgentHost(allow_echo=True, config_home=home, workspace=root)
     return await run_acp_stdio(host, streams=streams, grace_seconds=grace)
 
 

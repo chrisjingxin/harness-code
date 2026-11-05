@@ -4,7 +4,7 @@
 
 规则：每次只推进到下一个停点；到达停点后勾选本节、把证据写回 Task，然后停下等用户确认。每个实现项都先写失败的测试。
 
-状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）已完成，等用户确认后进入停点 2。
+状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）、S2（2.0 到 2.9）已完成，等用户确认后进入停点 3。
 
 ## 停点 0：摸底与重构（无可见变化）
 
@@ -53,16 +53,16 @@
 
 查看方式：`cd packages/agent && .venv/bin/python -m pytest -q tests/host/acp -s` 看官方 SDK 客户端的完整场景输出；可选：把 `harness acp` 配进 Zed 的 `agent_servers` 试用（非验收项）。
 
-- [ ] 2.0 先在 Python 内部审批预检回调里捕获 `tool_call_id`，写入每个 `action_requests` 元素（先文件类工具；`execute`、MCP 工具最后做，做不完登记 GAP-23）；测试先失败；确认 TUI 和现有审批测试不受影响。
-- [ ] 2.1 `test_permissions.py` 先失败，再实现 `permissions.py`：审批 → `session/request_permission`（选项映射、文本兜底、用 `tool_call_id` 关联工具调用，缺失时降级匹配）。
-- [ ] 2.2 outcome 处理：`selected` → decision，`cancelled` / 断开 / 异常 → `reject`；`session/cancel` 时丢弃迟到的应答。
-- [ ] 2.3 `test_permissions_directory_trust.py` 先失败，再实现目录信任翻译（`allow_session` / `deny`），声明 `directory_trust` handle。
-- [ ] 2.4 `test_server_sessions.py` 先失败，再实现 `session/list`、`session/load`（回放、线程忙、线程不存在、cwd 不匹配）、`session_info_update`。
-- [ ] 2.5 `test_server_commands.py` 先失败，再实现 `available_commands_update`、`/命令 参数` 补全 `requested_skill`、每连接一次 `bind_commands`、不匹配当普通文本。
-- [ ] 2.6 `test_server_modes.py` 先失败，再实现 4 个模式、`plan` 不暴露、`session/set_mode`、`current_mode_update`。
-- [ ] 2.7 `test_extension_negotiation.py` 先失败，再实现扩展协商：声明有效才带 `_meta.harnessCode.approval` 与 `run`；没声明或格式错误按没声明处理。
-- [ ] 2.8 SDK 端到端扩充：拒绝一次、允许一次、目录授权、`/命令`、列出并恢复会话、中途取消。
-- [ ] 2.9 Python 全量测试与 `npm run project:check` 通过；证据写入 Task；停下等待用户确认。
+- [x] 2.0 先在 Python 内部审批预检回调里记下 `tool_call_id`，在审批 payload 生成点写入每个 `action_requests` 元素（一次覆盖全部需要审批的工具族；同批「工具名 + 参数」完全相同时不注入，退回匹配）；测试先失败；确认 TUI 和现有审批测试不受影响。（已完成：新建 `runtime/approval_tool_calls.py` 与预检装饰器，一次覆盖 write/edit/delete/execute/web_fetch/task/MCP；同批相同 `(name,args)` 不注入；新增 25 条 Python 用例 + 1 条 TS 契约用例，真实 LangGraph 图测试拿到 `call-1`/`call-2`）
+- [x] 2.1 `test_permissions.py` 先失败，再实现 `permissions.py`：审批 → `session/request_permission`（选项映射、文本兜底、用 `tool_call_id` 关联工具调用，缺失时降级匹配）。（已完成：新增 `host/acp/permissions.py`（纯函数 + `PermissionBroker`）、翻译器 `prepare_approval`/`mark_executing`/`finish_card`，删除 `announce_input` 并把 3 条用例迁移为 11 条；进程内集成 34 条，含批准/拒绝/降级匹配/兜底卡/串行批/双会话）
+- [x] 2.2 outcome 处理：`selected` → decision，`cancelled` / 断开 / 异常 → `reject`；`session/cancel` 时丢弃迟到的应答。（已完成：审批无超时；`session/cancel` 先让 Run 进入取消再本地取消权限任务，断开/客户端异常一律 reject/deny 并 `resolve_interaction`；新增 6 条用例，含挂起中取消、迟到应答无副作用、断开无泄漏）
+- [x] 2.3 `test_permissions_directory_trust.py` 先失败，再实现目录信任翻译（`allow_session` / `deny`），声明 `directory_trust` handle。（已完成：`prepare_trust` + `build_trust_job`，连接声明 `("approval","directory_trust")`；新增 7 条用例，含 `trust:{request_id}` 卡片、允许/拒绝往返与卡片收尾）
+- [x] 2.4 `test_server_sessions.py` 先失败，再实现 `session/list`、`session/load`（回放、线程忙、线程不存在、cwd 不匹配）、`session_info_update`。（已完成：新增 `sessions.py`（列表映射/回放/时间格式）与 `load_session`/`list_sessions`，`_sender` 增加 `thread.summary` 分支，`to_request_error` 补线程存储与 Skill 错误码分支；新增 19 条用例 + 1 条错误映射表用例）
+- [x] 2.5 `test_server_commands.py` 先失败，再实现 `available_commands_update`、`/命令 参数` 补全 `requested_skill`、每连接一次 `bind_commands`、不匹配当普通文本。（已完成：新增 `commands.py`（`CommandIndex`/`parse_slash`）与握手期一次绑定，列表非空才推 `available_commands_update`，绑定失败降级为普通文本；新增 11 条用例，含与 Host 解析的漂移测试）
+- [x] 2.6 `test_server_modes.py` 先失败，再实现 4 个模式、`plan` 不暴露、`session/set_mode`、`current_mode_update`。（已完成：新增 `modes.py`（四项固定表、`plan` 回退 `default`）与 `set_session_mode`，三种 Run 竞态只记会话、`BUSY`/`PLAN_LOCKED` 按表报错，Run 准备期改模式在受理后补发；新增 15 条用例）
+- [x] 2.7 `test_extension_negotiation.py` 先失败，再实现扩展协商：声明有效才带 `_meta.harnessCode.approval` 与 `run`；没声明或格式错误按没声明处理。（已完成：`ext.py` 增加 `Negotiation`/`negotiate` 与三个唯一出站口，`_meta.harnessCode.approval` 改挂在 `toolCall` 上（与设计 §4.1 一致）；新增 31 条用例，含「未声明时递归扫帧不含 harnessCode」）
+- [x] 2.8 SDK 端到端扩充：拒绝一次、允许一次、目录授权、`/命令`、列出并恢复会话、中途取消。（已完成：`acp_scripted_main.py` 新增 `approval`/`trust`/`history`/`commands` 场景，官方 SDK 客户端跑真实子进程；新增 8 条用例，含未声明与已声明两种 `_meta` 断言）
+- [x] 2.9 Python 全量测试与 `npm run project:check` 通过；证据写入 Task；停下等待用户确认。（已跑：`tests/host/acp` 310 passed；回归 775 passed / 1 skipped；`tests/runtime` 276 passed；Python 全量 3429 passed / 5 skipped；`npm run test` 主批 1356 pass / 1 skip、`takeover-recovery` 2 项因缺 Playwright 浏览器失败；`typecheck`/`project:check`/`deps:check` 全绿）
 
 ## 停点 3：浏览器里能用
 

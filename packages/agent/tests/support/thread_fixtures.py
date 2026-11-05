@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from harness_agent.runtime.execution_binding import (
     RunExecutionBinding,
@@ -10,7 +12,11 @@ from harness_agent.runtime.execution_binding import (
     SelectionOrigin,
     ThreadExecutionSelection,
 )
-from harness_agent.threads.thread_persistence import AcceptRun, ThreadPersistence
+from harness_agent.threads.thread_persistence import (
+    AcceptRun,
+    ThreadPersistence,
+    TranscriptAppend,
+)
 
 
 def create_legacy_prompt_epoch_table(connection: sqlite3.Connection) -> None:
@@ -73,6 +79,36 @@ async def accept_thread(
             binding=test_binding(thread_id, run_id or f"fixture-{thread_id}-{message}"),
         )
     )
+
+
+async def seed_thread(
+    store: ThreadPersistence,
+    thread_id: str,
+    messages: Sequence[Mapping[str, str]],
+) -> None:
+    """预置一条可被 `session/load` 回放的线程。
+
+    输入：`messages` 是 `{"kind": ..., "content": ...}` 序列，第一条必须是 `user`
+          （线程索引由第一条用户消息建立）；`tool` 记录可带 `tool_name` 与
+          `tool_call_id`，与真实 Run 写出的历史同形。
+    """
+    first = messages[0]
+    if first.get("kind") != "user":
+        raise ValueError("seed_thread 的第一条消息必须是 user")
+    await accept_thread(store, thread_id, str(first["content"]))
+    rest = tuple(
+        TranscriptAppend(
+            thread_id=thread_id,
+            record_id=f"seed:{thread_id}:{index}",
+            kind=cast(Any, item.get("kind")),
+            content=str(item["content"]),
+            tool_call_id=item.get("tool_call_id"),
+            tool_name=item.get("tool_name"),
+        )
+        for index, item in enumerate(messages[1:], start=1)
+    )
+    if rest:
+        await store.append_transcript_batch(rest)
 
 
 def async_return(value: object):

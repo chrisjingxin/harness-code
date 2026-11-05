@@ -247,3 +247,38 @@ S0 的探索由 DeepSeek 子 agent 只读完成（Todo 0.2 到 0.6），没有�
 - 手动：`HARNESS_ECHO_MODE=1 bun packages/cli/src/index.ts acp --cwd <仓库根>`，`initialize` 与 `session/new` 返回合法响应，stdout 无杂音。
 
 **未做**：审批 / 目录信任、`session/list` / `session/load`、`/命令`、模式切换、扩展协商（S2）；`harness web`（S3）；`packages/protocol`、TUI、无头模式均未改动。
+
+## S2 实施与 Review 结论（2026-11-05）
+
+**分工**：同 S0。探索与开发由 DeepSeek 子 agent 完成（开发分 A、B 两段），方案设计与 Code Review 由 Claude 子 agent 完成，主 agent 复核并修复 Review 发现。
+
+**实施内容**（Todo 2.0 到 2.9）
+- **`tool_call_id` 进审批 payload**：新增 `runtime/approval_tool_calls.py`（`ToolCallIdStore`，256 条上限、不设 TTL，因为审批没有超时）。预检回调里记下「工具名 + 参数」指纹对应的 provider id，审批 payload 生成点（`run_coordinator.py`）写入 `action_requests[i].tool_call_id`；子代理路径直接带上现成的 id。一次覆盖全部需要审批的工具族（探索发现 `execute`、MCP 其实都有捕获点，比 Spec 的假设更好）。同一批里「工具名 + 参数」完全相同时不注入。v3 的唯一可见变化就是这个可能多出的键，TUI 与 TS 校验器都把 `requests` 当 `unknown`，不受影响（`protocol-contract.test.ts` 加了 1 条用例锁定）。
+- **审批与目录信任**：新增 `host/acp/permissions.py`（纯函数 + `PermissionBroker`）。审批帧经 outbox 进 `_pump` 串行处理，先补卡再起独立权限任务；客户端断开、JSON-RPC 错误、畸形响应、`cancelled`、未知选项一律 reject（目录信任为 deny）并回填 Host。**审批不加超时**（v3 本来就没有，TUI 也无限等人）。目录信任卡片为 `trust:{request_id}`，只有 `allow_session` / `deny`。
+- **会话**：`session/list`（固定 200 条，echo 模式回 `-32603 THREADS_UNAVAILABLE_IN_ECHO_MODE`）、`session/load`（回放历史，全部 update 排在响应之前；线程忙 `-32603` + `THREAD_BUSY`；不存在 `-32002`）、`thread.summary` → `session_info_update`（连接开了 `threads.read`，`_sender` 对其它 method 静默丢弃）。
+- **命令与模式**：握手期 `bind_commands` 一次，`/命令 参数` 补全 `requested_skill`（`raw_invocation` 逐字等于整条消息），`available_commands_update` 只在列表非空时发；4 个模式（`default` / `auto-edit` / `auto` / `yolo`，产品默认是 `auto`），`session/set_mode` 错误按表映射。
+- **扩展协商**：`clientCapabilities._meta.harnessCode` 声明有效才回报能力并启用 `_meta.harnessCode.approval`（只挂在权限请求的 `toolCall` 上）与 `run`（`session/prompt` 响应）；格式错误、版本不识别按没声明处理。
+- **端到端**：官方 SDK 客户端 + 真实子进程，覆盖拒绝一次、允许一次、目录授权（允许 / 拒绝）、`/命令`、列出并恢复会话、审批挂起时取消、扩展协商。
+
+**Code Review 发现与处理**
+- 无阻断项，结论「可以提交并进入 S3」。
+- 重要 R1（已修）：翻译或补卡阶段抛异常时审批不会被拒绝，加上没有超时，Run 会永久挂住。现在 `_pump` 对 interaction 帧的异常立刻 `fail_interaction`；另在起权限任务前再看一眼 `cancel_requested`，减少取消窗口里多弹一次框。
+- 重要 R2（已修）：provider 重复使用 tool_call id 时，审批挂在「幻影卡」上，同一次调用出现两张卡。`prepare_approval` 在按 id 找不到时先按「同名 + 参数相同」认领已有卡。
+- 重要 R3（已补）：新增 7 条回归，并逐个把对应护栏改坏确认测试变红——翻译失败拒绝、id 复用认领、已取消会话不再弹窗、同 id 第二个审批落兜底卡、Run 收敛清缓存、Host 侧取消后清权限任务；未声明客户端的全帧扫描补上会话列表、历史回放、命令推送。
+  - 例外：「取消时先取消 Run 再取消权限任务」的顺序在同一事件循环轮次内生效，无法稳定检测，只保留了 `agent.resumes == []` 的断言作为弱护栏，主要靠 docstring 与代码审阅。
+- 次要（已处理）：`load_session` 失败时只摘本次新增的订阅；`run_coordinator.py` 重复导入；`MAX_TOOL_CALL_IDS` 补 `ponytail:` 注释；`watch_thread` 的 docstring。
+- 次要（延后）：`PermissionBroker._run` 收尾无 try/finally 保护；子代理卡标题未净化；回放里用户消息不切块、`iso_from_ms` 对异常值会抛；命令推送顺序依赖 SDK 内部写响应的时机（升级 SDK 时必须重跑 `test_available_commands_sent_after_session_new_response`）；对整批请求逐条算 sha256；若干 `sleep` 后断言「没发生」的时序用例；ruff 19 条非门禁提示。
+- **目录信任短路（开发自报的风险）**：Review 用真实 registry 验证，生产里工作区外的未信任路径会弹信任卡；开发看到的短路只来自测试夹具里不存在的 `/ext/a.txt`。夹具已用 `write_file` 并强制 `_directory_trust_already_granted=False`，S3 联调时应改用真实的工作区外临时目录再验一次。
+- 偏离记录：`_meta` 位置在 2.7 才从请求层改到 `toolCall` 上；目录信任夹具不用 `ls`（并发安全，Host 直接放行）；进程内测试的 socket 读上限对齐生产 `MAX_FRAME_BYTES+1`。
+
+**新登记缺口**（详见 Spec §12.3）：GAP-28 普通 Skill 无斜杠入口、GAP-29 审批无超时需桥侧存活检测、GAP-30 `allow_always` 语义、GAP-31 Host 侧模式变化不回流、GAP-32 回放细节限制、GAP-33 列表不分页、GAP-34 子代理审批兜底卡、GAP-35 审批卡片顺序；GAP-23 缩小为 id 重复 / 参数被截断的残余。
+
+**验证数字（主 agent 复核）**
+- `tests/host/acp`：317 passed。
+- `tests/host` 等回归门槛：782 passed / 1 skipped。
+- `tests/runtime`：276 passed。
+- Python 全量：3436 passed / 5 skipped（S1 为 3244 / 5）。
+- CLI `npm run test` 主批：1356 pass / 1 skip / 0 fail；`tests/web/takeover-recovery.test.ts` 2 项因本机缺 Playwright 浏览器失败，与本任务无关。
+- `npm run typecheck`、`npm run deps:check` 通过。
+
+**未做**：`harness web`、WebSocket 桥与浏览器端（S3、S4）；`usage_update`、`ask_user` / 计划 / 目标交互（保守默认，见缺口表）；没有用 Zed 真机试用；`session/load` 之后继续对话没有端到端测试（`make_persistent_host` 没配模型，S3 联调时补）。

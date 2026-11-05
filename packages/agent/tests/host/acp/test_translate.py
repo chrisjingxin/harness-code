@@ -304,23 +304,73 @@ def test_leftovers_skip_already_finished_tools(tmp_path: Path) -> None:
     assert translator.leftovers() == []
 
 
-def test_announce_input_is_idempotent(tmp_path: Path) -> None:
-    """`announce_input` 只补一次参数；S2 的审批请求会复用它。"""
+def test_prepare_approval_claims_the_announced_card(tmp_path: Path) -> None:
+    """有 provider id 时直接占用已公告的卡：补标题与参数，不再重复建卡。"""
     translator = _translator(tmp_path)
     _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "edit_file"}))
-    _feed_ok(translator, _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"file_path":"/src/a.py"}'}))
-    [progress] = translator.announce_input("call_0")
-    assert progress.raw_input == {"file_path": "/src/a.py"}
-    assert progress.status == "in_progress"
-    assert translator.announce_input("call_0") == []
+    _feed_ok(
+        translator,
+        _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"file_path":"/src/a.py"}'}),
+    )
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="edit_file",
+        args={"file_path": "/src/a.py"},
+        tool_call_id="call_0",
+        is_child=False,
+        agent_id=None,
+    )
+    assert target.tool_call_id == acp_tool_call_id("r1", "call_0")
+    assert target.matched == "id"
+    assert target.raw_input == {"file_path": "/src/a.py"}
+    [update] = target.updates
+    assert update.title == "edit_file /src/a.py"
+    assert update.status is None  # 不改状态：批准后才推 in_progress
+
+
+def test_prepare_approval_creates_card_when_approval_arrives_first(tmp_path: Path) -> None:
+    """审批帧跑在 `tool.started` 前面：现在建卡，段号前进一步。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id="call_0",
+        is_child=False,
+        agent_id=None,
+    )
+    [start] = target.updates
+    assert isinstance(start, ToolCallStart)
+    assert start.tool_call_id == acp_tool_call_id("r1", "call_0")
+    assert start.status == "pending"
+    assert start.raw_input == {"command": "npm test"}
+    # 段号已前进一次：工具之后的正文属于新消息。
+    [chunk] = _feed_ok(translator, _event("content.delta", {"text": "结果"}))
+    assert chunk.message_id == "r1:m1"
+
+    # 迟到的 tool.started 不能重复建卡，也不再推进段号。
+    assert _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"})) == []
+    [chunk2] = _feed_ok(translator, _event("content.delta", {"text": "继续"}))
+    assert chunk2.message_id == "r1:m1"
 
 
 def test_completed_after_announce_does_not_rewrite_title_to_bare_name(tmp_path: Path) -> None:
     """参数已公告后，`tool.completed` 的更新不能把标题回写成裸工具名（Code Review 发现）。"""
     translator = _translator(tmp_path)
     _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
-    _feed_ok(translator, _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"command":"npm test"}'}))
-    [announced] = translator.announce_input("call_0")
+    _feed_ok(
+        translator,
+        _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"command":"npm test"}'}),
+    )
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id="call_0",
+        is_child=False,
+        agent_id=None,
+    )
+    [announced] = target.updates
     assert announced.title == "execute npm test"
     [done] = _feed_ok(
         translator,
@@ -330,12 +380,242 @@ def test_completed_after_announce_does_not_rewrite_title_to_bare_name(tmp_path: 
     assert done.title is None  # 不传 title，客户端沿用已公告的标题
 
 
-def test_announce_input_without_complete_arguments_returns_nothing(tmp_path: Path) -> None:
-    """参数不完整时 announce 不发任何东西（不发半截 rawInput）。"""
+def test_prepare_approval_without_id_matches_card_by_name_and_args(tmp_path: Path) -> None:
+    """没有 id 时降级匹配：同名、参数相同、还没被别的审批占用。"""
     translator = _translator(tmp_path)
-    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "edit_file"}))
-    _feed_ok(translator, _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"file_path":'}))
-    assert translator.announce_input("call_0") == []
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    _feed_ok(
+        translator,
+        _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"command":"npm test"}'}),
+    )
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    assert target.matched == "args"
+    assert target.tool_call_id == acp_tool_call_id("r1", "call_0")
+
+
+def test_reused_provider_id_claims_the_existing_card_by_args(tmp_path: Path) -> None:
+    """provider 重复用 id：事件里的卡是合成 id，审批带的却是原 id。
+
+    按 id 找不到时要先按「同名 + 参数相同」认领已有卡，否则会多出一张
+    永远转圈、最后被标成 failed 的幻影卡（Code Review R2）。
+    """
+    translator = _translator(tmp_path)
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "tool-r1-2", "name": "execute"}))
+    _feed_ok(
+        translator,
+        _event("tool.delta", {"tool_call_id": "tool-r1-2", "arguments_delta": '{"command":"npm test"}'}),
+    )
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id="call_0",
+        is_child=False,
+        agent_id=None,
+    )
+    assert target.matched == "args"
+    assert target.tool_call_id == acp_tool_call_id("r1", "tool-r1-2")
+    # 只有一张卡：收尾时不会冒出第二张永远转圈的幻影卡。
+    assert {update.tool_call_id for update in translator.leftovers()} == {target.tool_call_id}
+
+
+def test_two_approvals_never_share_one_card(tmp_path: Path) -> None:
+    """第二个同参数审批不能抢第一张卡：它会得到自己的兜底卡。"""
+    translator = _translator(tmp_path)
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    _feed_ok(
+        translator,
+        _event("tool.delta", {"tool_call_id": "call_0", "arguments_delta": '{"command":"npm test"}'}),
+    )
+    first = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    second = translator.prepare_approval(
+        request_id="req-2",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    assert first.matched == "args"
+    assert second.matched == "none"
+    assert second.tool_call_id == "approval:req-2"
+
+
+def test_approval_without_any_card_uses_fallback(tmp_path: Path) -> None:
+    """既没 id 也匹配不上：建 `approval:{request_id}` 兜底卡并把状态登记进去。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_approval(
+        request_id="req-9",
+        name="web_fetch",
+        args={"url": "https://example.com"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    assert target.tool_call_id == "approval:req-9"
+    assert target.matched == "none"
+    [start] = target.updates
+    assert isinstance(start, ToolCallStart)
+    assert start.title == "web_fetch https://example.com"
+    assert start.kind == "fetch"
+
+
+def test_child_approval_always_uses_fallback_with_agent_prefix(tmp_path: Path) -> None:
+    """子代理审批：即使带了 id 也用兜底卡，标题带子代理名前缀。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_approval(
+        request_id="req-child",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id="call_0",
+        is_child=True,
+        agent_id="builder",
+    )
+    assert target.tool_call_id == "approval:req-child"
+    assert target.title == "builder: execute npm test"
+    assert target.matched == "none"
+
+
+def test_prepare_trust_uses_own_card_and_read_or_edit_kind(tmp_path: Path) -> None:
+    """目录信任用 `trust:{request_id}`，写操作显示为 edit，位置只收绝对路径。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_trust(
+        request_id="req-t",
+        directory="/ext",
+        access="write",
+        target_path="/ext/a.txt",
+    )
+    assert target.tool_call_id == "trust:req-t"
+    assert target.title == "访问工作区外目录：/ext"
+    assert target.kind == "edit"
+    assert [location.path for location in target.locations] == ["/ext/a.txt"]
+    relative = translator.prepare_trust(
+        request_id="req-r", directory="/ext", access="read", target_path="a.txt"
+    )
+    assert relative.kind == "read"
+    assert relative.locations == []
+
+
+def test_mark_executing_only_for_real_cards_and_once(tmp_path: Path) -> None:
+    """`in_progress` 只对真实工具卡、只发一次；兜底卡与已终态的卡不发。"""
+    translator = _translator(tmp_path)
+    card = acp_tool_call_id("r1", "call_0")
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    [progress] = translator.mark_executing(card)
+    assert progress.status == "in_progress"
+    assert translator.mark_executing(card) == []
+
+    fallback = translator.prepare_approval(
+        request_id="req-9",
+        name="execute",
+        args={"command": "ls"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    assert translator.mark_executing(fallback.tool_call_id) == []
+
+    _feed_ok(
+        translator,
+        _event("tool.completed", {"tool_call_id": "call_0", "result": {"content": "ok", "is_error": False}}),
+    )
+    assert translator.mark_executing(card) == []
+
+
+def test_finish_card_only_closes_aux_cards(tmp_path: Path) -> None:
+    """兜底/信任卡由 `finish_card` 收尾；真实工具卡交给 `tool.completed`。"""
+    translator = _translator(tmp_path)
+    fallback = translator.prepare_approval(
+        request_id="req-9",
+        name="execute",
+        args={"command": "ls"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    [completed] = translator.finish_card(fallback.tool_call_id, ok=True)
+    assert completed.status == "completed"
+    assert translator.finish_card(fallback.tool_call_id, ok=True) == []
+
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    assert translator.finish_card(acp_tool_call_id("r1", "call_0"), ok=True) == []
+
+
+def test_leftovers_close_unfinished_fallback_cards(tmp_path: Path) -> None:
+    """终态补发也要收尾兜底卡，否则界面一直转圈。"""
+    translator = _translator(tmp_path)
+    fallback = translator.prepare_approval(
+        request_id="req-9",
+        name="execute",
+        args={"command": "ls"},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    translator.feed(_event("run.cancelled", {}))
+    [leftover] = translator.leftovers()
+    assert leftover.tool_call_id == fallback.tool_call_id
+    assert leftover.status == "failed"
+
+
+def test_run_summary_only_on_completed_and_bounded(tmp_path: Path) -> None:
+    """`RunOutcome.summary` 只取自 `run.completed`，超 16 KiB 的 context 丢掉。"""
+    translator = _translator(tmp_path)
+    result = translator.feed(
+        _event(
+            "run.completed",
+            {"usage": {"input_tokens": 1}, "duration_ms": 12, "context": {"thread_id": "t1"}},
+        )
+    )
+    assert result.outcome is not None
+    assert result.outcome.summary == {
+        "usage": {"input_tokens": 1},
+        "duration_ms": 12,
+        "context": {"thread_id": "t1"},
+    }
+
+    huge = _translator(tmp_path).feed(
+        _event("run.completed", {"duration_ms": 5, "context": {"blob": "x" * (17 * 1024)}})
+    )
+    assert huge.outcome is not None
+    assert huge.outcome.summary == {"duration_ms": 5}
+
+    cancelled = _translator(tmp_path).feed(_event("run.cancelled", {"usage": {"input_tokens": 1}}))
+    assert cancelled.outcome is not None and cancelled.outcome.summary is None
+    failed = _translator(tmp_path).feed(
+        _event("run.failed", {"error": {"code": "X"}, "duration_ms": 3})
+    )
+    assert failed.outcome is not None and failed.outcome.summary is None
+
+
+def test_prepare_approval_keeps_args_without_id_bounded(tmp_path: Path) -> None:
+    """审批参数超限时 `rawInput` 不发送（与 `_MAX_RAW_INPUT_BYTES` 同口径）。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_approval(
+        request_id="req-big",
+        name="execute",
+        args={"command": "x" * (_MAX_RAW_INPUT_BYTES + 1)},
+        tool_call_id=None,
+        is_child=False,
+        agent_id=None,
+    )
+    [start] = target.updates
+    assert isinstance(start, ToolCallStart)
+    assert start.raw_input is None
 
 
 def test_known_but_untranslated_events_produce_nothing(tmp_path: Path) -> None:

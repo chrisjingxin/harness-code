@@ -14,9 +14,12 @@ from typing import Any
 
 import pytest
 
+from harness_agent.extensions.plugin_skills import SkillError
+from harness_agent.extensions.skills import SkillError as CatalogSkillError
 from harness_agent.host.acp.server import to_request_error
 from harness_agent.host.connection import RpcError
 from harness_agent.host.run_coordinator import RunError
+from harness_agent.threads.thread_persistence import ThreadPersistenceError
 from tests.support.acp_harness import (
     InProcessAcp,
     RawAcpClient,
@@ -128,6 +131,42 @@ def test_long_message_is_truncated() -> None:
     """错误文案截断到 2000 字符，避免整段模型输出塞进错误帧。"""
     error = to_request_error(RpcError(-32004, "x" * 5000), startup_error=None)
     assert len(str(_data(error)["message"])) <= 2000
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_code", "expected_data_code", "expected_retryable"),
+    [
+        # session/load：线程不存在改成 ACP 的「资源不存在」；损坏不是客户端的错。
+        (RpcError(-32004, "THREAD_NOT_FOUND"), -32002, "THREAD_NOT_FOUND", False),
+        (RpcError(-32004, "THREAD_NOT_RECOVERABLE"), -32603, "THREAD_NOT_RECOVERABLE", False),
+        # 存储错误只把全大写错误码当契约，其余文案不外泄。
+        (ThreadPersistenceError("CHECKPOINT_LIST_INVALID_LIMIT"), -32603, "CHECKPOINT_LIST_INVALID_LIMIT", False),
+        (ThreadPersistenceError("db locked at /Users/secret/app.db"), -32603, "THREAD_STORE_ERROR", False),
+        # `/命令` 校验失败是参数问题（-32602），原码原样给客户端。
+        (SkillError("COMMAND_INVOCATION_BINDING_STALE"), -32602, "COMMAND_INVOCATION_BINDING_STALE", False),
+        (SkillError('Skill "x" has an empty body'), -32602, "SKILL_ERROR", False),
+        (CatalogSkillError("CATALOG_SNAPSHOT_MISSING"), -32602, "CATALOG_SNAPSHOT_MISSING", False),
+        # 审批模式的两种失败：忙可重试，计划锁定不可重试。
+        (RunError("RUN_APPROVAL_MODE_BUSY", retryable=True), -32603, "RUN_APPROVAL_MODE_BUSY", True),
+        (RunError("RUN_APPROVAL_MODE_PLAN_LOCKED"), -32603, "RUN_APPROVAL_MODE_PLAN_LOCKED", False),
+        # echo 模式没有线程存储：-32603 而不是 ACP 的 -32002。
+        (RpcError(-32002, "THREADS_UNAVAILABLE_IN_ECHO_MODE"), -32603, "THREADS_UNAVAILABLE_IN_ECHO_MODE", False),
+    ],
+)
+def test_error_mapping_table(
+    exc: BaseException,
+    expected_code: int,
+    expected_data_code: str,
+    expected_retryable: bool,
+) -> None:
+    """错误映射表：每行都锁住 JSON-RPC 码、`data.code` 与 `retryable`。"""
+    error = to_request_error(exc, startup_error=None)
+    assert error.code == expected_code
+    data = _data(error)
+    assert data["code"] == expected_data_code
+    assert data["retryable"] is expected_retryable
+    # 存储错误与未知异常的原文不能出现在错误帧里。
+    assert "/Users/secret" not in json.dumps(data)
 
 
 # —— 端到端失败路径 ——

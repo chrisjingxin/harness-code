@@ -195,3 +195,45 @@ def test_task_dispatch_description_mentions_auto_edit_for_gp() -> None:
     assert "改 README" in text
     assert "普通写入过程中不再询问" in text
     assert "执行命令" in text
+
+
+@pytest.mark.asyncio
+async def test_child_hitl_request_carries_tool_call_id() -> None:
+    """子代理审批的 action 元素带 provider id；没有 id 时不写这个键（v3 不变）。"""
+    called: list[object] = []
+
+    async def port(spec):
+        called.append(spec)
+        return InteractionResult({"decision": "reject"})
+
+    ctx = _context(port=port)
+    token = _CURRENT_DELEGATION_CALL.set(DelegationCallContext(run_context=ctx, tool_call_id="t1"))
+    command = DelegateAgent(
+        parent_ref=ExecutionRef.root("thread-1", "run-1"),
+        target_agent_id="general-purpose",
+        task="run cmd",
+        idempotency_key="k-id",
+        delegation_policy=DelegationPolicy(enabled=True, max_depth=1, max_parallelism=4),
+        cancellation_token=ctx.cancellation_token,
+    )
+    child_token = bind_child_command(command)
+    middleware = ChildHitlMiddleware(agent_id="general-purpose", approval_mode="auto-edit")
+
+    async def handler(_request):
+        raise AssertionError("rejected execute must not run")
+
+    try:
+        await middleware.awrap_tool_call(
+            _request("execute", {"command": "python deploy.py"}), handler
+        )
+        no_id_request = _request("execute", {"command": "python deploy.py"})
+        no_id_request.tool_call.pop("id")
+        await middleware.awrap_tool_call(no_id_request, handler)
+    finally:
+        reset_child_command(child_token)
+        _CURRENT_DELEGATION_CALL.reset(token)
+
+    with_id = called[0].payload["requests"]["action_requests"][0]
+    assert with_id["tool_call_id"] == "call-1"
+    without_id = called[1].payload["requests"]["action_requests"][0]
+    assert "tool_call_id" not in without_id

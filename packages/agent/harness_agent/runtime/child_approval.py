@@ -115,19 +115,30 @@ class ChildHitlMiddleware(AgentMiddleware):
         if decision == "allow" or effective_mode == "yolo":
             return await handler(request)
 
-        approved = await self._ask_approval(tool_name, tool_args)
+        approved = await self._ask_approval(
+            tool_name, tool_args, str(tool_call.get("id") or "") or None
+        )
         if not approved:
             return self._reject(tool_call, f"用户拒绝了子代理 {self._agent_id} 的 {tool_name}。请改用其他方案，不要取消整个任务。")
         return await handler(request)
 
-    async def _ask_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
-        """向 Host 请求审批；无通道时 fail closed。"""
+    async def _ask_approval(
+        self, tool_name: str, tool_args: dict[str, Any], tool_call_id: str | None = None
+    ) -> bool:
+        """向 Host 请求审批；无通道时 fail closed。
+
+        `tool_call_id` 有值时写进 action 元素，供支持它的客户端（ACP）把审批关联到
+        子代理的工具卡；没有时不多写这个键，v3 客户端看到的 payload 与以前一致。
+        """
+        action: dict[str, Any] = {"name": tool_name, "args": tool_args}
+        if tool_call_id:
+            action["tool_call_id"] = tool_call_id
         result = await self._request(
             "approval",
             {
                 "interrupt_id": str(uuid.uuid4()),
                 "description": f"子代理 {self._agent_id} 需要执行 {tool_name}",
-                "requests": {"action_requests": [{"name": tool_name, "args": tool_args}]},
+                "requests": {"action_requests": [action]},
                 "decisions": [
                     "approve_once",
                     "approve_thread",

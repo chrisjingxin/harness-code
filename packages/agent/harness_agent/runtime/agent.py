@@ -634,7 +634,7 @@ def _make_approval_preflight(
     过滤器 → 文件 mutation prepare → default 兜底。
     """
 
-    def composite(request: ToolCallRequest) -> bool:
+    def decide(request: ToolCallRequest) -> bool:
         # HITL 上下文中 request.tool 为 None，只能从 tool_call 提取工具名和参数。
         tool_call = request.tool_call
         tool_name = str(tool_call.get("name", ""))
@@ -789,7 +789,34 @@ def _make_approval_preflight(
                     )
         return True
 
+    def composite(request: ToolCallRequest) -> bool:
+        """装饰 `decide`：只有确定要弹窗的调用才登记 provider tool_call_id。"""
+        needs_approval = decide(request)
+        if needs_approval:
+            _remember_tool_call_id(request)
+        return needs_approval
+
     return composite
+
+
+def _remember_tool_call_id(request: ToolCallRequest) -> None:
+    """尽力而为地登记 `(工具名, 参数) → tool_call.id`，绝不影响审批结论。
+
+    只在确定要弹窗时调用：同一批里「一个弹窗、一个自动放行」的同参数调用
+    不会互相覆盖。注入 Agent 的测试路径没有 `RunContext`（`context is None`），
+    这里静默跳过，所以那些路径的 payload 与改动前完全一致。
+    """
+    tool_call = request.tool_call
+    name = tool_call.get("name")
+    call_id = tool_call.get("id")
+    args = tool_call.get("args") or {}
+    if not isinstance(name, str) or not isinstance(call_id, str) or not isinstance(args, Mapping):
+        return
+    runtime = getattr(request, "runtime", None)
+    store = getattr(getattr(runtime, "context", None), "tool_call_ids", None)
+    if store is None:
+        return
+    store.remember(name, args, call_id)
 
 
 def create_harness_agent(

@@ -22,6 +22,7 @@ from langchain_core.messages import SystemMessage
 from harness_agent.policy.approval_mode import ApprovalMode
 from harness_agent.policy.approval_policy import approval_mode_prompt
 from harness_agent.runtime.approval_presentation import ApprovalPresentationStore
+from harness_agent.runtime.approval_tool_calls import ToolCallIdStore
 from harness_agent.runtime.execution_binding import ExecutionMode
 from harness_agent.threads.context_lifecycle import RunContextSnapshot
 from harness_agent.threads.context_pressure import ModelCallLifecycle
@@ -143,6 +144,9 @@ class RunContext:
         default_factory=ApprovalPresentationStore,
         repr=False,
     )
+    # 审批预检登记的 provider tool_call_id；只在当前 Run 内短暂存活，供 ACP 把审批
+    # 关联回工具卡片，不参与授权判断，也不进入持久化。
+    tool_call_ids: ToolCallIdStore = field(default_factory=ToolCallIdStore, repr=False)
     # 额外工作目录 registry：可变、按引用共享，不进入执行资源池 fingerprint。
     workspace_root_registry: Any | None = field(default=None, repr=False)
     # Host-owned 的进程内 deferred 工具 reveal 存储；按 thread_id 隔离已激活的低频/MCP 工具。

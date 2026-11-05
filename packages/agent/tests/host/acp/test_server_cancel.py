@@ -283,3 +283,181 @@ async def test_aclose_fails_dangling_run_future(tmp_path: Path) -> None:
     assert future.done()
     assert isinstance(future.exception(), ConnectionError)
     await host.close()
+
+
+# —— 挂起审批时的取消 / 断开 / 客户端异常（HC-192 S2 2.2） ——
+
+from tests.support.acp_harness import ApprovalAgent, tool_result  # noqa: E402
+
+
+def _approval_agent(**overrides: Any) -> ApprovalAgent:
+    """一个 execute 审批脚本：中断前有工具卡，批准后收尾。"""
+    options: dict[str, Any] = {
+        "before": [
+            tool_start("call_0", "execute"),
+            tool_args("call_0", '{"command":"npm test"}'),
+            flush(),
+        ],
+        "actions": [
+            {
+                "name": "execute",
+                "args": {"command": "npm test"},
+                "description": "跑测试",
+                "tool_call_id": "call_0",
+            }
+        ],
+        "on_approve": [tool_result("call_0", "ok"), text("跑完了")],
+        "on_reject": [tool_result("call_0", "User rejected", error=True), text("已拒绝")],
+    }
+    options.update(overrides)
+    return ApprovalAgent(**options)
+
+
+async def test_cancel_while_waiting_for_approval_returns_cancelled(tmp_path: Path) -> None:
+    """审批挂起时取消：Run 以 cancelled 收尾，卡片被补成 failed，且一条都不少地在响应之前。"""
+    agent = _approval_agent()
+    host = make_host(tmp_path, agent=agent)
+    async with InProcessAcp(host) as acp:
+        client = acp.client
+        await _initialize(client)
+        session_id = await _new_session(client, host.workspace)
+        await _send_prompt(client, session_id)
+        permission = await client.read_request("session/request_permission")
+        card_id = permission["params"]["toolCall"]["toolCallId"]
+
+        await client.notify("session/cancel", {"sessionId": session_id})
+        response = await client.read_until(
+            lambda frame: frame.get("id") == 3 and ("result" in frame or "error" in frame)
+        )
+
+        assert prompt_response(response).stop_reason == "cancelled"
+        assert acp.server._broker is not None and acp.server._broker.pending_count == 0
+        # 先取消 Run、再取消权限任务：Agent 不应被带着 reject 多恢复一轮。
+        assert agent.resumes == []
+        statuses = [
+            update["status"]
+            for frame in client.updates()
+            for update in [frame.get("params", {}).get("update", {})]
+            if update.get("toolCallId") == card_id and update.get("status")
+        ]
+        assert statuses[-1] == "failed"
+        assert "in_progress" not in statuses
+
+
+async def test_late_answer_after_cancel_resolves_nothing(tmp_path: Path) -> None:
+    """取消之后客户端才点「允许」：不产生任何新帧，Run 不会带着批准继续跑。"""
+    host = make_host(tmp_path, agent=_approval_agent())
+    async with InProcessAcp(host) as acp:
+        client = acp.client
+        await _initialize(client)
+        session_id = await _new_session(client, host.workspace)
+        await _send_prompt(client, session_id)
+        permission = await client.read_request("session/request_permission")
+        await client.notify("session/cancel", {"sessionId": session_id})
+        await client.read_until(
+            lambda frame: frame.get("id") == 3 and ("result" in frame or "error" in frame)
+        )
+        before = len(client.frames)
+        await client.answer_permission(permission, "approve_once")
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(client.read_frame(), 0.3)
+        assert len(client.frames) == before
+
+
+async def test_connection_close_while_pending_rejects_and_leaks_nothing(
+    tmp_path: Path,
+) -> None:
+    """权限请求挂起时客户端断开：进程正常收尾，不留悬挂的权限任务。"""
+    host = make_host(tmp_path, agent=_approval_agent())
+    acp = InProcessAcp(host)
+    await acp.start()
+    client = acp.client
+    await _initialize(client)
+    session_id = await _new_session(client, host.workspace)
+    await _send_prompt(client, session_id)
+    await client.read_request("session/request_permission")
+
+    exit_code = await acp.stop()
+
+    assert exit_code == 0
+    assert acp.server._broker is None or acp.server._broker.pending_count == 0
+
+
+async def test_request_permission_connection_error_rejects(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """发权限请求时连接已断（SDK 抛 ConnectionError）：按 reject 交回 Host，Run 不挂。"""
+    host = make_host(tmp_path, agent=_approval_agent())
+    decided: list[object] = []
+    original = host.resolve_interaction
+
+    async def _boom(*_args: object, **_kwargs: object) -> object:
+        raise ConnectionError("Connection closed")
+
+    def _record(connection: Any, request_id: str, result: object) -> str:
+        decided.append(result)
+        return original(connection, request_id, result)
+
+    monkeypatch.setattr(host, "resolve_interaction", _record)
+    async with InProcessAcp(host) as acp:
+        client = acp.client
+        await _initialize(client)
+        session_id = await _new_session(client, host.workspace)
+        assert acp.server._broker is not None
+        monkeypatch.setattr(acp.server._broker._client, "request_permission", _boom)
+        await _send_prompt(client, session_id)
+        response = await client.read_until(
+            lambda frame: frame.get("id") == 3 and ("result" in frame or "error" in frame)
+        )
+
+        assert prompt_response(response).stop_reason == "end_turn"
+        assert decided == [{"decision": "reject"}]
+
+
+async def test_cancel_then_new_prompt_after_pending_approval_works(tmp_path: Path) -> None:
+    """取消挂起的审批后同一会话还能再发一轮，并正常完成。"""
+    host = make_host(tmp_path, agent=_approval_agent())
+    async with InProcessAcp(host) as acp:
+        client = acp.client
+        await _initialize(client)
+        session_id = await _new_session(client, host.workspace)
+        await _send_prompt(client, session_id)
+        await client.read_request("session/request_permission")
+        await client.notify("session/cancel", {"sessionId": session_id})
+        await client.read_until(
+            lambda frame: frame.get("id") == 3 and ("result" in frame or "error" in frame)
+        )
+
+        await _send_prompt(client, session_id, request_id=4)
+        permission = await client.read_request("session/request_permission")
+        await client.answer_permission(permission, "approve_once")
+        response = await client.read_until(
+            lambda frame: frame.get("id") == 4 and ("result" in frame or "error" in frame)
+        )
+        assert prompt_response(response).stop_reason == "end_turn"
+
+
+async def test_run_ending_without_session_cancel_clears_pending_permission(
+    tmp_path: Path,
+) -> None:
+    """Run 因别的原因结束（这里用 Host 侧取消）时，挂起的权限任务必须随之清掉。
+
+    没有 `session/cancel`，`cancel_session` 不会触发；只有 prompt 收尾的
+    `cancel_run` 能防止权限任务永远等一个已经不存在的 Run。
+    """
+    host = make_host(tmp_path, agent=_approval_agent())
+    async with InProcessAcp(host) as acp:
+        client = acp.client
+        await _initialize(client)
+        session_id = await _new_session(client, host.workspace)
+        await _send_prompt(client, session_id)
+        await client.read_request("session/request_permission")
+        run_id = acp.server._sessions[session_id].run.run_id
+
+        await host.cancel_run(acp.server._connection, session_id, run_id)
+        response = await client.read_until(
+            lambda frame: frame.get("id") == 3 and ("result" in frame or "error" in frame)
+        )
+
+        assert prompt_response(response).stop_reason == "cancelled"
+        assert acp.server._broker is not None and acp.server._broker.pending_count == 0

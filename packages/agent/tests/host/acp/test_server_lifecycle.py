@@ -55,20 +55,21 @@ def _prompt_params(session_id: str, prompt_text: str = "你好") -> dict[str, An
 
 
 async def test_initialize_advertises_minimal_honest_capabilities(tmp_path: Path) -> None:
-    """initialize 只广告真的实现了的能力：不做 load/list/prompt 多媒体。"""
+    """initialize 只广告真的实现了的能力：会 load/list，但不做 prompt 多媒体。"""
     async with InProcessAcp(make_host(tmp_path, echo=True)) as acp:
         response = await _initialize(acp.client)
         result = response["result"]
         assert result["protocolVersion"] == 1
         capabilities = result["agentCapabilities"]
-        assert capabilities["loadSession"] is False
+        # S2 实现了 session/load 与 session/list；能力声明必须跟上，否则客户端不会调。
+        assert capabilities["loadSession"] is True
         assert capabilities["promptCapabilities"] == {
             "image": False,
             "audio": False,
             "embeddedContext": False,
         }
         assert capabilities["mcpCapabilities"] == {"http": False, "sse": False, "acp": False}
-        assert "list" not in capabilities.get("sessionCapabilities", {})
+        assert capabilities["sessionCapabilities"]["list"] == {}
         assert result["agentInfo"]["name"] == "harness-code"
         assert result["agentInfo"]["version"]
         assert result["authMethods"] == []
@@ -141,19 +142,6 @@ async def test_new_session_accepts_symlink_to_workspace(tmp_path: Path) -> None:
         assert "result" in response, response
 
 
-async def test_new_session_reports_only_current_mode(tmp_path: Path) -> None:
-    """modes 只返回当前一项：没有 set_mode 就不广告四个模式。"""
-    async with InProcessAcp(make_host(tmp_path, echo=True)) as acp:
-        await _initialize(acp.client)
-        response = await acp.client.request(
-            2, "session/new", {"cwd": str(acp.host.workspace), "mcpServers": []}
-        )
-        modes = response["result"]["modes"]
-        assert len(modes["availableModes"]) == 1
-        assert modes["availableModes"][0]["id"] == modes["currentModeId"]
-        assert modes["currentModeId"] in {"default", "auto-edit", "auto", "yolo"}
-
-
 async def test_mcp_servers_are_ignored_with_a_count_only(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -181,9 +169,6 @@ async def test_mcp_servers_are_ignored_with_a_count_only(
 @pytest.mark.parametrize(
     ("method", "params"),
     [
-        ("session/load", {"cwd": "/w", "sessionId": "s", "mcpServers": []}),
-        ("session/list", {"cwd": "/w"}),
-        ("session/set_mode", {"sessionId": "s", "modeId": "default"}),
         ("authenticate", {"methodId": "x"}),
         ("session/fork", {"sessionId": "s", "cwd": "/w", "mcpServers": []}),
     ],

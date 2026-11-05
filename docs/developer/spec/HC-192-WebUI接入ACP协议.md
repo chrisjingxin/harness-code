@@ -220,7 +220,7 @@ class HostServicePort(Protocol):
 - **`start_run` 的顺序**：受理 → 调 `on_accepted` → 排标题自动生成 → 起事件扇出任务。v3 在 `on_accepted` 里发响应，保证「响应先于事件」；`AcpServer` 在回调里登记会话当前的 `run_id`，保证登记不晚于第一个事件。`on_accepted` 抛异常则不排标题、不起扇出。它返回 `RunAccepted` 而不是 `RunExecution`，因为 `events` 迭代器只能被消费一次，扇出任务已经在消费。
 - **连接**：`AcpServer` 用 `role="owner"` 登记连接，并启用 `run.multithread`（ACP 会话天然可并发）。服务方法**不**经过 `ControlLease` 的 permit：该互斥只为 owner 与 attached 之间转移控制权而设，ACP 进程里没有 attachment，不变量天然成立；因此 ACP 进程里不能暴露 `host.control.*` 和 `host.attachment.*`。
 - **事件与交互沿用原路径**：`_fanout_agent_event` 和 `ProtocolInteractionAdapter` 没有改动，ACP 连接的 `sender` 照样收到 v3 形状的帧（`event`、`thread.summary`、`interaction.approval` / `interaction.directory_trust`），由 `AcpServer` 自己翻译。`sender` 必须快速返回（事件只入队，交互请求只起任务去发 `session/request_permission`），而且不要抛异常：`_fanout_agent_event` 发现非 owner 连接的 `sender` 抛异常会关闭该连接，等于取消它的所有 Run。
-- **`resolve_interaction` 的 `request_id`** 是 v3 `InteractionRequest.request_id`（待回答表的键），与 ACP 线路上的 JSON-RPC id 无关；官方 Python SDK 的 `request_permission` 自己分配线路 id，S1 实现 `permissions.py` 前再核实这一点。
+- **`resolve_interaction` 的 `request_id`** 是 v3 `InteractionRequest.request_id`（待回答表的键），与 ACP 线路上的 JSON-RPC id 无关；官方 Python SDK 的 `request_permission` 自己分配线路 id（S2 已核实）。
 - **机器检查**：AST 测试禁止服务方法体里出现 `_current_connection`、不带参数的 `_connection_capabilities()` / `_connection_handles()` / `_connection_watches()`、`send_response`、`send_error`、`send_notification`、`_connection_context`。
 
 不变量：
@@ -252,9 +252,9 @@ S0 实测带来的实现要求：
 | 方法 | 行为 |
 |---|---|
 | `initialize` | 协议版本固定 1。返回 `agentInfo{name:"harness-code", version}`；`agentCapabilities`：`loadSession:true`，`promptCapabilities` 全 false，`mcpCapabilities{http:false,sse:false}`，`sessionCapabilities{list:{}}`；`authMethods:[]`。读取 `clientCapabilities._meta.harnessCode`（§4.4），声明有效才在 `agentCapabilities._meta.harnessCode` 回报并启用扩展字段。客户端 `fs` / `terminal` 能力一律不使用。内部调用 `ensure_ready()` 和 `open_connection()`。 |
-| `session/new` | 生成 `sessionId`（= `thread_id`，uuid4）。`cwd` 必须解析为本进程绑定的工作区，否则返回 `-32602`，消息说明工作区不一致（Host 在启动时固定一个工作区，不支持按会话切换）。`mcpServers` 一期忽略，写诊断日志。返回 `modes`（见下）。随后推送一次 `available_commands_update`，并 `watch_thread`。线程在第一次 Run 受理时才落库。 |
-| `session/load` | 仅当线程存在且空闲：`open_thread` 后按顺序回放 `user_message_chunk` / `agent_message_chunk`；历史里的 tool 记录回放成一条 `completed` 的 `tool_call`（`toolCallId = "{sessionId}:h{序号}"`，标题为工具名，内容为结果文本，没有参数和状态）；全部回放完再返回响应。线程有活动 Run 返回 `-32603`，`data.code="THREAD_BUSY"`。线程不存在返回 `-32002`。 |
-| `session/list` | 调用 `list_threads(limit)`，只返回当前工作区的线程。字段：`sessionId`、`cwd`（工作区绝对路径）、`title`（标题，缺省取首条消息前 40 字）、`updatedAt`（ISO 8601）。一期不分页，`limit` 上限 200，不返回 `nextCursor`。 |
+| `session/new` | 生成 `sessionId`（= `thread_id`，uuid4）。`cwd` 必须解析为本进程绑定的工作区，否则返回 `-32602`，消息说明工作区不一致（Host 在启动时固定一个工作区，不支持按会话切换）。`mcpServers` 一期忽略，写诊断日志。返回 `modes`（见下）。随后推送一次 `available_commands_update`（命令表为空时不发）。**不调用 `watch_thread`**：单连接下自己发起的 Run 事件和标题广播本来就发给 owner 连接。线程在第一次 Run 受理时才落库。 |
+| `session/load` | 仅当线程存在且空闲：`open_thread` 后按顺序回放 `user_message_chunk` / `agent_message_chunk`；历史里的 tool 记录回放成一条 `completed` 的 `tool_call`（`toolCallId = "{sessionId}:h{序号}"`，标题为工具名，内容为结果文本，没有参数和状态）；全部回放完再返回响应。线程有活动 Run 返回 `-32603`，`data={"code":"THREAD_BUSY","retryable":true}`。线程不存在返回 `-32002`，**包括 `session/new` 之后还没有过任何一轮 Run 的 id**（线程尚未落库，必须至少有过一轮 Run 才能被 load）。用 `open_and_watch_thread` 在同一个 idle 窗口里读历史并订阅；失败时只摘掉本次新加的订阅。ACP 的错误码在 `to_request_error` 里集中映射，不改 v3 的映射。 |
+| `session/list` | 调用 `list_threads(limit)`，只返回当前工作区的线程。字段：`sessionId`、`cwd`（工作区绝对路径）、`title`（标题，缺省取首条消息前 40 字）、`updatedAt`（ISO 8601）。一期不分页：ACP 的 `session/list` 请求没有 limit 参数，服务端固定取 200 条，不返回 `nextCursor`。echo 模式没有线程存储，返回 `-32603`（`data.code="THREADS_UNAVAILABLE_IN_ECHO_MODE"`），不是空列表。 |
 | `session/prompt` | 见 §5.5。 |
 | `session/cancel`（通知） | 找到该会话当前 `run_id`，调用 `cancel_run`；没有活动 Run 则忽略。 |
 | `session/set_mode` | 见 §5.6。 |
@@ -291,8 +291,8 @@ S0 实测带来的实现要求：
 
 对外暴露 4 个模式：`default`（逐项确认）、`auto-edit`（自动批准编辑）、`auto`（分类器判断）、`yolo`（全部放行）。`plan` 不暴露：它依赖「确认计划」交互，而 ACP 没有标准形态，一期会被默认放弃（见缺口登记表）。
 
-- `session/new` / `load` 返回的 `currentModeId`：取配置里的默认审批模式；若是 `plan` 则回退 `default`。
-- `session/set_mode`：没有活动 Run 时只记在会话上，下一次 `start_run` 作为 `approval_mode` 传入；有活动 Run 时调用 `set_approval_mode`，遇到 `RUN_APPROVAL_MODE_BUSY`（正在等审批）返回 `-32603`，`data.retryable=true`。
+- `session/new` / `load` 返回的 `currentModeId`：取配置里的默认审批模式（**产品默认是 `auto`，不是 `default`**）；若是 `plan` 则回退 `default`。
+- `session/set_mode`：没有活动 Run 时只记在会话上，下一次 `start_run` 作为 `approval_mode` 传入；有活动 Run 时调用 `set_approval_mode`。错误映射：`RUN_APPROVAL_MODE_BUSY`（正在等审批）→ `-32603`，`data.retryable=true`；`RUN_APPROVAL_MODE_PLAN_LOCKED` → `-32603`，`data.code` 带原码、`retryable=false`；`RUN_APPROVAL_MODE_NOT_FOUND` / `TERMINAL` / `CANCELLED`（Run 刚好结束或正在被取消的竞态）不报错，只记在会话上。
 - 模式变化后推送 `current_mode_update`。
 
 ---
@@ -310,7 +310,7 @@ S0 实测带来的实现要求：
 | `tool.started {tool_call_id, name}` | `tool_call` | `status:"pending"`，`kind` 与 `title` 见 §6.2；此时没有参数 |
 | `tool.delta {arguments_delta}` | 不立即推送 | 只拼进参数缓冲（避免推半截 JSON） |
 | `tool.delta {output_delta}` | `tool_call_update` | `status:"in_progress"`，追加文本内容 |
-| 审批请求到达（§6.4） | 先补一条 `tool_call_update`，再发权限请求 | 此时参数已完整：补 `rawInput`、更新 `title`、`locations`、`_meta` |
+| 审批请求到达（§6.4） | 先补一条 `tool_call_update`，再发权限请求 | 此时参数已完整：补 `rawInput`、更新 `title`、`locations`。`_meta.harnessCode.approval` 只放在随后权限请求的 `toolCall` 上，这条更新不带（diff 最多 16 KiB，不发两遍）。审批帧可能比 `tool.started` 更早到达，此时现建卡片，迟到的 `tool.started` 不重复建 |
 | `interaction.resolved` | `tool_call_update` | 审批通过则 `in_progress`；被拒不单独推，等 `tool.completed` |
 | `tool.completed {result}` | `tool_call_update` | `completed` 或（`is_error`）`failed`；`content` 为结果文本；`rawInput` 若还没推过就补上；`rawOutput` 为结果文本 |
 | `run.completed / cancelled / failed` | 不产生 update | 触发 prompt 响应（§5.5） |
@@ -348,12 +348,13 @@ S0 实测带来的实现要求：
 输入：request_id、payload{description, requests.action_requests[{name,args,description}], decisions, presentation?}
  → 关联工具调用：优先用 action 里新增的 tool_call_id（S0 查实可行：Python 在审批预检回调里捕获它，写入每个
                  action_requests 元素，不改 packages/protocol 的 schema）
-                 没有 tool_call_id（execute、MCP 工具在捕获点补齐前）或对不上：按「工具名相同 + 参数相同」
+                 没有 tool_call_id（同一批里出现两次完全相同的「工具名 + 参数」时不注入）或对不上：按「工具名相同 + 参数相同」
                  找最早的、还没结束的 tool_call；仍找不到：新建 toolCallId = "approval:{request_id}" 的卡片（降级）
  → 发 session/request_permission{sessionId, toolCall, options}
       toolCall：带 title、kind、status:"pending"、rawInput、locations、
                 content：[文本兜底：description + 若有 presentation 则附 unified diff 代码块]、
-                _meta.harnessCode.approval：{type:"approval", request_id, description, presentation(完整 file_diff)}
+                _meta.harnessCode.approval：{type:"approval", requestId, description, presentation(完整 file_diff，保持 v3 原样的 snake_case)}
+                键名统一 camelCase（requestId、targetPath、toolName、shadowsWorkspace）
                 （只发给声明了 harnessCode 扩展的客户端；其它客户端只看到标准字段和文本兜底）
       options（optionId 直接用 v3 的 decision 字符串）：
          approve_once    → kind allow_once   "允许一次"
@@ -364,10 +365,12 @@ S0 实测带来的实现要求：
  → 等客户端响应
 输出：outcome.selected{optionId} → resolve_interaction({decision: optionId})
       outcome.cancelled          → resolve_interaction({decision: "reject"})
-      连接断开 / 超时 / 响应格式错误 → 由现有机制默认拒绝（fail-closed：出现异常时一律按最保守的拒绝处理，不会因出错而放行）
+      连接断开 / 客户端 JSON-RPC 错误 / 响应格式错误 → 默认拒绝（目录信任为 deny）（fail-closed：出现异常时一律按最保守的拒绝处理，不会因出错而放行）
 ```
 
-JSON-RPC 请求 id 直接用 v3 的 `request_id` 字符串，不需要映射表。
+**审批不加超时。** v3 的交互本来就没有服务端超时（帧里的 `timeout_ms` 只是给客户端看的建议值），TUI 也是无限等人；人可能离开很久，自作主张超时拒绝会误伤。客户端断开走 fail-closed，用户可随时 `session/cancel`，stdin EOF 时取消并排空。代价是桥侧需要自己的存活检测（见 GAP-29）。
+
+JSON-RPC 请求 id 由官方 SDK 自行分配整数，v3 的 `request_id` 只在 Python 内部和 `resolve_interaction` 里使用，二者不需要映射表。
 
 `reject_with_feedback`（拒绝并附反馈）一期不提供：ACP 的权限响应只有 `optionId`，没有文字字段。记入缺口登记表。
 
@@ -499,7 +502,7 @@ child.stderr ──▶ 诊断日志（不转发给浏览器）
 | `setApprovalMode` | `session/set_mode` |
 | `listThreads` | `session/list` |
 | `openThread` | `session/load`，缓冲回放的 update，拼成 `ThreadsOpenResult.messages`（`kind: user / assistant / tool`）；`plan`、`goal` 等字段给空值 |
-| `setInteractionHandler` | 收到 `session/request_permission` 时，从 `_meta.harnessCode.approval` 取出 `type`（approval 或 directory_trust）、`request_id` 和对应字段，构造 `InteractionRequestEnvelope` 交给 Core；Core 的回答 `{decision}` 转成 `outcome.selected{optionId: decision}`；Core 无法处理或超时则回 `outcome.cancelled` |
+| `setInteractionHandler` | 收到 `session/request_permission` 时，从 `_meta.harnessCode.approval` 取出 `type`（approval 或 directory_trust）、`requestId` 和对应字段，构造 `InteractionRequestEnvelope` 交给 Core；Core 的回答 `{decision}` 转成 `outcome.selected{optionId: decision}`；Core 无法处理或超时则回 `outcome.cancelled` |
 | `onThreadSummary` | 来自 `session_info_update` |
 | `onClose` | WebSocket 关闭 |
 | 其余（模型、技能、MCP、插件、Agent、Team、目标、压缩、撤销重做、配置、代码索引、/btw、Compose） | 抛 `ACP_NOT_SUPPORTED`（含缺口编号）；对应能力不进 `capabilities` |
@@ -677,9 +680,17 @@ controller.ts → infrastructure/index.ts
 | GAP-22 | 历史回放里的工具记录没有参数和状态 | 恢复的会话里工具卡片信息很少 | 读取 Transcript 里更完整的记录 |
 | GAP-26 | `locations` 只覆盖主工作区路径（S1 实现） | 已信任的工作区外目录里的文件不会出现位置信息，客户端无法「跟随」 | 让位置解析复用 Host 的完整根注册表（需要给 `AgentHost` 暴露只读的路径策略） |
 | GAP-27 | `session/new` 的 `mcpServers`、`additionalDirectories` 被忽略，只在 stderr 记个数（S1 实现） | 客户端传入的 MCP 配置不生效，诊断日志里也没有结构化事件 | 新增诊断事件名（属于诊断日志 schema 的跨包改动）并把 MCP 配置并入会话级配置 |
-| GAP-23 | `execute`、MCP 工具的审批暂时拿不到 `tool_call_id`，退回「工具名 + 参数」匹配（§6.4） | 同一回复里并行两次相同命令时，审批卡片可能对不上工具卡片 | 给这两类工具补审批预检的捕获点；做完即关闭 |
+| GAP-23 | 审批与工具卡的关联在少数情形下退回「工具名 + 参数」匹配（S2 已覆盖全部工具族的 `tool_call_id`，残余如下） | 同一批里「工具名 + 参数」完全相同的调用、参数被截断、provider 重复使用 tool_call id（按序号编号的 provider 必现）时，可能出现「一次调用两张卡」，多出的兜底卡由终态补发收尾 | 在 Python 里给每次工具调用分配稳定的内部 id 并贯穿事件与审批；做完即关闭 |
 | GAP-24 | 输入框 @ 文件提及不在浏览器里内联文件内容（待 S3 核实现有行为后确认） | 提及只作为 `@路径` 文本发给 Agent，由 Agent 用工具读取 | 经 ACP 的 `resource_link` / 内容块，或 Electron 主进程读文件 |
 | GAP-25 | 输入历史（上下键）刷新后不保留 | 刷新页面后历史清空 | 浏览器本地存储，或 Electron 主进程落盘 |
+| GAP-28 | 普通 Skill 没有斜杠入口：`available_commands` 只含 Plugin / Qwen 命令（`HostSnapshot.agent_commands`），不含 TUI 里的 `/skill:<id>` | ACP 用户无法用斜杠调用普通 Skill；`/skill:xxx` 被当作普通文本 | 扩展命令列表来源（跨包改动）并放宽 `requested_skill` 校验，或提供 Skill 专用自定义方法 |
+| GAP-29 | 审批无超时，桥侧失联会让 Run 一直挂着（S3 的桥必须自己做存活检测） | 浏览器页面关闭或桥断开时，挂起的审批要等连接关闭才被拒绝 | 桥侧检测断线并回 `cancelled`；或为审批增加可配置的超时 |
+| GAP-30 | `approve_thread` 与 `approve_project` 都映射成 `allow_always`，后者会持久化项目规则 | 依赖 `kind` 做「记住选择」的通用 ACP 客户端无法区分这两个选项 | 选项名称里写明范围（已写），或拆成不同 `kind`/自定义字段 |
+| GAP-31 | Host 侧发起的模式变化不回流 `current_mode_update`：模型调用 `enter_plan_mode` 且被批准后 Host 进入 plan，ACP 会话仍显示旧模式（S3 前需实测确认，与 GAP-02 相关） | 界面显示的审批模式可能与实际不一致 | Host 在模式变化时广播事件，ACP 侧转成 `current_mode_update` |
+| GAP-32 | 历史回放的细节限制：用户消息不切块、回放不设条数上限、失败工具回放为 `completed`（后者并入 GAP-22） | 超大历史时首帧会变慢；恢复的会话里看不出哪个工具失败过 | 回放分块与分页；Transcript 记录工具状态 |
+| GAP-33 | `session/list` 固定 200 条、不分页 | 超过 200 个会话时旧会话列不出来 | 实现 `cursor` 分页 |
+| GAP-34 | 子代理审批只显示为独立的兜底卡（GAP-16 的补充） | 子代理里的工具审批卡片不挂在任何工具卡下 | 随子代理过程可见化一起解决 |
+| GAP-35 | 审批帧可能比同轮正文和 `tool.started` 更早到达，卡片显示顺序可能与模型输出顺序差几毫秒 | 偶尔先看到权限请求，正文稍后才出现 | Host 保证事件顺序，或翻译器按序号重排 |
 
 ---
 
@@ -689,7 +700,7 @@ controller.ts → infrastructure/index.ts
 
 1. 目录信任一期就做，映射成标准权限请求（§6.4）。
 2. 刷新页面会取消运行中的任务可以接受，但必须登记并最终解决（GAP-20，§12.2）。
-3. 审批与工具调用的关联：S0 查实可行，Python 在审批预检回调里捕获 `tool_call_id` 并写入每个 action；`execute` 与 MCP 工具暂缺捕获点，先降级匹配（GAP-23）。
+3. 审批与工具调用的关联：Python 在审批预检回调里记下 `tool_call_id`，在生成审批 payload 时写入每个 action（S2 已实现，覆盖全部需要审批的工具族，包括 `execute` 与 MCP）；同一批里「工具名 + 参数」完全相同的调用不注入，退回匹配（GAP-23 缩小后的残余）。
 4. 用户明确要求：一期缩水必须有记录、最终不能接受（§12.2 的治理方案）。
 
 **扩展前缀（用户确认）**：`_meta.harnessCode` 与 `_harnessCode/`（§4.4）。

@@ -52,7 +52,7 @@ class ApprovalPresentationStore:
         presentation: Mapping[str, object],
     ) -> bool:
         """保存 JSON-safe 有界副本；非法或过大的展示直接拒绝登记。"""
-        key = _presentation_key(tool_name, tool_args)
+        key = approval_fingerprint(tool_name, tool_args)
         if key is None:
             return False
         try:
@@ -84,7 +84,7 @@ class ApprovalPresentationStore:
         tool_args: Mapping[str, object],
     ) -> dict[str, object] | None:
         """返回独立副本；缺失、过期或参数不可稳定编码时安全降级。"""
-        key = _presentation_key(tool_name, tool_args)
+        key = approval_fingerprint(tool_name, tool_args)
         if key is None:
             return None
         with self._lock:
@@ -107,8 +107,12 @@ class ApprovalPresentationStore:
             self._entries.pop(key, None)
 
 
-def _presentation_key(tool_name: str, tool_args: Mapping[str, object]) -> str | None:
-    """生成不保留原始参数的稳定关联 key。"""
+def approval_fingerprint(tool_name: str, tool_args: Mapping[str, object]) -> str | None:
+    """生成不保留原始参数的稳定关联 key。
+
+    审批展示缓存与 `approval_tool_calls.ToolCallIdStore` 共用这一份 sha256 口径：
+    两处必须对同一 `(工具名, 参数)` 得到同一个 key，否则审批拿不到 provider id。
+    """
     if not tool_name:
         return None
     try:
@@ -127,4 +131,5 @@ __all__ = [
     "APPROVAL_PRESENTATION_TTL_SECONDS",
     "ApprovalPresentationStore",
     "MAX_APPROVAL_PRESENTATIONS",
+    "approval_fingerprint",
 ]

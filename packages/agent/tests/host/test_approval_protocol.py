@@ -459,6 +459,175 @@ class TestSerialApprovals:
         assert run.batch_rejected is False
 
 
+class TestApprovalToolCallIdInjection:
+    """审批 payload 只在能精确匹配时注入 provider `tool_call_id`。"""
+
+    @staticmethod
+    def _collect(coordinator: RunCoordinator, run: RunState, spec: InteractionRequest):
+        return asyncio.run(coordinator._collect_serial_approvals(run, spec))
+
+    def _first_action(self, port: _ScriptedInteractionPort) -> dict[str, object]:
+        """取第一条审批请求里 action_requests 的唯一元素。"""
+        requests = port.requests[0].payload["requests"]
+        assert isinstance(requests, dict)
+        actions = requests["action_requests"]
+        assert isinstance(actions, list) and len(actions) == 1
+        return actions[0]
+
+    def test_serial_approval_payload_carries_tool_call_id_from_store(self) -> None:
+        """预检登记过的指纹 → payload 里第一条 action 拿到 id，且 schema 仍合规。"""
+        port = _ScriptedInteractionPort([{"decision": "approve_once"}])
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        args = {"command": "npm build"}
+        assert run.tool_call_ids.remember("execute", args, "call-A")
+
+        self._collect(
+            coordinator,
+            run,
+            _serial_spec([{"name": "execute", "args": args}], [], [0]),
+        )
+
+        _assert_approval_params_schema_compliant(port.requests[0])
+        assert self._first_action(port)["tool_call_id"] == "call-A"
+
+    def test_duplicate_fingerprints_in_one_batch_get_no_id(self) -> None:
+        """同一批两个相同 `(工具名, 参数)` 不注入：注入任一个都会让两张卡片抢同一个 id。"""
+        port = _ScriptedInteractionPort(
+            [{"decision": "approve_once"}, {"decision": "approve_once"}]
+        )
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        args = {"command": "npm build"}
+        assert run.tool_call_ids.remember("execute", args, "call-dup")
+
+        self._collect(
+            coordinator,
+            run,
+            _serial_spec(
+                [{"name": "execute", "args": args}, {"name": "execute", "args": args}],
+                [],
+                [0, 1],
+            ),
+        )
+
+        assert len(port.requests) == 2
+        for request in port.requests:
+            _assert_approval_params_schema_compliant(request)
+            actions = request.payload["requests"]["action_requests"]
+            assert "tool_call_id" not in actions[0]
+
+    def test_unknown_fingerprint_adds_no_key(self) -> None:
+        """缓存里没有该指纹时 payload 与改动前逐字一致（不多一个键）。"""
+        port = _ScriptedInteractionPort([{"decision": "approve_once"}])
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        args = {"command": "npm build"}
+        assert run.tool_call_ids.remember("execute", {"command": "other"}, "call-X")
+
+        self._collect(
+            coordinator, run, _serial_spec([{"name": "execute", "args": args}], [], [0])
+        )
+
+        assert "tool_call_id" not in self._first_action(port)
+
+    def test_truncated_requests_get_no_id(self) -> None:
+        """`_bounded_json` 超限后不是 action_requests 形状，不注入也不报错。"""
+        port = _ScriptedInteractionPort([{"decision": "reject"}])
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        args = {"command": "x" * (1024 * 1024 + 1024)}
+        assert run.tool_call_ids.remember("execute", args, "call-big")
+
+        self._collect(
+            coordinator, run, _serial_spec([{"name": "execute", "args": args}], [], [0])
+        )
+
+        requests = port.requests[0].payload["requests"]
+        assert isinstance(requests, dict) and requests.get("truncated") is True
+
+    def test_directory_trust_payload_is_unchanged(self) -> None:
+        """目录信任走独立卡片：payload 没有 requests，也不注入 tool_call_id。"""
+        port = _ScriptedInteractionPort([{"decision": "allow_session"}])
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        args = {"path": "/outside"}
+        assert run.approval_presentations.remember(
+            "ls",
+            args,
+            {
+                "kind": "directory_trust",
+                "directory": "/outside",
+                "target_path": "/outside",
+                "tool_name": "ls",
+                "access": "read",
+                "shadows_workspace": False,
+            },
+        )
+        assert run.tool_call_ids.remember("ls", args, "call-trust")
+
+        self._collect(coordinator, run, _serial_spec([{"name": "ls", "args": args}], [], [0]))
+
+        assert port.requests[0].type == "directory_trust"
+        assert "requests" not in port.requests[0].payload
+        assert "tool_call_id" not in port.requests[0].payload
+
+    def test_existing_tool_call_id_in_action_is_not_overwritten(self) -> None:
+        """脚本化 Agent 自己带了 tool_call_id 时不覆盖：payload 永远有且只有一个键。"""
+        port = _ScriptedInteractionPort([{"decision": "approve_once"}])
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        action = {
+            "name": "execute",
+            "args": {"command": "npm build"},
+            "tool_call_id": "call-preset",
+        }
+        assert run.tool_call_ids.remember("execute", {"command": "npm build"}, "call-store")
+
+        self._collect(coordinator, run, _serial_spec([action], [], [0]))
+
+        _assert_approval_params_schema_compliant(port.requests[0])
+        assert self._first_action(port)["tool_call_id"] == "call-preset"
+
+    def test_second_serial_approval_still_gets_id_after_long_wait(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """审批没有超时：时间拨快一小时后，同批第二个审批仍能拿到 id。"""
+        import time as time_module
+
+        port = _ScriptedInteractionPort(
+            [{"decision": "approve_once"}, {"decision": "approve_once"}]
+        )
+        coordinator = _coordinator_with_port(port)
+        run = _serial_run()
+        first = {"command": "npm build"}
+        second = {"command": "npm test"}
+        assert run.tool_call_ids.remember("execute", first, "call-1")
+        assert run.tool_call_ids.remember("execute", second, "call-2")
+        later = time_module.monotonic() + 3600
+        monkeypatch.setattr(time_module, "monotonic", lambda: later)
+
+        self._collect(
+            coordinator,
+            run,
+            _serial_spec(
+                [{"name": "execute", "args": first}, {"name": "execute", "args": second}],
+                [],
+                [0, 1],
+            ),
+        )
+
+        assert [self._first_action_of(request) for request in port.requests] == [
+            "call-1",
+            "call-2",
+        ]
+
+    @staticmethod
+    def _first_action_of(request: InteractionRequest) -> object:
+        """从一条审批请求里取 action 元素的 tool_call_id。"""
+        return request.payload["requests"]["action_requests"][0]["tool_call_id"]
+
+
 class _FakeInterrupt:
     """模拟 LangGraph interrupt 对象，携带 value 与 id。"""
 

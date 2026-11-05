@@ -367,6 +367,25 @@ test("scoped Interaction 可携带 execution provenance 与 compose_scope", () =
   })).not.toThrow()
 })
 
+test("approval action 元素可携带 provider tool_call_id", () => {
+  // HC-192 S2 2.0：审批 action 里可能多一个 tool_call_id，协议校验不能因此失败。
+  expect(() => validateInteractionParams("interaction.approval", {
+    thread_id: "t",
+    run_id: "r",
+    timeout_ms: 30_000,
+    payload: {
+      interrupt_id: "int-1",
+      description: "run tests",
+      requests: {
+        action_requests: [
+          { name: "execute", args: { command: "npm test" }, tool_call_id: "call-1" },
+        ],
+      },
+      decisions: ["approve_once", "reject"],
+    },
+  })).not.toThrow()
+})
+
 test("compose.progress projection 严格有界且 revision 单调", () => {
   const payload = {
     thread_id: "t",

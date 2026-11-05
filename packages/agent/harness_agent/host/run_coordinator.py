@@ -86,6 +86,11 @@ from harness_agent.host.run_execution import (
     RunLifecyclePort,
     _bounded_json,
 )
+from harness_agent.runtime.approval_presentation import (
+    ApprovalPresentationStore,
+    approval_fingerprint,
+)
+from harness_agent.runtime.approval_tool_calls import ToolCallIdStore
 from harness_agent.runtime.interactions import (
     ChildInteractionRegistry,
     InteractionRequest,
@@ -122,7 +127,6 @@ from harness_agent.runtime.run_context import (
     RunCancellationToken,
     RunContext,
 )
-from harness_agent.runtime.approval_presentation import ApprovalPresentationStore
 from harness_agent.extensions.plugin_skills import LoadedSkill
 from harness_agent.protocol.generated import PROTOCOL_MINOR
 from harness_agent.threads.thread_persistence import (
@@ -638,6 +642,8 @@ class RunState:
     approval_presentations: ApprovalPresentationStore = field(
         default_factory=ApprovalPresentationStore
     )
+    # 与实际 RunContext 共享的 provider tool_call_id 缓存；生成审批 payload 时读取。
+    tool_call_ids: ToolCallIdStore = field(default_factory=ToolCallIdStore)
     # 所有等待用户响应的 Interaction 都登记在此集合；切换模式必须在集合为空时线性化。
     pending_interactions: set[str] = field(default_factory=set)
 
@@ -1650,6 +1656,7 @@ class RunCoordinator:
             await self._settle_root_execution(run)
             await self._release_runtime(run)
             run.approval_presentations.clear()
+            run.tool_call_ids.clear()
             async with self._lock:
                 if self._runs.get(run.ref.thread_id) is run:
                     self._runs.pop(run.ref.thread_id, None)
@@ -2141,10 +2148,15 @@ class RunCoordinator:
                 if total_unsafe > 1
                 else base_description
             )
+            requests = _bounded_json({"action_requests": [dict(action_map)]})
+            _inject_tool_call_id(
+                requests,
+                self._approval_tool_call_id(run, all_requests, tool_name, tool_args),
+            )
             payload: dict[str, object] = {
                 "interrupt_id": interrupt_id,
                 "description": description,
-                "requests": _bounded_json({"action_requests": [dict(action_map)]}),
+                "requests": requests,
                 "decisions": (
                     ["approve_once", "reject"]
                     if plan_entry
@@ -2208,6 +2220,53 @@ class RunCoordinator:
 
         run.pending_approvals = []
         return {interrupt_id: {"decisions": decisions}}
+
+    def _approval_tool_call_id(
+        self,
+        run: RunState,
+        all_requests: list[object],
+        tool_name: str,
+        tool_args: Mapping[str, object],
+    ) -> str | None:
+        """返回本条审批应带的 provider tool_call_id；不能确定时返回 None。
+
+        输入：整个 interrupt 批次（含自动放行的调用）与当前工具名参数。
+        输出：能给客户端精确关联的 id，或 None（不注入，客户端降级成模糊匹配）。
+
+        为什么重复检测放在这里：只有这个方法手里有整批 action_requests，
+        同批出现两个相同 `(工具名, 参数)` 时，预检登记的 id 已被后者覆盖，
+        注入任何一个都会让两张卡片抢同一个 id，所以宁可不注入。
+        """
+        target = approval_fingerprint(tool_name, tool_args)
+        if target is None:
+            return None
+        matches = 0
+        for action in all_requests:
+            action_map = action if isinstance(action, Mapping) else {}
+            raw_args = action_map.get("args")
+            args = dict(raw_args) if isinstance(raw_args, Mapping) else {}
+            if approval_fingerprint(str(action_map.get("name") or ""), args) == target:
+                matches += 1
+                if matches > 1:
+                    return None
+        return run.tool_call_ids.lookup(tool_name, tool_args)
+
+
+def _inject_tool_call_id(requests: object, tool_call_id: str | None) -> None:
+    """把 provider tool_call_id 写进第一个 action 元素；只能就地改自己造的对象。
+
+    `_bounded_json` 超限时返回 `{truncated:true, preview}` 而不是 action_requests
+    形状，此时不注入（客户端降级为模糊匹配）。
+    """
+    if tool_call_id is None or not isinstance(requests, dict):
+        return
+    actions = requests.get("action_requests")
+    if not isinstance(actions, list) or not actions:
+        return
+    action = actions[0]
+    if not isinstance(action, dict) or "tool_call_id" in action:
+        return
+    action["tool_call_id"] = tool_call_id
 
 
 def _generate_permission_rule(

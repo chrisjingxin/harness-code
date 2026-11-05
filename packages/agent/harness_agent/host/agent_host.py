@@ -2665,7 +2665,7 @@ class AgentHost:
         }
 
     def watch_thread(self, connection: ProtocolConnection, thread_id: str) -> None:
-        """只登记该连接的 Thread 订阅；不读历史、不验存在性（session/new 用）。"""
+        """只登记该连接的 Thread 订阅；不读历史、不验存在性（`open_and_watch_thread` 复用）。"""
         connection.watched_threads.add(thread_id)
 
     async def open_and_watch_thread(
@@ -6168,6 +6168,8 @@ class AgentHost:
             snapshot_store=self._snapshot_store,
             deferred_tool_store=self._deferred_tool_store,
             approval_presentations=run.approval_presentations,
+            # 与 Coordinator 共享同一对象：预检写入，生成审批 payload 时读取。
+            tool_call_ids=run.tool_call_ids,
             workspace_root_registry=self._workspace_root_registry,
             interaction_port=interaction_port,
             event_port=event_port,

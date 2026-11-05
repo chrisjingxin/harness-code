@@ -35,6 +35,9 @@ from harness_agent.tools.file_tool_catalog import (
 TITLE_LIMIT = 120
 """标题的最大字符数；超过就截断加省略号，避免撑爆客户端卡片。"""
 
+BLOCK_LIMIT = 24_000
+"""多行安全文本（审批描述与 diff）的上限。"""
+
 _TITLE_ARGUMENT_BY_TOOL: dict[str, str] = {
     "execute": "command",
     "web_fetch": "url",
@@ -93,11 +96,11 @@ def tool_title(name: str, args: Mapping[str, object] | None) -> str:
         if argument_name is not None:
             raw = args.get(argument_name)
     if not isinstance(raw, str) or not raw:
-        return _sanitize(name)
-    return _sanitize(f"{name} {raw}")
+        return sanitize_line(name)
+    return sanitize_line(f"{name} {raw}")
 
 
-def _sanitize(text: str) -> str:
+def sanitize_line(text: str) -> str:
     """把标题压成单行安全文本：空白折叠成一个空格，去掉控制字符，超长截断。"""
     chars: list[str] = []
     for char in text:
@@ -112,6 +115,26 @@ def _sanitize(text: str) -> str:
     if len(collapsed) > TITLE_LIMIT:
         return collapsed[: TITLE_LIMIT - 1] + "…"
     return collapsed
+
+
+def sanitize_block(text: str, *, limit: int = BLOCK_LIMIT) -> str:
+    """把多行文本压成安全版本：保留换行与制表，去掉其它控制与格式字符。
+
+    审批兜底文本与 diff 内容来自模型和文件，会进终端或编辑器，必须净化；
+    与标题不同，这里不能把换行折成空格，否则 diff 不可读。
+    """
+    chars: list[str] = []
+    for char in text:
+        if char in "\n\t":
+            chars.append(char)
+        elif unicodedata.category(char) in {"Cc", "Cf"}:
+            continue
+        else:
+            chars.append(char)
+    cleaned = "".join(chars)
+    if len(cleaned) > limit:
+        return cleaned[: limit - 1] + "…"
+    return cleaned
 
 
 class PathLocator:
@@ -152,8 +175,11 @@ class PathLocator:
 
 __all__ = [
     "ACP_KIND_BY_TOOL",
-    "TITLE_LIMIT",
+    "BLOCK_LIMIT",
     "PathLocator",
+    "TITLE_LIMIT",
+    "sanitize_block",
+    "sanitize_line",
     "tool_kind",
     "tool_risk_kind_names",
     "tool_title",
