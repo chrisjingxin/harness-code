@@ -405,7 +405,7 @@ describe("TraceView", () => {
     try {
       const body = handle.container.querySelector<HTMLElement>(".trace-view-body")
       expect(body).not.toBeNull()
-      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px 360px")
+      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px min(360px, 50%)")
 
       const handleEl = handle.container.querySelector<HTMLElement>(".trace-resize-vertical")
       expect(handleEl).not.toBeNull()
@@ -417,12 +417,12 @@ describe("TraceView", () => {
       act(() => {
         window.dispatchEvent(new PointerEvent("pointermove", { clientX: 512 }))
       })
-      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px 354px")
+      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px min(354px, 50%)")
       // 向左拖 24px（相对起点 500 → 476）→ 详情 360 + 24*0.5 = 372（边界左移，详情变宽）。
       act(() => {
         window.dispatchEvent(new PointerEvent("pointermove", { clientX: 476 }))
       })
-      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px 372px")
+      expect(body!.style.gridTemplateColumns).toBe("minmax(0, 1fr) 9px min(372px, 50%)")
       act(() => {
         window.dispatchEvent(new PointerEvent("pointerup"))
       })

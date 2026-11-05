@@ -12,7 +12,7 @@ scope: 落地已确认的冷紫品牌主题与三栏布局，保留中间对话�
 acceptance: 双主题可替换且选中清晰；原有功能可达；文件树在右侧；仅提交勾选的完整文件；提交与推送分别报告结果；按可演示停点完成验证。
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-190-Web主题布局与Git提交.md、docs/developer/plan/HC-190-Web主题布局与Git提交.md、docs/developer/todo/HC-190-Web主题布局与Git提交.md、docs/developer/architecture/架构总览.md
-test_evidence: "提交前复核：typecheck、project:check 通过；工程及依赖脚本各 17 pass，CLI 1275 pass / 1 skip / 0 fail，浏览器恢复另 2 pass。npm test 因既有 Python 依赖门禁退出 1，pytest 未启动；真实内网 SDK 仍待验收。"
+test_evidence: "dev 本地迁移复核：typecheck、build、额外夹具类型检查通过；相关回归 428 pass，浏览器布局 13 pass，接管恢复 2 pass。CLI 全量 1344 pass / 1 skip / 1 既有高亮断言失败；工程检查受 dev 原有本地链接影响，Python 依赖门禁未通过。"
 references: docs/developer/task/HC-125-统一Web工作台视觉token.md
 completed_at: -
 ---
@@ -189,3 +189,58 @@ TDD：独立设置状态测试先因缺少 settings 失败；嵌套查看测试�
 提交前重新执行 `npm run typecheck`、`npm run project:check` 均通过；`npm test` 中工程测试与依赖脚本各 17 pass，CLI 主集合 1275 pass / 1 skip / 0 fail，浏览器接管恢复另 2 pass / 0 fail。Python 阶段仍因本机 DeepAgents 0.6.8 与声明 0.7.3 不一致、缺少项目补丁及禁止分发门禁退出，pytest 未启动；整个 `npm test` 退出 1。沿用用户已确认的环境差异边界，不修改 Python、私有 SDK、依赖声明或锁文件。验证日志保存在本地忽略目录 `tmp/trace-merge-20261103/`。
 
 本次只做主仓库提交交付，不新增功能或改动版本；内网真实 SDK、目标环境与最终用户验收仍待完成，任务不归档。OpenWiki 命令未安装，未手改生成页面。设计稿及归档继续保留。
+
+
+## 分辨率与样式复核（2026-11-04）
+
+用户要求先在主仓库修正并走查，检查通过后另行迁移内网；本轮不提交、不推送。文件标签关闭图标与按钮中心对齐；文件树/预览按右栏可用高度 2:3 分配、分别滚动，关闭全部文件后文件树占满右栏。长路径省略且刷新按钮不被挤走。Git 在低高度下保留变更区域，提交区与结果可滚动到达。保持左栏 280px、纯色选中、品牌图标与中间消息/工具交互。
+
+本轮验证：
+
+- `npx playwright test -c packages/cli/tests/e2e layout.spec.ts --output=tmp/layout-test-results --reporter=line`：11 pass。真实 WebApp 组件 + 合成快照，覆盖 1920×1080、1440×900、1366×768、1280×600、1024×480，另检查 1280×360 深色与 800/600px 窄窗 Trace。先复现关闭图标偏移 3px、Trace 缩窗下半区高度为 0、右栏拖宽后内容宽度计算错误与窄窗 Trace 错占 280px 列，再修正并通过。
+- Web presentation/application/architecture focused：376 pass；测试夹具补齐当前类型后 presentation 复跑 284 pass，额外夹具 TypeScript 检查通过。
+- `npm run test:ts`：1275 pass / 1 skip / 0 fail；接管恢复另 2 pass。
+- `npm run typecheck`、`npm run build`、`npm run project:check`、`git diff --check`：通过。
+- 对照保留原稿检查品牌 Command 图标、280px 左栏、无边框会话选中、消息头像、右栏主/文件页签。原稿和内网仓库未修改；没有提交或推送。生产改动仅 4 个 Web 展示文件，未修改 SDK、Agent、协议与 Trace 数据算法。
+- 本机浏览器验证不代表内网 Windows/浏览器缩放已验收；Python/私有 SDK 不属于本轮样式改动，未重跑。`openwiki code --update --print` 因本机缺少命令退出 127，生成 Wiki 未手改。
+
+截图和日志保存在主仓库忽略目录 `tmp/layout-*`。独立布局预览可在主仓库运行 `bun packages/cli/tests/e2e/layout-server.ts`，使用它打印的本机 URL；仅使用演示数据，不执行真实 Git 或模型请求。真实工作台重新启动 `npm run dev` 并输入 `/web` 查看已构建资源。用户检查通过后再迁移内网。
+
+
+## 中央文件页签（2026-11-04）
+
+增加中央可关闭文件页签：右侧预览可在主区域打开；同路径去重，关闭不删除文件，切换保持对话草稿与轨迹状态。本停点仅涉及 CLI Web，只读访问沿用已有文件边界。
+
+### 中央文件页签实施与 Review
+
+已完成右侧打开入口、中央可关闭页签、同路径去重与键盘导航。对话/轨迹保持挂载，中央与右侧共享既有只读预览、高亮、行号、刷新和错误展示。关闭/淘汰以两处引用决定缓存清理；串行读取解决共享预览槽的并发取消，接管关闭不继续消费队列。复核生产变更仅 CLI Web，无 Protocol、Python、依赖或版本变更；无内网迁移。
+
+验证：Adapter/界面新增用例先失败再实现；Web presentation/application/architecture 最终 382 pass；浏览器布局 13 pass（含浅/深主题中央打开去重、独立关闭、键盘焦点、滚动、草稿与 1024×480 收起 Dock 阅读）。实现初版 CLI 全量 1279 pass、1 skip，独立接管测试 2 pass；后续读取队列补充已由最终 Web 回归覆盖。类型检查、额外 E2E 类型检查、构建、工程检查及 diff 空白检查通过。浏览器使用真实组件和确定性合成数据，不调用模型或执行 Git；本次未运行 Python/内网私有 SDK 测试。OpenWiki 命令未安装，未刷新生成 Wiki。
+
+用户查看入口：http://127.0.0.1:58851/（本机合成数据预览）；真实 CLI 需重启后通过 `/web` 打开新构建。先前样式修复 19 文件已暂存，新功能修改留在工作区，等待用户查看后再处理提交/迁移；HC-190 保持原状态。
+
+
+## 主仓库提交复核（2026-11-05）
+
+用户明确授权把当前主仓库改动提交并推送到远端 `trace_merge`。本次包含分辨率布局修复、中央可关闭文件页签、紧凑文件操作图标、顶部项目名及文字/图标对齐、底部重复状态行移除。Review 确认改动集中于 CLI Web、相关回归和文档；没有修改 Protocol、Python、私有 SDK、依赖锁或版本，没有迁移本轮改动到内网仓库。设计稿保持保留，最终内网真实 SDK 与目标环境验收仍待完成，任务不归档。
+
+提交前完整测试发现文件操作悬停背景引用未定义的 `--surface-hover`，已改用现有双主题变量 `--surface-2`；主题契约 4 pass，随后完整 CLI 测试无失败。
+
+- `npm run project:check`、`npm run typecheck`、`npm run build` 与 diff 空白检查通过。
+- `npm test`：工程与依赖脚本各 17 pass；CLI 主集合 1288 pass / 1 skip / 0 fail；独立接管恢复 2 pass / 0 fail。唯一跳过项为原有真实模型端到端用例。
+- `npm test` 最终退出 1：Python 依赖门禁仍检测到 DeepAgents 安装 0.6.8 与声明 0.7.3 不符、缺少项目补丁，以及环境中保留 Anthropic 分发包/引用；pytest 未启动。与前次交付记录一致，按用户确认保留内网依赖逻辑，不为通过外网检查改包或锁文件。
+- Playwright 布局回归 13 pass，覆盖文件标签开关、独立关闭与去重、草稿/滚动/焦点保留、浅深主题、多分辨率、缩窗后 Git/Trace 可达性。使用真实组件与合成数据，不替代内网实测。
+- 本轮日志与浏览器输出保存在主仓库忽略目录 `tmp/trace-merge-commit-*`。`openwiki code --update --print` 因命令缺失退出 127，未手改生成 Wiki。
+
+
+## dev 本地迁移（2026-11-05）
+
+用户要求以最新远端 `origin/dev` 为基础，在主仓库本地迁入 `origin/trace_merge` 领先 `origin/master` 的两条提交，并明确禁止推送。迁移基线为 `3825f67df0615b9c2d49e6ad6ba203e3a60e7de4`，来源依次为 `7a8cd04413203c9e7be96f2aa29fa445d81fb48a` 与 `91245bd4ec86ab38581817b5c838bb209d3ca811`，保留两个独立提交并记录来源。
+
+第一条提交产生 7 处冲突：保留 dev 的启动入口注释和运行时绑定、代码索引状态/浮层、与 InteractiveIntent 编译期绑定的完整意图白名单及 Goal/模式校验，再接入 Git 意图与 Trace 历史/实时读取；测试入口保留双方新增集合。任务看板通过 `tasks:sync` 重建，保留 dev 任务。第二条提交自动合并。另为 dev 新增的代码索引测试补齐 Trace 客户端方法，在共享 Web 夹具中补齐 `codeIndex: null`，避免迁移后遗漏状态或测试接口。
+
+Review 确认 Agent、Protocol、依赖锁、安装脚本与 dev 运行时绑定保持原样；原 master/trace_merge 分支保留，远端未写入。迁移相关回归 428 pass，浏览器布局 13 pass，生产 TypeScript、额外 E2E/夹具类型检查与构建通过。
+
+项目检查在 dev 原有的 `docs/developer/research/182-模型路由委派评估.md` 失效本地链接处退出；已确认该文件相对 origin/dev 未变化。首次全量测试的 wheel 构建发生 5 秒超时，单独以 30 秒上限复跑 6 pass；同时发现的代码索引假客户端缺少 Trace 方法已修正。未为通过检查修改 dev 原有研究文档、Python 或内网依赖。OpenWiki 命令仍未安装，未手改生成 Wiki。
+
+最终验证：复跑 `npm test` 的工程与依赖脚本通过，CLI 1344 pass / 1 skip / 1 fail，唯一失败为 `tests/web/syntax/worker.test.ts` 对 `const` 高亮范围的断言。单独运行仍失败，worker 与测试均和 origin/dev 字节一致，本轮未修改；因此不把全量检查报告为通过。接管恢复另行执行 2 pass。`npm run test:py` 在原有 DeepAgents/Anthropic 依赖门禁退出，pytest 未启动。验证命令、回归输出和限制保存在主仓库忽略目录 `tmp/dev-trace-migration-*`，不包含真实模型请求。为保持两条迁移提交，将测试夹具适配和本段记录纳入第二条本地提交；不推送远端。

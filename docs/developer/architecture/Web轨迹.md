@@ -18,6 +18,8 @@ SDK stderr marker → `TraceRuntime` 增量解码与合并 → 串行写日志�
 - `web/presentation/trace/`：内网原展示算法；状态输入不含 adapter 或 SDK。颜色在 `theme.css`，布局在模块 CSS。
 - `workbench-views.tsx/css`：中央页签与开发者／简化切换。聊天和 Dock 常驻，隐藏区域 inert；Timeline 隐藏时停止自动滚动。设置状态独立。
 
+布局尺寸属于展示模块：拖动保存请求尺寸，CSS 约束实际可视尺寸。甘特区至少 120px 以容纳 72px 三轨和标题，常规窗口最多占 Trace 可用高度 45%；详情列不超过双列区宽度的一半。视口缩小时自动收敛，放大后恢复请求尺寸；窄窗口通过宿主横向滚动访问最小双列宽度，不改 Span 数据或折叠状态。
+
 ## 生命周期与保护边界
 
 CLI `startAgent` 在 stderr 监听处将字节同时送入既有 drain 和 TraceRuntime。正常退出与初始化失败都关闭 Runtime；不改变 stdout JSON-RPC。Gateway 订阅 Runtime，连接时回放当前进程缓存；关闭解绑。浏览器断开时关闭实时订阅并结算历史请求，Adapter 释放本地订阅。没有 SDK 日志时不生成 Span。
