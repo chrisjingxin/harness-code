@@ -5,7 +5,7 @@
   "snapshot": {
     "git_commit": "07bb7880293258614a912454aed1f554e80b6ec8",
     "bun_lock_sha256": "e46c7318f4444f1b4b496175ebe16b8369f3e2fc5c66e77a5e956a7819121e15",
-    "uv_lock_sha256": "d3aeea573138d2b4c9d77363d3e9de11f45fd70a39feaf89c8037919bbe62b24"
+    "uv_lock_sha256": "1178f547a55847b8b2a99af02b527a85366fe0c6a79b306f5f9c055052710b7a"
   },
   "runtime": {
     "bun": "1.3.13",
@@ -83,7 +83,8 @@
       "tomli-w": ">=1.1.0 (locked 1.2.0)",
       "websockets": "15.0.1",
       "tree-sitter": ">=0.24.0,<0.27.0 (locked 0.26.0)",
-      "tree-sitter-bash": ">=0.25.0,<0.26.0 (locked 0.25.1)"
+      "tree-sitter-bash": ">=0.25.0,<0.26.0 (locked 0.25.1)",
+      "agent-client-protocol": "0.12.1"
     },
     "test": {
       "pytest": "9.0.3",
@@ -94,7 +95,7 @@
       "lock_status": "declared in pyproject.toml but absent from uv.lock; audit separately for build isolation"
     },
     "lockfile": "packages/agent/uv.lock",
-    "locked_external_packages": 92,
+    "locked_external_packages": 93,
     "locked_registry": "https://mirrors.aliyun.com/pypi/simple/",
     "removed": ["langchain-quickjs", "langchain-tests", "js_eval", "secretstorage"]
   },

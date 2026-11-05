@@ -1507,6 +1507,9 @@ executor = "fast"
         server._config,
         resolved,
         skill_registry=registry,
+        # 0.10 起 `interactive` 不再从 ContextVar 读，必须显式传入；
+        # 本用例 initialize 未声明 question handle，所以为 False。
+        interactive="question" in server._owner_connection.interaction_handles,
     )
     agent_engine_profile = spec_for_profile.runtime_profile
     spec = server._resolved_agent_specs[agent_engine_profile.profile_key]

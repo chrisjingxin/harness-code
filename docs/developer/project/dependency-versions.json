@@ -42,6 +42,7 @@
     "websockets": "15.0.1",
     "tree-sitter": "0.26.0",
     "tree-sitter-bash": "0.25.1",
+    "agent-client-protocol": "0.12.1",
     "pytest": "9.0.3",
     "pytest-asyncio": "1.4.0",
     "hatchling": "1.27.0 (build isolation; not present in uv.lock)"

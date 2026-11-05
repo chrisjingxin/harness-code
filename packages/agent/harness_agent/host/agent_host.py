@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from jsonschema.exceptions import ValidationError
 
@@ -53,7 +53,7 @@ from harness_agent.config.settings import (
     SettingsStore,
     create_platform_credential_backend,
 )
-from harness_agent.policy.approval_mode import ApprovalMode
+from harness_agent.policy.approval_mode import DEFAULT_APPROVAL_MODE, ApprovalMode
 from harness_agent.policy.concurrency import AsyncRWLock
 from harness_agent.policy.permission_rules import PermissionRule
 from harness_agent.config.config_change_service import (
@@ -91,6 +91,7 @@ from harness_agent.protocol.generated import (
     CONTROLLED_OPERATIONS,
     ERROR_CODES,
     EVENT_TYPE,
+    INTERACTION_HANDLES,
     METHOD,
     OPERATION_CAPABILITIES,
     OPERATION_MIN_MINOR,
@@ -141,6 +142,7 @@ from harness_agent.protocol.generated import (
 )
 from harness_agent.threads.git_checkpoints import GitCheckpointService
 from harness_agent.threads.thread_persistence import workspace_fingerprint
+from harness_agent.threads.thread_records import ThreadSummary
 from harness_agent.tools.plan_file import (
     PLAN_VIRTUAL_PATH,
     plan_display_path,
@@ -214,6 +216,8 @@ from harness_agent.compose.session import (
 )
 from harness_agent.extensions.providers.harness_gateway import ProviderClientPool
 from harness_agent.host.run_coordinator import (
+    ApprovalModeResult,
+    CancelResult,
     GoalContinuationRunInput,
     GoalProposalRunInput,
     AgentEvent,
@@ -222,6 +226,7 @@ from harness_agent.host.run_coordinator import (
     RunCoordinator,
     RunError,
     RunExecution,
+    RunInput,
     RunPreparation,
     RunRuntime,
     RunState,
@@ -231,6 +236,11 @@ from harness_agent.host.run_coordinator import (
     UserRunInput,
 )
 from harness_agent.host.run_execution import _bounded_json
+from harness_agent.host.service_types import (
+    HostSnapshot,
+    RunAccepted,
+    StartRunRequest,
+)
 from harness_agent.runtime.team_coordinator import (
     TeamCoordinator,
     TeamDefinition,
@@ -335,6 +345,50 @@ def _validate_command_invocation(
         raise SkillError("COMMAND_INVOCATION_IDENTITY_MISMATCH")
     if requested.args.strip() != raw_args:
         raise SkillError("COMMAND_INVOCATION_ARGS_MISMATCH")
+
+
+def start_run_request_from_params(params: dict[str, Any]) -> StartRunRequest:
+    """把 v3 `run.start` 参数纯函数式地转成服务层请求。
+
+    只做形状转换，不做校验也不产生副作用：能力检查、空消息、goal revision 比对
+    都是服务方法自己的职责，ACP 路径才能复用同一套判断。
+    这个函数只服务 v3 薄壳，TUI 下线时随薄壳一起删。
+    """
+    parsed = RunStartParams.model_validate(params)
+    run_input = parsed.input
+    typed_input: RunInput
+    if run_input.kind == "user":
+        requested_skill = (
+            RequestedSkill(
+                run_input.requested_skill.id,
+                run_input.requested_skill.args or "",
+                run_input.requested_skill.raw_invocation,
+                run_input.requested_skill.command_name,
+            )
+            if run_input.requested_skill is not None
+            else None
+        )
+        typed_input = UserRunInput(run_input.message, requested_skill)
+    elif run_input.kind == "goal_proposal":
+        typed_input = GoalProposalRunInput(run_input.request_id)
+    else:
+        typed_input = GoalContinuationRunInput(
+            run_input.goal_id,
+            run_input.goal_revision,
+            run_input.reason,
+        )
+    return StartRunRequest(
+        thread_id=parsed.thread_id,
+        run_id=parsed.run_id,
+        mode=parsed.mode,
+        input=typed_input,
+        requested_primary_profile=(
+            parsed.model_selection.primary_profile
+            if parsed.model_selection is not None
+            else None
+        ),
+        requested_approval_mode=parsed.approval_mode,
+    )
 
 
 @dataclass(slots=True)
@@ -800,6 +854,51 @@ class AgentHost:
             )
         return connection
 
+    def open_connection(
+        self,
+        sender: Callable[[dict[str, Any]], Awaitable[None]] | None,
+        *,
+        enabled_capabilities: Iterable[str],
+        interaction_handles: Iterable[str],
+        capability_ceiling: Iterable[str] = SERVER_CAPABILITIES,
+        role: str = "owner",
+    ) -> ProtocolConnection:
+        """登记一条已协商好的外部连接（ACP 用），不经过 v3 initialize 流程。
+
+        输入：`sender` 是该连接的发帧回调；`enabled_capabilities` 是客户端声明的能力，
+              与 `capability_ceiling` 取交集后才生效；`interaction_handles` 必须是
+              `INTERACTION_HANDLES` 里登记过的名字。
+        输出：`initialized=True` 的 `ProtocolConnection`，可直接用于其他服务方法。
+        异常：`sender` 为空或 handle 未登记时抛 `ValueError`（编程错误，不降级）。
+
+        `sender` 约束（写给 AcpServer）：必须快速返回，事件帧只入队、交互帧只起任务，
+        不要随意抛异常。`_fanout_agent_event` 发现非 owner 连接的 sender 抛错会
+        `create_task(close_connection(...))`，等于直接取消该连接上的所有 Run。
+
+        控制权前提：ACP 进程里没有 attachment，控制权不会在 owner 与 attached 之间
+        转移，所以 `_control_lease.permit` 不进入服务方法；v3 路径仍由
+        `_dispatch_current` 对受控操作包 permit。代价是 `host.control.*` 与
+        `host.attachment.*` 在 ACP 模式下绝不能暴露。
+        """
+        if sender is None:
+            raise ValueError("open_connection requires a sender callable")
+        handles = set(interaction_handles)
+        unknown_handles = handles - set(INTERACTION_HANDLES.values())
+        if unknown_handles:
+            raise ValueError(f"Unknown interaction handles: {sorted(unknown_handles)}")
+        connection = self.create_connection(
+            sender,
+            role=role,
+            capability_ceiling=capability_ceiling,
+        )
+        connection.initialized = True
+        connection.protocol_minor = PROTOCOL_MINOR
+        connection.enabled_capabilities = set(enabled_capabilities).intersection(
+            connection.capability_ceiling
+        )
+        connection.interaction_handles = handles
+        return connection
+
     async def dispatch(self, message: dict[str, Any]) -> None:
         """从 owner stdio Connection 分派一帧。"""
         await self.dispatch_connection(self._owner_connection, message)
@@ -1006,7 +1105,7 @@ class AgentHost:
                 {"code": str(exc)},
             )
         except RunError as exc:
-            rpc_error = self._run_rpc_error(exc)
+            rpc_error = self.run_error_to_rpc_error(exc)
             await self.send_error(request_id, rpc_error.code, rpc_error.message, rpc_error.data)
         except ControlLeaseError as exc:
             await self.send_error(
@@ -1046,6 +1145,17 @@ class AgentHost:
 
     def _connection_watches(self, connection: ProtocolConnection | None = None) -> set[str]:
         return (connection or self._current_connection()).watched_threads
+
+    def _connection_handles_for(self, connection_id: str | None) -> set[str]:
+        """按 Connection 身份查 handles；连接已回收时返回空集。
+
+        Run 的 preparation 在 Coordinator 的异步任务里执行，不能读 ContextVar；
+        只按 `StartRun.connection_id` 找登记过的连接，找不到就当没有交互能力。
+        """
+        if connection_id is None:
+            return set()
+        connection = self._connections.get(connection_id)
+        return set() if connection is None else connection.interaction_handles
 
     async def _send_to(
         self,
@@ -1125,6 +1235,74 @@ class AgentHost:
             {"jsonrpc": "2.0", "method": method, "params": params},
         )
 
+    async def ensure_ready(self) -> HostSnapshot:
+        """完成 Host 级资源初始化；可重复调用，只有第一次真正做事。
+
+        输入：无（Host 启动时已固定 workspace 与 config 路径）。
+        执行：取 `_resource_init_lock` → 若尚未就绪，则预订 AgentEngine 快照锁，
+              刷新 Skill 目录 → 装配 SkillRegistry → 加载配置 → 刷新 Settings 快照
+              → 后台起 MCP 连接 → 置位就绪；随后（每次调用都做，幂等）配置开启代码索引时
+              启动 Manager。
+        输出：`HostSnapshot`；配置损坏不抛错，错误文本放在 `startup_error`。
+        异常：`SkillError` / `PluginError` / `ConfigChangeError` 等资源初始化失败原样上抛，
+              且 `_resources_ready` 保持 False，调用方可以重试。代码索引 `start()` 失败也
+              原样上抛，但此时资源已就绪、MCP 已在后台连接，只是这一次调用失败，下次
+              调用会再尝试启动 Manager；这与重构前每次 v3 initialize 都调一次 `start()` 的
+              行为一致。
+        """
+        async with self._resource_init_lock:
+            if not self._resources_ready:
+                reservation = await self._reserve_agent_engine_snapshot()
+                try:
+                    await self._refresh_skill_catalog_locked()
+                finally:
+                    await reservation.release()
+                self._skill_registry = self._build_skill_registry()
+                self._load_config()
+                self._refresh_settings_snapshot()
+                # MCP 连接不阻塞响应；后台建立连接。
+                self._mcp_connect_task = asyncio.ensure_future(self._connect_mcp_servers())
+                self._resources_ready = True
+            if self._code_index_configured():
+                # Manager.start() 幂等；每次调用都尝试，与重构前每次 initialize 都启动一致，
+                # 同时 ACP 模式才不至于静默丢掉索引工具。放在置位之后，启动失败不会把
+                # 已经就绪的资源回滚成「未就绪」。
+                await self._ensure_code_index_manager().start()
+        return self._host_snapshot()
+
+    @property
+    def workspace(self) -> Path:
+        """Host 启动时固定的工作区绝对路径；AcpServer 用它校验 session/new 的 cwd。"""
+        return self._workspace
+
+    def _host_snapshot(self) -> HostSnapshot:
+        """同步装配 initialize 快照；不 await，保证读取时机与响应组装在同一拍。"""
+        registry = self._require_skills()
+        return HostSnapshot(
+            agent_commands=tuple(registry.agent_commands()),
+            skills_snapshot=registry.snapshot(),
+            skills_snapshot_id=registry.snapshot_id,
+            skill_diagnostics=tuple(registry.diagnostics[:20]),
+            diagnostics=(
+                self._config.diagnostics.redacted()
+                if self._config is not None
+                else DiagnosticsSettings(
+                    level=(
+                        os.environ["HARNESS_LOG_LEVEL"]
+                        if os.environ.get("HARNESS_LOG_LEVEL") in {"debug", "info", "warn", "error"}
+                        else "info"
+                    )
+                ).redacted()
+            ),
+            config_summary=self._config.redacted() if self._config else None,
+            startup_error=self._startup_error,
+            default_approval_mode=(
+                self._config.execution.approval_mode
+                if self._config is not None
+                else DEFAULT_APPROVAL_MODE
+            ),
+        )
+
     async def _handle_initialize(self, params: dict[str, Any], _id: str) -> dict[str, Any]:
         """协商 v3 minor、请求能力和可处理 Interaction。"""
         started_at = time.monotonic()
@@ -1150,20 +1328,7 @@ class AgentHost:
         if self._connection_initialized(connection):
             raise RpcError(-32000, "Peer is already initialized")
         negotiated_minor = min(PROTOCOL_MINOR, max_minor)
-        async with self._resource_init_lock:
-            if not self._resources_ready:
-                reservation = await self._reserve_agent_engine_snapshot()
-                try:
-                    await self._refresh_skill_catalog_locked()
-                finally:
-                    await reservation.release()
-                self._skill_registry = self._build_skill_registry()
-                self._load_config()
-                self._refresh_settings_snapshot()
-                # MCP 连接不阻塞 initialize 响应；后台建立连接
-                self._mcp_connect_task = asyncio.ensure_future(self._connect_mcp_servers())
-                self._resources_ready = True
-        registry = self._require_skills()
+        snapshot = await self.ensure_ready()
         requested = set(parsed.capabilities.requests)
         enabled = requested.intersection(connection.capability_ceiling)
         if connection.role != "owner":
@@ -1176,8 +1341,6 @@ class AgentHost:
         if not self._code_index_configured():
             enabled.difference_update(_CODE_INDEX_CAPABILITIES)
             available = [item for item in available if item not in _CODE_INDEX_CAPABILITIES]
-        else:
-            await self._ensure_code_index_manager().start()
         handles = set(parsed.capabilities.handles)
         connection.protocol_minor = negotiated_minor
         connection.interaction_handles = handles
@@ -1204,28 +1367,18 @@ class AgentHost:
                 "enabled": sorted(enabled),
                 "handles": sorted(handles),
             },
-            "agent_commands": registry.agent_commands(),
-            "skills_snapshot": registry.snapshot(),
-            "skill_diagnostics": registry.diagnostics[:20],
+            "agent_commands": list(snapshot.agent_commands),
+            "skills_snapshot": dict(snapshot.skills_snapshot),
+            "skill_diagnostics": list(snapshot.skill_diagnostics),
             "limits": {
                 "max_frame_bytes": MAX_FRAME_BYTES,
                 "max_tool_payload_bytes": MAX_TOOL_PAYLOAD_BYTES,
             },
-            "diagnostics": (
-                self._config.diagnostics.redacted()
-                if self._config is not None
-                else DiagnosticsSettings(
-                    level=(
-                        os.environ["HARNESS_LOG_LEVEL"]
-                        if os.environ.get("HARNESS_LOG_LEVEL") in {"debug", "info", "warn", "error"}
-                        else "info"
-                    )
-                ).redacted()
-            ),
-            "config_summary": self._config.redacted() if self._config else None,
+            "diagnostics": dict(snapshot.diagnostics),
+            "config_summary": snapshot.config_summary,
             "startup_error": (
-                {"code": "CONFIGURATION_ERROR", "message": self._startup_error}
-                if self._startup_error
+                {"code": "CONFIGURATION_ERROR", "message": snapshot.startup_error}
+                if snapshot.startup_error
                 else None
             ),
         }
@@ -1244,18 +1397,40 @@ class AgentHost:
         params: dict[str, Any],
         _id: str,
     ) -> dict[str, object]:
-        """登记 CLI 对本次 Host snapshot 得出的唯一 command 名称映射。"""
-        connection = self._current_connection()
+        """v3 薄壳：解析参数、转元组序列，业务交给 `bind_commands`。"""
+        parsed = CommandsBindParams.model_validate(params)
+        await self.bind_commands(
+            self._current_connection(),
+            parsed.snapshot_id,
+            tuple((str(binding.id), str(binding.name)) for binding in parsed.bindings),
+        )
+        return {"snapshot_id": parsed.snapshot_id, "accepted": True}
+
+    async def bind_commands(
+        self,
+        connection: ProtocolConnection,
+        snapshot_id: str,
+        bindings: Sequence[tuple[str, str]],
+    ) -> None:
+        """把「command id → 最终 slash 名称」绑定到一条连接；每连接只能一次。
+
+        输入：`snapshot_id` 必须是当前 Skill catalog 的 id；`bindings` 是
+              `(id, name)` 序列。用序列而不是 dict，是因为「重复 id」本身就是
+              需要报 `COMMAND_BINDING_DUPLICATE_ID` 的非法输入，转成 dict 就丢了。
+        输出：无；成功时写入 `connection.command_binding_snapshot_id` 与
+              `command_bindings`（不可变映射，供 Run 读取）。
+        异常：`RpcError(-32602, COMMAND_BINDING_*)`，共五种：已绑定、快照不匹配、
+              重复 id、重复名（大小写不敏感）、未知 id、集合不完整。
+        """
         if connection.command_binding_snapshot_id is not None:
             raise RpcError(
                 -32602,
                 "COMMAND_BINDING_ALREADY_SET",
                 {"code": "COMMAND_BINDING_ALREADY_SET", "retryable": False},
             )
-        parsed = CommandsBindParams.model_validate(params)
         await self._refresh_control_plane_catalog()
         registry = self._require_skills()
-        if parsed.snapshot_id != registry.snapshot_id:
+        if snapshot_id != registry.snapshot_id:
             raise RpcError(
                 -32602,
                 "COMMAND_BINDING_SNAPSHOT_MISMATCH",
@@ -1269,9 +1444,7 @@ class AgentHost:
         }
         bound: dict[str, str] = {}
         names: set[str] = set()
-        for binding in parsed.bindings:
-            command_id = str(binding.id)
-            command_name = str(binding.name)
+        for command_id, command_name in bindings:
             folded_name = command_name.casefold()
             if command_id in bound:
                 raise RpcError(
@@ -1299,9 +1472,8 @@ class AgentHost:
                 "COMMAND_BINDING_SET_MISMATCH",
                 {"code": "COMMAND_BINDING_SET_MISMATCH", "retryable": False},
             )
-        connection.command_binding_snapshot_id = parsed.snapshot_id
+        connection.command_binding_snapshot_id = snapshot_id
         connection.command_bindings = MappingProxyType(bound)
-        return {"snapshot_id": parsed.snapshot_id, "accepted": True}
 
     async def _connect_mcp_servers(self) -> None:
         """根据配置建立 MCP 服务器连接并构建初始 snapshot；失败不阻止启动。"""
@@ -1382,90 +1554,108 @@ class AgentHost:
             await self._start_plugin_runtime()
 
     async def _handle_run_start(self, params: dict[str, Any], request_id: str) -> None:
-        """把协议输入转换成 StartRun，并让 Coordinator 先完成受理再启动事件流。"""
-        parsed = RunStartParams.model_validate(params)
-        run_input = parsed.input
-        if run_input.kind == "user":
-            if not run_input.message.strip():
-                raise RpcError(-32602, "message must be non-empty")
-            requested_skill = (
-                RequestedSkill(
-                    run_input.requested_skill.id,
-                    run_input.requested_skill.args or "",
-                    run_input.requested_skill.raw_invocation,
-                    run_input.requested_skill.command_name,
-                )
-                if run_input.requested_skill is not None
-                else None
+        """v3 薄壳：解析参数、在回调里发响应，业务交给 `start_run`。"""
+
+        async def respond(accepted: RunAccepted) -> None:
+            await self.send_response(
+                request_id,
+                {
+                    "thread_id": accepted.thread_id,
+                    "run_id": accepted.run_id,
+                    "accepted": accepted.accepted,
+                },
             )
-            typed_input = UserRunInput(run_input.message, requested_skill)
-        elif run_input.kind == "goal_proposal":
-            self._require_goal_run_capabilities(parsed.mode)
-            typed_input = GoalProposalRunInput(run_input.request_id)
+
+        await self.start_run(
+            self._current_connection(),
+            start_run_request_from_params(params),
+            on_accepted=respond,
+        )
+
+    async def start_run(
+        self,
+        connection: ProtocolConnection,
+        request: StartRunRequest,
+        *,
+        on_accepted: Callable[[RunAccepted], Awaitable[None]] | None = None,
+    ) -> RunAccepted:
+        """受理一次 Run：校验 → 构造 StartRun → undo 收敛 → 检查点 → 受理 → 起事件扇出。
+
+        输入：`connection` 是发起方（决定 owner、能力、command binding、minor）；
+              `request` 是传输无关的请求快照；`on_accepted` 在 Coordinator 受理成功后、
+              排标题和起扇出之前被 await（v3 在这里发 run.start 响应，保证
+              “响应先于事件”只由一处代码保证）。
+        输出：`RunAccepted`；事件另经该连接的 sender 推出。
+        异常：`RpcError(-32602)` 空消息、goal 能力不够、`RpcError(-32002)` 缺
+              `models.select`、`RpcError(-32000)` goal revision 过期、`RunError`，
+              以及 Coordinator 受理时的 `ConfigError` / `ContextRefreshError` /
+              `ExecutionBindingError` / `ThreadPersistenceError` 统一转 `-32004`。
+
+        前置顺序不得调换：`models.select` 检查必须在 undo 收敛和 git 检查点之前，
+        否则没有权限的请求也会改写 Thread 状态。
+        """
+        typed_input = request.input
+        if isinstance(typed_input, UserRunInput):
+            if not typed_input.message.strip():
+                raise RpcError(-32602, "message must be non-empty")
+        elif isinstance(typed_input, GoalProposalRunInput):
+            self._require_goal_run_capabilities(connection, request.mode)
         else:
-            self._require_goal_run_capabilities(parsed.mode)
+            self._require_goal_run_capabilities(connection, request.mode)
             persistence = await self._ensure_thread_persistence()
-            goal = (await persistence.goal_store().inspect(parsed.thread_id)).goal
+            goal = (await persistence.goal_store().inspect(request.thread_id)).goal
             # continuation 绑定发起时的 goal revision：期间若发生过 mutation，
             # 说明客户端看到的上下文已过期，拒绝执行而不是基于旧目标续跑。
             if (
                 goal is None
                 or goal.status != "active"
-                or goal.goal_id != run_input.goal_id
-                or goal.revision != run_input.goal_revision
+                or goal.goal_id != typed_input.goal_id
+                or goal.revision != typed_input.goal_revision
             ):
                 raise RpcError(-32000, "GOAL_CONTINUATION_STALE")
-            typed_input = GoalContinuationRunInput(
-                run_input.goal_id,
-                run_input.goal_revision,
-                run_input.reason,
-            )
         if (
-            parsed.model_selection is not None
-            and CAPABILITY["MODELS_SELECT"] not in self._connection_capabilities()
+            request.requested_primary_profile is not None
+            and CAPABILITY["MODELS_SELECT"] not in connection.enabled_capabilities
         ):
             raise RpcError(-32002, "MODELS_SELECT_CAPABILITY_REQUIRED")
 
-        connection = self._current_connection()
         command = StartRun(
-            thread_id=parsed.thread_id,
-            run_id=parsed.run_id,
-            mode=parsed.mode,
+            thread_id=request.thread_id,
+            run_id=request.run_id,
+            mode=request.mode,
             input=typed_input,
             connection_id=connection.connection_id,
             command_binding_snapshot_id=connection.command_binding_snapshot_id,
             command_bindings=connection.command_bindings,
             protocol_minor=connection.protocol_minor,
-            requested_primary_profile=(
-                parsed.model_selection.primary_profile
-                if parsed.model_selection is not None
-                else None
-            ),
-            requested_approval_mode=parsed.approval_mode,
+            requested_primary_profile=request.requested_primary_profile,
+            requested_approval_mode=request.requested_approval_mode,
         )
         if self._thread_persistence_enabled():
             persistence = await self._ensure_thread_persistence()
-            revert_state = await persistence.get_thread_revert_state(parsed.thread_id)
+            revert_state = await persistence.get_thread_revert_state(request.thread_id)
             # 受理新 Run 前必须先落定上一次 undo/redo 的挂起状态：新 Run 会追加
             # 对话历史，基线不定就无法判定后续回放应该基于哪条历史线。
             if revert_state is not None:
                 reverted_turn_id, undo_mode, _redo_tree_oid = revert_state
                 if undo_mode == "code":
-                    await persistence.set_thread_reverted_turn(parsed.thread_id, None)
+                    await persistence.set_thread_reverted_turn(request.thread_id, None)
                 else:
                     await persistence.cleanup_thread_history_after_turn(
-                        parsed.thread_id, reverted_turn_id
+                        request.thread_id, reverted_turn_id
                     )
 
             if isinstance(typed_input, UserRunInput):
-                await self._record_workspace_git_checkpoint(parsed.thread_id, parsed.run_id)
+                await self._record_workspace_git_checkpoint(
+                    request.thread_id, request.run_id
+                )
 
         try:
             execution = await self._run_coordinator.start(
                 command,
                 ConnectionRef(connection.connection_id),
                 allow_multithread=(
-                    CAPABILITY["RUN_MULTITHREAD"] in self._connection_capabilities()
+                    CAPABILITY["RUN_MULTITHREAD"] in connection.enabled_capabilities
                 ),
             )
         except (
@@ -1476,14 +1666,14 @@ class AgentHost:
         ) as exc:
             raise RpcError(-32004, str(exc)) from exc
 
-        await self.send_response(
-            request_id,
-            {
-                "thread_id": execution.ref.thread_id,
-                "run_id": execution.ref.run_id,
-                "accepted": execution.accepted,
-            },
+        accepted = RunAccepted(
+            thread_id=execution.ref.thread_id,
+            run_id=execution.ref.run_id,
+            accepted=execution.accepted,
         )
+        if on_accepted is not None:
+            # 回调抛错时直接退出：不排标题、不起扇出，与旧代码“send_response 失败”同语义。
+            await on_accepted(accepted)
         if isinstance(typed_input, UserRunInput):
             self._schedule_thread_title_autogen(
                 thread_id=execution.ref.thread_id,
@@ -1497,24 +1687,40 @@ class AgentHost:
         )
         self._run_event_tasks.add(task)
         task.add_done_callback(self._run_event_tasks.discard)
+        return accepted
 
     async def _handle_run_cancel(self, params: dict[str, Any], _id: str) -> dict[str, Any]:
-        """通过 Coordinator 取消 Run，统一处理 owner 校验和刚受理即取消。"""
+        """v3 薄壳：解析参数后交给 `cancel_run`。"""
         parsed = RunCancelParams.model_validate(params)
-        result = await self._run_coordinator.cancel(
-            RunRef(parsed.thread_id, parsed.run_id),
-            ConnectionRef(self._current_connection().connection_id),
+        result = await self.cancel_run(
+            self._current_connection(), parsed.thread_id, parsed.run_id
         )
         return {"cancelled": result.cancelled, "run_id": result.run_id}
+
+    async def cancel_run(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        run_id: str,
+    ) -> CancelResult:
+        """取消指定 Run；只有发起它的连接有权取消。
+
+        异常：`RunError(RUN_NOT_FOUND / RUN_NOT_OWNER)`；刚受理即取消也走这里。
+        """
+        return await self._run_coordinator.cancel(
+            RunRef(thread_id, run_id),
+            ConnectionRef(connection.connection_id),
+        )
 
     async def _handle_run_set_approval_mode(
         self, params: dict[str, Any], _id: str
     ) -> dict[str, Any]:
-        """通过 Coordinator 提交活动 Run 的审批模式，响应只回显服务端实际状态。"""
+        """v3 薄壳：解析参数后交给 `set_approval_mode`。"""
         parsed = RunSetApprovalModeParams.model_validate(params)
-        result = await self._run_coordinator.set_approval_mode(
-            RunRef(parsed.thread_id, parsed.run_id),
-            ConnectionRef(self._current_connection().connection_id),
+        result = await self.set_approval_mode(
+            self._current_connection(),
+            parsed.thread_id,
+            parsed.run_id,
             parsed.approval_mode,
         )
         return {
@@ -1523,6 +1729,23 @@ class AgentHost:
             "approval_mode": result.approval_mode,
             "revision": result.revision,
         }
+
+    async def set_approval_mode(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        run_id: str,
+        approval_mode: ApprovalMode,
+    ) -> ApprovalModeResult:
+        """提交活动 Run 的审批模式，返回值只反映服务端实际状态。
+
+        异常：`RunError(RUN_APPROVAL_MODE_*)`；正常切档后 revision 单调递增。
+        """
+        return await self._run_coordinator.set_approval_mode(
+            RunRef(thread_id, run_id),
+            ConnectionRef(connection.connection_id),
+            approval_mode,
+        )
 
     async def _run_persistence_provider(self) -> ThreadPersistence | None:
         """只为默认生产 Run 打开 Thread 持久化；echo/注入 Agent 保持轻量路径。"""
@@ -1624,6 +1847,9 @@ class AgentHost:
                 max_iterations=self._config.goal.max_iterations if goal_backed else 3,
                 grader_model_fingerprint=grader_fingerprint,
                 code_index_generation=None if code_index_lease is None else code_index_lease.generation,
+                # 本次 Run 的连接自己声明了 question handle 才算交互式；
+                # 不能用 ContextVar，否则 ACP 会继承休眠 owner 的 handles。
+                interactive="question" in self._connection_handles_for(command.connection_id),
             )
             # Policy 解析会把 Skill catalog 收窄成角色级的只读视图，Run 必须
             # 原样带上这份视图传给 Context/virtual backend；否则被代理执行的
@@ -2183,11 +2409,22 @@ class AgentHost:
         return result
 
     async def _handle_threads_list(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """返回当前 project 内最近活跃的 thread；thread_id 仅供客户端内部打开。"""
+        """v3 薄壳：解析参数后交给 `list_threads`。"""
         self._require_threads_capability()
         parsed = ThreadsListParams.model_validate(params)
-        threads = await (await self._ensure_thread_persistence()).list_threads(parsed.limit)
+        threads = await self.list_threads(parsed.limit)
         return {"threads": [_thread_summary_payload(thread) for thread in threads]}
+
+    async def list_threads(self, limit: int) -> list[ThreadSummary]:
+        """返回当前 Host 工作区最近活跃的 thread 摘要。
+
+        异常：回声模式没有 Thread 存储，抛
+              `RpcError(-32002, THREADS_UNAVAILABLE_IN_ECHO_MODE)`；
+              存储层错误原样上抛 `ThreadPersistenceError`。
+        """
+        self._require_threads_available()
+        persistence = await self._ensure_thread_persistence()
+        return await persistence.list_threads(limit)
 
     async def _handle_threads_set_title(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """把当前 project 的 thread 标题写成用户给定值。"""
@@ -2365,37 +2602,52 @@ class AgentHost:
         *,
         assume_idle: bool = False,
     ) -> dict[str, object]:
-        """读取当前 project 的一个 thread Transcript 历史，不以 checkpoint 兜底。"""
+        """v3 薄壳：保留 capability 检查，业务交给 `open_thread`。"""
         self._require_threads_capability()
         parsed = ThreadsOpenParams.model_validate(params)
+        return await self.open_thread(parsed.thread_id, assume_idle=assume_idle)
+
+    async def open_thread(
+        self,
+        thread_id: str,
+        *,
+        assume_idle: bool = False,
+    ) -> dict[str, object]:
+        """读取一个 thread 的 Transcript 历史与关联状态；只读，不登记 watch。
+
+        输入：`thread_id`；`assume_idle=True` 表示调用方已经持着
+              `idle_thread()` 锁，不用再查一次活动 Run。
+        输出：现有 v3 wire 形状的字典（thread/messages/plan/goal 等）。
+        异常：`THREAD_NOT_FOUND` / `THREAD_NOT_RECOVERABLE` 转 `RpcError(-32004)`；
+              其余 `ThreadPersistenceError` 原样上抛。
+        """
+        self._require_threads_available()
         persistence = await self._ensure_thread_persistence()
         try:
-            opened = await persistence.open_thread(parsed.thread_id)
+            opened = await persistence.open_thread(thread_id)
         except ThreadPersistenceError as exc:
             if str(exc) in {"THREAD_NOT_FOUND", "THREAD_NOT_RECOVERABLE"}:
                 raise RpcError(-32004, str(exc)) from exc
             raise
-        thread_mode = await persistence.compose_progress_store().load_thread_mode(parsed.thread_id)
+        thread_mode = await persistence.compose_progress_store().load_thread_mode(thread_id)
         progress: dict[str, object] | None = None
         if thread_mode is ThreadMode.COMPOSE:
-            progress = await self._compose_session(persistence).inspect(
-                thread_id=parsed.thread_id
-            )
+            progress = await self._compose_session(persistence).inspect(thread_id=thread_id)
         plan_markdown, has_plan = read_plan_markdown(
-            parsed.thread_id,
+            thread_id,
             home=self._config_home,
         )
         from harness_agent.goals.models import activity_to_wire, goal_to_wire, pending_to_wire
 
         goal_store = persistence.goal_store()
-        if assume_idle or not await self._run_coordinator.is_active(parsed.thread_id):
+        if assume_idle or not await self._run_coordinator.is_active(thread_id):
             # Host 重启后不会再有旧 Run 负责终态收敛；打开空闲 Thread 时先把
             # 中断中的 proposal/排队 mutation 恢复成可安全继续的 canonical 状态。
             await goal_store.reconcile(
-                thread_id=parsed.thread_id,
+                thread_id=thread_id,
                 now_ms=int(time.time() * 1000),
             )
-        goal_snapshot = await goal_store.inspect(parsed.thread_id)
+        goal_snapshot = await goal_store.inspect(thread_id)
         return {
             "thread": _thread_summary_payload(opened.summary),
             "messages": [_thread_message_payload(message) for message in opened.messages],
@@ -2403,7 +2655,7 @@ class AgentHost:
                 "has_plan": has_plan,
                 "plan_markdown": plan_markdown,
                 "plan_virtual_path": PLAN_VIRTUAL_PATH,
-                "plan_display_path": plan_display_path(parsed.thread_id),
+                "plan_display_path": plan_display_path(thread_id),
             },
             "thread_mode": thread_mode.value if thread_mode is not None else None,
             "compose_progress": progress,
@@ -2412,21 +2664,79 @@ class AgentHost:
             "goal_activities": [activity_to_wire(item) for item in goal_snapshot.activities],
         }
 
-    async def _handle_threads_watch(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """仅在 Thread 空闲时原子读取历史并登记当前 Connection 的观察关系。"""
-        parsed = ThreadsOpenParams.model_validate(params)
-        async with self._run_coordinator.idle_thread(parsed.thread_id):
-            result = await self._handle_threads_open(params, _id, assume_idle=True)
-            self._connection_watches().add(parsed.thread_id)
+    def watch_thread(self, connection: ProtocolConnection, thread_id: str) -> None:
+        """只登记该连接的 Thread 订阅；不读历史、不验存在性（session/new 用）。"""
+        connection.watched_threads.add(thread_id)
+
+    async def open_and_watch_thread(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+    ) -> dict[str, object]:
+        """在同一个 idle 窗口里读完历史并登记 watch，不留“读完未登记”的空窗。
+
+        异常：线程繁忙时 `RunError(THREAD_BUSY)`；其余同 `open_thread`。
+        """
+        async with self._run_coordinator.idle_thread(thread_id):
+            result = await self.open_thread(thread_id, assume_idle=True)
+            self.watch_thread(connection, thread_id)
             return result
 
-    async def _handle_threads_unwatch(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """移除当前 Connection 的 Thread 观察关系。"""
+    def unwatch_thread(self, connection: ProtocolConnection, thread_id: str) -> bool:
+        """移除订阅；返回是否真的删掉了一条。"""
+        removed = thread_id in connection.watched_threads
+        connection.watched_threads.discard(thread_id)
+        return removed
+
+    def resolve_interaction(
+        self,
+        connection: ProtocolConnection,
+        request_id: str,
+        result: object,
+    ) -> Literal["resolved", "expired", "invalid"]:
+        """用客户端返回的 result 恢复挂起的交互 Future。
+
+        返回三态：`resolved` 已成功交付；`expired` 请求不存在或已完成
+        （v3 薄壳发 REQUEST_EXPIRED）；`invalid` 结果不合 schema（只让 Future
+        失败，不发错误帧，适配器自行 fail-closed）。
+        """
+        future = connection.pending_requests.get(request_id)
+        if future is None or future.done():
+            return "expired"
+        try:
+            spec = connection.interaction_specs.get(request_id)
+            if spec is None:
+                raise ValueError("Unknown interaction request")
+            validate_interaction_result(interaction_method(spec.type), result)
+            parsed = dict(result) if isinstance(result, dict) else result
+        except (ValidationError, ValueError) as exc:
+            future.set_exception(RpcError(-32602, f"Invalid interaction response: {exc}"))
+            return "invalid"
+        future.set_result(parsed)
+        return "resolved"
+
+    def fail_interaction(
+        self,
+        connection: ProtocolConnection,
+        request_id: str,
+        error: RpcError,
+    ) -> bool:
+        """用错误终止挂起的交互 Future；返回 False 表示请求已不存在。"""
+        future = connection.pending_requests.get(request_id)
+        if future is None or future.done():
+            return False
+        future.set_exception(error)
+        return True
+
+    async def _handle_threads_watch(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """v3 薄壳：解析参数后交给 `open_and_watch_thread`。"""
         parsed = ThreadsOpenParams.model_validate(params)
-        watches = self._connection_watches()
-        removed = parsed.thread_id in watches
-        watches.discard(parsed.thread_id)
-        return {"removed": removed}
+        return await self.open_and_watch_thread(self._current_connection(), parsed.thread_id)
+
+    async def _handle_threads_unwatch(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """v3 薄壳：解析参数后交给 `unwatch_thread`。"""
+        parsed = ThreadsOpenParams.model_validate(params)
+        return {"removed": self.unwatch_thread(self._current_connection(), parsed.thread_id)}
 
     async def _handle_threads_side_question(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """执行轻量只读单轮问答（/btw），基于当前 Thread 历史快照，0 工具，不写存储。"""
@@ -2620,7 +2930,7 @@ class AgentHost:
                     "restored_files_count": restored_files_count,
                 }
         except RunError as exc:
-            raise self._run_rpc_error(exc) from exc
+            raise self.run_error_to_rpc_error(exc) from exc
         except Exception as exc:
             from harness_agent.goals.models import GoalStoreError
 
@@ -2658,7 +2968,7 @@ class AgentHost:
                     "restored_files_count": restored_files_count,
                 }
         except RunError as exc:
-            raise self._run_rpc_error(exc) from exc
+            raise self.run_error_to_rpc_error(exc) from exc
 
     async def _handle_goal_inspect(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """读取 Goal 的 current/pending/latest evaluation。
@@ -4025,6 +4335,10 @@ class AgentHost:
             parsed.thread_id,
             config,
             binding,
+            skill_registry=await self._refresh_skill_catalog_locked(),
+            # Teams 控制面没有 Run 级连接绑定，沿用“当前连接”的旧语义；
+            # 它与 run.start 路径无共享状态，本任务不改。
+            interactive="question" in self._connection_handles(),
         )
         delegation_policy = parent_spec.effective_policy.delegation
         if delegation_policy is None or not delegation_policy.enabled:
@@ -4289,7 +4603,7 @@ class AgentHost:
         return RpcError(-32012, error.code, error.redacted_data())
 
     @staticmethod
-    def _run_rpc_error(error: RunError) -> RpcError:
+    def run_error_to_rpc_error(error: RunError) -> RpcError:
         """把 Run module 的稳定错误码适配成现有 JSON-RPC 错误。"""
         rpc_codes = {
             "THREAD_BUSY": -32000,
@@ -4431,6 +4745,8 @@ class AgentHost:
                 config,
                 resolved_binding,
                 skill_registry=registry,
+                # 预取 Engine 发生在当前请求的调用栈上，沿用“当前连接”的旧语义。
+                interactive="question" in self._connection_handles(),
             )
             profile = spec.runtime_profile
         pool = self._ensure_agent_engine_pool(config)
@@ -4472,8 +4788,14 @@ class AgentHost:
         max_iterations: int = 3,
         grader_model_fingerprint: str | None = None,
         code_index_generation: int | None = None,
+        interactive: bool,
     ) -> ResolvedAgentSpec:
-        """截取一次角色解析快照，Profile、审批策略和 builder 都从它派生。"""
+        """截取一次角色解析快照，Profile、审批策略和 builder 都从它派生。
+
+        `interactive` 必须由调用方显式传入：它决定 Profile 里有没有 `ask_user`
+        工具，也参与 AgentEngine 池的指纹。以前是从 ContextVar 读当前连接，ACP
+        路径会默默读到休眠的 owner 连接；现在改成参数，Run 的所有者连接自己决定。
+        """
         persistence = persistence or await self._ensure_thread_persistence()
         await self._ensure_mcp_connected()
         async with self._mcp_state_lock:
@@ -4498,7 +4820,7 @@ class AgentHost:
             skill_registry=skill_registry,
             mcp_snapshot=mcp_snapshot,
             mcp_tools=mcp_tools,
-            interactive="question" in self._connection_handles(),
+            interactive=interactive,
             pinned=config.agent_engine_pool.pin_default_profile,
             delegation_agent_ids=(
                 tuple(definition.agent_id for definition in agent_catalog.agents)
@@ -5863,38 +6185,39 @@ class AgentHost:
         )
 
     async def _handle_peer_response(self, message: dict[str, Any]) -> None:
-        """用客户端 response 解析并恢复对应交互 Future。"""
+        """v3 薄壳：校验响应帧形状并按服务三态发帧。"""
         connection = self._current_connection()
         request_id = message.get("id")
         if not isinstance(request_id, str):
             await self.send_error(None, -32600, "Response id must be a string")
             return
-        future = connection.pending_requests.get(request_id)
-        if future is None or future.done():
-            await self.send_error(request_id, -32004, "REQUEST_EXPIRED")
-            return
+        # 重构前这里先查 future：不存在或已完成就统一回 REQUEST_EXPIRED，
+        # 再按 error / result 分支处理。服务方法把「已过期」折叠成返回值，
+        # 所以三条分支都要在这里把它翻回 v3 的 REQUEST_EXPIRED 错误帧，
+        # 否则 TUI 对过期应答会一直等不到通知。
+        expired = False
         if "error" in message:
             error = message.get("error")
             if not isinstance(error, dict) or not isinstance(error.get("code"), int) or not isinstance(error.get("message"), str):
-                future.set_exception(RpcError(-32600, "Invalid JSON-RPC error response"))
-                return
-            detail = error["message"]
-            future.set_exception(RpcError(-32004, str(detail)))
-            return
-        if "result" not in message:
-            future.set_exception(RpcError(-32600, "Response must contain result or error"))
-            return
-        result = message.get("result")
-        try:
-            spec = connection.interaction_specs.get(request_id)
-            if spec is None:
-                raise ValueError("Unknown interaction request")
-            validate_interaction_result(interaction_method(spec.type), result)
-            parsed = dict(result) if isinstance(result, dict) else result
-        except (ValidationError, ValueError) as exc:
-            future.set_exception(RpcError(-32602, f"Invalid interaction response: {exc}"))
-            return
-        future.set_result(parsed)
+                expired = not self.fail_interaction(
+                    connection, request_id, RpcError(-32600, "Invalid JSON-RPC error response")
+                )
+            else:
+                detail = error["message"]
+                expired = not self.fail_interaction(
+                    connection, request_id, RpcError(-32004, str(detail))
+                )
+        elif "result" not in message:
+            expired = not self.fail_interaction(
+                connection, request_id, RpcError(-32600, "Response must contain result or error")
+            )
+        else:
+            expired = (
+                self.resolve_interaction(connection, request_id, message.get("result"))
+                == "expired"
+            )
+        if expired:
+            await self.send_error(request_id, -32004, "REQUEST_EXPIRED")
 
     async def _compact_with_agent_engine(
         self,
@@ -6038,20 +6361,20 @@ class AgentHost:
         payload["shared_resources"] = shared_resources
         return payload
 
-    def _threads_enabled(self) -> bool:
-        """只有协商了读取能力的交互客户端才启用可恢复 thread 存储。"""
-        return CAPABILITY["THREADS_READ"] in self._connection_capabilities() and not self._allow_echo
-
     def _thread_persistence_enabled(self) -> bool:
         """默认生产图始终持久化 thread；外部注入图保持测试/嵌入调用的无存储契约。"""
         return not self._allow_echo and self._uses_default_agent_factory
+
+    def _require_threads_available(self) -> None:
+        """回声模式没有 Thread 存储；服务方法用它，capability 由调用方自己校验。"""
+        if self._allow_echo:
+            raise RpcError(-32002, "THREADS_UNAVAILABLE_IN_ECHO_MODE")
 
     def _require_threads_capability(self) -> None:
         """阻止未协商读取能力的客户端意外读取本地 thread 数据。"""
         if CAPABILITY["THREADS_READ"] not in self._connection_capabilities():
             raise RpcError(-32002, "THREADS_CAPABILITY_REQUIRED")
-        if self._allow_echo:
-            raise RpcError(-32002, "THREADS_UNAVAILABLE_IN_ECHO_MODE")
+        self._require_threads_available()
 
     def _require_models_capability(self) -> None:
         """模型目录包含配置摘要，只向显式协商的交互客户端公开。"""
@@ -6072,13 +6395,17 @@ class AgentHost:
         if not self._thread_persistence_enabled():
             raise RpcError(-32002, "CONTEXT_COMPACTION_UNAVAILABLE")
 
-    def _require_goal_run_capabilities(self, mode: str) -> None:
-        """Goal 内部 Run 只允许 Build，且 owner 必须能管理并处理 review。"""
+    def _require_goal_run_capabilities(
+        self,
+        connection: ProtocolConnection,
+        mode: str,
+    ) -> None:
+        """Goal 内部 Run 只允许 Build，且发起连接必须能管理并处理 review。"""
         if mode != "build":
             raise RpcError(-32602, "GOAL_MODE_UNAVAILABLE")
-        if CAPABILITY["GOAL_MANAGE"] not in self._connection_capabilities():
+        if CAPABILITY["GOAL_MANAGE"] not in connection.enabled_capabilities:
             raise RpcError(-32002, "CAPABILITY_REQUIRED")
-        if "goal" not in self._connection_handles():
+        if "goal" not in connection.interaction_handles:
             raise RpcError(-32602, "GOAL_INTERACTION_UNSUPPORTED")
 
     async def _ensure_thread_persistence(self) -> ThreadPersistence:
