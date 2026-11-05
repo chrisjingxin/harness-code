@@ -58,6 +58,7 @@ import {
 } from "@za38/protocol"
 
 import { CLI_USAGE, parseArgs, type Command } from "./args"
+import { runAcpPassthrough, type AcpCommand } from "./acp-command"
 import { CLI_INSTALL_ROOT_ENV, resolveAgentProcessBinding, resolveCliInstallRoot } from "./runtime-binding"
 import { createDiagnosticLog, defaultProcessFields, type DiagnosticLog } from "./diagnostic-log/runtime"
 import { SidecarStderrDrain } from "./diagnostic-log/runtime/stderr-drain"
@@ -95,6 +96,8 @@ type RunningAgent = {
 
 type ExecuteDependencies = {
   startAgent?: (command: Command) => Promise<RunningAgent>
+  /** `harness acp` 透传实现；测试用它证明没走 startAgent。 */
+  runAcp?: (command: AcpCommand) => Promise<number>
   readSettingValue?: (secretStdin: boolean) => Promise<string>
   /** 交互界面入口；测试用它替换真实终端渲染，其余生命周期保持真实。 */
   runTui?: typeof runTui
@@ -222,7 +225,7 @@ export async function readPluginConsent(
 }
 
 /** 启动后台 Python 核心进程，通过标准输入输出（stdio）建立 JSON-RPC 消息通道，完成握手初始化，并返回包含通信客户端和清理关闭方法的运行句柄。 */
-async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" }>): Promise<RunningAgent> {
+async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" }>): Promise<RunningAgent> {
   validateWorkspace(command.cwd)
   const startedAtMs = Date.now()
   const startedAt = performance.now()
@@ -521,7 +524,7 @@ export function clientMethodForCommand(command: Command): OperationName | undefi
 
 /** 执行非对话类的后台管理命令（如查询模型列表、读取配置、管理插件等），直接向后台发起请求并返回结果。 */
 export async function dispatchClientCommand(
-  command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" }>,
+  command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" }>,
   request: (method: OperationName, params: Record<string, unknown>) => Promise<unknown>,
   readValue: (secretStdin: boolean) => Promise<string> = readSettingValue,
 ): Promise<unknown> {
@@ -553,6 +556,15 @@ export async function execute(
   if (command.kind === "logs") {
     // 日志查询完全离线短路：不创建 logger、不启动 Python 后台、不连接 SQLite
     await runLogsQuery(command)
+    return
+  }
+  if (command.kind === "acp") {
+    // ACP 透传同样在 startAgent 与 TTY 校验之前短路：协议通道只需要管道，
+    // 不需要终端，也不能被 CLI 自己的诊断日志拖慢启动。
+    // 但工作区仍要校验：否则 sidecar 会在不存在的 cwd 里启动并读到错误目录。
+    validateWorkspace(command.cwd)
+    const code = await (dependencies.runAcp ?? runAcpPassthrough)(command)
+    if (code !== 0) process.exitCode = code
     return
   }
   if (command.kind === "run" && !command.nonInteractive) {

@@ -3,6 +3,7 @@
 export type Command =
   | { kind: "version" }
   | { kind: "help" }
+  | { kind: "acp"; cwd: string; configPath?: string }
   | { kind: "run"; message?: string; nonInteractive: boolean; json: boolean; cwd: string; configPath?: string; resume: boolean; sandbox?: "remote" | false }
   | { kind: "config.show" | "config.path"; cwd: string; configPath?: string; params?: Record<string, unknown> }
   | { kind: SkillCommandKind | PluginCommandKind; cwd: string; configPath?: string; params: Record<string, unknown>; secretStdin?: boolean }
@@ -29,6 +30,7 @@ export const CLI_USAGE = [
   "  harness --help | -h",
   "  harness config <show|path> [--config PATH]",
   "  harness logs [--thread ID | --run ID] [--level L] [--event E] [--component C] [--limit N] [--cursor T] [--json]",
+  "  harness acp [--cwd PATH] [--config PATH]",
   "  harness skills <...>",
   "  harness plugins <...>",
 ].join("\n")
@@ -71,6 +73,7 @@ export function parseArgs(argv: string[], cwd = process.cwd()): Command {
   if (command === "skills") return parseSkillsCommand(args.slice(1), cwd)
   if (command === "plugins") return parsePluginsCommand(args.slice(1), cwd)
   if (command === "logs") return parseLogsCommand(args.slice(1), cwd)
+  if (command === "acp") return parseAcpCommand(args.slice(1), cwd)
 
   const configPath = optionValue(args, "--config")
   const cwdValue = optionValue(args, "--cwd")
@@ -450,6 +453,36 @@ function sandboxOption(args: string[]): "remote" | false | undefined {
   if (["true", "remote"].includes(value)) return "remote"
   if (["false", "off"].includes(value)) return false
   throw new Error("--sandbox only supports remote or false")
+}
+
+/**
+ * 解析 `harness acp` 透传命令。
+ *
+ * 只接受 `--cwd` 与 `--config`，各自最多一次：多余的选项或位置参数在 spawn 之前
+ * 就失败，避免错参数被当成 ACP 帧写进协议流。`acp` 没有自己的 `--help`/`--version`，
+ * 它们仍是全局帮助与版本（`parseArgs` 的全局分支已先处理）。
+ */
+function parseAcpCommand(args: string[], cwd: string): Command {
+  const usage = "Usage: harness acp [--cwd PATH] [--config PATH]"
+  const allowed = new Set(["--cwd", "--config"])
+  let workspace = cwd
+  let configPath: string | undefined
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (!allowed.has(argument)) throw new Error(usage)
+    const value = args[index + 1]
+    if (!value || value.startsWith("-")) throw new Error(usage)
+    if (argument === "--cwd") {
+      if (workspace !== cwd) throw new Error(usage)
+      workspace = value
+    } else {
+      if (configPath !== undefined) throw new Error(usage)
+      configPath = value
+    }
+    // 跳过已消费的值，避免把 `--cwd /x` 的 `/x` 当成位置参数。
+    index += 1
+  }
+  return { kind: "acp", cwd: workspace, configPath }
 }
 
 /** 解析 logs 离线查询命令；必须在 startAgent 之前短路，且不接受 --config。 */

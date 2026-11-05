@@ -219,3 +219,31 @@ S0 的探索由 DeepSeek 子 agent 只读完成（Todo 0.2 到 0.6），没有�
 - v3 对照录制（echo 模式 8 帧）：抹掉连接 id、时间戳、随机 `event_id` 后，重构前后 0 行差异。
 
 **未做**：`AcpServer`、`translate.py`、`permissions.py`、`stdio.py`（S1 起）；没有改 `packages/protocol`、`packages/cli`、TUI、无头模式。
+
+## S1 实施与 Review 结论（2026-11-05）
+
+**分工**：同 S0。DeepSeek 子 agent 开发，Claude 子 agent 设计与 Code Review，主 agent 复核并修复。
+
+**实施内容**（Todo 1.1 到 1.11）
+- Python：新增 `harness_agent/host/acp/`（`ext`、`stdio`、`server`、`translate`、`tool_display`）。`python -m harness_agent acp` 在 stdout 上只输出 ACP 消息；`main()` 按 argv 分派，无参数时仍是 v3。
+- 支持的 ACP 方法：`initialize`、`session/new`、`session/prompt`、`session/cancel`，以及 `session/update`（文本、思考、工具卡）。能力声明如实：`loadSession:false`，`sessionCapabilities:{}`；`modes` 只返回当前模式。
+- stdout 保护：启动时复制并重定向 fd，非管道 stdout 直接报错；`print`、孙进程、继承 stdin 都不会污染协议；读端 8 MiB 帧长检查；SIGTERM / SIGINT 取消在途 Run 后退出码 0；stdin EOF 同样取消并等待收尾。
+- `toolCallId` 形如 `{run_id}:{原 id}`；子 agent 事件暂不外发（GAP-16）。
+- TypeScript：`harness acp` 命令（`packages/cli/src/acp-command.ts`）一字节不改地透传 stdio 与退出码，转发 SIGTERM；子进程环境带 `PYTHONSAFEPATH=1`，降低仓库顶层 `acp/` 目录遮蔽官方 SDK 的风险（R12，仅 TS 启动器有此保护）。
+
+**Code Review 发现与处理**
+- 无阻断项，结论「可以提交」。
+- 已修：恶意 JSON（深嵌套触发 `RecursionError`）会让帧守卫崩溃，现在回 -32600 并继续，守卫任务崩溃时进程以 1 退出；关停时处于准备阶段的会话现在也会被标记取消；终态事件翻译或发送失败时，`session/prompt` 以 -32603 收尾，不再悬挂；`tool.completed` 不再把已宣布的标题改回裸工具名；`wait_closed()` 恒失败的死代码已删；`test_sdk_client_e2e.py` 补了真实入口的工具卡场景，两个名不副实的测试已改名。
+- 已登记 GAP：GAP-16 子 agent 过程不可见、GAP-26 `locations` 只含主工作区路径、GAP-27 `mcpServers` / `additionalDirectories` 被忽略（只在 stderr 记数量）。
+- 次要、延后（进入 S2 到 S4 顺手处理，不单独立项）：`prompt_text` 未把工作区内 `file://` 链接转成相对路径、也不解码 URL 转义；`_fit_update` 只裁剪 `ToolCallUpdate`；连接断开后无标志位；未检查 stderr 与 stdout 是否同一管道（`2>&1`）；信号处理器先于 `host.close()` 移除；`claim_protocol_fds` 缺直接单测；`session/new` 的 cwd 含 NUL 会抛 `ValueError`。
+- 偏差记录：工作区校验放在 `execute` 的 `acp` 分支；参数无法解析时 `announce_input` 返回空列表；`ShutdownAware` 配合 `cast`。
+- 修复测试稳定性：`acp-command.test.ts` 的 SIGTERM 用例原先固定睡 300ms，偶发在 `trap` 装好前就发信号（退出码 128）；改为等假 sidecar 输出 ready 后再发，连续 6 次通过。
+
+**验证数字（主 agent 复核）**
+- `tests/host/acp`：153 passed；`test_sdk_client_e2e.py`：6 passed。
+- Python 全量：3244 passed / 5 skipped（S0 为 3083 / 5）。
+- CLI `npm run test` 主批：1355 pass / 1 skip / 0 fail；`tests/web/takeover-recovery.test.ts` 2 项失败，原因是本机缺 Playwright 浏览器，与本任务无关。
+- `npm run typecheck`、`npm run deps:check` 通过；`npm run project:check` 仅剩他人 `research/187-*` 的无效链接。
+- 手动：`HARNESS_ECHO_MODE=1 bun packages/cli/src/index.ts acp --cwd <仓库根>`，`initialize` 与 `session/new` 返回合法响应，stdout 无杂音。
+
+**未做**：审批 / 目录信任、`session/list` / `session/load`、`/命令`、模式切换、扩展协商（S2）；`harness web`（S3）；`packages/protocol`、TUI、无头模式均未改动。

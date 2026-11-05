@@ -277,3 +277,25 @@ test("logs 命令使用 --cwd 覆盖工作区", () => {
   expect(c.kind).toBe("logs")
   expect((c as any).cwd).toBe("/other")
 })
+
+test("acp 命令只接受 --cwd 与 --config", () => {
+  expect(parseArgs(["acp"], "/work")).toEqual({ kind: "acp", cwd: "/work", configPath: undefined })
+  expect(parseArgs(["acp", "--cwd", "/x"], "/work")).toEqual({ kind: "acp", cwd: "/x", configPath: undefined })
+  expect(parseArgs(["acp", "--config", "/c.toml"], "/work")).toEqual({
+    kind: "acp",
+    cwd: "/work",
+    configPath: "/c.toml",
+  })
+})
+
+test("acp 拒绝未知选项、位置参数、缺值与重复选项", () => {
+  expect(() => parseArgs(["acp", "--json"], "/work")).toThrow("Usage: harness acp")
+  expect(() => parseArgs(["acp", "extra"], "/work")).toThrow("Usage: harness acp")
+  expect(() => parseArgs(["acp", "--cwd"], "/work")).toThrow("Usage: harness acp")
+  expect(() => parseArgs(["acp", "--cwd", "/a", "--cwd", "/b"], "/work")).toThrow("Usage: harness acp")
+})
+
+test("acp 的 --help 与 --version 仍然是全局帮助与版本", () => {
+  expect(parseArgs(["acp", "--help"], "/work")).toEqual({ kind: "help" })
+  expect(parseArgs(["acp", "--version"], "/work")).toEqual({ kind: "version" })
+})

@@ -4,7 +4,7 @@
 
 规则：每次只推进到下一个停点；到达停点后勾选本节、把证据写回 Task，然后停下等用户确认。每个实现项都先写失败的测试。
 
-状态：S0 已完成（0.1 到 0.14），等用户确认后进入停点 1。
+状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）已完成，等用户确认后进入停点 2。
 
 ## 停点 0：摸底与重构（无可见变化）
 
@@ -37,17 +37,17 @@
 
 应看到：`initialize` 的能力声明、`session/new` 的 sessionId、若干 `session/update`（`agent_message_chunk`）、最后 `stopReason: end_turn`；不应出现任何非 JSON 的输出。另可运行 `cd packages/agent && .venv/bin/python -m pytest -q tests/host/acp` 看官方 SDK 客户端端到端测试。
 
-- [ ] 1.1 `host/acp/ext.py`：`EXT_KEY`、`EXT_METHOD_PREFIX` 常量与测试。
-- [ ] 1.2 `test_stdio_hygiene.py` 先失败，再实现 `stdio.py`：fd 复制与重定向（`input_stream` 传写端、`output_stream` 传读端）、非管道 stdout 启动即报错、自装 SIGTERM / SIGINT 处理器（取消 Run → `host.close()` → 退出码 0）、读端 8 MiB 帧长检查、stdin EOF 优雅退出；各有测试。
-- [ ] 1.3 `main()` 内按 argv 分派 `acp`，函数名与 console script 目标不变，不影响无参数的 v3 模式；`tests/test_harness_agent_entry.py` 保持通过。
-- [ ] 1.4 `test_translate.py` 先失败，再实现基础翻译：`content.delta`、`reasoning.delta`、`tool.started`、`tool.delta` 参数缓冲不外泄、`tool.completed`。
-- [ ] 1.5 `tool_display.py`：kind 映射表、标题规则、`locations` 解析（按 0.5 的结论）与测试。
-- [ ] 1.6 `test_server_lifecycle.py` 先失败，再实现 `initialize`（先不含扩展协商）、`session/new`（cwd 校验）、`session/prompt`（终态映射、update 先于响应的顺序保证）、`session/cancel`。
-- [ ] 1.7 `test_server_failure.py`：`startup_error`、`run.failed`、畸形输入、帧超限。
-- [ ] 1.8 `test_server_cancel.py`：取消活动 Run、取消后立即再发 prompt、终态补发未结束 tool_call 为 `failed`。
-- [ ] 1.9 TypeScript `harness acp` 透传：`args.ts` / `index.ts` 新增 `acp` 命令，`tests/args.test.ts`、`tests/index.test.ts` 先失败再实现；继承 stdio 并透传退出码。
-- [ ] 1.10 `test_sdk_client_e2e.py`：官方 SDK 客户端 `spawn_agent_process` 启动 `python -m harness_agent acp`，完成一轮对话。
-- [ ] 1.11 Python 全量测试、`bun test`、`npm run typecheck`、`npm run project:check` 通过；证据写入 Task；停下等待用户确认。
+- [x] 1.1 `host/acp/ext.py`：`EXT_KEY`、`EXT_METHOD_PREFIX` 常量与测试。（2 条用例通过，前缀由键推导并锁死）
+- [x] 1.2 `test_stdio_hygiene.py` 先失败，再实现 `stdio.py`：fd 复制与重定向（`input_stream` 传写端、`output_stream` 传读端）、非管道 stdout 启动即报错、自装 SIGTERM / SIGINT 处理器（取消 Run → `host.close()` → 退出码 0）、读端 8 MiB 帧长检查、stdin EOF 优雅退出；各有测试。（三个测试文件 23 条用例；子进程验证 print/孙进程/stdin 继承都不污染协议，超限帧回 -32600 后继续收帧）
+- [x] 1.3 `main()` 内按 argv 分派 `acp`，函数名与 console script 目标不变，不影响无参数的 v3 模式；`tests/test_harness_agent_entry.py` 保持通过。（`_select_mode` 仅 `["acp"]` 进 ACP；v3 路径运行期不加载 ACP SDK；手动已跑通一轮对话）
+- [x] 1.4 `test_translate.py` 先失败，再实现基础翻译：`content.delta`、`reasoning.delta`、`tool.started`、`tool.delta` 参数缓冲不外泄、`tool.completed`。（31 条用例，含半截/超限/truncated 参数不外泄与终态补发）
+- [x] 1.5 `tool_display.py`：kind 映射表、标题规则、`locations` 解析（按 0.5 的结论）与测试。（32 条用例，含映射表漂移测试与控制字符净化）
+- [x] 1.6 `test_server_lifecycle.py` 先失败，再实现 `initialize`（先不含扩展协商）、`session/new`（cwd 校验）、`session/prompt`（终态映射、update 先于响应的顺序保证）、`session/cancel`。（28 条用例；裸行读断言所有 update 排在 prompt 响应之前）
+- [x] 1.7 `test_server_failure.py`：`startup_error`、`run.failed`、畸形输入、帧超限。（20 条用例；诊断日志只含白名单字段，不含参数/文本/路径）
+- [x] 1.8 `test_server_cancel.py`：取消活动 Run、取消后立即再发 prompt、终态补发未结束 tool_call 为 `failed`。（10 条用例；含取消早于受理、晚于终态两个竞态窗口）
+- [x] 1.9 TypeScript `harness acp` 透传：`args.ts` / `index.ts` 新增 `acp` 命令，`tests/args.test.ts`、`tests/index.test.ts` 先失败再实现；继承 stdio 并透传退出码。（新增 `src/acp-command.ts`；47 条用例通过，`npm run typecheck` 通过；黑盒验证 stdin/stdout 一字节不改、退出码 7 透传、SIGTERM 转发）
+- [x] 1.10 `test_sdk_client_e2e.py`：官方 SDK 客户端 `spawn_agent_process` 启动 `python -m harness_agent acp`，完成一轮对话。（6 条用例，含版本锁定 0.12.1、echo 模式一轮对话、脚本化 Agent 的工具卡、阻塞场景下取消、错参数退出码 2；「取消后恢复」由 `test_server_cancel.py` 覆盖）
+- [x] 1.11 Python 全量测试、`bun test`、`npm run typecheck`、`npm run project:check` 通过；证据写入 Task；停下等待用户确认。（Review 修复后：Python 3244 passed / 5 skipped；CLI 主批 1355 pass / 1 skip / 0 fail，`takeover-recovery` 2 项因缺 Playwright 浏览器失败；`project:check` 仅剩他人 `research/187-*` 无效链接；`deps:check` 通过；证据见 Task「S1 实施与 Review 结论」）
 
 ## 停点 2：标准 ACP 客户端功能完整
 

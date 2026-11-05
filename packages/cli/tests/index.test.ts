@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { PassThrough, Readable } from "node:stream"
@@ -465,4 +465,56 @@ test("Plugin Command binding 遵守协商 minor，不向 v5 Agent 调用未知�
 
   await bindPluginCommands(client, 5, "snapshot-v5", [])
   expect(calls).toHaveLength(1)
+})
+
+test("harness acp 在 startAgent 与 TTY 校验之前短路", async () => {
+  const acpCommand = parseArgs(["acp"], process.cwd())
+  expect(acpCommand.kind).toBe("acp")
+  let started = 0
+  const seen: string[] = []
+  await execute(acpCommand, {
+    startAgent: async () => {
+      started += 1
+      throw new Error("startAgent must not run for acp")
+    },
+    runAcp: async command => {
+      seen.push(command.kind)
+      return 0
+    },
+  })
+  expect(started).toBe(0)
+  expect(seen).toEqual(["acp"])
+})
+
+test("harness acp 的 buildAcpSpawnPlan 以 acp 结尾并注入 sidecar 环境", async () => {
+  const { buildAcpSpawnPlan } = await import("../src/acp-command")
+  const command = { kind: "acp" as const, cwd: "/work", configPath: "/cfg.toml" }
+
+  const viaOverride = buildAcpSpawnPlan(command, {
+    moduleDir: resolve(import.meta.dir, "../src"),
+    env: { HARNESS_AGENT_PYTHON: "/venv/bin/python" },
+  })
+  expect(viaOverride.executable).toBe("/venv/bin/python")
+  expect(viaOverride.args).toEqual(["-m", "harness_agent", "acp"])
+  expect(viaOverride.cwd).toBe("/work")
+  expect(viaOverride.env.HARNESS_COMMAND_KIND).toBe("acp")
+  expect(viaOverride.env.HARNESS_AGENT_CONFIG_PATH).toBe("/cfg.toml")
+  expect(viaOverride.env.HARNESS_CLI_INSTALL_ROOT).toBeTruthy()
+
+  const directory = await mkdtemp(resolve(tmpdir(), "harness-acp-binding-"))
+  const agentDirectory = resolve(directory, "packages", "agent")
+  await mkdir(resolve(agentDirectory, ".venv", "bin"), { recursive: true })
+  await writeFile(resolve(agentDirectory, ".venv", "bin", "python"), "")
+  // resolveCliInstallRoot 会 realpath 模块目录，假目录必须先存在。
+  await mkdir(resolve(directory, "packages", "cli", "src"), { recursive: true })
+  const viaDevelopment = buildAcpSpawnPlan(
+    { kind: "acp", cwd: "/work" },
+    {
+      moduleDir: resolve(directory, "packages", "cli", "src"),
+      env: { PYTHONPATH: "/existing" },
+    },
+  )
+  expect(viaDevelopment.args).toEqual(["-m", "harness_agent", "acp"])
+  expect(viaDevelopment.env.PYTHONPATH).toBe(`${agentDirectory}:${"/existing"}`)
+  expect(viaDevelopment.env.HARNESS_AGENT_CONFIG_PATH).toBeUndefined()
 })
