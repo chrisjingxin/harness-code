@@ -10,7 +10,7 @@ import { TraceDetail } from "./trace-detail"
 import { TraceTree } from "./trace-tree"
 import { buildTree, extractRunModes, type TraceTreeNode } from "./types"
 
-/** 甘特区初始高度（对齐 4.html 三行甘特：固定 50px 轨道 + 头部标题，默认留足余量）。 */
+/** 甘特区请求高度；可视高度由 CSS 按可用空间约束，三条泳道始终完整。 */
 const INITIAL_GANTT_HEIGHT = 140
 /** 甘特区高度下限。 */
 const MIN_GANTT_HEIGHT = 84
@@ -120,7 +120,7 @@ function ThreadTraceView(props: {
       />
       <div
         className="trace-view-body"
-        style={{ gridTemplateColumns: `minmax(0, 1fr) 9px ${detailWidth}px` }}
+        style={{ gridTemplateColumns: `minmax(0, 1fr) 9px min(${detailWidth}px, 50%)` }}
       >
         <div className="trace-pane-tree">
           <TraceTree

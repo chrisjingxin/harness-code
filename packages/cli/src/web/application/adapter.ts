@@ -103,7 +103,9 @@ export type WebScrollRequest = "new-message" | "to-bottom" | null
 
 /** Web Adapter 发布的完整表现快照；领域事实来自共享 Core 视图（WebUiClient 缓存）。 */
 export type WebAdapterSnapshot = {
-  readonly viewMode: "chat" | "trace"
+  readonly viewMode: "chat" | "trace" | "file"
+  /** 中央只读文件页签；与右侧独立关闭，共享 code.previews。 */
+  readonly fileViews: { readonly paths: readonly string[]; readonly activePath: string | null }
   readonly trace: TraceViewState
   /** 由网关视图分片重组得到的 InteractiveSnapshot；与 TUI 看到的同一 Core 状态。 */
   readonly interactive: InteractiveSnapshot
@@ -214,6 +216,8 @@ export type WebIntent =
   | { type: "mcp-add"; input: InteractiveMcpInput }
   | { type: "mcp-remove"; name: string }
   | { type: "workspace-directory-toggle"; path: string }
+  | { type: "workbench-file-open"; path: string }
+  | { type: "workbench-file-close"; path: string }
   | { type: "workspace-file-open"; path: string }
   | { type: "workspace-file-tab-select"; path: string }
   | { type: "workspace-file-tab-close"; path: string }
@@ -320,7 +324,10 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
   private readonly unsubscribeTrace: () => void
 
   private readonly traceStore: TraceStore
-  private viewMode: "chat" | "trace" = "chat"
+  private viewMode: "chat" | "trace" | "file" = "chat"
+  private fileViews: { paths: string[]; activePath: string | null } = { paths: [], activePath: null }
+  private previewRequests: Array<{ path: string; refresh: boolean }> = []
+  private readingPreview: { path: string; refresh: boolean } | null = null
   private snapshot: WebAdapterSnapshot
   private draft = ""
   private draftCursorOffset = 0
@@ -547,6 +554,12 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         this.schedulePublish()
         void this.client.workspaceIntent({ type: "workspace.toggle-directory", path: intent.path })
         return
+      case "workbench-file-open":
+        this.openWorkbenchFile(intent.path)
+        return
+      case "workbench-file-close":
+        this.closeWorkbenchFile(intent.path)
+        return
       case "workspace-file-open":
         this.openFileTab(intent.path)
         return
@@ -560,7 +573,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         void this.client.workspaceIntent({ type: "workspace.refresh" })
         return
       case "workspace-preview-refresh":
-        void this.client.workspaceIntent({ type: "workspace.refresh-preview", path: intent.path })
+        this.requestFilePreview(intent.path, true)
         return
       case "interaction-draft-change":
         this.updateInteractionDraft(intent.requestId, intent.patch)
@@ -685,13 +698,13 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.schedulePublish()
   }
 
-  /** 把网关推送的 workspacePreview 合并进 Code 面板；只接受当前 activePath 的结果（设计 14.4）。 */
+  /** 合并右侧活动预览或中央已打开文件的结果；两处共用缓存且不改变当前页签。 */
   private mergeWorkspacePreview(): void {
     const preview = this.client.getState().workspacePreview
     if (preview.status === "idle") return
     const previewPath = preview.status === "ready" ? preview.file.path : preview.path
     const code = this.contextDock.code
-    if (code.activePath === null || previewPath !== code.activePath) {
+    if (previewPath !== code.activePath && !this.fileViews.paths.includes(previewPath)) {
       // 旧请求的晚到结果不切回旧文件：直接丢弃，Tab 重新激活时会再触发读取。
       return
     }
@@ -729,9 +742,9 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
       // run 结束：文件树、当前预览与 Thread 列表一起刷新（消息数/时间戳已变化）。
       void this.client.workspaceIntent({ type: "workspace.refresh" })
       void this.client.submitIntent({ type: "catalog.refresh", catalog: "threads" })
-      const activePath = this.contextDock.code.activePath
+      const activePath = this.viewMode === "file" ? this.fileViews.activePath : this.contextDock.code.activePath
       if (activePath !== null) {
-        void this.client.workspaceIntent({ type: "workspace.refresh-preview", path: activePath })
+        this.requestFilePreview(activePath, true)
       }
     }, RUN_END_REFRESH_DELAY_MS)
   }
@@ -769,6 +782,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     return {
       interactive,
       viewMode: this.viewMode,
+      fileViews: { paths: [...this.fileViews.paths], activePath: this.fileViews.activePath },
       trace: this.traceStore.getState(interactive.currentThreadId),
       draft: this.draft,
       draftCursorOffset: this.draftCursorOffset,
@@ -1053,7 +1067,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
 
   /** 打开右侧文件或变更面板。 */
   private dockOpen(panel: ContextDockPanel): void {
-    this.viewMode = "chat"
+    if (this.viewMode === "trace") this.viewMode = "chat"
     this.traceStore.select(this.getInteractive().currentThreadId, false)
     this.contextDock = { ...this.contextDock, open: true, activePanel: panel }
     this.closeHeaderMenu()
@@ -1179,7 +1193,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
 
   /** 打开文件：新建/激活 Tab → Dock 切到 Code → 触发预览读取（MRU 排序，超出 12 个淘汰最旧）。 */
   private openFileTab(filePath: string): void {
-    this.viewMode = "chat"
+    if (this.viewMode === "trace") this.viewMode = "chat"
     this.traceStore.select(this.getInteractive().currentThreadId, false)
     const code = this.contextDock.code
     const existing = code.tabs.find(tab => tab.path === filePath)
@@ -1195,10 +1209,12 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         tabs = tabs.slice(0, MAX_FILE_TABS)
       }
     }
-    const previews = { ...code.previews, [filePath]: WebInteractiveAdapterImpl.loadingPreview(filePath) }
+    const retained = this.fileViews.paths.includes(filePath) && code.previews[filePath]?.status === "ready"
+    const previews = { ...code.previews, [filePath]: retained ? code.previews[filePath]! : WebInteractiveAdapterImpl.loadingPreview(filePath) }
     const previewErrors = { ...code.previewErrors }
     delete previewErrors[filePath]
     for (const evictedPath of evictedPaths) {
+      if (this.fileViews.paths.includes(evictedPath)) continue
       delete previews[evictedPath]
       delete previewErrors[evictedPath]
     }
@@ -1216,7 +1232,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     }
     this.workspaceSelectedPath = filePath
     this.schedulePublish()
-    void this.client.workspaceIntent({ type: "workspace.preview-file", path: filePath })
+    this.requestFilePreview(filePath)
   }
 
   /** 激活已有 Tab；无缓存预览时重新触发读取（Tab 可能因淘汰或关闭而无 previews 条目）。 */
@@ -1232,7 +1248,7 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.workspaceSelectedPath = filePath
     this.schedulePublish()
     if (!code.previews[filePath]) {
-      void this.client.workspaceIntent({ type: "workspace.preview-file", path: filePath })
+      this.requestFilePreview(filePath)
     }
   }
 
@@ -1243,9 +1259,11 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     if (index === -1) return
     const tabs = code.tabs.filter(tab => tab.path !== filePath)
     const previews = { ...code.previews }
-    delete previews[filePath]
     const previewErrors = { ...code.previewErrors }
-    delete previewErrors[filePath]
+    if (!this.fileViews.paths.includes(filePath)) {
+      delete previews[filePath]
+      delete previewErrors[filePath]
+    }
     let activePath = code.activePath
     if (activePath === filePath) {
       const neighbor = tabs[Math.min(index, tabs.length - 1)] ?? tabs[Math.max(index - 1, 0)] ?? null
@@ -1254,8 +1272,76 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
     this.contextDock = { ...this.contextDock, code: { ...code, tabs, activePath, previews, previewErrors } }
     this.schedulePublish()
     if (activePath !== null && !previews[activePath]) {
-      void this.client.workspaceIntent({ type: "workspace.preview-file", path: activePath })
+      this.requestFilePreview(activePath)
     }
+  }
+
+  /** 文件服务只有一个预览槽；串行读取，避免两处可见文件互相取消。 */
+  private requestFilePreview(path: string, refresh = false): void {
+    if (!refresh && (this.readingPreview?.path === path || this.previewRequests.some(item => item.path === path))) return
+    this.previewRequests.push({ path, refresh })
+    if (!this.readingPreview) void this.readNextPreview()
+  }
+
+  /** 等待当前预览的结果发布后再请求下一个；关闭接管后不再消费队列。 */
+  private async readNextPreview(): Promise<void> {
+    while (!this.closed && this.previewRequests.length) {
+      const request = this.previewRequests.shift()!
+      this.readingPreview = request
+      try {
+        await this.client.workspaceIntent({ type: request.refresh ? "workspace.refresh-preview" : "workspace.preview-file", path: request.path })
+      } catch (error) {
+        if (!this.closed) {
+          this.transientNotice = error instanceof Error ? error.message : "读取文件失败，请重试"
+          this.publishNow()
+        }
+      } finally {
+        this.readingPreview = null
+      }
+    }
+    if (this.closed) this.previewRequests = []
+  }
+
+  /** 在中央打开或激活文件；保留右侧位置、对话草稿和已有内容。 */
+  private openWorkbenchFile(path: string): void {
+    if (!this.fileViews.paths.includes(path)) this.fileViews.paths = [...this.fileViews.paths, path]
+    this.fileViews.activePath = path
+    this.viewMode = "file"
+    this.traceStore.select(this.getInteractive().currentThreadId, false)
+    const code = this.contextDock.code
+    const preview = code.previews[path]
+    if (!preview || preview.status === "loading" || preview.status === "idle") {
+      this.contextDock = { ...this.contextDock, code: { ...code,
+        previews: { ...code.previews, [path]: WebInteractiveAdapterImpl.loadingPreview(path) },
+      } }
+      this.requestFilePreview(path)
+    }
+    this.publishNow()
+  }
+
+  /** 中央关闭只释放自身页签；最后一个引用关闭后清理缓存。 */
+  private closeWorkbenchFile(path: string): void {
+    const index = this.fileViews.paths.indexOf(path)
+    if (index === -1) return
+    const paths = this.fileViews.paths.filter(candidate => candidate !== path)
+    const activePath = this.fileViews.activePath === path
+      ? paths[Math.min(index, paths.length - 1)] ?? null
+      : this.fileViews.activePath
+    this.fileViews = { paths, activePath }
+    if (activePath === null && this.viewMode === "file") this.viewMode = "chat"
+    const code = this.contextDock.code
+    if (!code.tabs.some(tab => tab.path === path)) {
+      const previews = { ...code.previews }
+      const previewErrors = { ...code.previewErrors }
+      delete previews[path]
+      delete previewErrors[path]
+      this.contextDock = { ...this.contextDock, code: { ...code, previews, previewErrors } }
+    }
+    if (this.viewMode === "file" && activePath !== null) {
+      this.openWorkbenchFile(activePath)
+      return
+    }
+    this.publishNow()
   }
 
   /** 草稿合并：feedback、answer、reset 都只对当前 requestId 生效。 */

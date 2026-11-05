@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { useSyncExternalStore } from "react"
 import { selectWorkItemView } from "../../interactive/selectors"
 import type { WebInteractiveAdapter, WebAdapterSnapshot, WebIntent, WebTheme } from "../application/adapter"
-import { workspaceLabel } from "../../interactive/runtime"
+import { workspaceLabel, type InteractiveRuntime } from "../../interactive/runtime"
 import { threadDisplayTitle } from "../../presentation-shared/thread-title"
 import { activityLabel } from "../../presentation-shared/timeline-presenter"
 import { HarnessBrandLogo } from "./brand-logo"
@@ -149,7 +149,7 @@ export function WebApp(props: {
           </div>
           <div className="topbar-main">
             <div className="topbar-project" title={interactive.runtime.workspace}>
-              <FolderOpen size={16} aria-hidden="true" /><span className="topbar-project-name">{workspaceLabel(interactive.runtime.workspace)}</span><span>/</span><span>工作台</span>
+              <FolderOpen size={16} aria-hidden="true" /><span className="topbar-project-name">{projectLabel(interactive.runtime)}</span>
             </div>
             <div className="topbar-actions">
               <button type="button" className="button return-button" disabled={!props.active || snapshot.leaving || returnBlocked} title={returnBlocked ? "当前任务结束或交互完成后可返回 TUI" : "归还控制权并恢复 TUI"} onClick={() => { onIntent({ type: "return-to-tui" }) }}><Terminal aria-hidden="true" size={15} />返回 TUI</button>
@@ -229,4 +229,19 @@ export function WebApp(props: {
 /** 主题切换的下一状态：浅色 ↔ 深色；顶栏图标按钮的 icon 与 aria-label 始终表达下一动作。 */
 function nextTheme(theme: WebTheme): WebTheme {
   return theme === "light" ? "dark" : "light"
+}
+
+/** 顶部只表达项目位置；已知 Git 根目录时附上工作区的相对路径。 */
+function projectLabel(runtime: InteractiveRuntime): string {
+  const { workspace, gitWorkspace } = runtime
+  if (gitWorkspace?.kind !== "branch" && gitWorkspace?.kind !== "detached") return workspaceLabel(workspace)
+  const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "")
+  const root = normalize(gitWorkspace.root)
+  const current = normalize(workspace)
+  // Windows 路径不区分大小写；前缀必须落在目录边界，避免把同名前缀的相邻仓库当成子目录。
+  const windowsPath = /^[a-z]:\//i.test(current) || current.startsWith("//")
+  const comparable = (path: string) => windowsPath ? path.toLowerCase() : path
+  if (comparable(current) === comparable(root)) return workspaceLabel(gitWorkspace.root)
+  if (!comparable(current).startsWith(`${comparable(root)}/`)) return workspaceLabel(workspace)
+  return `${workspaceLabel(gitWorkspace.root)} / ${current.slice(root.length + 1)}`
 }

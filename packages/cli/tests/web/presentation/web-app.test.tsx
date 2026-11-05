@@ -6,7 +6,7 @@ import { act } from "react"
 
 import { WebApp } from "../../../src/web/presentation/web-app"
 import type { WebAdapterSnapshot, WebIntent, WebInteractiveAdapter } from "../../../src/web/application/adapter"
-import { makeInteractive, makeSnapshot } from "./fixtures"
+import { makeInteractive, makeRuntime, makeSnapshot } from "./fixtures"
 import { registerTestDom, render, setControlledValue, type RenderHandle } from "./render"
 
 const unregisterTestDom = registerTestDom()
@@ -112,6 +112,34 @@ describe("WebApp", () => {
     }
   })
 
+  test.each([
+    ["/projects/harness-code", "/projects/harness-code", "harness-code"],
+    ["/projects/harness-code/packages/cli", "/projects/harness-code/", "harness-code / packages/cli"],
+    ["/projects/harness-code-other/cli", "/projects/harness-code", "cli"],
+    ["/projects/notes/", null, "notes"],
+    ["C:\\Projects\\harness-code\\packages\\cli\\", "C:\\Projects\\harness-code", "harness-code / packages/cli"],
+    ["c:/Projects/harness-code/packages/cli", "C:/Projects/harness-code", "harness-code / packages/cli"],
+  ])("顶部项目标识：%s", (workspace, root, expected) => {
+    const { handle } = mountWebApp(true, makeSnapshot({ interactive: makeInteractive({
+      runtime: makeRuntime({ workspace, gitWorkspace: root ? { kind: "branch", root, branch: "main" } : { kind: "not-repository" } }),
+    }) }))
+    try {
+      const project = handle.container.querySelector(".topbar-project")
+      expect(project?.textContent).toBe(expected)
+      expect(project?.getAttribute("title")).toBe(workspace)
+    } finally { handle.unmount() }
+  })
+
+  test("detached HEAD 仍显示项目与子目录，Git 信息不可用时显示目录名", () => {
+    const runtime = makeRuntime({ workspace: "/projects/demo/src", gitWorkspace: { kind: "detached", root: "/projects/demo", shortSha: "abc1234" } })
+    const { adapter, handle } = mountWebApp(true, makeSnapshot({ interactive: makeInteractive({ runtime }) }))
+    try {
+      expect(handle.container.querySelector(".topbar-project")?.textContent).toBe("demo / src")
+      act(() => adapter.emit(makeSnapshot({ interactive: makeInteractive({ runtime: { ...runtime, gitWorkspace: { kind: "unavailable", message: "Git 不可用" } } }) })))
+      expect(handle.container.querySelector(".topbar-project")?.textContent).toBe("src")
+    } finally { handle.unmount() }
+  })
+
   test("顶栏品牌使用设计稿 Command 图标", () => {
     const { handle } = mountWebApp(true, makeSnapshot())
     try {
@@ -181,6 +209,7 @@ describe("WebApp", () => {
     })
     const { adapter, handle } = mountWebApp(true, makeSnapshot({ interactive }))
     try {
+      expect(handle.container.querySelector('.connection-banner[role="alert"]')?.textContent).toBe("连接已断开")
       const header = handle.container.querySelector<HTMLButtonElement>(".tool-row-header")
       expect(header).not.toBeNull()
       act(() => { header?.click() })
@@ -338,7 +367,6 @@ describe("WebApp", () => {
     act(() => toggle.click())
     expect(adapter.intentLog).toContainEqual({ type: "dock-open", panel: "code" })
     expect(handle.container.querySelector(".conversation-heading")?.textContent).toContain("新对话")
-    expect(handle.container.querySelector(".workspace-connection")?.textContent).toContain("已连接")
   } finally { handle.unmount() }
 })
 

@@ -30,6 +30,7 @@ export function CodePanel({
     <div className="panel code-panel">
       <FileTabs tabs={code.tabs} activePath={code.activePath} dispatch={dispatch} disabled={disabled} />
       <FilePreviewHeader
+        openInWorkbench
         path={code.activePath}
         preview={preview}
         error={error}

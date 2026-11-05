@@ -3,6 +3,7 @@
 import type {
   CommandMenuItem,
 } from "../../../src/interactive/commands"
+import type { ModelProfile, ThreadSummary } from "@za38/protocol"
 import type {
   AgentSummary,
   InteractiveSnapshot,
@@ -11,9 +12,7 @@ import type {
   InteractiveQuestion,
   LoadableCatalog,
   McpServerSummary,
-  ModelProfile,
   SkillSummary,
-  ThreadSummary,
 } from "../../../src/interactive/types"
 import type { InteractiveRuntime } from "../../../src/interactive/runtime"
 import type { WebAdapterSnapshot } from "../../../src/web/application/adapter"
@@ -61,7 +60,7 @@ export function makeInteractive(
   return {
     git: {busy:false,repository:null,diff:null,result:null,error:null},
     currentThreadId: null,
-    activity: { kind: "home", label: "就绪" },
+    activity: { kind: "home" },
     activeRun: null,
     timeline: [],
     runProgress: null,
@@ -79,7 +78,17 @@ export function makeInteractive(
       agents: makeCatalog<AgentSummary>([]),
     },
     selection: { requestedModelProfileId: null, actualModel: null, armedSkill: null },
+    workMode: "build",
+    composeState: null,
+    workItem: null,
+    goal: null,
+    goalPending: null,
+    goalEvaluation: null,
+    goalActivities: [],
+    threadMode: null,
     childTimelineExecutionId: null,
+    isReverted: false,
+    revertedTurnId: null,
     ...overrides,
   }
 }
@@ -99,6 +108,7 @@ export function makeSnapshot(overrides: Partial<WebAdapterSnapshot> = {}): WebAd
   return {
     interactive: makeInteractive(),
     viewMode: "chat",
+    fileViews: { paths: [], activePath: null },
     trace: { threadId: null, spans: [], loading: false, loaded: false, hasAnyTrace: false },
     draft: "",
     draftCursorOffset: 0,
@@ -188,6 +198,9 @@ export function makeAgent(overrides: Partial<AgentSummary> = {}): AgentSummary {
     requested_skills: [],
     requested_mcp_servers: [],
     max_turns: null,
+    color: null,
+    approval_mode: null,
+    permission_mode: null,
     source: "builtin",
     fingerprint: "explore-fingerprint",
     kind: "builtin",
