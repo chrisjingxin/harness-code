@@ -1,6 +1,6 @@
 /** 中央工作区页签：对话、轨迹与只读文件切换时保留各自内容和滚动。 */
 /** @jsxImportSource react */
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Activity, FileCode2, MessageSquare, X } from "lucide-react"
 import type { WebAdapterSnapshot, WebIntent } from "../application/adapter"
 import { TraceView } from "./trace"
@@ -21,6 +21,15 @@ export function WorkbenchViews({ snapshot, dispatch, disabled, children }: {
   const { paths, activePath } = snapshot.fileViews
   const selected = snapshot.viewMode === "file" && activePath ? fileId(activePath) : snapshot.viewMode
   const views = ["chat", "trace", ...paths.map(fileId)]
+  const userMessages = useMemo(() => {
+    const messages: Record<string, string> = {}
+    for (const item of snapshot.interactive.timeline) {
+      if (item.type !== "message" || item.message.role !== "user" || !item.message.runId) continue
+      const content = item.message.content.trim()
+      if (content) messages[item.message.runId] = content
+    }
+    return messages
+  }, [snapshot.interactive.timeline])
 
   useLayoutEffect(() => {
     const active = tabList.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
@@ -75,13 +84,13 @@ export function WorkbenchViews({ snapshot, dispatch, disabled, children }: {
         })}
       </div>
       {trace ? <div className="trace-mode-switch" role="group" aria-label="轨迹显示模式">
-        <button type="button" aria-pressed={mode === "dev"} onClick={() => setMode("dev")}>开发者</button>
-        <button type="button" aria-pressed={mode === "simple"} onClick={() => setMode("simple")}>简化</button>
+        <button type="button" aria-pressed={mode === "dev"} onClick={() => setMode("dev")}>开发者模式</button>
+        <button type="button" aria-pressed={mode === "simple"} onClick={() => setMode("simple")}>简化模式</button>
       </div> : null}
     </div>
     <section id="view-panel-chat" role="tabpanel" aria-labelledby="view-tab-chat" className="conversation-chat" hidden={snapshot.viewMode !== "chat"} inert={snapshot.viewMode !== "chat"}>{children}</section>
     <section id="view-panel-trace" role="tabpanel" aria-labelledby="view-tab-trace" className="conversation-trace" hidden={!trace} inert={!trace}>
-      <TraceView state={snapshot.trace} disabled={disabled} mode={mode} />
+      <TraceView state={snapshot.trace} disabled={disabled} mode={mode} userMessages={userMessages} />
     </section>
     {paths.map(path => {
       const visible = snapshot.viewMode === "file" && path === activePath

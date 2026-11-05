@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any, Literal, Protocol
 
 from harness_agent.runtime.provider_retry import is_provider_transient
+from harness_agent.tracing import current_trace
 
 # 单条工具 payload 的 1 MiB wire 上限；与 schema x-harness / host 同步。
 MAX_TOOL_PAYLOAD_BYTES = 1 * 1024 * 1024
@@ -231,6 +232,19 @@ async def execute(
         metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
         metadata["harness_execution_id"] = expected_execution_id
         stream_config["metadata"] = metadata
+    trace_context = current_trace()
+    if trace_context is not None:
+        raw_callbacks = stream_config.get("callbacks")
+        if raw_callbacks is None:
+            callbacks: list[Any] = []
+        elif isinstance(raw_callbacks, (list, tuple)):
+            callbacks = list(raw_callbacks)
+        else:
+            callbacks = [raw_callbacks]
+        if all(callback is not trace_context.recorder for callback in callbacks):
+            callbacks.append(trace_context.recorder)
+        # 只修改本次 stream 的浅拷贝，initial/resume 不污染共享 graph_config。
+        stream_config["callbacks"] = callbacks
     stream_kwargs: dict[str, Any] = {
         "config": stream_config,
         "stream_mode": ["messages", "updates", "custom"],

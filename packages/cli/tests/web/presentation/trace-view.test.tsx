@@ -27,7 +27,7 @@ function span(overrides: Partial<TraceSpanEvent> = {}): TraceSpanEvent {
     status: "SUCCESS",
     metadata: { input: { run_id: "r1" } },
     threadId: "thread-1",
-    raw: { trace_id: "t-1" },
+    raw: { trace_id: "t-1", run_id: "r1" },
     ...overrides,
   }
 }
@@ -39,6 +39,8 @@ function mountTraceView(
     currentThreadId?: string | null
     traceLoadedThreads?: ReadonlySet<string>
     traceLoadingThread?: string | null
+    userMessages?: Readonly<Record<string, string>>
+    mode?: "dev" | "simple"
   } = {},
 ) {
   const threadId = options.currentThreadId ?? "thread-1"
@@ -47,7 +49,7 @@ function mountTraceView(
     loaded: options.traceLoadedThreads?.has(threadId) ?? false,
     loading: options.traceLoadingThread === threadId,
     hasAnyTrace: Object.keys(perThread).length > 0,
-  }} />)
+  }} userMessages={options.userMessages} mode={options.mode} />)
   return { handle }
 }
 
@@ -141,6 +143,7 @@ describe("TraceView", () => {
       expect(detail?.textContent).toContain("init")
       // 原始 JSON 存在（>200 字折叠逻辑在 D6）。
       expect(detail?.querySelector("pre")).not.toBeNull()
+      expect(detail?.querySelector(".trace-detail-sub")).toBeNull()
     } finally {
       handle.unmount()
     }
@@ -324,12 +327,34 @@ describe("TraceView", () => {
     }
   })
 
-  test("无 user message 时 run 头回退到 traceId", () => {
+  test("统一 JSONL 通过 run_id 显示用户输入，轮次和甘特标题都不展示编号", () => {
+    const accept = span({ spanId: "s1", name: "run.accept", metadata: { mode: "build" } })
+    const { handle } = mountTraceView(
+      { "thread-1": [accept] },
+      { userMessages: { r1: "请直接展示这句用户输入" } },
+    )
+    try {
+      const label = handle.container.querySelector(".trace-run-label")
+      expect(label?.textContent).toBe("请直接展示这句用户输入")
+      expect(label?.textContent).not.toContain("t-1")
+      const title = handle.container.querySelector(".trace-gantt-title")?.textContent ?? ""
+      expect(title).toContain("请直接展示这句用户输入")
+      expect(title).not.toContain("#1")
+      expect(title).not.toContain("t-1")
+      expect(handle.container.textContent).not.toContain("按调用顺序等宽排列 · 点击条块定位到树")
+    } finally {
+      handle.unmount()
+    }
+  })
+
+  test("无 user message 时显示非编号空态，不回退到 traceId", () => {
     const accept = span({ spanId: "s1", name: "run.accept", metadata: { input: { run_id: "r1" } } })
     const { handle } = mountTraceView({ "thread-1": [accept] })
     try {
       const label = handle.container.querySelector(".trace-run-label")
-      expect(label?.textContent).toContain("t-1")
+      expect(label?.textContent).toBe("用户输入不可用")
+      expect(label?.textContent).not.toContain("t-1")
+      expect(handle.container.querySelector(".trace-gantt-title")?.textContent).not.toContain("#1")
     } finally {
       handle.unmount()
     }
@@ -368,6 +393,77 @@ describe("TraceView", () => {
     }
   })
 
+  test("统一 JSONL 的 run/ROOT 行同时展示 mode 与 yolo 审批模式", () => {
+    const root = span({
+      spanId: "root",
+      name: "run",
+      type: "ROOT",
+      metadata: {},
+    })
+    const accept = span({
+      spanId: "accept",
+      name: "run.accept",
+      parentSpanId: "root",
+      metadata: { mode: "build", requested_approval_mode: "yolo" },
+    })
+    const { handle } = mountTraceView({ "thread-1": [root, accept] })
+    try {
+      const chips = handle.container.querySelectorAll(".trace-node-row[data-span-key='t-1:root'] .trace-mode-chip")
+      expect([...chips].map(chip => chip.textContent)).toEqual(["build", "yolo"])
+      expect(chips[1]?.classList.contains("appr-yolo")).toBe(true)
+    } finally {
+      handle.unmount()
+    }
+  })
+
+  test("统一 JSONL 按 run_id 展示当前对话输入，精简编号、说明和详情身份行", () => {
+    const root = span({
+      spanId: "root",
+      name: "run",
+      type: "ROOT",
+      metadata: {},
+      raw: { run_id: "run-1" },
+    })
+    const accept = span({
+      spanId: "accept",
+      name: "run.accept",
+      type: "FUNC",
+      parentSpanId: "root",
+      metadata: { mode: "build", requested_approval_mode: "yolo" },
+      raw: { run_id: "run-1" },
+    })
+    const { handle } = mountTraceView(
+      { "thread-1": [root, accept] },
+      { userMessages: { "run-1": "请修复登录问题" } },
+    )
+    try {
+      expect(handle.container.querySelector(".trace-run-label")?.textContent).toBe("请修复登录问题")
+      expect(handle.container.querySelector(".trace-gantt-title")?.textContent).toContain("请修复登录问题")
+      expect(handle.container.querySelector(".trace-gantt-title")?.textContent).not.toContain("#1")
+      expect(handle.container.textContent).not.toContain("按调用顺序等宽排列")
+      const chips = handle.container.querySelectorAll(".trace-node-row[data-span-key='t-1:root'] .trace-mode-chip")
+      expect([...chips].map(chip => chip.textContent)).toEqual(["build", "yolo"])
+      act(() => { handle.container.querySelector<HTMLElement>(".trace-node-row[data-span-key='t-1:root']")?.click() })
+      expect(handle.container.querySelector(".trace-detail-sub")).toBeNull()
+      expect(handle.container.querySelector(".trace-detail")?.textContent).not.toContain("span_id:")
+    } finally { handle.unmount() }
+  })
+
+  test("统一 JSONL 的 run 根、graph.node 模型外壳与 attributes.mode 正确展示", () => {
+    const root = span({ spanId: "root", name: "run", type: "ROOT", metadata: {} })
+    const accept = span({ spanId: "accept", name: "run.accept", type: "FUNC", parentSpanId: "root", metadata: { mode: "build" } })
+    const shell = span({ spanId: "shell", name: "graph.node", type: "NODE", parentSpanId: "root", metadata: { node: "model" } })
+    const llm = span({ spanId: "llm", name: "graph.llm", type: "LLM", parentSpanId: "shell", metadata: { model: "mock-model" } })
+    const { handle } = mountTraceView({ "thread-1": [root, accept, shell, llm] })
+    try {
+      const rootRow = handle.container.querySelector<HTMLElement>(".trace-node-row[data-span-key='t-1:root']")
+      expect(rootRow?.querySelector(".trace-mode-chip")?.textContent).toBe("build")
+      expect(handle.container.querySelector(".trace-gantt-bar[data-span-key='t-1:llm']")).not.toBeNull()
+      const simple = simplifyTree(buildTree([root, accept, shell, llm]))
+      expect(simple.flatMap(node => [node, ...node.children]).some(node => node.span.spanId === "shell")).toBe(false)
+    } finally { handle.unmount() }
+  })
+
   test("水平分隔条拖拽：甘特高度随 pointermove 变化，结束后恢复 cursor", () => {
     const spans = [span({ spanId: "s1", name: "run.accept", type: "RUN" })]
     const { handle } = mountTraceView({ "thread-1": spans })
@@ -375,7 +471,7 @@ describe("TraceView", () => {
       const wrap = handle.container.querySelector<HTMLElement>(".trace-gantt-wrap")
       expect(wrap).not.toBeNull()
       const before = parseInt(wrap!.style.height, 10)
-      expect(before).toBe(140)
+      expect(before).toBe(96)
 
       const handleEl = handle.container.querySelector<HTMLElement>(".trace-resize-horizontal")
       expect(handleEl).not.toBeNull()
@@ -388,7 +484,7 @@ describe("TraceView", () => {
       })
       // 灵敏度 0.5：位移 40px → 高度 +20px。
       const after = parseInt(wrap!.style.height, 10)
-      expect(after).toBe(160)
+      expect(after).toBe(116)
       act(() => {
         window.dispatchEvent(new PointerEvent("pointerup"))
       })
@@ -456,6 +552,18 @@ describe("4.html 对齐：tools 聚合节点 / 失败标记（display 系列）"
     expect(displayType(node.span)).toBe("TOOL")
     expect(displayColor(node.span)).toBe("var(--trace-tool)") // TOOL 类型色由主题提供。
     expect(displayName(node)).toBe("bash、read_file")
+  })
+
+  test("ROOT、FUNC、AGENT 各自使用不同的类型色", () => {
+    const colors = ["ROOT", "FUNC", "AGENT", "LLM", "TOOL"].map(type => displayColor(span({ type })))
+    expect(colors).toEqual([
+      "var(--trace-root)",
+      "var(--trace-func)",
+      "var(--trace-agent)",
+      "var(--trace-llm)",
+      "var(--trace-tool)",
+    ])
+    expect(new Set(colors).size).toBe(colors.length)
   })
 
   test("树中 tools 聚合节点：badge 显示 TOOL、行名显示真实工具名", () => {

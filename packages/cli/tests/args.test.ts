@@ -19,6 +19,18 @@ test("skills install --version 仍是 Skill 包版本", () => {
   })
 })
 
+test("npm workspace 使用原始命令目录且允许显式 cwd 覆盖", () => {
+  const original = process.env.INIT_CWD
+  process.env.INIT_CWD = "/from-npm"
+  try {
+    expect(parseArgs([])).toMatchObject({ cwd: "/from-npm" })
+    expect(parseArgs(["--cwd", "/explicit"])).toMatchObject({ cwd: "/explicit" })
+  } finally {
+    if (original === undefined) delete process.env.INIT_CWD
+    else process.env.INIT_CWD = original
+  }
+})
+
 test("parses a non-interactive JSON run", () => {
   expect(parseArgs(["--non-interactive", "summarize this", "--json", "--config", "/tmp/za38.toml"], "/work")).toEqual({
     kind: "run",

@@ -1,4 +1,4 @@
-/** Span 树：对齐 trace_viewer 原型——run 分组头（idx 徽章 + 用户输入 + meta，整体可折叠）+
+/** Span 树：对齐 trace_viewer 原型——run 分组头（用户输入 + meta，整体可折叠）+
  *  节点行（toggle ▾/· + 类型 badge + name + dur + status-dot + run.root 的 mode chips）；
  *  children 缩进带左边线，点击选中高亮。 */
 /** @jsxImportSource react */
@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { TraceSpanEvent } from "../../../presentation-coordinator/contracts/trace"
 import { displayColor, displayName, displayType, outcomeChipText, shownStatus } from "./simple"
-import { buildTree, extractRunModes, extractUserMessage, simplifyTree, type TraceTreeNode } from "./types"
+import { buildTree, extractRunModes, extractUserMessage, simplifyTree, type TraceTreeNode, type TraceUserMessages } from "./types"
 
 /** 树组件外向回调：选中某个 span（详情面板展示）。 */
 export type TraceTreeHandlers = {
@@ -23,12 +23,14 @@ export function TraceTree({
   externalSelectedKey = null,
   selectionRevision = 0,
   mode = "dev",
+  userMessages = {},
 }: {
   spans: readonly TraceSpanEvent[]
   handlers: TraceTreeHandlers
   externalSelectedKey?: string | null
   selectionRevision?: number
   mode?: "dev" | "simple"
+  userMessages?: TraceUserMessages
 }): React.ReactElement {
   const [collapsedRuns, setCollapsedRuns] = useState<ReadonlySet<string>>(new Set())
   const [collapsedNodes, setCollapsedNodes] = useState<ReadonlySet<string>>(new Set())
@@ -122,10 +124,10 @@ export function TraceTree({
     () =>
       groups.map(group => ({
         group,
-        userMessage: extractUserMessage(getGroupSpans(group.trees)),
+        userMessage: extractUserMessage(getGroupSpans(group.trees), userMessages),
         modes: extractRunModes(getGroupSpans(group.trees)),
       })),
-    [groups],
+    [groups, userMessages],
   )
 
   return (
@@ -134,6 +136,7 @@ export function TraceTree({
         const collapsed = collapsedRuns.has(group.traceId)
         const total = group.trees.reduce((n, tree) => n + countNodes(tree), 0)
         const countBit = mode === "simple" ? `${total} 个关键节点` : `${total} spans`
+        const label = userMessage || "用户输入不可用"
         return (
           <section className="trace-run-section" key={group.traceId}>
             <button
@@ -142,7 +145,7 @@ export function TraceTree({
               onClick={() => toggleRun(group.traceId)}
               aria-expanded={!collapsed}
             >
-              <span className="trace-run-label" title={userMessage || group.traceId}>{userMessage || group.traceId.slice(0, 12)}</span>
+              <span className="trace-run-label" title={label}>{label}</span>
               <span className="trace-run-meta">{countBit} · {Math.round(groupTotalDuration(group.trees))}ms</span>
             </button>
             {!collapsed ? (
@@ -210,7 +213,7 @@ function TraceNodeRow({
   const selected = selectedKey === `${span.traceId}:${span.spanId}`
   const externalTarget = externalSelectedKey === `${span.traceId}:${span.spanId}`
   const rowRef = useRef<HTMLDivElement | null>(null)
-  const isRunRoot = (span.name ?? "") === "run.root"
+  const isRunRoot = (span.name ?? "") === "run.root" || ((span.name ?? "") === "run" && span.type === "ROOT")
 
   useLayoutEffect(() => {
     if (externalTarget && rowRef.current) {
@@ -235,7 +238,7 @@ function TraceNodeRow({
         }}>
           {hasChildren ? (collapsed ? "▸" : "▾") : "·"}
         </span>
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         <span className="trace-name" title={span.name}>{displayName(node)}</span>
         {isRunRoot && modes.mode ? <span className="trace-mode-chip kind-mode">{modes.mode}</span> : null}
         {isRunRoot && modes.requestedApprovalMode ? (

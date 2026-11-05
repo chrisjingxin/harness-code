@@ -94,26 +94,27 @@
   --message-user-bg: #f3f3f6;
   --thread-selected-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --overlay-scrim: rgba(32, 32, 36, .3);
-  /* Trace 类型色与状态色独立；强调色仍随品牌替换。 */
-  --trace-run: var(--accent);
-  --trace-func: #56738c;
-  --trace-agent: #7754a1;
-  --trace-node: #437b76;
-  --trace-llm: #956b28;
-  --trace-tool: #3e7f60;
-  --trace-retriever: #956080;
-  --trace-rerank: #a35555;
-  --trace-embedding: #956a40;
-  --trace-interaction: #77649c;
-  --trace-policy: #497583;
-  --trace-db: #687a43;
-  --trace-context: #816a91;
+  /* 每种 span 类型一个色相，徽章与甘特条都从这里取色；状态色保持独立。 */
+  --trace-root: #1a7393;
+  --trace-run: #4176e6;
+  --trace-func: #a51d9c;
+  --trace-agent: #9c1c58;
+  --trace-node: #5e8217;
+  --trace-llm: #7868c9;
+  --trace-tool: #93531a;
+  --trace-retriever: #188b7f;
+  --trace-rerank: #7a20b6;
+  --trace-embedding: #308217;
+  --trace-interaction: #9c1c1c;
+  --trace-policy: #827717;
+  --trace-db: #188b2f;
+  --trace-context: #178257;
   --trace-success: var(--success);
   --trace-failed: var(--danger);
   --trace-error: var(--danger);
   --trace-running: var(--warning);
-  --trace-unknown: #68717d;
-  --trace-badge-text: #ffffff;
+  --trace-unknown: #61666b;
+  --trace-kind: var(--trace-unknown);
 }
 
 .web-shell[data-theme="dark"] {
@@ -203,24 +204,25 @@
   --message-user-bg: #2b2b31;
   --thread-selected-bg: color-mix(in srgb, var(--accent) 32%, var(--surface));
   --overlay-scrim: rgba(0, 0, 0, .6);
-  /* 深色类型色适度提亮，避免标签与背景混在一起。 */
-  --trace-run: var(--accent);
-  --trace-func: #9ebbd2;
-  --trace-agent: #baa0d7;
-  --trace-node: #8fbeb8;
-  --trace-llm: #d7b579;
-  --trace-tool: #8fbea2;
-  --trace-retriever: #cba0b8;
-  --trace-rerank: #d49a9a;
-  --trace-embedding: #d0ac87;
-  --trace-interaction: #b7a8d0;
-  --trace-policy: #91b6c2;
-  --trace-db: #adbc8d;
-  --trace-context: #bba8ca;
+  /* 深色主题沿用同一色相并适度提亮，避免标签与背景混在一起。 */
+  --trace-root: #98cee1;
+  --trace-run: #7aa2f0;
+  --trace-func: #e198dc;
+  --trace-agent: #e198ba;
+  --trace-node: #c9e198;
+  --trace-llm: #b0a1e5;
+  --trace-tool: #e1ba98;
+  --trace-retriever: #98e1da;
+  --trace-rerank: #c498e1;
+  --trace-embedding: #a9e198;
+  --trace-interaction: #e19898;
+  --trace-policy: #e1da98;
+  --trace-db: #98e1a7;
+  --trace-context: #98e1c4;
   --trace-success: var(--success);
   --trace-failed: var(--danger);
   --trace-error: var(--danger);
   --trace-running: var(--warning);
   --trace-unknown: #aeb6c2;
-  --trace-badge-text: var(--bg);
+  --trace-kind: var(--trace-unknown);
 }

@@ -23,6 +23,7 @@ from jsonschema.exceptions import ValidationError
 
 from harness_agent import __version__
 from harness_agent.diagnostic_log.runtime import DiagnosticLog, ensure_log, safe_context_value
+from harness_agent.tracing import func_monitor, trace_monitor
 from harness_agent.host.attachments import AttachmentManager
 from harness_agent.host.control_lease import (
     ActivityFacts,
@@ -1758,6 +1759,16 @@ class AgentHost:
             return None
         return await self._ensure_thread_persistence()
 
+    @trace_monitor(
+        session_id=lambda _self, command, _persistence: command.thread_id,
+        run_id=lambda _self, command, _persistence: command.run_id,
+        log_dir=lambda self, _command, _persistence: self._workspace / "log",
+        manual=True,
+    )
+    @func_monitor(
+        name="run.prepare",
+        idempotency_key=lambda call: f"run.prepare:{call.args[1].run_id}",
+    )
     async def _prepare_run(
         self,
         command: StartRun,

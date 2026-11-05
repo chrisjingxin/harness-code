@@ -1,10 +1,10 @@
 /* 中央页签与视图容器；Trace 业务样式仍由 trace/trace.css 独立维护。 */
-.workbench-view-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 0 20px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
-.workbench-view-tabs { display: flex; gap: 18px; align-self: stretch; min-width: 0; overflow-x: auto; }
+.workbench-view-toolbar { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; min-height: 36px; padding: 0 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.workbench-view-tabs { display: flex; gap: 16px; align-self: stretch; min-width: 0; overflow-x: auto; }
 .workbench-view-tab { display: flex; align-items: center; gap: 6px; padding: 0 2px; border: 0;  background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
 .workbench-view-tab[aria-selected="true"] { color: var(--accent); font-weight: 600; }
-.trace-mode-switch { display: flex; padding: 3px; border-radius: var(--radius-control); background: var(--surface-2); }
-.trace-mode-switch button { background: transparent; border: 0; border-radius: var(--radius-control); color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.trace-mode-switch { display: flex; padding: 2px; border-radius: var(--radius-control); background: var(--surface-2); }
+.trace-mode-switch button { background: transparent; border: 0; border-radius: var(--radius-control); color: var(--muted); font: inherit; font-size: 12px; padding: 3px 8px; cursor: pointer; }
 .trace-mode-switch button[aria-pressed="true"] { background: var(--bg); color: var(--accent); }
 .conversation-chat, .conversation-trace { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .conversation-chat[hidden], .conversation-trace[hidden] { display: none; }
@@ -19,6 +19,8 @@
 
 /* 文件页签共用品牌下划线；按钮与关闭控件分开，避免嵌套交互。 */
 .workbench-tab-item { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 42px; border-bottom: 2px solid transparent; }
+/* 轨迹工具栏保持 36px；文件页签仍使用上方的 42px 通用高度。 */
+.workbench-view-toolbar .workbench-tab-item { min-height: 35px; }
 .workbench-tab-item[data-selected="true"] { border-bottom-color: var(--accent); }
 .workbench-tab-item .workbench-view-tab { align-self: stretch; min-width: 0; }
 .workbench-tab-name { max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

@@ -66,6 +66,7 @@ from langchain_core.messages import (
 
 from harness_agent.diagnostic_log.runtime import ensure_log
 from harness_agent.threads.prompting import estimate_tokens
+from harness_agent.tracing import FunctionCall, func_monitor
 
 if TYPE_CHECKING:
     from harness_agent.threads.thread_persistence import ThreadPersistence, TranscriptRecord
@@ -152,6 +153,23 @@ class ModelProjection:
     source_record_sequence: int
 
 
+def _projection_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """只投影真实缓存命中与消息数；异常结果不虚构匹配状态。"""
+    if call.error is not None or not isinstance(call.result, ModelProjection):
+        return {}
+    return {
+        "matched": call.result.checkpoint is not None,
+        "count": len(call.result.messages),
+    }
+
+
+def _projection_idempotency_key(call: FunctionCall) -> str:
+    """按 Thread 与排除记录识别投影重放，不记录消息正文。"""
+    identity = repr((call.args[1:], sorted(call.kwargs.items())))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"context.project:{digest}"
+
+
 class ContextProjector:
     """从最新有效检查点和 Transcript tail 构造唯一模型历史。"""
 
@@ -159,6 +177,12 @@ class ContextProjector:
         """绑定已经 project-scoped 的持久化领域入口。"""
         self._persistence = persistence
 
+    @func_monitor(
+        name="context.project",
+        kind="CONTEXT",
+        attributes=_projection_attributes,
+        idempotency_key=_projection_idempotency_key,
+    )
     async def project(
         self,
         thread_id: str,

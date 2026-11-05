@@ -1,7 +1,8 @@
 /** 轨迹视图配色：保留内网类型与状态映射；实际颜色由工作台 theme.css 统一定义。 */
 
-/** span 类型 → 条形颜色（trace_viewer.py TYPE_COLORS 平移）。 */
+/** span 类型 → 条形/徽章颜色。每种 type 一个色相，具体色值在 theme.css。 */
 export const TYPE_COLORS: Readonly<Record<string, string>> = {
+  ROOT: "var(--trace-root)",
   RUN: "var(--trace-run)",
   FUNC: "var(--trace-func)",
   AGENT: "var(--trace-agent)",
