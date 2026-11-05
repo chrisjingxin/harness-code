@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
+from harness_agent.tracing import TraceRecorder, use_trace
 from harness_agent.runtime.execution_stream import (
     CONTENT_DELTA,
     REASONING_DELTA,
@@ -62,6 +63,57 @@ class _FakeAgent:
         self.calls.append({"input": stream_input, **kwargs})
         for event in self.events:
             yield event
+
+
+@pytest.mark.asyncio
+async def test_stream_appends_current_recorder_without_mutating_shared_callbacks(tmp_path) -> None:
+    """initial/resume 每次只追加一个 Recorder，并保留调用方已有 callbacks。"""
+    recorder = TraceRecorder(session_id="thread", run_id="run-stream", log_dir=tmp_path)
+    context = recorder.start_trace()
+    existing = object()
+    graph_config = {"callbacks": [existing], "configurable": {"thread_id": "thread"}}
+    agent = _FakeAgent([])
+    with use_trace(context):
+        for run_id in ("run-initial", "run-resume"):
+            await execute(
+                ExecutionStreamRequest(
+                    agent=agent,
+                    stream_input={"messages": []},
+                    graph_config=graph_config,
+                    context=None,
+                    content_visibility="passthrough",
+                    session=StreamSession(run_id=run_id),
+                    is_cancelled=lambda: False,
+                ),
+                _RecordingPorts(),
+            )
+    context.recorder.end_trace()
+
+    assert graph_config["callbacks"] == [existing]
+    assert len(agent.calls) == 2
+    for call in agent.calls:
+        assert call["config"] is not graph_config
+        assert call["config"]["callbacks"] == [existing, context.recorder]
+
+
+@pytest.mark.asyncio
+async def test_stream_without_trace_preserves_existing_callback_shape() -> None:
+    """无活跃 Trace 时不增加 callbacks 键，也不改变既有配置语义。"""
+    agent = _FakeAgent([])
+    await execute(
+        ExecutionStreamRequest(
+            agent=agent,
+            stream_input={"messages": []},
+            graph_config={"configurable": {"thread_id": "thread"}},
+            context=None,
+            content_visibility="passthrough",
+            session=StreamSession(run_id="run-no-trace"),
+            is_cancelled=lambda: False,
+        ),
+        _RecordingPorts(),
+    )
+
+    assert "callbacks" not in agent.calls[0]["config"]
 
 
 @pytest.mark.asyncio

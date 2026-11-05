@@ -1,5 +1,5 @@
 /** 详情面板：对齐 4.html 原型——h2（badge + name + status-dot + 时长meta）、
- *  sub（span_id/parent/trace_id）、分节（关于/时间/metadata）、pre.json 语法着色（details 折叠）。
+ *  分节（关于/时间/metadata）、pre.json 语法着色（details 折叠）。
  *  长字符串展示统一走 FoldText 折叠：开发者模式 200 字、简化模式 500 字（对齐 4.html applyFolds 的
  *  FOLD_LIMIT=200 与简化详情少而精的 500 字），点击「展开 N 字 / 收起」切换。 */
 /** @jsxImportSource react */
@@ -34,7 +34,7 @@ export function TraceDetail({
   return <DevDetail node={node} />
 }
 
-/** 开发者模式：h2 + sub 定位行，分节「关于（raw JSON）/时间/metadata」（对齐 4.html renderDevDetail：
+/** 开发者模式：h2 + 分节「关于（raw JSON）/时间/metadata」（对齐 4.html renderDevDetail：
  *  无顶层字段节；mode/requested_approval_mode 值高亮；metadata 跳过一个空的 sessionId 键）。 */
 function DevDetail({ node }: { node: TraceTreeNode }): React.ReactElement {
   const span = node.span
@@ -45,16 +45,13 @@ function DevDetail({ node }: { node: TraceTreeNode }): React.ReactElement {
   return (
     <div className="trace-detail" data-selected="true">
       <h2 className="trace-detail-title">
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         {displayName(node)}
         <span className="trace-status-dot" data-status={shownStatus(span).toLowerCase()} />
         <span className={`trace-detail-meta${failed ? " is-failed" : ""}`}>
           {span.durationMs !== null ? `${Math.round(span.durationMs)}ms` : "—"} · {shownStatusLabel(span)}
         </span>
       </h2>
-      <div className="trace-detail-sub">
-        span_id: {span.spanId} | parent_span_id: {span.parentSpanId ?? "—"} | trace_id: {span.traceId}
-      </div>
 
       <div className="trace-section">
         <h3>关于 <span className="trace-section-note">（raw JSON 完整保留，未做任何裁剪）</span></h3>
@@ -164,7 +161,7 @@ function SimpleDetail({ node, modes }: { node: TraceTreeNode; modes?: { mode?: s
   return (
     <div className="trace-detail trace-detail-simple" data-selected="true">
       <h2 className="trace-detail-title">
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         {displayName(node)}
         <span className="trace-status-dot" data-status={shownStatus(span).toLowerCase()} />
         <span className="trace-detail-meta">

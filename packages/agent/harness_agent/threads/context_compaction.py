@@ -32,6 +32,7 @@ from harness_agent.threads.context_projection import (
 )
 from harness_agent.diagnostic_log.runtime import ensure_log, safe_context_value
 from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json, estimate_tokens, input_cap_tokens
+from harness_agent.tracing import FunctionCall, func_monitor
 from harness_agent.threads.runtime_state import (
     RuntimeExecutionPolicy,
     RuntimeStateRehydrator,
@@ -112,6 +113,36 @@ class CompressionResult:
         return self.outcome == "compressed"
 
 
+def _compaction_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """记录请求的真实缓存来源与 typed outcome，不把 skipped/failed 当成功。"""
+    if call.error is not None or not isinstance(call.result, CompressionResult):
+        return {}
+    request = call.args[1]
+    if not isinstance(request, CompressionRequest):
+        return {}
+    return {
+        "matched": request.projection.checkpoint is not None,
+        "compressed": call.result.compressed,
+        "status": call.result.outcome,
+    }
+
+
+def _compaction_idempotency_key(call: FunctionCall) -> str:
+    """以来源投影识别同一压缩请求，不把历史正文写入幂等键。"""
+    request = call.args[1]
+    if not isinstance(request, CompressionRequest):
+        raise TypeError("未知压缩请求")
+    projection = request.projection
+    checkpoint_id = (
+        projection.checkpoint.checkpoint_id if projection.checkpoint is not None else None
+    )
+    identity = canonical_json(
+        [request.thread_id, request.trigger, projection.source_record_sequence, checkpoint_id]
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"context.compact:{digest}"
+
+
 @dataclass(frozen=True, slots=True)
 class _MicroPlan:
     """只存在于当前压缩调用内的微压缩草稿。"""
@@ -152,6 +183,12 @@ class ContextCompactor:
         self._runtime_state_provider = runtime_state_provider
         self._provider_retry = provider_retry
 
+    @func_monitor(
+        name="context.compact",
+        kind="CONTEXT",
+        attributes=_compaction_attributes,
+        idempotency_key=_compaction_idempotency_key,
+    )
     async def compress(self, request: CompressionRequest) -> CompressionResult:
         """按 trigger 统一执行完整压缩闭环，并在失败时保持旧投影。"""
         self._compress_started = time.monotonic()

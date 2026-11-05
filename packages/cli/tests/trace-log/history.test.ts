@@ -25,6 +25,25 @@ test("同一行多个 marker、乱序 end/start、父节点和 metadata 保留�
   expect(spans[0]).toMatchObject({ threadId: "t1", parentSpanId: null, durationMs: 10, metadata: { result: "done", input: start.metadata.input } })
   expect(spans[1]?.endTime).toBeNull()
 })
+test("统一 session JSONL 合并 start/end、保留安全属性并隔离其他会话", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc-session-trace-")); dirs.push(root)
+  await mkdir(join(root, "log"))
+  const start = { schema_version: 1, event: "trace.start", session_id: "thread-1", trace_id: "trace-1", span_id: "root", parent_span_id: null, name: "run", kind: "ROOT", start_time_ms: 1000, attributes: {} }
+  const llmStart = { schema_version: 1, event: "span.start", session_id: "thread-1", trace_id: "trace-1", span_id: "llm", parent_span_id: "root", name: "graph.llm", kind: "LLM", start_time_ms: 1100, attributes: { model: "mock-model" } }
+  const llmEnd = { ...llmStart, event: "span.end", end_time_ms: 1350, duration_ms: 250, status: "SUCCESS", attributes: { finish_reason: "stop" } }
+  const other = { ...start, session_id: "thread-2", trace_id: "trace-2", span_id: "other" }
+  await writeFile(join(root, "log", "session.jsonl"), [start, llmEnd, llmStart, other].map(value => JSON.stringify(value)).join("\n") + "\nnot-json\n")
+  const result = await createTraceHistorySource({ workspace: root }).loadThread("thread-1")
+  expect(result.hasAnyTrace).toBe(true)
+  expect(result.spans).toHaveLength(2)
+  expect(result.spans.find(span => span.spanId === "llm")).toMatchObject({
+    threadId: "thread-1", parentSpanId: "root", name: "graph.llm", type: "LLM",
+    startTime: 1100, endTime: 1350, durationMs: 250, status: "SUCCESS",
+    metadata: { model: "mock-model", finish_reason: "stop" },
+  })
+  expect((await createTraceHistorySource({ workspace: root }).loadThread("thread-2")).spans.map(span => span.spanId)).toEqual(["other"])
+})
+
 test("日期目录回读并按 trace 回填未绑定节点，其他会话不混入", async () => {
   const { source } = await fixture()
   const result = await source.loadThread("t1")

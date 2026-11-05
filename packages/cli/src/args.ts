@@ -40,7 +40,7 @@ export type PluginCommandKind =
   | "plugins.settings.remove"
 
 /** 解析交互、无头执行和配置管理命令，并保留工作区与配置路径。 */
-export function parseArgs(argv: string[], cwd = process.cwd()): Command {
+export function parseArgs(argv: string[], cwd = process.env.INIT_CWD ?? process.cwd()): Command {
   const args = [...argv]
   const command = args[0]
   if (command === "config") {

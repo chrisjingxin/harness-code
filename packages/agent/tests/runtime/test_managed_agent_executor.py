@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessageChunk
 
 from harness_agent.runtime.execution_stream import ExecutionSignal, StreamSession
+from harness_agent.tracing import TraceRecorder, TraceStatus, use_trace
 from harness_agent.runtime.managed_agent_executor import (
     FailClosedManagedObserver,
     ManagedAgentExecutionError,
@@ -739,6 +742,66 @@ def test_managed_child_observers_keep_sibling_event_ports_isolated() -> None:
 
     assert destinations["a"] == [("tool.started", "child-a", "root-parent", "same-agent-id")]
     assert destinations["b"] == [("tool.started", "child-b", "root-parent", "same-agent-id")]
+
+
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取 executor 测试产生的统一 JSONL 事件。"""
+    return [
+        json.loads(line)
+        for path in root.glob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_trace_covers_acquire_stream_and_finally_release(tmp_path: Path) -> None:
+    """run.execute 包含 runtime 获取与释放，两个子 Span 共享执行父级。"""
+    recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
+    context = recorder.start_trace()
+    runtime = _Runtime(None)
+    with use_trace(context):
+        result = await ManagedAgentExecutor().execute(_request(runtime), _Observer())
+    context.recorder.end_trace()
+
+    assert result.final_content == "修复当前问题"
+    events = _trace_events(tmp_path)
+    names = [event["name"] for event in events if event["event"] == "span.start"]
+    assert names == ["run.execute", "runtime.acquire", "runtime.release"]
+    execute_start = events[1]
+    assert execute_start["name"] == "run.execute"
+    child_starts = [event for event in events if event["event"] == "span.start"][1:]
+    assert all(event["parent_span_id"] == execute_start["span_id"] for event in child_starts)
+    assert [event["name"] for event in events if event["event"] == "span.end"] == [
+        "runtime.acquire",
+        "runtime.release",
+        "run.execute",
+    ]
+    assert all(event["status"] == "SUCCESS" for event in events if event["event"] == "span.end")
+
+
+@pytest.mark.asyncio
+async def test_executor_acquire_failure_does_not_fake_release(tmp_path: Path) -> None:
+    """runtime 获取失败只结束 execute/acquire，不记录未发生的 release。"""
+    recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
+    context = recorder.start_trace()
+    request = _request(_Runtime(None))
+
+    async def fail_acquire():
+        raise RuntimeError("acquire failed")
+
+    object.__setattr__(request, "runtime_provider", fail_acquire)
+    with use_trace(context), pytest.raises(RuntimeError, match="acquire failed"):
+        await ManagedAgentExecutor().execute(request, _Observer())
+    context.recorder.end_trace(TraceStatus.FAILED)
+
+    events = _trace_events(tmp_path)
+    assert [event["name"] for event in events if event["event"] == "span.start"] == [
+        "run.execute",
+        "runtime.acquire",
+    ]
+    ends = [event for event in events if event["event"] == "span.end"]
+    assert [event["name"] for event in ends] == ["runtime.acquire", "run.execute"]
+    assert all(event["status"] == "FAILED" for event in ends)
 
 
 @pytest.mark.asyncio

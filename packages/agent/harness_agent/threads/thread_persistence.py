@@ -31,6 +31,7 @@ from harness_agent.runtime.execution_binding import (
 )
 from harness_agent.threads.context_lifecycle import RunContextSnapshot, snapshot_from_legacy_prompt_epoch
 from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json
+from harness_agent.tracing import FunctionCall, func_monitor
 from harness_agent.runtime.agent_engine_profile import AGENT_ENGINE_PROFILE_VERSION, AgentEngineProfile
 from harness_agent.threads.context_projection import (
     CompressionCheckpoint,
@@ -2733,6 +2734,67 @@ class ProjectScopedAsyncSqliteSaver(AsyncSqliteSaver):
         }
 
 
+def _persist_idempotency_key(call: FunctionCall) -> str:
+    """按真实业务身份去重，不把正文、SQL 或工作区路径写入 Trace。"""
+    command = call.args[1]
+    if isinstance(command, AcceptRun):
+        return f"accept_run:{command.binding.thread_id}:{command.binding.run_id}"
+    if isinstance(command, TranscriptAppend):
+        commands = (command,)
+    elif isinstance(command, tuple) and all(
+        isinstance(item, TranscriptAppend) for item in command
+    ):
+        commands = command
+    else:
+        commands = ()
+    if commands:
+        identity = canonical_json(
+            [commands[0].thread_id, [item.record_id for item in commands]]
+        )
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return f"transcript:{digest}"
+    if isinstance(command, str):
+        return f"run_complete:{command}"
+    if isinstance(command, CommitContextRewrite):
+        if command.checkpoint is not None:
+            identity = f"{command.thread_id}:{command.checkpoint.checkpoint_id}"
+        else:
+            # 无 Checkpoint 的独立状态提交不能共用一个固定键；仅暴露不可逆摘要。
+            identity = repr(command)
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return f"context_commit:{digest}"
+    raise TypeError("未知持久化命令")
+
+
+def _persist_attributes(operation: str):
+    """生成指定事务的安全字段提供器，失败时不虚构提交序号或数量。"""
+    def attributes(call: FunctionCall) -> Mapping[str, object]:
+        if call.error is not None:
+            return {"operation": operation, "outcome": "failed"}
+        projected: dict[str, object] = {
+            "operation": operation,
+            "outcome": "committed",
+        }
+        result = call.result
+        if isinstance(result, RunAcceptance):
+            projected["created"] = result.created
+        elif isinstance(result, TranscriptRecord):
+            projected.update(count=1, seq=result.sequence)
+        elif isinstance(result, tuple) and all(
+            isinstance(item, TranscriptRecord) for item in result
+        ):
+            projected["count"] = len(result)
+            if result:
+                projected["seq"] = result[-1].sequence
+        elif isinstance(result, ContextCommit):
+            projected["count"] = len(result.artifacts)
+            if result.checkpoint is not None:
+                projected["seq"] = result.checkpoint.source_record_sequence
+        return projected
+
+    return attributes
+
+
 class ThreadPersistence:
     """按 Thread、Run 和 Context 生命周期封装 SQLite 与 checkpoint 细节。"""
 
@@ -3062,6 +3124,12 @@ class ThreadPersistence:
             except ValueError:
                 return None
 
+    @func_monitor(
+        name="thread.persist",
+        kind="DB",
+        attributes=_persist_attributes("accept_run"),
+        idempotency_key=_persist_idempotency_key,
+    )
     async def accept_run(self, command: AcceptRun) -> RunAcceptance:
         """原子受理一个 Run，并提交或复用 Context snapshot、索引和绑定。"""
         started = time.monotonic()
@@ -3411,11 +3479,23 @@ class ThreadPersistence:
         await cursor.close()
         return any(_payload_content(row["payload"]) == message for row in rows)
 
+    @func_monitor(
+        name="thread.persist",
+        kind="DB",
+        attributes=_persist_attributes("transcript"),
+        idempotency_key=_persist_idempotency_key,
+    )
     async def append_transcript(self, command: TranscriptAppend) -> TranscriptRecord:
         """原子追加一条完整语义记录及其可选 Artifact。"""
         records = await self.append_transcript_batch((command,))
         return records[0]
 
+    @func_monitor(
+        name="thread.persist",
+        kind="DB",
+        attributes=_persist_attributes("transcript_batch"),
+        idempotency_key=_persist_idempotency_key,
+    )
     async def append_transcript_batch(
             self, commands: tuple[TranscriptAppend, ...]
     ) -> tuple[TranscriptRecord, ...]:
@@ -3867,6 +3947,12 @@ class ThreadPersistence:
             has_legacy_runtime=await self._has_legacy_runtime_binding(thread_id),
         )
 
+    @func_monitor(
+        name="thread.persist",
+        kind="DB",
+        attributes=_persist_attributes("run_complete"),
+        idempotency_key=_persist_idempotency_key,
+    )
     async def complete_run(self, thread_id: str) -> None:
         """在 Run 终态刷新活动时间；消息数量由 Transcript 追加事务维护。"""
         started = time.monotonic()
@@ -4157,6 +4243,12 @@ class ThreadPersistence:
             legacy_incomplete=legacy_incomplete,
         )
 
+    @func_monitor(
+        name="thread.persist",
+        kind="DB",
+        attributes=_persist_attributes("context_commit"),
+        idempotency_key=_persist_idempotency_key,
+    )
     async def commit_context(self, command: CommitContextRewrite) -> ContextCommit:
         """原子提交 Artifact、摘要、状态和模型投影检查点。"""
         started = time.monotonic()

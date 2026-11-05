@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -25,6 +26,7 @@ from harness_agent.policy.bash_parser import extract_segments
 from harness_agent.policy.concurrency import is_shell_command_mutating
 from harness_agent.tools.file_tool_catalog import FILESYSTEM_WRITE_TOOL_NAMES
 from harness_agent.tools.plan_file import PLAN_VIRTUAL_PATH, is_plan_virtual_path
+from harness_agent.tracing import FunctionCall, func_monitor
 
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -96,6 +98,24 @@ PlanShellDecision = Literal["allow", "ask", "deny"]
 """Plan 约束下 Shell 命令的三态处置结果。"""
 
 
+def _decision_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """仅投影真实决策；异常或敏感调用参数不进入 Trace。"""
+    return {} if call.error is not None else {"decision": call.result}
+
+
+def _decision_idempotency_key(call: FunctionCall) -> str:
+    """按决策输入识别重放；JSONL 只保留不可逆摘要，不写命令或路径。"""
+    identity = repr((call.function.__name__, call.args, sorted(call.kwargs.items())))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"policy:{digest}"
+
+
+@func_monitor(
+    name="policy.classifier",
+    kind="POLICY",
+    attributes=_decision_attributes,
+    idempotency_key=_decision_idempotency_key,
+)
 def classify_plan_shell_command(command: object) -> PlanShellDecision:
     """把 Plan Shell 命令分为只读、明确写入和未知三类。
 
@@ -754,6 +774,12 @@ PermissionDecision = Literal["allow", "ask", "deny"]
 """审批流水线最终决策：allow 直接执行，ask 需要用户审批，deny 硬拒绝。"""
 
 
+@func_monitor(
+    name="policy.evaluate",
+    kind="POLICY",
+    attributes=_decision_attributes,
+    idempotency_key=_decision_idempotency_key,
+)
 def evaluate_permission(
     tool_name: str,
     tool_args: dict[str, Any],

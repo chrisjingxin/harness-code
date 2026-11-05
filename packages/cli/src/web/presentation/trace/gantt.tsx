@@ -7,7 +7,7 @@ import { useMemo } from "react"
 
 import type { TraceSpanEvent } from "../../../presentation-coordinator/contracts/trace"
 import { displayColor, displayName, displayType, formatMs, shownStatusLabel, toolPayloadFailure } from "./simple"
-import { buildTree, extractUserMessage, ganttLanes, simplifyTree, type TraceTreeNode } from "./types"
+import { buildTree, extractUserMessage, ganttLanes, simplifyTree, type TraceTreeNode, type TraceUserMessages } from "./types"
 
 /** 三行甘特的 lane 标签（对齐 4.html gantt-labels）。 */
 const LANE_LABELS = ["Input", "Model", "Tools"]
@@ -18,10 +18,12 @@ export function GanttChart({
   spans,
   onSelect,
   mode = "dev",
+  userMessages = {},
 }: {
   spans: readonly TraceSpanEvent[]
   onSelect?: (item: TraceSpanEvent) => void
   mode?: "dev" | "simple"
+  userMessages?: TraceUserMessages
 }): React.ReactElement {
   const groups = useMemo(() => {
     const byTrace = new Map<string, TraceSpanEvent[]>()
@@ -41,9 +43,9 @@ export function GanttChart({
         }
       }
       walk(trees)
-      return { traceId, trees, userMessage: extractUserMessage(flatSpans) }
+      return { traceId, trees, userMessage: extractUserMessage(flatSpans, userMessages) }
     })
-  }, [spans, mode])
+  }, [spans, mode, userMessages])
 
   // 全部 lane 节点（含所属 trace 顺序）：flatMap 保持 trace 分组序，组内按 start_time 稳定排序，
   // 保证多轮时条块的「码放顺序」与 4.html collectGanttSpans 一致。
@@ -69,7 +71,7 @@ export function GanttChart({
   const n = barNodes.length
   const title = groups.length > 1
     ? `全部 ${groups.length} 轮 · ${n} 个事件`
-    : `#1 · ${(groups[0]?.userMessage || groups[0]?.traceId || "").slice(0, 40)} · ${n} 个事件`
+    : `${(groups[0]?.userMessage || "用户输入不可用").slice(0, 40)} · ${n} 个事件`
 
   return (
     <div className="trace-gantt trace-gantt-lanes3">
@@ -95,8 +97,7 @@ export function GanttChart({
         </div>
       </div>
       <div className="trace-gantt-header">
-        <span className="trace-gantt-title" title={groups.map(g => g.userMessage || g.traceId).join(" / ")}>{title}</span>
-        <span className="trace-gantt-range">按调用顺序等宽排列 · 点击条块定位到树</span>
+        <span className="trace-gantt-title" title={groups.map(g => g.userMessage || "用户输入不可用").join(" / ")}>{title}</span>
       </div>
     </div>
   )

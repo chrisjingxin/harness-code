@@ -16,6 +16,13 @@ from typing import Any, ClassVar, Literal, Protocol
 
 from harness_agent.compose.models import ThreadMode
 from harness_agent.diagnostic_log.runtime import DiagnosticLog, ensure_log, safe_context_value
+from harness_agent.tracing import (
+    SpanHandle,
+    TraceContext,
+    TraceStatus,
+    current_trace,
+    use_trace,
+)
 from harness_agent.goals.context import GoalRunBinding
 from harness_agent.host.run_execution import (
     AdapterOutcome,
@@ -555,6 +562,7 @@ class RunState:
     started_at: float = field(default_factory=time.monotonic)
     timing: RunTimingLedger | None = None
     diagnostic_log: DiagnosticLog | None = None
+    trace_context: TraceContext | None = None
     context_summary: dict[str, object] = field(default_factory=dict)
     cancellation_token: RunCancellationToken = field(default_factory=RunCancellationToken)
     run_context: RunContext | None = None
@@ -733,37 +741,70 @@ class _CoordinatorLifecyclePort:
             run.pending_interactions.add(spec.request_id)
         kind = safe_context_value(spec.type) or "interaction"
         run.diagnostic_log.info("interaction.started", {"kind": kind, "source": "host"})
+        trace_context = current_trace()
+        wait_span = (
+            trace_context.recorder.start_span(
+                "interaction.wait",
+                kind="INTERACTION",
+                attributes={"phase": "wait"},
+                idempotency_key=f"interaction:{spec.request_id}",
+            )
+            if trace_context is not None
+            else None
+        )
+        outcome = "failed"
+        error: BaseException | None = None
         wait_started = run.timing.begin_wait() if run.timing is not None else None
         try:
-            result = await self._coordinator._interaction_port.request(
-                run.owner, run.ref, spec
-            )
-        finally:
+            try:
+                result = await self._coordinator._interaction_port.request(
+                    run.owner, run.ref, spec
+                )
+            finally:
+                if run.timing is not None and wait_started is not None:
+                    run.timing.end_interaction_wait(wait_started)
+                async with self._coordinator._lock:
+                    run.pending_interactions.discard(spec.request_id)
+                    if run.completion is None and not run.cancel_requested:
+                        run.status = "running"
+            wait_ms = 0
             if run.timing is not None and wait_started is not None:
-                run.timing.end_interaction_wait(wait_started)
-            async with self._coordinator._lock:
-                run.pending_interactions.discard(spec.request_id)
-                if run.completion is None and not run.cancel_requested:
-                    run.status = "running"
-        wait_ms = 0
-        if run.timing is not None and wait_started is not None:
-            wait_ms = max(0, round((run.timing.clock() - wait_started) * 1000))
-        outcome = _interaction_outcome(result)
-        completed = {"kind": kind, "outcome": outcome, "wait_ms": wait_ms}
-        if result.expired or outcome in {"reject", "deny", "expired"}:
-            run.diagnostic_log.warn("interaction.completed", completed)
-        else:
-            run.diagnostic_log.info("interaction.completed", completed)
-        self._coordinator._emit(
-            run,
-            INTERACTION_RESOLVED,
-            {"request_id": spec.request_id, "type": spec.type},
-            execution_id=spec.execution_id,
-            parent_execution_id=spec.parent_execution_id,
-            agent_id=spec.agent_id,
-            compose_scope=spec.compose_scope,
-        )
-        return result
+                wait_ms = max(0, round((run.timing.clock() - wait_started) * 1000))
+            outcome = _interaction_outcome(result)
+            completed = {"kind": kind, "outcome": outcome, "wait_ms": wait_ms}
+            if result.expired or outcome in {"reject", "deny", "expired"}:
+                run.diagnostic_log.warn("interaction.completed", completed)
+            else:
+                run.diagnostic_log.info("interaction.completed", completed)
+            self._coordinator._emit(
+                run,
+                INTERACTION_RESOLVED,
+                {"request_id": spec.request_id, "type": spec.type},
+                execution_id=spec.execution_id,
+                parent_execution_id=spec.parent_execution_id,
+                agent_id=spec.agent_id,
+                compose_scope=spec.compose_scope,
+            )
+            return result
+        except BaseException as exc:
+            error = exc
+            outcome = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
+            raise
+        finally:
+            if trace_context is not None:
+                status = (
+                    TraceStatus.SUCCESS
+                    if error is None
+                    else TraceStatus.CANCELLED
+                    if isinstance(error, asyncio.CancelledError)
+                    else TraceStatus.FAILED
+                )
+                trace_context.recorder.end_span(
+                    wait_span,
+                    status,
+                    attributes={"phase": "wait", "outcome": outcome},
+                    error=error,
+                )
 
     async def request_question(
         self,
@@ -1058,9 +1099,28 @@ class RunCoordinator:
 
         preparation: RunPreparation | None = None
         reservation_transferred = False
+        trace_context: TraceContext | None = None
+        accept_span: SpanHandle | None = None
+        trace_transferred = False
         try:
             persistence = await self._persistence_provider()
             preparation = await self._preparation_provider(command, persistence)
+            accept_attributes = {
+                "mode": command.mode,
+                # 只记录受理阶段确定的安全枚举，与 RunState 的初始审批模式一致。
+                "requested_approval_mode": (
+                    preparation.approval_mode
+                    or command.requested_approval_mode
+                    or DEFAULT_APPROVAL_MODE
+                ),
+            }
+            trace_context = current_trace()
+            if trace_context is not None:
+                accept_span = trace_context.recorder.start_span(
+                    "run.accept",
+                    attributes=accept_attributes,
+                    idempotency_key=f"run.accept:{command.run_id}",
+                )
 
             if persistence is not None:
                 binding = preparation.execution_binding
@@ -1092,6 +1152,13 @@ class RunCoordinator:
                 if not acceptance.created:
                     await self._release_snapshot_reservation(preparation)
                     reservation_transferred = True
+                    if trace_context is not None:
+                        trace_context.recorder.end_span(
+                            accept_span,
+                            attributes={**accept_attributes, "outcome": "duplicate"},
+                        )
+                        trace_context.recorder.end_trace(TraceStatus.SUCCESS)
+                        trace_transferred = True
                     return self._accepted_without_events(command.ref, owner)
 
             # preparation/persistence 仍属于受理过程；Run wall time 从真正受理完成后起算。
@@ -1113,17 +1180,39 @@ class RunCoordinator:
                         "agent_id": root_execution.agent_id,
                     }
                 ),
+                trace_context=trace_context,
             )
             self._log_run_started(run)
             await self._execution_registry.accept(root_execution)
             async with self._lock:
                 self._runs[command.thread_id] = run
+            if trace_context is not None:
+                trace_context.recorder.end_span(
+                    accept_span,
+                    attributes={**accept_attributes, "outcome": "accepted"},
+                )
             run.task = asyncio.create_task(
                 self._execute(run),
                 name=f"harness-run-{command.run_id}",
             )
             reservation_transferred = True
+            trace_transferred = True
             return RunExecution(command.ref, owner, True, self._read_events(run))
+        except BaseException as exc:
+            if trace_context is not None and not trace_transferred:
+                status = (
+                    TraceStatus.CANCELLED
+                    if isinstance(exc, asyncio.CancelledError)
+                    else TraceStatus.FAILED
+                )
+                trace_context.recorder.end_span(
+                    accept_span,
+                    status,
+                    attributes={**accept_attributes, "outcome": status.value.lower()},
+                    error=exc,
+                )
+                trace_context.recorder.end_trace(status, error=exc)
+            raise
         finally:
             if preparation is not None and not reservation_transferred:
                 await self._release_snapshot_reservation(preparation)
@@ -1530,7 +1619,29 @@ class RunCoordinator:
             async with self._lock:
                 if self._runs.get(run.ref.thread_id) is run:
                     self._runs.pop(run.ref.thread_id, None)
+            self._complete_trace(run)
             run.events.put_nowait(None)
+
+    def _complete_trace(self, run: RunState) -> None:
+        """在资源与持久化收尾后记录唯一 run.complete，并关闭根 Trace。"""
+        context = run.trace_context
+        if context is None:
+            return
+        status = {
+            "completed": TraceStatus.SUCCESS,
+            "cancelled": TraceStatus.CANCELLED,
+        }.get(run.status, TraceStatus.FAILED)
+        duration_ms = run.completion.duration_ms if run.completion is not None else 0
+        attributes = {"status": run.status, "duration": duration_ms}
+        # 显式绑定 RunState 中的上下文，避免依赖创建后台任务时的偶然继承。
+        with use_trace(context):
+            complete_span = context.recorder.start_span(
+                "run.complete",
+                attributes=attributes,
+                idempotency_key=f"run.complete:{run.run_id}",
+            )
+            context.recorder.end_span(complete_span, status, attributes=attributes)
+            context.recorder.end_trace(status)
 
     async def _finish_after_goal_reconcile(
         self,

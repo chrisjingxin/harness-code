@@ -1,4 +1,4 @@
-/** 内网 Trace 日志纯解析：marker 提取、start/end 合并与会话字段解释。 */
+/** Trace 日志纯解析：兼容内网 marker 与统一 session JSONL，合并 start/end 并解释会话字段。 */
 import type { TraceSpanEvent } from "../presentation-coordinator/contracts/trace"
 const LOG_MARKER = "[[za38-log]]"
 
@@ -24,16 +24,53 @@ function extractAllMarkerJson(text: string): readonly Record<string, unknown>[] 
   return results
 }
 
+/** 统一 Trace 使用一行一个事件；只接受明确版本和事件类型，避免误读普通日志。 */
+function extractSessionJsonl(text: string): readonly Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith("{")) continue
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue
+      const record = parsed as Record<string, unknown>
+      if (record.schema_version !== 1) continue
+      if (!["trace.start", "trace.end", "span.start", "span.end"].includes(String(record.event))) continue
+      results.push(record)
+    } catch {
+      // 追加写入中的半行或畸形条目等待下次完整读取。
+    }
+  }
+  return results
+}
+
+function extractRecords(text: string): readonly Record<string, unknown>[] {
+  return [...extractAllMarkerJson(text), ...extractSessionJsonl(text)]
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function hasEnd(json: Record<string, unknown>): boolean {
+  return finiteNumber(json.end_time) !== undefined || finiteNumber(json.end_time_ms) !== undefined
+}
+
 /** 把一条日志归一化为 TraceSpanEvent。 */
 function normalizeSpan(traceId: string, spanId: string, json: Record<string, unknown>): TraceSpanEvent {
   const raw = { ...json }
-  const metadata = typeof json.metadata === "object" && json.metadata !== null && !Array.isArray(json.metadata)
-    ? json.metadata as Record<string, unknown>
-    : {}
+  const metadata = recordValue(json.metadata) ?? recordValue(json.attributes) ?? {}
   const threadId = extractThreadId(json, metadata)
-  const startTime = typeof json.start_time === "number" && Number.isFinite(json.start_time) ? json.start_time : 0
-  const hasEnd = typeof json.end_time === "number" && Number.isFinite(json.end_time)
-  const endTime = hasEnd ? json.end_time as number : null
+  const startTime = finiteNumber(json.start_time) ?? finiteNumber(json.start_time_ms) ?? 0
+  const endValue = finiteNumber(json.end_time) ?? finiteNumber(json.end_time_ms)
+  const hasEnd = endValue !== undefined
+  const endTime = endValue ?? null
   const durationMs = typeof json.duration_ms === "number" && Number.isFinite(json.duration_ms)
     ? json.duration_ms
     : hasEnd
@@ -47,7 +84,7 @@ function normalizeSpan(traceId: string, spanId: string, json: Record<string, unk
     spanId,
     parentSpanId,
     name: typeof json.name === "string" ? json.name : typeof json.method === "string" ? json.method : "span",
-    type: typeof json.type === "string" ? json.type : undefined,
+    type: typeof json.type === "string" ? json.type : typeof json.kind === "string" ? json.kind : undefined,
     startTime,
     endTime,
     durationMs,
@@ -61,6 +98,7 @@ function normalizeSpan(traceId: string, spanId: string, json: Record<string, unk
 /** 从日志 JSON/metadata 提取 thread_id 归属。覆盖真实 SDK 日志的多种载体： */
 export function extractThreadId(json: Record<string, unknown>, metadata: Record<string, unknown>): string | null {
   const candidates: unknown[] = []
+  if (json.session_id !== undefined) candidates.push(json.session_id)
   if (json.thread_id !== undefined) candidates.push(json.thread_id)
   if (metadata.thread_id !== undefined) candidates.push(metadata.thread_id)
   // SDK 日志的 sessionId：thread 绑定（值为 "-" 时表示未绑定，跳过）。
@@ -101,13 +139,13 @@ export class TraceLogParser {
 
   /** 接收一份完整日志；同一物理行内的多个 marker 都会解析，畸形记录跳过。 */
   pushText(text: string): void {
-    for (const json of extractAllMarkerJson(text)) {
+    for (const json of extractRecords(text)) {
       const spanId = typeof json.span_id === "string" ? json.span_id : undefined
       if (!spanId) continue
       const traceId = typeof json.trace_id === "string" ? json.trace_id : "unknown-trace"
       const key = JSON.stringify([traceId, spanId])
       this.keys.add(key)
-      if (typeof json.end_time === "number") {
+      if (hasEnd(json)) {
         if (!this.ends.has(key)) this.ends.set(key, json)
       } else this.starts.set(key, json)
     }
@@ -123,14 +161,12 @@ export class TraceLogParser {
       const startParent = startJson && typeof startJson.parent_span_id === "string" ? startJson.parent_span_id : undefined
       const endParent = typeof endJson.parent_span_id === "string" ? endJson.parent_span_id : undefined
       mergedJson.parent_span_id = startParent ?? endParent ?? "0"
-      const startMeta = startJson && typeof startJson.metadata === "object" && startJson.metadata !== null
-        ? startJson.metadata as Record<string, unknown>
-        : {}
-      const endMeta = typeof endJson.metadata === "object" && endJson.metadata !== null
-        ? endJson.metadata as Record<string, unknown>
-        : {}
-      if (Object.keys(startMeta).length > 0 || Object.keys(endMeta).length > 0) {
-        mergedJson.metadata = { ...startMeta, ...endMeta }
+      const startMeta = startJson ? recordValue(startJson.metadata) ?? recordValue(startJson.attributes) : undefined
+      const endMeta = recordValue(endJson.metadata) ?? recordValue(endJson.attributes)
+      if (startMeta || endMeta) {
+        const metadata = { ...startMeta, ...endMeta }
+        if (recordValue(endJson.metadata) || (startJson && recordValue(startJson.metadata))) mergedJson.metadata = metadata
+        else mergedJson.attributes = metadata
       }
       const [traceId, spanId] = JSON.parse(key) as [string, string]
       spans.push(normalizeSpan(traceId, spanId, mergedJson))
