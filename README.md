@@ -1,91 +1,37 @@
-# Harness Code（za38-cli）
+# 独立桌面协作工作台
 
-Harness Code 是面向企业研发场景的 Coding Agent CLI。终端交互由 Bun/OpenTUI 提供，Agent 内核基于 Python、deepagents、LangChain 和 LangGraph，并通过 stdio JSON-RPC 通信。
+本分支以 Electron + React/TypeScript 建立独立桌面产品。目前提供基础窗口、原生目录选择、主题和窗口缩放。共享会话、云端、Agent 执行、文件/Git 与 Trace 尚未接入；没有预置聊天数据。Runner 当前只有工程骨架。
 
-## 安装
+## 从源码启动
 
-把 `scripts/install/install.sh` 与 `install.ps1` 顶部的企业 npm / PyPI 默认地址填好，托管到企业安装入口后，用户只执行：
+准备 Node.js `>=22.12.0`、npm（仓库声明 `11.11.0`）及可下载目标平台 Electron 的网络或镜像。在仓库根目录执行：
 
-
-macOS / Linux：
-
-```bash
-curl -fsSL https://<企业安装入口>/install.sh | bash
-```
-
-Windows（必须用 PowerShell，不要用 CMD 或 Git Bash）：
-
-```powershell
-irm https://<企业安装入口>/install.ps1 | iex
-```
-
-用户不用先配环境变量。脚本会检测 Bun、Python 3.11+ 和 uv，缺了就安装。装完进入任意项目目录：
-
-```bash
-export HARNESS_API_KEY='你的企业网关密钥'
-harness
-```
-
-已有 Bun 和 uv 时也可以手动安装：
-
-```bash
-bun install -g @za38/cli --registry <企业 npm>
-uv tool install za38-agent --index <企业 PyPI>
-```
-
-卸载：`bun remove -g @za38/cli` 与 `uv tool uninstall za38-agent`。不卸载本机 Bun/uv/Python，也不删除 `~/.harness/config.toml`。
-
-当前未发布到可访问的包源时，安装命令会在 `bun install -g` 失败；开发请用下面的源码方式。Linux musl 与 Windows ARM 本版本不支持。
-
-## 从源码开发
-
-本地开发固定使用 Bun `1.3.13`（仅 `packages/cli` 的 OpenTUI/FFI 运行、bundler 与 CLI 测试边界）、Python 3.11+ 和 `uv`。根 `package.json` 只使用 npm 做 workspace 编排；依赖安装链路和普通工程工具不会启动 Bun，`npm run dev`、`npm run build` 与 CLI 测试则会转入 `packages/cli` 的上述必要 Bun 边界。依赖安装使用 npm/pip 当前配置：企业外就是公网源，企业内就是企业源。随后通过统一入口安装锁定依赖、应用 DeepAgents 补丁并执行零 Anthropic 门禁：
-
-```bash
-mkdir -p ~/.harness
-npm run deps:sync
-cp docs/user/examples/config.toml ~/.harness/config.toml
-export HARNESS_API_KEY='你的企业网关密钥'
+```sh
+npm ci
 npm run dev
 ```
 
-企业外不需要额外配置源。npm 和 pip 都没写地址时，安装使用 `https://registry.npmjs.org/` 和 `https://pypi.org/simple`。企业内把 npm/pip 配到企业源即可；如果工具配置仍指向公网，可以用 `HARNESS_NPM_REGISTRY`、`HARNESS_PYPI_INDEX` 把这一次安装切到内网。
+不需要安装 Bun、uv、Python、Harness，也不需要模型密钥。Electron 首次使用会从官方源下载二进制，网络受限时需使用可用缓存或配置镜像，不能把仅 npm 包安装成功当成窗口已启动。
 
-日常只需执行 `npm run deps:sync`，它会按现有锁文件完成 JavaScript 和 Python 依赖的冻结同步、补丁与验证。只有依赖声明或包源发生变化时，才执行 `npm run deps:sync -- --update-lock`；该模式会更新两个锁文件并继续完成同一套同步与验证，不需要再补跑第二条命令。锁文件里的下载地址必须属于这次选中的源：公网安装接受当前公网锁，内网安装仍会拒绝公网下载地址。工具链版本不符时，同步会在联网前失败。
+运行已构建页面：
 
-临时分支 `feat_hc_179_内网依赖源码化` 将五个关键 npm 发布包（含 Windows x64 native 包）放在 `third_party/npm/` 并按 workspace 链接；其余平台 native optional package 由当前 npm 企业源提供。`deps:sync` 支持 OpenTUI `0.4.3` 已发布的 macOS、Windows、Linux x64/arm64 目标，安装后会同时校验五个 workspace realpath 和本机 native 包。该例外不代表 canonical `master` 的永久发布策略，正式内网包可用并完成各目标环境验收后应移除。
+```sh
+npm run build
+npm --workspace @workbench/desktop run preview
+```
 
-在 macOS、Windows 或 Linux 上都可从根目录使用 npm 入口运行工程检查：
+基础窗口的操作与当前限制见[独立桌面工作台](docs/user/独立桌面工作台.md)、[快速开始](docs/user/快速开始.md)和[安全与沙箱](docs/user/安全与沙箱.md)。Windows/macOS 完整交付与签名验收留后续阶段，当前不承诺正式安装包。
 
-```bash
-npm run deps:test
-npm run test:project
-npm run project:check
+## 工程检查
+
+```sh
 npm run typecheck
+npm run check:boundaries -- --self-check
+npm run project:check
 ```
 
-以上四条不启动 Bun。`npm run build`、`npm run test:ts` 和完整 `npm test` 会进入 CLI 的 Bun 边界，因此需要 Bun `1.3.13`；npm 是统一入口，但 OpenTUI CLI 尚未脱离 Bun 运行时。
+七个 workspace 按契约、核心骨架、UI、应用排序，只有一个根 package-lock；普通安装使用 npm ci。必要工程管理小套为 `npm run test:project`，完整回归在总体开发后统一执行。
 
-推荐通过 `api_key_env` 引用环境变量。若本机开发环境无法预先设置环境变量，可在权限为 `0600` 的 `~/.harness/config.toml` 模型 Profile 中设置 `api_key` 作为降级值；环境变量非空时始终优先。
+新入口位于 apps/desktop，UI 与契约位于 packages/workbench-ui 和 workbench-contracts，执行器/ACP/项目服务独立成包。旧 CLI、Web、Python 内核和 vendor 源码暂留供后续迁移，均退出新默认安装和运行路径；旧用户指南中的命令不代表本分支当前能力。Harness 将作为可替换 ACP Agent 接入，可选集成不成为平台启动条件。
 
-可使用 `harness --help` 或 `npm run dev -- --help` 查看当前 CLI 参数；无头运行示例：
-
-```bash
-harness -n --message "解释当前目录的项目结构"
-npm run dev -- --non-interactive --message "解释当前目录的项目结构"
-```
-
-详细说明：
-
-- [快速开始](docs/user/快速开始.md)
-- [模型配置](docs/user/模型配置.md)
-- [交互使用](docs/user/交互使用.md)
-- [代码索引](docs/user/代码索引.md)
-- [插件管理](docs/user/插件管理.md)
-- [完整 Plugin Demo](examples/plugins/harness-full-demo/README.md)
-- [安全与沙箱](docs/user/安全与沙箱.md)
-- [故障排查](docs/user/故障排查.md)
-
-终端界面使用企业源的 `@opentui/core` / `@opentui/react` `0.4.3`、React `19.2.6` 和 `react-reconciler` `0.33.0`。企业引入 OpenTUI Core 时须同时镜像其目标平台 native optional packages；项目不再携带本地 Core 源码或自行构建的 FFI artifact。
-
-参与开发请从 [开发工作流](docs/developer/project/开发工作流.md) 开始；任务以 [任务看板](docs/developer/task/任务看板.md) 和任务源文件为准。
+设计与进度见 [HC-193](docs/developer/task/HC-193-独立桌面工程与分包.md)、[总体设计](docs/developer/architecture/多人协作工作台顶层设计.md)和[开发工作流](docs/developer/project/开发工作流.md)。

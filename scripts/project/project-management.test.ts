@@ -53,10 +53,8 @@ async function createFixture(): Promise<string> {
     mkdir(join(projectRoot, "docs/developer/architecture"), { recursive: true }),
     mkdir(join(projectRoot, "docs/developer/project"), { recursive: true }),
     mkdir(join(projectRoot, TASK_DIR), { recursive: true }),
-    mkdir(join(projectRoot, "packages/cli/src/interactive"), { recursive: true }),
-    mkdir(join(projectRoot, "packages/cli/src/tui/application"), { recursive: true }),
-    mkdir(join(projectRoot, "packages/protocol"), { recursive: true }),
-    mkdir(join(projectRoot, "packages/agent/harness_agent"), { recursive: true }),
+    mkdir(join(projectRoot, "apps/desktop"), { recursive: true }),
+    mkdir(join(projectRoot, "packages/workbench-contracts"), { recursive: true }),
   ])
 
   const taskName = taskFileName(taskMetadata.id, taskMetadata.title)
@@ -71,11 +69,10 @@ async function createFixture(): Promise<string> {
     writeFile(join(projectRoot, "docs/developer/project/变更检查清单.md"), "# 变更检查清单\n", "utf8"),
     writeFile(join(projectRoot, TASK_DIR, "README.md"), "# 任务\n", "utf8"),
     writeFile(join(projectRoot, TASK_DIR, taskName), renderTask(taskMetadata), "utf8"),
-    writeFile(join(projectRoot, "packages/cli/package.json"), '{"name":"cli","version":"0.0.0"}\n', "utf8"),
-    writeFile(join(projectRoot, "packages/protocol/package.json"), '{"name":"protocol","version":"0.0.0"}\n', "utf8"),
-    writeFile(join(projectRoot, "packages/agent/pyproject.toml"), '[project]\nversion = "0.0.0"\n', "utf8"),
-    writeFile(join(projectRoot, "packages/agent/harness_agent/__init__.py"), '__version__ = "0.0.0"\n', "utf8"),
-    writeFile(join(projectRoot, "packages/cli/src/interactive/runtime.ts"), 'export const CLI_VERSION = "0.0.0"\n', "utf8"),
+    writeFile(join(projectRoot, "package-lock.json"), JSON.stringify({ packages: { "apps/desktop": { version: "0.0.0" }, "packages/workbench-contracts": { version: "0.0.0" } } }), "utf8"),
+    writeFile(join(projectRoot, "package.json"), JSON.stringify({ workspaces: ["apps/desktop", "packages/workbench-contracts"] }), "utf8"),
+    writeFile(join(projectRoot, "apps/desktop/package.json"), '{"name":"desktop","version":"0.0.0"}\n', "utf8"),
+    writeFile(join(projectRoot, "packages/workbench-contracts/package.json"), '{"name":"contracts","version":"0.0.0"}\n', "utf8"),
   ])
   await syncTasks(projectRoot)
   return projectRoot
@@ -342,13 +339,43 @@ test("初次版本初始化同步所有版本文件，并拒绝不一致发布�
     await writeFile(join(projectRoot, "VERSION"), "0.1.0\n", "utf8")
     await setVersion(projectRoot, "0.1.0", ["feat: 建立协作基础设施"])
     assert.equal((await readFile(join(projectRoot, "VERSION"), "utf8")).trim(), "0.1.0")
-    assert.equal(JSON.parse(await readFile(join(projectRoot, "packages/cli/package.json"), "utf8")).version, "0.1.0")
+    assert.equal(JSON.parse(await readFile(join(projectRoot, "apps/desktop/package.json"), "utf8")).version, "0.1.0")
     assert.ok((await readFile(join(projectRoot, "CHANGELOG.md"), "utf8")).includes("### 新增"))
     await assert.doesNotReject(() => checkRelease(projectRoot))
     await assert.rejects(setVersion(projectRoot, "0.1.0", []), /新版本必须高于当前版本/)
 
-    await writeFile(join(projectRoot, "packages/protocol/package.json"), '{"version":"0.2.0"}\n', "utf8")
+    await writeFile(join(projectRoot, "packages/workbench-contracts/package.json"), '{"version":"0.2.0"}\n', "utf8")
     await assert.rejects(checkRelease(projectRoot), /版本与 VERSION 不一致/)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("升版同步四类内部精确引用及锁条目，保留外部版本和范围", async () => {
+  const projectRoot = await createFixture()
+  try {
+    const sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const
+    const internalReferences = Object.fromEntries(sections.map(section => [section, { "@workbench/contracts": "0.0.0", react: "19.3.0", "@workbench/external": "1.2.3" }]))
+    const desktop = { name: "@workbench/desktop", version: "0.0.0", ...internalReferences }
+    const contracts = { name: "@workbench/contracts", version: "0.0.0", peerDependencies: { "@workbench/desktop": "^0.0.0" } }
+    await Promise.all([
+      writeFile(join(projectRoot, "VERSION"), "0.0.0\n", "utf8"),
+      writeFile(join(projectRoot, "apps/desktop/package.json"), JSON.stringify(desktop), "utf8"),
+      writeFile(join(projectRoot, "packages/workbench-contracts/package.json"), JSON.stringify(contracts), "utf8"),
+      writeFile(join(projectRoot, "package-lock.json"), JSON.stringify({ packages: { "apps/desktop": desktop, "packages/workbench-contracts": contracts } }), "utf8"),
+    ])
+    await setVersion(projectRoot, "0.1.0", ["fix: 同步内部引用"])
+    const manifest = JSON.parse(await readFile(join(projectRoot, "apps/desktop/package.json"), "utf8"))
+    const lock = JSON.parse(await readFile(join(projectRoot, "package-lock.json"), "utf8"))
+    for (const section of sections) {
+      const expected = { "@workbench/contracts": "0.1.0", react: "19.3.0", "@workbench/external": "1.2.3" }
+      assert.deepEqual(manifest[section], expected)
+      assert.deepEqual(lock.packages["apps/desktop"][section], expected)
+    }
+    const contractsAfter = JSON.parse(await readFile(join(projectRoot, "packages/workbench-contracts/package.json"), "utf8"))
+    assert.equal(contractsAfter.peerDependencies["@workbench/desktop"], "^0.0.0")
+    assert.equal(lock.packages["packages/workbench-contracts"].peerDependencies["@workbench/desktop"], "^0.0.0")
+    await assert.doesNotReject(() => checkRelease(projectRoot))
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

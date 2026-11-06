@@ -8,10 +8,25 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const versionFiles = [
-  "packages/cli/package.json",
-  "packages/protocol/package.json",
-] as const
+/** 与根显式 workspace 清单共用版本对象，避免新平台再依赖旧 CLI/Python。 */
+async function versionFiles(projectRoot: string): Promise<string[]> {
+  const manifest = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as { workspaces: string[] }
+  if (!Array.isArray(manifest.workspaces) || manifest.workspaces.some(path => !/^(apps|packages)\/[a-z0-9-]+$/.test(path))) throw new Error("版本检查需要显式 workspace 清单")
+  return manifest.workspaces.map(path => `${path}/package.json`)
+}
+
+const semVerPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/
+const dependencySections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const
+type VersionRecord = { version?: string } & Partial<Record<typeof dependencySections[number], Record<string, string>>>
+
+/** 只迁移新 workspace 间的既有精确版本；外部依赖和范围表达式不属于本次升版。 */
+function updateInternalReferences(record: VersionRecord, workspaceNames: ReadonlySet<string>, version: string): void {
+  for (const section of dependencySections) {
+    for (const [name, reference] of Object.entries(record[section] ?? {})) {
+      if (workspaceNames.has(name) && semVerPattern.test(reference)) record[section]![name] = version
+    }
+  }
+}
 
 export type SemVer = {
   raw: string
@@ -23,7 +38,7 @@ export type SemVer = {
 
 /** 解析严格的 SemVer 字符串，支持预发布和构建元数据。 */
 export function parseSemVer(value: string): SemVer {
-  const match = value.trim().match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/)
+  const match = value.trim().match(semVerPattern)
   if (!match) throw new Error(`无效 SemVer：${value}`)
   return {
     raw: value.trim(),
@@ -85,7 +100,7 @@ export function renderChangelogSection(version: string, date: string, subjects: 
   return [`## [${version}] - ${date}`, "", ...sections].join("\n")
 }
 
-/** 通过唯一版本来源同步所有包与运行时常量，并在同一操作内刷新 Changelog。 */
+/** 通过唯一版本来源同步新 workspace 包版本，并在同一操作内刷新 Changelog。 */
 export async function setVersion(projectRoot: string, version: string, subjects?: readonly string[]): Promise<void> {
   const target = parseSemVer(version)
   const versionPath = join(projectRoot, "VERSION")
@@ -102,10 +117,24 @@ export async function setVersion(projectRoot: string, version: string, subjects?
   }
 
   await writeFile(versionPath, `${target.raw}\n`, "utf8")
-  for (const file of versionFiles) await setPackageVersion(join(projectRoot, file), target.raw)
-  await replaceSingle(join(projectRoot, "packages/agent/pyproject.toml"), /^version = ".*"$/m, `version = "${target.raw}"`)
-  await replaceSingle(join(projectRoot, "packages/agent/harness_agent/__init__.py"), /^__version__ = ".*"$/m, `__version__ = "${target.raw}"`)
-  await replaceSingle(join(projectRoot, "packages/cli/src/interactive/runtime.ts"), /^export const CLI_VERSION = ".*"$/m, `export const CLI_VERSION = "${target.raw}"`)
+  const files = await versionFiles(projectRoot)
+  const manifests = await Promise.all(files.map(async file => ({ file, value: JSON.parse(await readFile(join(projectRoot, file), "utf8")) as VersionRecord & { name: string } })))
+  const workspaceNames = new Set(manifests.map(({ value }) => value.name))
+  for (const { file, value } of manifests) {
+    value.version = target.raw
+    updateInternalReferences(value, workspaceNames, target.raw)
+    await writeFile(join(projectRoot, file), `${JSON.stringify(value, null, 2)}\n`, "utf8")
+  }
+
+  // npm ci 冻结读取锁文件；版本变更必须同步 workspace 锁条目，不能留下下一次安装失败的状态。
+  const lockPath = join(projectRoot, "package-lock.json")
+  const lock = JSON.parse(await readFile(lockPath, "utf8")) as { packages: Record<string, VersionRecord> }
+  for (const file of files) {
+    const entry = lock.packages[dirname(file)]
+    entry.version = target.raw
+    updateInternalReferences(entry, workspaceNames, target.raw)
+  }
+  await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8")
 
   if (existing.includes(`## [${target.raw}] -`)) throw new Error(`CHANGELOG 已包含版本 ${target.raw}`)
   const messages = subjects ?? readCommitSubjects(projectRoot)
@@ -115,15 +144,13 @@ export async function setVersion(projectRoot: string, version: string, subjects?
 /** 验证版本字段、顶层 Changelog 节和所有发布文件的一致性。 */
 export async function checkRelease(projectRoot = root): Promise<void> {
   const version = parseSemVer((await readFile(join(projectRoot, "VERSION"), "utf8")).trim()).raw
-  for (const file of versionFiles) {
+  for (const file of await versionFiles(projectRoot)) {
     const value = JSON.parse(await readFile(join(projectRoot, file), "utf8")) as { version?: unknown }
     if (value.version !== version) throw new Error(`${file} 版本与 VERSION 不一致`)
   }
-  const pyproject = await readFile(join(projectRoot, "packages/agent/pyproject.toml"), "utf8")
-  const pythonInit = await readFile(join(projectRoot, "packages/agent/harness_agent/__init__.py"), "utf8")
-  const cliModel = await readFile(join(projectRoot, "packages/cli/src/interactive/runtime.ts"), "utf8")
-  if (!pyproject.includes(`version = "${version}"`) || !pythonInit.includes(`__version__ = "${version}"`) || !cliModel.includes(`CLI_VERSION = "${version}"`)) {
-    throw new Error("Python Agent 或 CLI 运行时版本与 VERSION 不一致")
+  const lock = JSON.parse(await readFile(join(projectRoot, "package-lock.json"), "utf8")) as { packages: Record<string, { version?: string }> }
+  for (const file of await versionFiles(projectRoot)) {
+    if (lock.packages[dirname(file)]?.version !== version) throw new Error(`package-lock 中 ${dirname(file)} 版本与 VERSION 不一致`)
   }
   const changelog = await readFile(join(projectRoot, "CHANGELOG.md"), "utf8")
   if (!new RegExp(`^# 更新日志\\r?\\n\\r?\\n## \\[${escapeRegExp(version)}\\] - \\d{4}-\\d{2}-\\d{2}`).test(changelog)) {
@@ -133,18 +160,6 @@ export async function checkRelease(projectRoot = root): Promise<void> {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-async function setPackageVersion(file: string, version: string): Promise<void> {
-  const packageJson = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>
-  packageJson.version = version
-  await writeFile(file, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8")
-}
-
-async function replaceSingle(file: string, pattern: RegExp, replacement: string): Promise<void> {
-  const source = await readFile(file, "utf8")
-  if (!pattern.test(source)) throw new Error(`${file} 缺少待同步版本字段`)
-  await writeFile(file, source.replace(pattern, replacement), "utf8")
 }
 
 async function readOptional(path: string): Promise<string | undefined> {

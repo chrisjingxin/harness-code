@@ -1,31 +1,26 @@
 {
-  "name": "za38-cli",
+  "name": "workbench",
   "private": true,
   "packageManager": "npm@11.11.0",
   "engines": {
-    "bun": "1.3.13",
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "workspaces": [
-    "packages/*",
-    "third_party/npm/*",
-    "third_party/npm/@opentui/*"
+    "packages/workbench-contracts",
+    "packages/runner-core",
+    "packages/acp-runtime",
+    "packages/project-service",
+    "packages/workbench-ui",
+    "apps/runner",
+    "apps/desktop"
   ],
   "scripts": {
-    "clean": "node scripts/clean.mjs",
-    "build": "npm --workspace @za38/cli run build",
-    "dev": "npm --workspace @za38/cli run dev --",
+    "build": "npm run build --workspaces",
+    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
+    "typecheck": "npm run typecheck --workspaces",
+    "check:boundaries": "node scripts/workbench/check-boundaries.mjs",
     "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",
-    "deps:sync": "node scripts/dependencies/sync.mjs",
-    "deps:check": "node scripts/dependencies/check_vendored_packages.mjs && node scripts/dependencies/run_python.mjs scripts/dependencies/check_dependencies.py",
-    "deps:test": "node --test scripts/dependencies/node_tooling.test.mjs scripts/dependencies/source_policy.test.mjs scripts/dependencies/vendor_policy.test.mjs packages/protocol/scripts/newline.test.mjs",
-    "test": "npm run test:project && npm run deps:test && npm run test:ts && npm run test:py",
     "test:project": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs --test scripts/project/project-management.test.ts",
-    "typecheck": "npm --workspace @za38/cli run typecheck",
-    "protocol:generate": "npm --workspace @za38/protocol run generate",
-    "protocol:check": "npm --workspace @za38/protocol run check",
-    "test:ts": "npm --workspace @za38/cli run test",
-    "test:py": "npm run deps:check && node scripts/dependencies/run_python.mjs -m pytest -q packages/agent/tests",
     "docs:check": "npm run project:tool -- docs:check",
     "tasks:sync": "npm run project:tool -- tasks:sync",
     "tasks:check": "npm run project:tool -- tasks:check",
@@ -33,14 +28,9 @@
     "task:complete": "npm run project:tool -- task:complete",
     "version:set": "npm run project:tool -- version:set",
     "release:check": "npm run project:tool -- release:check",
-    "project:check": "npm run protocol:check && npm run project:tool -- project:check",
-    "test:web:e2e": "npx playwright test -c packages/cli/tests/e2e"
+    "project:check": "npm run check:boundaries && npm run project:tool -- project:check"
   },
   "devDependencies": {
-    "@playwright/test": "1.59.1",
     "typescript": "6.0.3"
-  },
-  "overrides": {
-    "fast-uri": "3.1.7"
   }
 }

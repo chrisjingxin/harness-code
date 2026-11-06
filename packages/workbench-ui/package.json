@@ -1,0 +1,25 @@
+{
+  "name": "@workbench/ui",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/theme.css','dist/theme.css')\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@workbench/contracts": "0.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0"
+  },
+  "peerDependencies": {
+    "react": "19.3.0"
+  }
+}

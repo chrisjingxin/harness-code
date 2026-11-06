@@ -1,0 +1,35 @@
+/* 独立工作台的基础主题与布局；原生标题栏由桌面宿主同步。 */
+:root { color-scheme: light; --bg:#f5f5f1; --panel:#fff; --text:#242b28; --muted:#6f7772; --border:#e0e4dd; --accent:#287756; --soft:#eaf0e8; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+:root[data-theme="dark"] { color-scheme:dark; --bg:#191f1d; --panel:#222a26; --text:#e7ede7; --muted:#a1afa5; --border:#364139; --accent:#91cfac; --soft:#2b382f; }
+* { box-sizing:border-box; }
+body { margin:0; }
+button, select { font:inherit; -webkit-app-region:no-drag; }
+button { cursor:pointer; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:10px 16px; }
+button:hover:not(:disabled) { border-color:var(--accent); }
+button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+button:disabled { opacity:.4; cursor:default; }
+.titlebar { height:56px; padding:0 150px 0 88px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); font-size:13px; font-weight:600; -webkit-app-region:drag; user-select:none; }
+.brand-mark { font-size:14px; color:var(--accent); }
+.stage { color:var(--muted); font-size:11px; font-weight:400; border-left:1px solid var(--border); margin-left:8px; padding-left:16px; white-space:nowrap; }
+main { width:min(740px, 100%); margin:0 auto; padding:68px 28px 30px; }
+.eyebrow { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:2px; }
+h1 { font-size:34px; font-weight:600; letter-spacing:-1px; margin:16px 0 12px; }
+.intro { color:var(--muted); font-size:15px; margin:0 0 36px; }
+.project-card { display:flex; flex-wrap:wrap; gap:20px; align-items:center; padding:26px; background:var(--panel); border:1px solid var(--border); border-radius:14px; }
+.folder-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:11px; background:var(--soft); color:var(--accent); font-size:34px; }
+.project-copy { flex:1; min-width:120px; }
+h2 { margin:0 0 8px; font-size:15px; font-weight:600; }
+.directory { color:var(--muted); font-size:12px; margin:0; overflow-wrap:anywhere; }
+.primary { background:var(--accent); color:var(--panel); border-color:transparent; font-size:13px; font-weight:600; }
+.hint { margin:12px 4px 32px; color:var(--muted); font-size:12px; line-height:1.6; }
+.preferences { display:flex; flex-wrap:wrap; gap:24px 48px; border-top:1px solid var(--border); padding-top:26px; font-size:12px; }
+.preferences label, .zoom-control { display:flex; align-items:center; gap:14px; }
+.preferences select { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:9px 28px 9px 12px; }
+.zoom-buttons { display:flex; }
+.zoom-buttons button { border-radius:0; padding:8px 13px; font-size:12px; }
+.zoom-buttons button:first-child { border-radius:8px 0 0 8px; }
+.zoom-buttons button:last-child { border-radius:0 8px 8px 0; }
+.zoom-buttons button+button { border-left:0; }
+footer { margin-top:55px; color:var(--muted); font-size:11px; line-height:1.8; }
+.error { color:#ba4b3b; font-size:13px; }
+@media (max-width:520px) { main { padding-top:36px; } h1 { font-size:28px; } .stage { display:none; } }

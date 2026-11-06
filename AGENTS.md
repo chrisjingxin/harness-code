@@ -2,9 +2,17 @@
 
 ## 项目定位
 
-Harness Code（命令名 `harness`）是一个面向企业研发场景的终端 Coding Agent。用户在 Bun/OpenTUI 界面中发起对话和审批，CLI 通过 stdio 上的 JSON-RPC v3 驱动 Python sidecar，Python 端基于 deepagents、LangChain 和 LangGraph 完成模型调用、工具执行、Skill 加载、上下文管理与 Thread 持久化。
+本分支是独立桌面协作工作台，入口为 Electron + React/TypeScript。Java/TDSQL 云端、本机 Runner、通用 ACP 和项目服务在独立包接入；Harness/Python 仅是后续可选 Agent。本阶段 HC-193 提供基础窗口，尚无真实协作业务。
 
-当前仓库处于源码开发阶段，不应将跨平台安装包或生产发布流程视为已交付能力。产品入口是 `README.md` 与 `docs/user/`；**面向开发者的过程文档一律放在 `docs/developer/`**。
+根 npm workspace 只列新平台七个目录。`packages/cli`、`packages/protocol`、`packages/agent` 与 vendor 暂留作后续迁移来源，不进入新产品安装/启动/构建。产品入口说明以 README 和 docs/user 为准，过程文档放 docs/developer。
+
+### HC-192 实施期间的用户覆盖规则
+
+以下是用户当前明确要求，覆盖本文默认 Skill、TDD、逐停点确认和全库测试节奏：不调用 Skill；每个实施任务只做必要安装/构建/类型/边界/真实冒烟，全部开发后在 HC-204 统一测试；由统筹调度左侧可见实施对话，不派生隐藏代理；阶段完成或遇到真实阻塞时回调指定统筹，不轮询。Spec → Plan → Todo 顺序保留，统筹审查派发后实施；阶段通过只标待验收，不自动归档。
+
+使用 harness_lody 当前工作区，保留已有未提交内容，不自动提交/推送、切分支、stash/reset/clean 或另建 worktree。新根锁正常同步 node_modules 获得授权，干净副本额外证明不依赖旧工具，不维护双安装链。
+
+2026-11-06 补充：中央对话/头像/工具/输入及右侧文件/变更 UI 优先从现有 Web 迁出复用，仅替换旧状态/动作依赖；左侧工作区/设备/共享会话等新增区域另写，不整体重画中右区域。HC-205～208 分别负责公共视图基础、对话复用、文件/变更复用和新协作导航；HC-202 负责装配。各任务按接口、目录归属并行，云端认领材料保持仓库相对引用。接口前置、最小实现前置与真实集成前置分开记录，不能都等上游整个任务完成；详见 docs/developer/project/协作任务并行开发约定.md。
 
 ## 发布阶段与兼容性原则
 
@@ -98,12 +106,15 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 
 ### 项目结构与职责边界
 
-- `packages/cli/`：`@za38/cli` TypeScript 终端入口；`src/tui/application/` 管工作流，`presentation/` 管视图渲染，`platform/` 管终端与语法高亮，`ipc/` 管与 Python sidecar 的跨进程连接。表现层逻辑只能放在 `cli`。
-- `packages/protocol/`：跨进程共享的 JSON-RPC 方法名和 TypeScript 类型载荷。跨进程契约只能放在 `protocol`。
-- `packages/agent/`：`za38-agent` Python 运行时；`host/` 管双向连接与 Run 状态，`runtime/` 构建 Agent 执行图，`threads/` 管持久化与上下文投影，其余按 `config/policy/tools/extensions` 分层。Agent 与业务逻辑只能放在 `agent`。
-- `packages/*/tests/`：各包单元测试；项目级工程脚本测试位于 `scripts/project/`。
-- `docs/user/`：面向最终用户的快速开始、配置与交互指南。
-- `docs/developer/`：面向开发者的规范与过程文档。
+- `apps/desktop/`：Electron main/preload/renderer 装配与受限原生端口。
+- `apps/runner/`：执行器装配骨架，当前不自动启动。
+- `packages/workbench-ui/`：通用 React 基础工作台，不直接依赖 Node/Electron。
+- `packages/workbench-contracts/`：独立平台端口类型，不回引旧 Harness 协议。
+- `packages/runner-core/`、`packages/acp-runtime/`、`packages/project-service/`：后续执行器、ACP、文件/Git 的独立包骨架。
+- `scripts/workbench/`：新平台依赖边界检查；`scripts/project/`：文档、Task、版本管理。
+- `docs/user/`、`docs/developer/`：用户说明与开发过程文档。
+
+代码按新职责落包，代替下文历史流程中按 cli/protocol/agent 选包的旧规则。旧源码只作迁移来源；Harness 专有集成后续由可选包通过公开窄入口接入。依赖以 package exports 为准，禁止跨路径访问内部源码。
 
 ### 方案设计参考
 
@@ -112,16 +123,16 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 
 ## 构建、测试与开发命令
 
-- `npm run dev`：开发模式运行 CLI 终端入口（保留 Bun/OpenTUI 运行时）。
-- `npm run build`：构建全部工作区包。
-- `npm run typecheck`：检查 TypeScript 类型。
-- `npm run test`：运行工作区测试。
-- `cd packages/cli && bun test`：运行 TypeScript IPC/TUI 测试。
-- `cd packages/agent && .venv/bin/python -m pytest -q`：使用虚拟环境运行 Python 测试。
-- `npm run project:check`：项目级一致性检查（Protocol 契约、文档链接、任务看板、版本号）。
+- `npm ci`：按唯一根锁安装新平台，不安装旧 CLI/Python/OpenTUI。
+- `npm run dev`：启动 Electron 基础桌面；`npm run build`：构建七个新工程。
+- `npm --workspace @workbench/desktop run preview`：运行已构建的本地页面。
+- `npm run typecheck`：新工程类型检查。
+- `npm run check:boundaries -- --self-check`：新包依赖、公开入口、宿主访问与负例夹具。
+- `npm run test:project`：必要工程管理小套；不调用旧全库测试。
+- `npm run project:check`：新边界加文档、任务与版本一致性，不前置旧协议。
 - `npm run task:claim -- <ID> --owner <名称> --branch <分支>`：认领 Task。
-- `npm run task:complete -- <ID> --evidence "<证据>"`：记录证据并归档完成 Task。
-- `npm run version:set -- <SemVer>`：唯一允许修改版本号（根 `VERSION`、各包版本与 `CHANGELOG.md`）的入口。
+- `npm run tasks:sync`：同步看板；当前实施阶段不调用 task:complete。
+- `npm run version:set -- <SemVer>`：唯一版本变更入口，作用于新 workspace；HC-193 不升版。
 
 ## 代码风格与命名
 
