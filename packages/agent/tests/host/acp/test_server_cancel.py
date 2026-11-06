@@ -285,7 +285,7 @@ async def test_aclose_fails_dangling_run_future(tmp_path: Path) -> None:
     await host.close()
 
 
-# —— 挂起审批时的取消 / 断开 / 客户端异常（HC-192 S2 2.2） ——
+# —— 挂起审批时的取消 / 断开 / 客户端异常（HC-209 S2 2.2） ——
 
 from tests.support.acp_harness import ApprovalAgent, tool_result  # noqa: E402
 

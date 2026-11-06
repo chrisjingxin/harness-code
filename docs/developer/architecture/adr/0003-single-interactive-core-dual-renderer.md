@@ -33,7 +33,7 @@
 - **D-03 已落地**：`PresentationCoordinator`（`src/presentation-coordinator/coordinator.ts`）只管理表现层输入权状态机（`tui-active → opening-web → web-active → returning-tui → tui-active`），任何阶段不调用 `host.control.*`；Host `ControlLease` holder 始终为 owner。
 - 创建 `InteractiveController` 的生产调用点仅 `src/index.ts` 一处；`handoff-coordinator.ts`、`agent-transport.ts`、`connection-supervisor.ts`、`handoff-port.ts`、`bootstrap-url.ts` 已删除。
 
-## 后续说明（HC-192，2026-11）
+## 后续说明（HC-209，2026-11）
 
 - Interactive Core 现在有第三个生产装配点：`packages/cli/src/acp-web/client/session.ts`。它经 `AcpAgentGateway` 走 ACP 协议接入同一个 Controller，浏览器沿用 WebApp/React 展现层。
 - TUI 下线后，Interactive Core 保留为 Web/Electron 界面的会话状态层；`WebUiGateway` 与自有 UI 契约（`state.replace/state.patch/intent` 通道）随 TUI 下线一并删除。

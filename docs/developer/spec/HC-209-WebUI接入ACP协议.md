@@ -1,8 +1,8 @@
-# HC-192：WebUI接入ACP协议规格
+# HC-209：WebUI接入ACP协议规格
 
-来源：[Task](../task/HC-192-WebUI接入ACP协议.md)。Task 的范围、入口（`harness web`）、传输方案（stdio 为主、WebSocket 只做浏览器调试桥）和前端复用方式（复用组件、只写适配层）已由用户确认。本规格把它们落实到模块、接口、映射表和验证方式。
+来源：[Task](../task/HC-209-WebUI接入ACP协议.md)。Task 的范围、入口（`harness web`）、传输方案（stdio 为主、WebSocket 只做浏览器调试桥）和前端复用方式（复用组件、只写适配层）已由用户确认。本规格把它们落实到模块、接口、映射表和验证方式。
 
-状态：用户已确认（2026-11-05），包括扩展前缀 `_meta.harnessCode` / `_harnessCode/`。后续按 [Plan](../plan/HC-192-WebUI接入ACP协议.md) 与 [Todo](../todo/HC-192-WebUI接入ACP协议.md) 实施。
+状态：用户已确认（2026-11-05），包括扩展前缀 `_meta.harnessCode` / `_harnessCode/`。后续按 [Plan](../plan/HC-209-WebUI接入ACP协议.md) 与 [Todo](../todo/HC-209-WebUI接入ACP协议.md) 实施。
 
 ---
 
@@ -649,7 +649,7 @@ controller.ts → infrastructure/index.ts
    - 万一被调用，网关抛 `ACP_NOT_SUPPORTED`，消息带缺口编号，用户在界面看到「该功能暂未通过 ACP 提供（GAP-xx）」；
    - `harness web` 启动时在终端打印一行：当前为 ACP 过渡版本，部分功能暂不可用，清单见文档。
 3. **用户文档同步**：`Web界面.md` 的「当前不支持」一节引用同一组编号。
-4. **立项不丢失**：HC-192 归档前，必须为每组缺口在看板建好后续 Task（状态「待认领」），并把 Task 编号写回缺口表。Task 的验收标准新增这一条（见 Task #13）。
+4. **立项不丢失**：HC-209 归档前，必须为每组缺口在看板建好后续 Task（状态「待认领」），并把 Task 编号写回缺口表。Task 的验收标准新增这一条（见 Task #13）。
 5. **闸门**：TUI 下线 Task 的前置条件是缺口表里没有「未开始」或「进行中」的行；每一行要么「已关闭」，要么「用户确认放弃」（带日期，记在表里）。这条写进 Task 的后续线索，TUI 下线 Task 立项时照抄为验收项。
 
 ### 12.3 缺口表初版（编号固定，后续只增不改号）

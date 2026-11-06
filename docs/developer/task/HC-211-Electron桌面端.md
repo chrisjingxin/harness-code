@@ -1,5 +1,5 @@
 ---
-id: HC-194
+id: HC-211
 title: Electron 桌面端
 feature_area: Web UI 与 Agent 通信协议（ACP）
 priority: P1
@@ -11,9 +11,11 @@ acceptance: Electron 界面可完成「发消息 → 流式 → 审批 → 取�
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/architecture/ACP通信.md
 test_evidence: -
-references: docs/developer/task/HC-192-WebUI接入ACP协议.md、docs/developer/task/HC-193-补齐ACP缺口扩展.md、docs/developer/architecture/ACP通信.md
+references: docs/developer/task/HC-209-WebUI接入ACP协议.md、docs/developer/task/HC-210-补齐ACP缺口扩展.md、docs/developer/architecture/ACP通信.md
 completed_at: -
 ---
+
+> harness_lody 分支说明：本分支的 HC-193「独立桌面工程与分包」已建立 Electron 桌面，文件/Git 由 HC-199、HC-207 负责；本任务认领前需与 HC-192 系列统筹对齐，可能合并或改为放弃。「性能基线」一节仍可作为桌面端启动性能的输入。
 
 ## 背景
 
@@ -26,16 +28,16 @@ completed_at: -
 - Electron 壳（主进程 + 预加载 + 渲染层）：主进程 spawn `harness acp`，渲染层复用 `acp-web/client` 的 boot-less 会话装配与 WebApp。
 - 主进程本机能力注入：文件树/文件预览（GAP-11）、Git 面板（GAP-12）、@ 提及内联（GAP-24）、输入历史落盘（GAP-25）。
 - 常驻子进程：界面刷新/重载不再取消运行中任务（GAP-20）。
-- 打开与刷新性能（HC-192 用户验收时提出，约定在本任务处理）：见下节「性能基线」。
+- 打开与刷新性能（HC-209 用户验收时提出，约定在本任务处理）：见下节「性能基线」。
 
-## 性能基线（2026-11-06，HC-192 S4 实测）
+## 性能基线（2026-11-06，HC-209 S4 实测）
 
 `harness web` 每次打开或刷新页面约 2.9 秒才能输入，原因是每个页面连接都冷启动一个新的 `harness acp`。用户真实配置（2 个远程 HTTP MCP）、无头 Chromium 实测拆解：
 
 | 阶段 | 耗时 | 说明与可选优化 |
 |---|---|---|
 | 页面与脚本加载 | ≈0.05s | 无需处理 |
-| 刷新时等旧进程退出 | ≈0.45s（首次打开无） | HC-192 已把旧进程退出从 4.5s 降到 0.37s；剩余是浏览器 409 重试间隔 450ms，可缩短到 150ms 左右 |
+| 刷新时等旧进程退出 | ≈0.45s（首次打开无） | HC-209 已把旧进程退出从 4.5s 降到 0.37s；剩余是浏览器 409 重试间隔 450ms，可缩短到 150ms 左右 |
 | Python 启动与导入（langchain 等，仅导入约 0.9s）+ initialize | ≈1.3–1.5s | 常驻或预热子进程即可消除；也可做惰性导入 |
 | `session/list` | ≈0.6s | 原因未查，需先定位（疑似 SQLite 打开或列表查询） |
 | 等待 `available_commands_update` | 固定 0.5s | 没有插件命令时 Python 不发命令清单，浏览器每次等满 `settleCommandsMs`；让 Python 始终发一次（可为空）即可 |

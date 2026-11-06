@@ -368,7 +368,7 @@ test("scoped Interaction 可携带 execution provenance 与 compose_scope", () =
 })
 
 test("approval action 元素可携带 provider tool_call_id", () => {
-  // HC-192 S2 2.0：审批 action 里可能多一个 tool_call_id，协议校验不能因此失败。
+  // HC-209 S2 2.0：审批 action 里可能多一个 tool_call_id，协议校验不能因此失败。
   expect(() => validateInteractionParams("interaction.approval", {
     thread_id: "t",
     run_id: "r",
