@@ -21,11 +21,14 @@ const presentationSharedRoot = resolve(cliSrcRoot, "presentation-shared")
 const coordinatorRoot = resolve(cliSrcRoot, "presentation-coordinator")
 const repoRoot = resolve(import.meta.dir, "../../../..")
 
-test("A-01 单一 InteractiveController：生产调用点仅 CLI Composition Root", () => {
+test("A-01 单一 InteractiveController：生产调用点仅 CLI Composition Root 与 acp-web/client", () => {
   const callers = sourceFiles(cliSrcRoot)
     .filter(file => !file.endsWith("interactive/controller.ts"))
     .filter(file => readFileSync(file, "utf8").includes("createInteractiveController("))
-  expect(callers.map(file => file.replace(`${cliSrcRoot}/`, ""))).toEqual(["index.ts"])
+    .map(file => file.replace(`${cliSrcRoot}/`, ""))
+  const secondRoot = callers.filter(file => file.startsWith("acp-web/client/"))
+  expect(callers.filter(file => !file.startsWith("acp-web/client/"))).toEqual(["index.ts"])
+  expect(secondRoot).toEqual(["acp-web/client/session.ts"])
 })
 
 test("A-02 共享 Timeline reducer 唯一：TUI/Web 不直接解析 Agent Event", () => {

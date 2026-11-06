@@ -46,6 +46,7 @@ test("发布副本含 dist 运行资产且不含 tests", async () => {
   const webAssets = Bun.file(join(stagingDir, "dist/web-assets.json"))
   expect(await distIndex.exists()).toBe(true)
   expect(await webAssets.exists()).toBe(true)
+  expect(await Bun.file(join(stagingDir, "dist/acp-web-assets.json")).exists()).toBe(true)
   expect(await Bun.file(join(stagingDir, "dist/code-index-adapter/index.mjs")).exists()).toBe(true)
   expect(await Bun.file(join(stagingDir, "tests/index.test.ts")).exists()).toBe(false)
   expect(await Bun.file(join(stagingDir, "src/index.ts")).exists()).toBe(false)

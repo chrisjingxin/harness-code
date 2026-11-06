@@ -10,6 +10,7 @@
     "@opentui/core-win32-x64": "0.4.3 (local workspace on HC-179 temporary branch)",
     "bun-ffi-structs": "0.2.4 (local workspace on HC-179 temporary branch)",
     "react-devtools-core": "7.0.1 (local workspace on HC-179 temporary branch)",
+    "@agentclientprotocol/sdk": "0.25.1",
     "ajv": "8.17.1",
     "lucide-react": "1.28.0",
     "marked": "17.0.1",
@@ -24,7 +25,8 @@
     "@types/react-dom": "19.2.4",
     "@types/react-reconciler": "0.32.0",
     "happy-dom": "20.11.1",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "zod": "3.25.76"
   },
   "python": {
     "python": ">=3.11,<4.0",

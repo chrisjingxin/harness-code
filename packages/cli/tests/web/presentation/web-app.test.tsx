@@ -264,6 +264,22 @@ describe("WebApp", () => {
     }
   })
 
+  test("handoffControls={false}：没有返回 TUI 按钮，header menu 只剩帮助，composer 正常可用", () => {
+    const adapter = createFakeAdapter(makeSnapshot())
+    const handle = render(<WebApp adapter={adapter} active={true} handoffControls={false} />)
+    try {
+      expect(handle.container.querySelector(".return-button")).toBeNull()
+      act(() => {
+        adapter.emit(makeSnapshot({ headerMenuOpen: true }))
+      })
+      const items = Array.from(handle.container.querySelectorAll<HTMLButtonElement>(".header-menu-item"))
+      expect(items.map(item => item.textContent)).toEqual(["帮助"])
+      expect(handle.container.querySelector("textarea")).not.toBeNull()
+    } finally {
+      handle.unmount()
+    }
+  })
+
   test("连接断开（只读）时 Tool 仍可展开：本地表现不受连接状态阻断", () => {
     const interactive = makeInteractive({
       connection: { status: "closed", message: "连接已断开" },

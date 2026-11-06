@@ -175,10 +175,15 @@ export class ShikiHighlightService {
 
 let globalService: ShikiHighlightService | null = null
 let serviceUsers = 0
+/** ACP 浏览器入口的高亮 Worker 路径与旧 /web 不同；建单例前调用。 */
+let configuredWorkerUrl: string | null = null
+export function configureSyntaxWorkerUrl(url: string): void {
+  configuredWorkerUrl = url
+}
 
 function getService(): ShikiHighlightService {
   if (!globalService) {
-    globalService = new ShikiHighlightService()
+    globalService = new ShikiHighlightService(configuredWorkerUrl ?? undefined)
   }
   return globalService
 }

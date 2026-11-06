@@ -121,7 +121,7 @@ export async function readBuiltWebAssets(directory: string): Promise<WebAssets |
 }
 
 /** 只接受 dist 内普通相对文件名，避免被损坏的清单带出构建目录。 */
-function resolveAssetPath(directory: string, relativePath: string): string {
+export function resolveAssetPath(directory: string, relativePath: string): string {
   if (!relativePath || relativePath.startsWith("/") || relativePath.split(/[\\/]+/).includes("..")) {
     throw new Error(`Web 资产路径无效：${relativePath}`)
   }

@@ -518,3 +518,34 @@ test("harness acp 的 buildAcpSpawnPlan 以 acp 结尾并注入 sidecar 环境",
   expect(viaDevelopment.env.PYTHONPATH).toBe(`${agentDirectory}:${"/existing"}`)
   expect(viaDevelopment.env.HARNESS_AGENT_CONFIG_PATH).toBeUndefined()
 })
+
+test("harness web 在 startAgent 与 TTY 校验之前短路", async () => {
+  const webCommand = parseArgs(["web"], process.cwd())
+  expect(webCommand.kind).toBe("web")
+  let started = 0
+  const seen: string[] = []
+  await execute(webCommand, {
+    startAgent: async () => {
+      started += 1
+      throw new Error("startAgent must not run for web")
+    },
+    runWeb: async command => {
+      seen.push(command.kind)
+      return 0
+    },
+  })
+  expect(started).toBe(0)
+  expect(seen).toEqual(["web"])
+})
+
+test("harness web 对不存在的 --cwd 在 runWeb 之前失败", async () => {
+  const webCommand = parseArgs(["web", "--cwd", "/nonexistent/acp-web-dir"], process.cwd())
+  let called = 0
+  await expect(execute(webCommand, {
+    runWeb: async () => {
+      called += 1
+      return 0
+    },
+  })).rejects.toThrow("Workspace does not exist")
+  expect(called).toBe(0)
+})

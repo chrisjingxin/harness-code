@@ -5,6 +5,7 @@ import { mkdir, writeFile, rm, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { makeHarness, flush } from "./harness"
+import { resolveMentions } from "../../src/workspace/mention-resolver"
 
 describe("Controller @ 提及端到端注入", () => {
   let testDir: string
@@ -23,8 +24,10 @@ describe("Controller @ 提及端到端注入", () => {
   })
 
   test("提交带 @ 提及的消息时：Gateway 接收附加上下文，Timeline 保留用户原始输入", async () => {
+    // 显式注入真实实现：浏览器 bundle 默认直通，真实解析由装配点注入。
     const harness = makeHarness({
       workspace: testDir,
+      resolveMentions,
     })
 
     await flush()
@@ -50,6 +53,17 @@ describe("Controller @ 提及端到端注入", () => {
       expect(userMessage.message.content).toBe(rawInput)
     }
 
+    await harness.controller.close()
+  })
+
+  test("不注入 resolveMentions 时直通：原文原样送达 Gateway，不内联文件", async () => {
+    const harness = makeHarness({ workspace: testDir })
+    await flush()
+    const rawInput = "请解释 @math.ts 的实现"
+    await harness.controller.dispatch({ type: "input.submit", value: rawInput })
+    const lastRun = harness.port.lastRunSelection()
+    expect(lastRun?.message).toBe(rawInput)
+    expect(lastRun?.message).not.toContain("[Attached Context")
     await harness.controller.close()
   })
 })

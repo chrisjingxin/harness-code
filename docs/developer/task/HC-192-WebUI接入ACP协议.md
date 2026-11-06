@@ -24,7 +24,7 @@ completed_at: -
 
 经过对话确认，本任务只做第一步：**让 Web UI 通过标准 ACP 与自家 Agent 通信**。接入第三方 Agent、Electron 打包、补齐 ACP 缺口、TUI 下线都是后续 Task。
 
-当前阶段：Task 与 Spec 均已由用户确认；[Plan](../plan/HC-192-WebUI接入ACP协议.md) 和 [Todo](../todo/HC-192-WebUI接入ACP协议.md) 已写成，等待用户确认后开始实现（尚未认领、未建分支、未改代码）。本任务改动跨进程协议，不属于快速通道，走完整流程：Task → Spec → Plan → Todo → 实现 → 检视。
+当前阶段：Task、Spec、[Plan](../plan/HC-192-WebUI接入ACP协议.md)、[Todo](../todo/HC-192-WebUI接入ACP协议.md) 均已确认；停点 0 到 3 已完成（证据见文末各节），等待用户确认后进入停点 4。本任务改动跨进程协议，不属于快速通道，走完整流程：Task → Spec → Plan → Todo → 实现 → 检视。
 
 ## 通俗说明
 
@@ -68,6 +68,7 @@ completed_at: -
 
 8. **缺口治理**（用户要求）：一期功能比现在的 Web 少可以接受，但必须有记录，最终不可接受。缺口表使用固定编号 `GAP-xx`（Spec §12.3），权威版本迁入架构文档；缺口在界面和终端可见，不静默；归档前为每组缺口建好后续 Task；TUI 下线 Task 的前置条件是缺口表没有「未开始 / 进行中」的行（要么已关闭，要么用户确认放弃）。
 9. **刷新页面会重启 Python 并取消运行中的任务**（用户确认可接受，登记为 GAP-20）：Electron 阶段由主进程常驻子进程解决。
+10. **S3 设计默认值**（2026-11-06 用户确认「全部按默认」）：路由用 `GET /` 与 `/assets/*`；有活动连接时 bootCode 顺延；子进程崩溃用 `_harnessCode/bridge/exit` 通知帧；CSP `connect-src` 写确切端口；新增 GAP-36 到 GAP-39；SDK 与 zod 放 `dependencies`；启动时打印过渡版本提示。浏览器自建命令注册表（Q4）、输入框不隐藏 plan 选项（Q5）两项用户未表态，按设计默认执行。
 
 ## 范围
 
@@ -281,4 +282,30 @@ S0 的探索由 DeepSeek 子 agent 只读完成（Todo 0.2 到 0.6），没有�
 - CLI `npm run test` 主批：1356 pass / 1 skip / 0 fail；`tests/web/takeover-recovery.test.ts` 2 项因本机缺 Playwright 浏览器失败，与本任务无关。
 - `npm run typecheck`、`npm run deps:check` 通过。
 
-**未做**：`harness web`、WebSocket 桥与浏览器端（S3、S4）；`usage_update`、`ask_user` / 计划 / 目标交互（保守默认，见缺口表）；没有用 Zed 真机试用；`session/load` 之后继续对话没有端到端测试（`make_persistent_host` 没配模型，S3 联调时补）。
+**未做（S2 时点）**：`harness web`、WebSocket 桥与浏览器端（S3、S4）；`usage_update`、`ask_user` / 计划 / 目标交互（保守默认，见缺口表）；没有用 Zed 真机试用；`session/load` 之后继续对话没有端到端测试（`make_persistent_host` 没配模型，S3 联调时补）。
+
+## S3 实施与 Review 结论（2026-11-06）
+
+**分工**：设计沿用前一位 agent 的 S3 设计稿（本地 `/tmp/hc192-s3-design.md`），分 A、B、C 三段实施；开发与测试由子 agent 完成，主 agent 每段审阅 diff 与截图，批量下发返工。
+
+**实施内容**（Todo 3.0 到 3.16）
+- **S3-A 桥与命令**：`packages/cli/src/acp-web/bridge/`（`guard`、`session-token`、`framing`、`assets`、`bridge`）与 `src/web-command.ts`；`args.ts`、`index.ts` 新增 `harness web [--cwd] [--config] [--port] [--no-open]`，在 TTY 校验与 `startAgent` 之前短路。只绑 127.0.0.1；Host、Origin 逐字匹配且先于凭据检查；两段式凭据（bootCode 滑动 10 分钟、一次性 wsToken 60 秒、5 次错误锁 30 秒、SHA-256 摘要加恒定时间比较）；同时只允许一个 WebSocket，名额被占回 409 且不烧 token；8 MiB 帧上限、二进制帧、含换行帧一律断开；浏览器断开后 EOF → 5 秒 → SIGTERM → 3 秒 → SIGKILL；桥被 `kill -9` 时子进程读到 stdin EOF 自行退出；子进程崩溃先发 `_harnessCode/bridge/exit` 通知再 1011 关闭；日志与响应不含任何凭据。
+- **S3-B 浏览器侧逻辑**：`controller.ts` 拆桶文件导入、注入 `resolveMentions`（TUI 在 `src/index.ts` 注入原实现，浏览器默认直通），浏览器 bundle 从「57 个输入含 3 个 `node:`」变为零 `node:`；`@agentclientprotocol/sdk@0.25.1`、`zod@3.25.76` 精确锁定，三份依赖文档同步；`client/` 下的 `ws-stream`、`translate`、`replay`、`permission`、`runtime`、`acp-agent-gateway`；27 个不支持的方法统一抛 `ACP_NOT_SUPPORTED`，带 GAP 编号，并有与 `AgentGateway` 接口的漂移检查；`ext.ts` 与 Python `ext.py` 有跨语言常量漂移测试。
+- **S3-C 界面接入**：`local-ui-client`、`boot`、`session`（全仓第二个 `createInteractiveController(` 调用点）、`app.tsx`；`acp-web/html.ts`、`acp-web/bundle.ts`（源码模式即时构建，生产模式读 `dist/acp-web-assets.json`）；`scripts/build-web-assets.ts` 产出 `dist/acp-web.js`、`acp-web.css`、`acp-web-assets.json`；`WebApp` 新增 `handoffControls`（ACP 入口传 `false`）；`configureSyntaxWorkerUrl`；三处架构测试收紧为只允许 `acp-web/client/session.ts`。
+
+**Review 发现与处理**（主 agent 审阅，均已修复并补回归用例）
+- S3-A：`/assets/constructor` 等路径命中对象原型（改为白名单加 `Object.hasOwn`）；子进程 stdout 行切分逐块整体拷贝，8 MiB 单行为二次方开销（改为分块缓冲）；子进程崩溃时最后几帧可能未读就被丢弃（崩溃通知推迟到 stdio 读完后发）。
+- S3-B：浏览器入站帧的字节检查对多字节字符可绕过；`setSessionMode` 失败时产出无 `run.started` 的 `run.failed`（改按发送前门禁收敛）；取消时会误取消其它会话的挂起审批；初始化超时计时器残留。
+- S3-C：首轮浏览器 E2E 有假绿——取消用例实际是第一轮就因 `Method not found` 失败（stub 场景没声明 modes，网关仍调 `session/set_mode`），缺口、会话列表用例几乎没有断言。修复：Agent 未声明 modes 或目标模式不在列表里时不换模式；E2E 全部改为真实点击加真实断言。加强后暴露出一个真实缺陷：Agent 跨 Run 复用同一个审批 id 时，上一轮取消的迟到收尾会误结算本轮审批；修法是对 Core 暴露的 `request_id` 改为 `${runId}:${ACP requestId}`。
+- 真实浏览器差异：`boot.ts` 里未绑定的 `fetch` 引用在浏览器中抛 `Illegal invocation`，已修。
+- 「update 先于响应」的变红验证做不出来：SDK 0.25.1 对通知是 `await notificationHandler(...)`，通知与响应天然串行。保留了 100 条增量的排序用例作护栏，升级 SDK 时要重跑。
+
+**新登记缺口**（详见 Spec §12.3）：GAP-36 会话摘要缺字段、GAP-37 Agent 命令缺字段与 500 ms 补全窗口、GAP-38 审批 `requests` 为合成值、GAP-39 手动重命名会话（ACP 入口下 `/title` 因缺 `threads.read` 能力被隐藏，没有界面入口）。另外核实：模型、Skill 面板在 ACP 入口下被能力门禁隐藏，GAP-08、GAP-13 无可点击入口；GAP-24 确认为直通。
+
+**验证数字**
+- `cd packages/cli && npm run test` 主批：1711 pass / 8 skip / 2 fail。两个失败（`acp-web/bundle.test.ts` 的源码模式构建、`bridge.lifecycle` 的慢客户端背压）只在全量并行时偶发，单跑与 `bun test tests/acp-web`（347 pass / 7 skip / 0 fail，主 agent 复跑）均通过，判定为负载下的时序抖动，登记为遗留风险。`tests/web/takeover-recovery.test.ts` 2 项仍因缺 Playwright 指定修订版浏览器失败（环境原因，基线即如此）。
+- 浏览器 E2E：`HARNESS_E2E_CHROMIUM=<~/Library/Caches/ms-playwright/chromium-1243 下的可执行文件> bun test tests/acp-web/browser-e2e.test.ts` 7/7 通过（真实点击）：首页与回复、取消后再发并允许、拒绝、工具卡片、会话列表点开回放、GAP-11/GAP-12 提示、控制台无 CSP 违规。截图在 `tmp/hc192-s3/screenshots/`（不入库）。
+- 真实 Python 冒烟：`bun src/index.ts web --no-open --cwd /tmp/hc192-ws`，页面挂载、侧栏会话列表正常；发「你好」后 Agent 报 `Invalid configuration in ~/.harness/config.toml: Unknown configuration section [fusion]`（本机配置问题，与本任务无关），界面正确显示「运行失败」。
+- `npm run typecheck`、`npm run build`（`dist/index.js` 不含 SDK）、`npm run project:check`、`npm run deps:check` 通过；Python 全量 3436 passed / 5 skipped（与 S2 一致，Python 未改动）。
+
+**未做**：文件 diff 审批卡片的真实改文件验证、刷新恢复会话的 E2E、安全 E2E、缺口治理文档与看板（停点 4）；`npm run test` 两个并行抖动用例的稳定化（停点 4 处理）。

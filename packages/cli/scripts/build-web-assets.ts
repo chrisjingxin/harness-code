@@ -4,6 +4,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { readBuiltWebAssets, type WebAssetsManifest } from "../src/web/bundle"
+import { readBuiltAcpWebAssets, type AcpWebAssetsManifest } from "../src/acp-web/bundle"
 
 const cliRoot = resolve(import.meta.dir, "..")
 const sourceRoot = resolve(cliRoot, "src")
@@ -63,6 +64,37 @@ async function main(): Promise<void> {
   const assets = await readBuiltWebAssets(distRoot)
   if (!assets || !assets.syntaxWorkerScript) {
     throw new Error("Web 资产构建不完整：manifest 未包含完整 Syntax Worker 脚本")
+  }
+
+  // ACP Web：不设 outdir，直接从 outputs 取内容写成固定文件名（两个构建
+  // 共用一个 dist/，outdir 会互相覆盖）；externals 留空，让"浏览器代码误
+  // import Node 模块"在构建期就失败。
+  const acpResult = await Bun.build({
+    entrypoints: [resolve(sourceRoot, "acp-web/client/app.tsx")],
+    target: "browser",
+    minify: true,
+  })
+  ensureBuildSucceeded(acpResult, "ACP Web app")
+  const acpScript = acpResult.outputs.find(output => output.path.endsWith(".js"))
+  const acpStyle = acpResult.outputs.find(output => output.path.endsWith(".css"))
+  if (!acpScript || !acpStyle) {
+    throw new Error(`ACP Web app 构建缺少脚本或样式输出：${acpResult.outputs.map(output => output.path).join(", ")}`)
+  }
+  await Promise.all([
+    Bun.write(resolve(distRoot, "acp-web.js"), acpScript),
+    Bun.write(resolve(distRoot, "acp-web.css"), acpStyle),
+  ])
+  const acpManifest: AcpWebAssetsManifest = {
+    version: 1,
+    script: "acp-web.js",
+    style: "acp-web.css",
+    syntaxWorkerScript: "web-syntax-worker.js",
+  }
+  await writeFile(resolve(distRoot, "acp-web-assets.json"), `${JSON.stringify(acpManifest, null, 2)}
+`, "utf8")
+  const acpBuilt = await readBuiltAcpWebAssets(distRoot)
+  if (!acpBuilt || !acpBuilt.files["app.js"]) {
+    throw new Error("ACP Web 资产构建不完整")
   }
 }
 

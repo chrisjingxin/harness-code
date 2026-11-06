@@ -20,7 +20,7 @@ test("TUI 根目录只保留组合入口", () => {
   expect(rootFiles).toEqual(["app.tsx"])
 })
 
-test("createInteractiveController 生产调用点仅 CLI Composition Root 一处（ZC-114 移除 web 豁免）", () => {
+test("createInteractiveController 生产调用点仅 CLI Composition Root 与 acp-web/client/session.ts（ZC-114 移除 web 豁免）", () => {
   const sources = sourceFiles(cliRoot).filter(file => !file.includes("/tests/"))
 
   const callers = sources
@@ -28,8 +28,10 @@ test("createInteractiveController 生产调用点仅 CLI Composition Root 一处
     .filter(file => readFileSync(file, "utf8").includes("createInteractiveController("))
     .sort()
 
-  // index.ts 是唯一 Composition Root；web/app.tsx 的自建 Controller 已由 ZC-114 移除。
-  expect(callers).toEqual([indexPath])
+  // index.ts 是 CLI Composition Root；acp-web/client/session.ts 是
+  // ACP 浏览器入口的唯一第二装配点（S3-C）；web/app.tsx 的自建
+  // Controller 已由 ZC-114 移除。
+  expect(callers).toEqual([indexPath, resolve(cliRoot, "acp-web/client/session.ts")].sort())
   // TUI 侧不再自行创建 Controller。
   expect(callers.filter(file => file.startsWith(tuiRoot))).toEqual([])
 })

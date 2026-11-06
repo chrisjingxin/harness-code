@@ -4,6 +4,7 @@ export type Command =
   | { kind: "version" }
   | { kind: "help" }
   | { kind: "acp"; cwd: string; configPath?: string }
+  | { kind: "web"; cwd: string; configPath?: string; port?: number; open: boolean }
   | { kind: "run"; message?: string; nonInteractive: boolean; json: boolean; cwd: string; configPath?: string; resume: boolean; sandbox?: "remote" | false }
   | { kind: "config.show" | "config.path"; cwd: string; configPath?: string; params?: Record<string, unknown> }
   | { kind: SkillCommandKind | PluginCommandKind; cwd: string; configPath?: string; params: Record<string, unknown>; secretStdin?: boolean }
@@ -31,6 +32,7 @@ export const CLI_USAGE = [
   "  harness config <show|path> [--config PATH]",
   "  harness logs [--thread ID | --run ID] [--level L] [--event E] [--component C] [--limit N] [--cursor T] [--json]",
   "  harness acp [--cwd PATH] [--config PATH]",
+  "  harness web [--cwd PATH] [--config PATH] [--port N] [--no-open]",
   "  harness skills <...>",
   "  harness plugins <...>",
 ].join("\n")
@@ -74,6 +76,7 @@ export function parseArgs(argv: string[], cwd = process.cwd()): Command {
   if (command === "plugins") return parsePluginsCommand(args.slice(1), cwd)
   if (command === "logs") return parseLogsCommand(args.slice(1), cwd)
   if (command === "acp") return parseAcpCommand(args.slice(1), cwd)
+  if (command === "web") return parseWebCommand(args.slice(1), cwd)
 
   const configPath = optionValue(args, "--config")
   const cwdValue = optionValue(args, "--cwd")
@@ -483,6 +486,38 @@ function parseAcpCommand(args: string[], cwd: string): Command {
     index += 1
   }
   return { kind: "acp", cwd: workspace, configPath }
+}
+
+/** 解析 `harness web`：与 acp 一样只收白名单选项；--port 必须是 0-65535 的数字。 */
+function parseWebCommand(args: string[], cwd: string): Command {
+  const usage = "Usage: harness web [--cwd PATH] [--config PATH] [--port N] [--no-open]"
+  let workspace = cwd
+  let configPath: string | undefined
+  let port: number | undefined
+  let open = true
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (argument === "--no-open") {
+      if (!open) throw new Error(usage)
+      open = false
+      continue
+    }
+    if (argument !== "--cwd" && argument !== "--config" && argument !== "--port") throw new Error(usage)
+    const value = args[index + 1]
+    if (!value || value.startsWith("-")) throw new Error(usage)
+    if (argument === "--cwd") {
+      if (workspace !== cwd) throw new Error(usage)
+      workspace = value
+    } else if (argument === "--config") {
+      if (configPath !== undefined) throw new Error(usage)
+      configPath = value
+    } else {
+      if (port !== undefined || !/^\d+$/.test(value) || Number(value) > 65535) throw new Error(usage)
+      port = Number(value)
+    }
+    index += 1
+  }
+  return { kind: "web", cwd: workspace, configPath, port, open }
 }
 
 /** 解析 logs 离线查询命令；必须在 startAgent 之前短路，且不接受 --config。 */

@@ -83,6 +83,7 @@ function createPort(options: {
   codeIndexApplyImpl?: AgentGateway["codeIndexApply"]
   compactContextImpl?: AgentGateway["compactContext"]
   openThreadImpl?: AgentGateway["openThread"]
+  resolveMentions?: import("../../src/interactive/types").InteractiveControllerOptions["resolveMentions"]
 } = {}) {
   const calls: string[] = []
   const runHandles: Array<{ threadId: string; runId: string }> = []
@@ -611,6 +612,7 @@ export function makeHarness(options: {
     gateway: portState.port,
     workspaceGit: options.workspaceGit,
     baseRuntime: runtimeOverride,
+    ...(options.resolveMentions !== undefined ? { resolveMentions: options.resolveMentions } : {}),
     ...(options.initialThreadId !== undefined ? { initialThreadId: options.initialThreadId } : {}),
     ...(options.scheduler !== undefined ? { scheduler: options.scheduler } : {}),
   })

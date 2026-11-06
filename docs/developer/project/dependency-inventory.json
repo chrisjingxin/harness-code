@@ -17,13 +17,15 @@
       "@za38/protocol": { "version": "0.1.0", "source": "local workspace", "path": "packages/protocol" },
       "@opentui/core": "0.4.3",
       "@opentui/react": "0.4.3",
+      "@agentclientprotocol/sdk": "0.25.1",
       "ajv": "8.17.1",
       "lucide-react": "1.28.0",
       "marked": "17.0.1",
       "react": "19.2.6",
       "react-dom": "19.2.6",
       "react-reconciler": "0.33.0",
-      "shiki": "3.23.0"
+      "shiki": "3.23.0",
+      "zod": "3.25.76"
     },
     "opentui_core_transitive": {
       "bun-ffi-structs": "0.2.4",

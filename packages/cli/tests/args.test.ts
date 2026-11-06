@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { parseArgs } from "../src/args"
+import { CLI_USAGE, parseArgs } from "../src/args"
 
 test("无子命令的 --version/-V 是 CLI 版本，不启动 run", () => {
   expect(parseArgs(["--version"], "/work")).toEqual({ kind: "version" })
@@ -298,4 +298,57 @@ test("acp 拒绝未知选项、位置参数、缺值与重复选项", () => {
 test("acp 的 --help 与 --version 仍然是全局帮助与版本", () => {
   expect(parseArgs(["acp", "--help"], "/work")).toEqual({ kind: "help" })
   expect(parseArgs(["acp", "--version"], "/work")).toEqual({ kind: "version" })
+})
+
+test("web 命令默认只带工作区与 open", () => {
+  expect(parseArgs(["web"], "/work")).toEqual({
+    kind: "web",
+    cwd: "/work",
+    configPath: undefined,
+    port: undefined,
+    open: true,
+  })
+})
+
+test("web 命令接受 --cwd、--config、--port、--no-open 及组合", () => {
+  expect(parseArgs(["web", "--cwd", "/x"], "/work")).toEqual({
+    kind: "web", cwd: "/x", configPath: undefined, port: undefined, open: true,
+  })
+  expect(parseArgs(["web", "--config", "/c.toml"], "/work")).toEqual({
+    kind: "web", cwd: "/work", configPath: "/c.toml", port: undefined, open: true,
+  })
+  expect(parseArgs(["web", "--port", "8080"], "/work")).toEqual({
+    kind: "web", cwd: "/work", configPath: undefined, port: 8080, open: true,
+  })
+  expect(parseArgs(["web", "--port", "0"], "/work")).toEqual({
+    kind: "web", cwd: "/work", configPath: undefined, port: 0, open: true,
+  })
+  expect(parseArgs(["web", "--no-open"], "/work")).toEqual({
+    kind: "web", cwd: "/work", configPath: undefined, port: undefined, open: false,
+  })
+  expect(parseArgs(["web", "--cwd", "/x", "--config", "/c.toml", "--port", "9", "--no-open"], "/work")).toEqual({
+    kind: "web", cwd: "/x", configPath: "/c.toml", port: 9, open: false,
+  })
+})
+
+test("web 拒绝位置参数、未知选项、缺值、重复与非法端口", () => {
+  const usage = "Usage: harness web"
+  expect(() => parseArgs(["web", "extra"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--json"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--cwd"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--cwd", "/a", "--cwd", "/b"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--port", "abc"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--port", "70000"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--port", "-1"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--no-open", "--no-open"], "/work")).toThrow(usage)
+  expect(() => parseArgs(["web", "--no-open", "x"], "/work")).toThrow(usage)
+})
+
+test("web 的 --help 与 --version 仍然是全局帮助与版本", () => {
+  expect(parseArgs(["web", "--help"], "/work")).toEqual({ kind: "help" })
+  expect(parseArgs(["web", "--version"], "/work")).toEqual({ kind: "version" })
+})
+
+test("CLI_USAGE 列出 harness web", () => {
+  expect(CLI_USAGE).toContain("harness web [--cwd PATH] [--config PATH] [--port N] [--no-open]")
 })

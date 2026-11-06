@@ -4,7 +4,7 @@
 
 规则：每次只推进到下一个停点；到达停点后勾选本节、把证据写回 Task，然后停下等用户确认。每个实现项都先写失败的测试。
 
-状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）、S2（2.0 到 2.9）已完成，等用户确认后进入停点 3。
+状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）、S2（2.0 到 2.9）、S3（3.0 到 3.17，分 A/B/C 三段实施）已完成，等用户确认后进入停点 4。
 
 ## 停点 0：摸底与重构（无可见变化）
 
@@ -68,24 +68,24 @@
 
 查看方式：`npm run dev -- web`（会自动打开浏览器）。发一条消息，观察流式文字、思考和工具卡片；运行中点取消，再立即发一条；左侧能看到会话列表。浏览器里没有「返回 TUI」按钮，文件树与 Git 面板显示「暂不支持」。
 
-- [ ] 3.0 前置改造（Spec §8.5）：测试先失败（浏览器 bundle 无 `node:` 空桩的自动检查），再切断 `InteractiveController` 对 Node 模块的间接依赖（只改 import 与依赖注入，TUI 在 `src/index.ts` 注入原实现）；修改「控制器只能在 `src/index.ts` 创建」的架构测试，允许 `src/acp-web/client/` 作第二个装配点；`tests/interactive`、`tests/tui`、`tests/web/architecture.test.ts` 全绿。
-- [ ] 3.1 `guard.test.ts` 先失败，再实现 `guard.ts`（Host、Origin 校验）。
-- [ ] 3.2 `session-token.test.ts` 先失败，再实现两段式凭据（bootCode 滑动过期、wsToken 一次性与 60 秒过期、连续错误暂停、恒定时间比较）。
-- [ ] 3.3 `framing.test.ts` 先失败，再实现行分帧与帧校验（大小、二进制、数组、含换行）。
-- [ ] 3.4 `bridge.integration.test.ts` 先失败，再实现 `bridge.ts`：路由、`POST /acp/boot`、WebSocket ⇄ 子进程转发、关闭回收（EOF → SIGTERM → SIGKILL）、子进程崩溃、第二个连接被拒；使用假子进程。
-- [ ] 3.5 `harness web` 命令（`args.ts` / `index.ts`）：启动桥、打印提示、打开浏览器；Ctrl+C 回收全部子进程；测试先失败。
-- [ ] 3.6 构建：第二个浏览器 bundle、HTML 外壳、`bundle.ts` 与清单扩展、`tests/web/bundle.test.ts` 更新。
-- [ ] 3.7 `@agentclientprotocol/sdk@0.25.1`（用户确认，企业内部源版本）及必需 peer `zod` 加入依赖并更新依赖文档，`deps:check` 通过。
-- [ ] 3.8 自写 WebSocket Stream 适配（满足 SDK `Stream` 接口，一帧一条 JSON-RPC；二进制帧或非法 JSON 关闭连接），单元测试先失败。
-- [ ] 3.9 `acp-agent-gateway.test.ts` 先失败，再实现 `AcpAgentGateway`：`startRun`、事件翻译、终态映射、`cancel`、`setApprovalMode`、`listThreads`、`openThread`（回放）、ID 别名、`onThreadSummary`、`onClose`。
-- [ ] 3.10 权限请求 ⇄ Core 交互处理（审批与目录信任），Core 无法处理或超时回 `cancelled`。
-- [ ] 3.11 `acp-not-supported.test.ts` 先失败，再实现缺口方法抛 `ACP_NOT_SUPPORTED`（带 GAP 编号）；`runtime.capabilities` 只含已支持的能力。
-- [ ] 3.12 `local-ui-client.test.ts` 先失败，再实现 `LocalUiClient`：快照 → 切片、intent 转发、文件树 / 工作区 / Trace / 接管状态的固定值。
-- [ ] 3.13 新入口 `acp-web/client/app.tsx`、`ext.ts`（扩展声明）；读取 boot 信息、建立 WebSocket。
-- [ ] 3.14 界面最小调整：隐藏「返回 TUI / 退出」、文件树与 Git 的「暂不支持」说明、审批倒计时超过 24 小时不显示；组件测试先失败。
-- [ ] 3.15 `tests/web/architecture.test.ts` 保持通过；`bun test`、`npm run typecheck`、`npm run build`、`npm run project:check` 通过。
-- [ ] 3.16 浏览器 E2E（桥 + 脚本化假 ACP Agent）：首页、发送、流式、取消；真实浏览器人工走查并保留截图。
-- [ ] 3.17 证据写入 Task；停下等待用户确认。
+- [x] 3.0 前置改造（Spec §8.5）：测试先失败（浏览器 bundle 无 `node:` 空桩的自动检查），再切断 `InteractiveController` 对 Node 模块的间接依赖（只改 import 与依赖注入，TUI 在 `src/index.ts` 注入原实现）；修改「控制器只能在 `src/index.ts` 创建」的架构测试，允许 `src/acp-web/client/` 作第二个装配点；`tests/interactive`、`tests/tui`、`tests/web/architecture.test.ts` 全绿。（已完成：controller.ts 拆桶导入 + resolveMentions 注入 + passthrough 默认；browser-bundle.test.ts 37 输入零 node:；526 pass）
+- [x] 3.1 `guard.test.ts` 先失败，再实现 `guard.ts`（Host、Origin 校验）。（已完成：43 项用例覆盖精确 Host/Origin 匹配、JSON 请求体检视、限界 body 读取、CSP 与安全响应头）
+- [x] 3.2 `session-token.test.ts` 先失败，再实现两段式凭据（bootCode 滑动过期、wsToken 一次性与 60 秒过期、连续错误暂停、恒定时间比较）。（已完成：25 项用例覆盖格式、兑换、一次性、滑动过期、5 连错锁定 30 秒、digest 恒定时间比较与无秘密泄漏）
+- [x] 3.3 `framing.test.ts` 先失败，再实现行分帧与帧校验（大小、二进制、数组、含换行）。（已完成：framing 37 项 + assets 14 项，含 8 MiB 上限、UTF-8 跨块、行切分、stderr 尾部脱敏与安全资源名）
+- [x] 3.4 `bridge.integration.test.ts` 先失败，再实现 `bridge.ts`：路由、`POST /acp/boot`、WebSocket ⇄ 子进程转发、关闭回收（EOF → SIGTERM → SIGKILL）、子进程崩溃、第二个连接被拒；使用假子进程。（已完成：routes 28 + lifecycle 23 + orphan 1 + python 6 + web-command 8 项用例，含真实脚本化 Agent 联调与孤儿回收验证）
+- [x] 3.5 `harness web` 命令（`args.ts` / `index.ts`）：启动桥、打印提示、打开浏览器；Ctrl+C 回收全部子进程；测试先失败。（已完成：解析 11 项、execute 短路 2 项、黑盒 2 项用例；手动联调 Ctrl+C 5ms 退出、pgrep 无残留）
+- [x] 3.6 构建：第二个浏览器 bundle、HTML 外壳、`bundle.ts` 与清单扩展、`tests/web/bundle.test.ts` 更新。（已完成：acp-web/bundle.ts + html.ts + build-web-assets.ts 产出 dist/acp-web.{js,css,assets.json}；bundle.test.ts 4 项；pack-publishable 断言）
+- [x] 3.7 `@agentclientprotocol/sdk@0.25.1`（用户确认，企业内部源版本）及必需 peer `zod` 加入依赖并更新依赖文档，`deps:check` 通过。（已完成：sdk 0.25.1 + zod 3.25.76 精确锁定；ext.test.ts 真实读 ext.py 跨语言断言 3 项；deps:check/deps:test/typecheck/build 全过）
+- [x] 3.8 自写 WebSocket Stream 适配（满足 SDK `Stream` 接口，一帧一条 JSON-RPC；二进制帧或非法 JSON 关闭连接），单元测试先失败。（已完成：ws-stream.ts + 10 项用例：帧门禁/bridgeExit 拦截/背压/closed 恒 resolve；bundle 入口零 node: 零 SDK 运行时代码）
+- [x] 3.9 `acp-agent-gateway.test.ts` 先失败，再实现 `AcpAgentGateway`：`startRun`、事件翻译、终态映射、`cancel`、`setApprovalMode`、`listThreads`、`openThread`（回放）、ID 别名、`onThreadSummary`、`onClose`。（已完成：acp-agent-gateway.ts + 31 项用例 + wire 回放 4 项：握手/暖会话/别名/F11 顺序/取消/审批模式/失败收敛/列表/打开/关闭）
+- [x] 3.10 权限请求 ⇄ Core 交互处理（审批与目录信任），Core 无法处理或超时回 `cancelled`。（已完成：permission.ts 13 项 + 网关审批/信任/取消挂起 5 项 + approval-no-timeout：timeout_ms=Infinity 无定时器 25h 仍 pending）
+- [x] 3.11 `acp-not-supported.test.ts` 先失败，再实现缺口方法抛 `ACP_NOT_SUPPORTED`（带 GAP 编号）；`runtime.capabilities` 只含已支持的能力。（已完成：UNSUPPORTED_METHODS 27 项与接口漂移检查 30 项用例：拒绝 Promise 非同步抛、GAP 编号、catalogs.skills=error、capabilities 收窄）
+- [x] 3.12 `local-ui-client.test.ts` 先失败，再实现 `LocalUiClient`：快照 → 切片、intent 转发、文件树 / 工作区 / Trace / 接管状态的固定值。（已完成：local-ui-client.ts 14 成员实现；4 项用例：8 切片/固定缺口值/引用缓存/deadlineAtMs=Infinity/handoff/workspaceIntent 拒绝/close 幂等）
+- [x] 3.13 新入口 `acp-web/client/app.tsx`、`ext.ts`（扩展声明）；读取 boot 信息、建立 WebSocket。（已完成：boot.ts+session.ts+app.tsx；boot.test.ts 8 项 + session.integration.test.ts 真实桥+Python 1 项全绿）
+- [x] 3.14 界面最小调整：隐藏「返回 TUI / 退出」、文件树与 Git 的「暂不支持」说明、审批倒计时超过 24 小时不显示；组件测试先失败。（已完成：handoffControls prop + configureSyntaxWorkerUrl；web-app/syntax 并列用例 + unsupported-panels 2 项 + interaction-deadline-render 1 项）
+- [x] 3.15 `tests/web/architecture.test.ts` 保持通过；`bun test`、`npm run typecheck`、`npm run build`、`npm run project:check` 通过。（已完成：两处架构测试收紧为精确 ["acp-web/client/session.ts"] + ZC-114 同步；全量 bun test/typecheck/build/project:check 通过）
+- [x] 3.16 浏览器 E2E（桥 + 脚本化假 ACP Agent）：首页、发送、流式、取消；真实浏览器人工走查并保留截图。（已完成：browser-e2e.test.ts 6 项经 HARNESS_E2E_CHROMIUM 全绿——首页/回显/工具卡片/取消重发/会话列表/GAP 提示/无 CSP 违规；截图 tmp/hc192-s3/screenshots/）
+- [x] 3.17 证据写入 Task；停下等待用户确认。（已写入 Task「S3 实施与 Review 结论」；GAP-36 到 GAP-39 与 S3 偏离 Spec 之处已回写 Spec §12.3、§13）
 
 ## 停点 4：完整验收
 

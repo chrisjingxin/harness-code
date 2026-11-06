@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { isValidElement } from "react"
 
 import { resolveLanguage } from "../../../src/presentation-shared/language-catalog"
-import { acquireHighlightService, closeHighlightService, releaseHighlightService, ShikiHighlightService } from "../../../src/web/syntax/highlight-service"
+import { acquireHighlightService, closeHighlightService, configureSyntaxWorkerUrl, releaseHighlightService, ShikiHighlightService } from "../../../src/web/syntax/highlight-service"
 import { colorToScope, processHighlightRequest } from "../../../src/web/syntax/worker"
 import { renderSpans } from "../../../src/web/presentation/code-block"
 
@@ -182,3 +182,32 @@ class RespondingWorker extends FakeWorker {
     } as MessageEvent)
   }
 }
+
+
+describe("configureSyntaxWorkerUrl", () => {
+  test("配置后 acquire 的单例使用新 Worker 地址；构造函数默认值不变", async () => {
+    const createdUrls: string[] = []
+    class FakeWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(url: string) { createdUrls.push(url) }
+      postMessage(_message: unknown): void {}
+      terminate(): void {}
+    }
+    const originalWorker = globalThis.Worker
+    ;(globalThis as { Worker: unknown }).Worker = FakeWorker
+    try {
+      configureSyntaxWorkerUrl("/assets/syntax-worker.js")
+      const service = acquireHighlightService()
+      const promise = service.highlight("python", "x = 1")
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(createdUrls).toEqual(["/assets/syntax-worker.js"])
+      void promise.catch(() => {})
+      closeHighlightService()
+      expect(new ShikiHighlightService().workerUrlForTest ?? "/web/syntax-worker.js").toBe("/web/syntax-worker.js")
+    } finally {
+      ;(globalThis as { Worker: unknown }).Worker = originalWorker
+      closeHighlightService()
+    }
+  })
+})

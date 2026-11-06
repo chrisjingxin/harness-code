@@ -49,15 +49,18 @@ import { builtinCommandCapabilities } from "./commands"
 import { CatalogFeature, CodeIndexFeature, CommandFeature, formatMcpStatusNotice, GoalFeature, InteractionFeature, McpFeature, ModelFeature, PLAN_IMPLEMENT_PROMPT, RunFeature, SkillFeature, ThreadFeature, TimelineFeature, type FeatureContext } from "./features"
 import { selectCodeIndexView } from "./selectors"
 import type { AgentGateway, Clock, IdGenerator, IntentOutcome, InteractiveConfirmation, InteractiveConnectionState, InteractiveController, InteractiveControllerOptions, InteractiveIntent, InteractiveSnapshot, LoadableCatalog, Scheduler } from "./ports"
-import { cryptoIdGenerator, systemClock, systemScheduler } from "../infrastructure"
+import { cryptoIdGenerator } from "../infrastructure/system-id-generator"
+import { systemClock } from "../infrastructure/system-clock"
+import { systemScheduler } from "../infrastructure/system-scheduler"
 import { DEFAULT_APPROVAL_MODE, type InteractiveRuntime } from "./runtime"
 import { appendNotice, clearThread, createInitialState, finishContextCompaction, leaveChildTimeline, openChildTimeline, setWorkMode, startContextCompaction, type InteractiveState } from "./state"
 import { scopeTimeline } from "../presentation-shared/timeline-scope"
-import { resolveMentions } from "../workspace/mention-resolver"
+import type { MentionResolutionResult } from "../workspace/mention-resolver"
 export class InteractiveControllerImpl implements InteractiveController {
   private readonly gateway: AgentGateway
   private readonly clock: Clock
   private readonly idGenerator: IdGenerator
+  private readonly resolveMentions: (workspaceRoot: string, text: string) => Promise<MentionResolutionResult>
   private readonly baseRuntime: InteractiveRuntime
   private readonly scheduler: Scheduler
   private readonly listeners = new Set<(snapshot: InteractiveSnapshot) => void>()
@@ -120,6 +123,7 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.clock = options.clock ?? systemClock
     this.scheduler = options.scheduler ?? systemScheduler
     this.idGenerator = options.idGenerator ?? cryptoIdGenerator
+    this.resolveMentions = options.resolveMentions ?? passthroughMentions
     this.state = createInitialState(options.initialThreadId ?? null)
     this.snapshot = this.buildSnapshot()
     this.unsubscribeProtocolError = this.gateway.onProtocolError?.(error => {
@@ -373,7 +377,7 @@ export class InteractiveControllerImpl implements InteractiveController {
         message: "当前任务进行中，完成后发送，或用 Ctrl+C 中断后再发送。",
       }
     }
-    const resolvedMention = await resolveMentions(this.baseRuntime.workspace, message)
+    const resolvedMention = await this.resolveMentions(this.baseRuntime.workspace, message)
     return this.runFeature.startRun(resolvedMention.prompt, this.featureContext, {
       // 下一次 Run 的工作模式由共享状态或 direct_shell 显式指定决定，受理后冻结。
       mode: modeOverride ?? this.state.workMode,
@@ -631,7 +635,7 @@ export class InteractiveControllerImpl implements InteractiveController {
         }
       }
       case "submit-prompt": {
-        const resolved = await resolveMentions(this.baseRuntime.workspace, result.prompt)
+        const resolved = await this.resolveMentions(this.baseRuntime.workspace, result.prompt)
         return this.runFeature.startRun(resolved.prompt, this.featureContext, {
           mode: this.state.workMode,
           requestedModelProfileId: this.modelFeature.requestedModelProfileId,
@@ -840,4 +844,12 @@ function blocksPendingOperation(intent: InteractiveIntent): boolean {
     return !["system.help", "system.status", "system.quit"].includes(intent.commandId)
   }
   return true
+}
+
+/**
+ * 缺省 @ 提及解析：原样返回文本、不内联文件。浏览器 bundle 没有文件系统，
+ * TUI 由 CLI 入口注入读文件的真实实现；两者之外（如纯逻辑测试）走直通。
+ */
+async function passthroughMentions(_workspaceRoot: string, text: string): Promise<MentionResolutionResult> {
+  return { resolved: [], inlinedCount: 0, referenceCount: 0, totalBytes: 0, contextBlock: "", prompt: text }
 }

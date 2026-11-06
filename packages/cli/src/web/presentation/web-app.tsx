@@ -26,7 +26,10 @@ import { GoalBanner } from "./goal-view"
 export function WebApp(props: {
   adapter: WebInteractiveAdapter
   active: boolean
+  /** 默认 true：渲染"返回 TUI"按钮与退出菜单项；ACP 浏览器入口传 false。 */
+  handoffControls?: boolean
 }) {
+  const handoffControls = props.handoffControls ?? true
   const subscribe = useCallback(
     (listener: (snapshot: WebAdapterSnapshot) => void) => props.adapter.subscribe(listener),
     [props.adapter],
@@ -152,7 +155,7 @@ export function WebApp(props: {
               <FolderOpen size={16} aria-hidden="true" /><span className="topbar-project-name">{projectLabel(interactive.runtime)}</span>
             </div>
             <div className="topbar-actions">
-              <button type="button" className="button return-button" disabled={!props.active || snapshot.leaving || returnBlocked} title={returnBlocked ? "当前任务结束或交互完成后可返回 TUI" : "归还控制权并恢复 TUI"} onClick={() => { onIntent({ type: "return-to-tui" }) }}><Terminal aria-hidden="true" size={15} />返回 TUI</button>
+              {handoffControls ? <button type="button" className="button return-button" disabled={!props.active || snapshot.leaving || returnBlocked} title={returnBlocked ? "当前任务结束或交互完成后可返回 TUI" : "归还控制权并恢复 TUI"} onClick={() => { onIntent({ type: "return-to-tui" }) }}><Terminal aria-hidden="true" size={15} />返回 TUI</button> : null}
               {/* 主题切换提到顶栏：单图标按钮表达下一动作（light 显示 Moon/切深色，dark 显示 Sun/切浅色），不再占用菜单项。 */}
               <button
                 type="button"
@@ -183,7 +186,7 @@ export function WebApp(props: {
               {snapshot.headerMenuOpen ? (
                 <div ref={headerMenuRef} className="header-menu" role="menu" aria-label="更多操作" onKeyDown={handleHeaderMenuKeyDown}>
                   <button type="button" role="menuitem" className="header-menu-item" onClick={() => { onIntent({ type: "settings-open", panel: "help" }) }}>帮助</button>
-                  <button type="button" role="menuitem" className="header-menu-item" disabled={!props.active || snapshot.leaving} onClick={() => { onIntent({ type: "exit-harness" }) }}>退出 Harness</button>
+                  {handoffControls ? <button type="button" role="menuitem" className="header-menu-item" disabled={!props.active || snapshot.leaving} onClick={() => { onIntent({ type: "exit-harness" }) }}>退出 Harness</button> : null}
                 </div>
               ) : null}
             </div>

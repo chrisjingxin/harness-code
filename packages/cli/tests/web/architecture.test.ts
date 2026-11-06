@@ -98,11 +98,16 @@ test("Web composition root 是唯一装配 WebUiClient/Adapter 与 React 的入�
   expect(app).not.toContain("host.control")
 })
 
-test("createInteractiveController 生产调用点仅 CLI Composition Root 一处（D-01）", () => {
+test("createInteractiveController 生产调用点仅 CLI Composition Root 与 acp-web/client（D-01）", () => {
   const files = sourceFiles(cliSrcRoot)
     .filter(file => !file.endsWith("interactive/controller.ts"))
-  const callers = files.filter(file => readFileSync(file, "utf8").includes("createInteractiveController("))
-  expect(callers.map(file => file.replace(`${cliSrcRoot}/`, ""))).toEqual(["index.ts"])
+  const callers = files
+    .filter(file => readFileSync(file, "utf8").includes("createInteractiveController("))
+    .map(file => file.replace(`${cliSrcRoot}/`, ""))
+  // CLI 之外只允许 acp-web/client/ 下出现第二装配点（S3-C 是 session.ts）。
+  const secondRoot = callers.filter(file => file.startsWith("acp-web/client/"))
+  expect(callers.filter(file => !file.startsWith("acp-web/client/"))).toEqual(["index.ts"])
+  expect(secondRoot).toEqual(["acp-web/client/session.ts"])
 })
 
 test("presentation 可以使用交互式类型与 @za38/protocol 枚举", () => {

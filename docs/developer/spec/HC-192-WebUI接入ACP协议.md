@@ -657,7 +657,7 @@ controller.ts → infrastructure/index.ts
 | 编号 | 功能 | 一期用户看到什么 | 建议关闭方式 |
 |---|---|---|---|
 | GAP-01 | 提问（`ask_user`） | 工具得到空答案，模型会继续或重复提问 | 自定义请求，或退化为带选项的权限请求 |
-| GAP-02 | Plan 模式与计划确认 | 界面没有 plan 模式 | 自定义请求「确认计划」 |
+| GAP-02 | Plan 模式与计划确认 | 界面没有 plan 模式；输入框的审批模式下拉仍列出 plan，选中后发送会提示「该功能暂未通过 ACP 提供（GAP-02）」 | 自定义请求「确认计划」 |
 | GAP-03 | 目标闭环（goal） | 无入口 | 自定义方法与通知 |
 | GAP-04 | Compose 模式 | 无入口 | 自定义方法与通知 |
 | GAP-05 | 拒绝并附反馈 | 审批卡片没有「拒绝并反馈」 | `_meta` 携带反馈文本，或自定义响应字段 |
@@ -681,7 +681,7 @@ controller.ts → infrastructure/index.ts
 | GAP-26 | `locations` 只覆盖主工作区路径（S1 实现） | 已信任的工作区外目录里的文件不会出现位置信息，客户端无法「跟随」 | 让位置解析复用 Host 的完整根注册表（需要给 `AgentHost` 暴露只读的路径策略） |
 | GAP-27 | `session/new` 的 `mcpServers`、`additionalDirectories` 被忽略，只在 stderr 记个数（S1 实现） | 客户端传入的 MCP 配置不生效，诊断日志里也没有结构化事件 | 新增诊断事件名（属于诊断日志 schema 的跨包改动）并把 MCP 配置并入会话级配置 |
 | GAP-23 | 审批与工具卡的关联在少数情形下退回「工具名 + 参数」匹配（S2 已覆盖全部工具族的 `tool_call_id`，残余如下） | 同一批里「工具名 + 参数」完全相同的调用、参数被截断、provider 重复使用 tool_call id（按序号编号的 provider 必现）时，可能出现「一次调用两张卡」，多出的兜底卡由终态补发收尾 | 在 Python 里给每次工具调用分配稳定的内部 id 并贯穿事件与审批；做完即关闭 |
-| GAP-24 | 输入框 @ 文件提及不在浏览器里内联文件内容（待 S3 核实现有行为后确认） | 提及只作为 `@路径` 文本发给 Agent，由 Agent 用工具读取 | 经 ACP 的 `resource_link` / 内容块，或 Electron 主进程读文件 |
+| GAP-24 | 输入框 @ 文件提及不在浏览器里内联文件内容（S3 已核实：控制器默认直通，`@路径` 作为文本发送） | 提及只作为 `@路径` 文本发给 Agent，由 Agent 用工具读取 | 经 ACP 的 `resource_link` / 内容块，或 Electron 主进程读文件 |
 | GAP-25 | 输入历史（上下键）刷新后不保留 | 刷新页面后历史清空 | 浏览器本地存储，或 Electron 主进程落盘 |
 | GAP-28 | 普通 Skill 没有斜杠入口：`available_commands` 只含 Plugin / Qwen 命令（`HostSnapshot.agent_commands`），不含 TUI 里的 `/skill:<id>` | ACP 用户无法用斜杠调用普通 Skill；`/skill:xxx` 被当作普通文本 | 扩展命令列表来源（跨包改动）并放宽 `requested_skill` 校验，或提供 Skill 专用自定义方法 |
 | GAP-29 | 审批无超时，桥侧失联会让 Run 一直挂着（S3 的桥必须自己做存活检测） | 浏览器页面关闭或桥断开时，挂起的审批要等连接关闭才被拒绝 | 桥侧检测断线并回 `cancelled`；或为审批增加可配置的超时 |
@@ -690,7 +690,11 @@ controller.ts → infrastructure/index.ts
 | GAP-32 | 历史回放的细节限制：用户消息不切块、回放不设条数上限、失败工具回放为 `completed`（后者并入 GAP-22） | 超大历史时首帧会变慢；恢复的会话里看不出哪个工具失败过 | 回放分块与分页；Transcript 记录工具状态 |
 | GAP-33 | `session/list` 固定 200 条、不分页 | 超过 200 个会话时旧会话列不出来 | 实现 `cursor` 分页 |
 | GAP-34 | 子代理审批只显示为独立的兜底卡（GAP-16 的补充） | 子代理里的工具审批卡片不挂在任何工具卡下 | 随子代理过程可见化一起解决 |
-| GAP-35 | 审批帧可能比同轮正文和 `tool.started` 更早到达，卡片显示顺序可能与模型输出顺序差几毫秒 | 偶尔先看到权限请求，正文稍后才出现 | Host 保证事件顺序，或翻译器按序号重排 |
+| GAP-35 | 审批帧可能比同轮正文和 `tool.started` 更早到达，卡片显示顺序可能与模型输出顺序差几毫秒（S3 网关未加排序机制） | 偶尔先看到权限请求，正文稍后才出现 | Host 保证事件顺序，或翻译器按序号重排 |
+| GAP-36 | 会话摘要缺字段：`ThreadSummary` 的 `created_at_ms`、`message_count`、`first_message`、`latest_message` 在 ACP `SessionInfo` 里没有来源 | 侧栏只按更新时间排序，不显示消息条数与最近一条预览；Agent 未声明 `session/list` 时侧栏显示带 GAP-36 的提示 | `SessionInfo._meta.harnessCode` 携带这四个字段（Python 侧改） |
+| GAP-37 | Agent 命令缺字段：`AgentCommand` 的 `id`、`requested_skill_id`、`plugin_id` 无来源；`/命令` 补全只认页面启动后 500 ms 内到达的 `available_commands_update` | 用 `name` 合成 `id` 与 `requested_skill_id`，`plugin_id` 固定 `acp`；命令更新晚到则这一页没有补全，刷新后恢复；与内置命令重名的命令被丢弃 | 命令更新带 `_meta.harnessCode` 的 id 与来源；控制器支持动态命令表 |
+| GAP-38 | 审批 `payload.requests` 无 ACP 来源 | 由权限请求的 `toolCall.rawInput` 合成 `{action_requests:[{name,args,description}]}`，不是 v3 原样；文件 diff 审批详情里能看到，普通审批卡与现状一样不显示该块 | `_meta.harnessCode.approval` 携带 v3 原始 `requests` |
+| GAP-39 | 手动重命名会话（`/title`） | ACP 入口下没有入口：`/title` 要求 `threads.read` 能力而被隐藏，输入 `/title xx` 会当普通消息发给 Agent；网关的 `setThreadTitle` 抛 GAP-39 | 自定义方法 `_harnessCode/sessions/set_title`（Python 侧改） |
 
 ---
 
@@ -713,6 +717,19 @@ controller.ts → infrastructure/index.ts
 - 官方 Python SDK 能按 §5.3 接管 stdio，但有四条实现要求（§5.3）。
 - 控制器在浏览器里运行需要前置改造（§8.5）。
 - 全量测试基线见 Task「S0 结论」。
+
+**S3 已核实与决定（2026-11-06）**
+
+S3 的实施细节以设计稿（本地 `/tmp/hc192-s3-design.md`，未入库）为准，与本 Spec §7、§8 不一致之处如下，归档前在 Todo 4.5 时并入正文：
+
+- 文件布局：桥在 `packages/cli/src/acp-web/bridge/`（`guard`、`session-token`、`framing`、`assets`、`bridge`），浏览器端在 `acp-web/client/`，`ext.ts`、`html.ts`、`bundle.ts` 在 `acp-web/` 根层；`harness web` 命令在 `src/web-command.ts`（与 `acp-command.ts` 同级，安装根解析依赖这个位置）。参数为 `--cwd`、`--config`、`--port`、`--no-open`；Windows 直接拒绝。
+- 路由：`GET /`、`GET /assets/*`、`POST /acp/boot`、`GET /acp/ws`；检查顺序固定为 Host → Origin → 凭据；bootCode 在有活动连接时顺延滑动窗口；wsToken 先检视、名额通过后才消耗，409 不烧 token；名额包含回收中的连接。CSP 的 `connect-src` 写确切端口。
+- 子进程崩溃：桥先发 `_harnessCode/bridge/exit` 通知帧（退出码、信号、脱敏后的 stderr 末尾），再以 1011 关闭；WebSocket close reason 只放短码（最长 123 字节装不下诊断）。通知在 stdio 全部读完后才发，子进程最后写出的帧不会丢。
+- 浏览器侧：`controller.ts` 只拆桶文件导入并注入 `resolveMentions`（默认直通）；三处架构测试（`tests/web/architecture.test.ts`、`tests/acceptance/a-matrix.test.ts`、`tests/tui/architecture.test.ts`）只允许 `acp-web/client/session.ts` 作第二装配点。浏览器自建 `CommandRegistry`，去掉插件命令的 `skills.read` 要求，Skill 面板入口保持隐藏。
+- 网关：Agent 未声明 modes 或目标模式不在 `availableModes` 里时不调 `session/set_mode`；对 Core 暴露的审批 `request_id` 为 `${runId}:${ACP requestId}`，避免 Agent 跨 Run 复用 id 时上一轮的迟到应答误结算本轮；审批无倒计时（`timeout_ms: Infinity`）。
+- 「update 先于响应」由 SDK 0.25.1 保证：其消息循环对通知是 `await notificationHandler(...)`，通知与响应天然串行；网关再在 `sessionUpdate` 内同步翻译入队。升级 SDK 时要重跑排序用例。
+- 界面：`WebApp` 新增可选 `handoffControls`（默认 `true`，ACP 入口传 `false`）；语法高亮 Worker 地址经 `configureSyntaxWorkerUrl` 指向 `/assets/syntax-worker.js`；文件树与 Git 显示带 GAP-11、GAP-12 的「暂不支持」。模型、Skill 面板在 ACP 入口下被能力门禁隐藏，GAP-08、GAP-13 没有可点击的入口。
+- TS SDK + zod 打进浏览器 bundle 后零 `node:`；`dist/acp-web.js` 约 2.0 MB（minify 后，含 React、控制器、SDK、zod）。
 
 ---
 

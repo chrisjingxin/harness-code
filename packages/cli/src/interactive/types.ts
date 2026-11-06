@@ -280,6 +280,8 @@ export type InteractiveControllerOptions = {
   gateway: AgentGateway
   workspaceGit?: WorkspaceGit
   baseRuntime?: InteractiveRuntime
+  /** @ 提及解析器。缺省直通（原样返回文本，不内联文件）；TUI 在 CLI 入口注入读文件的真实实现。 */
+  resolveMentions?: (workspaceRoot: string, text: string) => Promise<import("../workspace/mention-resolver").MentionResolutionResult>
   /** 缺省表示不做启动恢复；显式 null 进入空首页；字符串调用 canonical threads.open。 */
   initialThreadId?: string | null
   clock?: Clock

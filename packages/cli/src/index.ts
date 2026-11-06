@@ -59,6 +59,7 @@ import {
 
 import { CLI_USAGE, parseArgs, type Command } from "./args"
 import { runAcpPassthrough, type AcpCommand } from "./acp-command"
+import { runWeb, type WebCommand } from "./web-command"
 import { CLI_INSTALL_ROOT_ENV, resolveAgentProcessBinding, resolveCliInstallRoot } from "./runtime-binding"
 import { createDiagnosticLog, defaultProcessFields, type DiagnosticLog } from "./diagnostic-log/runtime"
 import { SidecarStderrDrain } from "./diagnostic-log/runtime/stderr-drain"
@@ -70,6 +71,7 @@ import { runTui } from "./tui/app"
 import { CLI_VERSION, createInteractiveRuntime, type InteractiveRuntime } from "./interactive/runtime"
 import { createCommandRegistry } from "./interactive/commands"
 import { createInteractiveController } from "./interactive/controller"
+import { resolveMentions } from "./workspace/mention-resolver"
 import type { InteractiveController } from "./interactive/types"
 import { AgentClientGateway } from "./infrastructure/agent-client-gateway"
 import { detectGitWorkspace } from "./infrastructure/git-workspace"
@@ -96,6 +98,7 @@ type RunningAgent = {
 
 type ExecuteDependencies = {
   startAgent?: (command: Command) => Promise<RunningAgent>
+  runWeb?: (command: WebCommand) => Promise<number>
   /** `harness acp` 透传实现；测试用它证明没走 startAgent。 */
   runAcp?: (command: AcpCommand) => Promise<number>
   readSettingValue?: (secretStdin: boolean) => Promise<string>
@@ -225,7 +228,7 @@ export async function readPluginConsent(
 }
 
 /** 启动后台 Python 核心进程，通过标准输入输出（stdio）建立 JSON-RPC 消息通道，完成握手初始化，并返回包含通信客户端和清理关闭方法的运行句柄。 */
-async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" }>): Promise<RunningAgent> {
+async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" } | { kind: "web" }>): Promise<RunningAgent> {
   validateWorkspace(command.cwd)
   const startedAtMs = Date.now()
   const startedAt = performance.now()
@@ -524,7 +527,7 @@ export function clientMethodForCommand(command: Command): OperationName | undefi
 
 /** 执行非对话类的后台管理命令（如查询模型列表、读取配置、管理插件等），直接向后台发起请求并返回结果。 */
 export async function dispatchClientCommand(
-  command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" }>,
+  command: Exclude<Command, { kind: "run" } | { kind: "logs" } | { kind: "version" } | { kind: "help" } | { kind: "acp" } | { kind: "web" }>,
   request: (method: OperationName, params: Record<string, unknown>) => Promise<unknown>,
   readValue: (secretStdin: boolean) => Promise<string> = readSettingValue,
 ): Promise<unknown> {
@@ -567,6 +570,14 @@ export async function execute(
     if (code !== 0) process.exitCode = code
     return
   }
+  if (command.kind === "web") {
+    // web 同样在 startAgent 与 TTY 校验之前短路：桥只需要循环端口与管道，
+    // 不需要终端。工作区同样先校验，避免 sidecar 在不存在的 cwd 里启动。
+    validateWorkspace(command.cwd)
+    const code = await (dependencies.runWeb ?? runWeb)(command)
+    if (code !== 0) process.exitCode = code
+    return
+  }
   if (command.kind === "run" && !command.nonInteractive) {
     validateInteractiveTerminal(process.stdin.isTTY, process.stdout.isTTY)
   }
@@ -599,6 +610,7 @@ export async function execute(
         gateway,
         workspaceGit: createWorkspaceGit(command.cwd),
         baseRuntime: agent.runtime,
+        resolveMentions,
       })
       if (!command.nonInteractive) {
         // 工作区文件浏览独立于 Interactive Core；根解析失败时 explorer 自身进入 error 状态。
