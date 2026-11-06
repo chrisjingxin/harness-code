@@ -37,10 +37,12 @@ MODE_TABLE: list[tuple[str, str]] = [
 
 
 async def _initialize(client: Any, request_id: int = 1) -> dict[str, Any]:
-    """完成握手。"""
-    return await client.request(
+    """完成握手；握手失败直接报出真实错误，而不是让后续 session/new 报 NOT_INITIALIZED。"""
+    response = await client.request(
         request_id, "initialize", {"protocolVersion": 1, "clientCapabilities": {}}
     )
+    assert "result" in response, response
+    return response
 
 
 async def _new_session(client: Any, workspace: Path, request_id: int = 2) -> str:

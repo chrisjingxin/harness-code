@@ -352,10 +352,15 @@ describe("背压", () => {
     await h.waitForEvent(event => event.event === "ws.closed", 10_000)
     await h.waitForDrained(10_000)
     socket.destroy()
-    Bun.gc(true) // flood 的吞吐只造成临时分配；GC 后的 heapUsed 才是真实留存
-    // 真实泄漏（回收期 stdout 不销毁）会让留存到 GB 级；阈值放宽到 128 MiB
-    // 只挡病态，不容忍 GC/碎片噪声。
-    const heapGrowth = process.memoryUsage().heapUsed - heapBefore
+    // heapUsed 是整个测试 worker 的堆：并行套件里兄弟用例的分配会抬高
+    // 基线后增量，全量跑偶发误报（单跑稳定）。GC 后连测两次，两次都超
+    // 阈值才算病态——真实泄漏（回收期 stdout 不销毁）留存是 GB 级。
+    Bun.gc(true)
+    let heapGrowth = process.memoryUsage().heapUsed - heapBefore
+    if (heapGrowth >= 128 * 1024 * 1024) {
+      Bun.gc(true)
+      heapGrowth = process.memoryUsage().heapUsed - heapBefore
+    }
     expect(heapGrowth).toBeLessThan(128 * 1024 * 1024)
   })
 

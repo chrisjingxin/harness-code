@@ -205,7 +205,7 @@ async def _run(scenario: str, fds: ProtocolFds, grace: float) -> int:
     return await serve_acp_streams(_StubAgent(scenario), streams, grace_seconds=grace)
 
 
-_HOST_SCENARIOS = frozenset({"host", "tools", "commands", "approval", "trust", "history"})
+_HOST_SCENARIOS = frozenset({"host", "tools", "commands", "approval", "trust", "diff", "history"})
 """用真实 Host 跑的场景名；其余走传输层 stub。"""
 
 TRUST_DIRECTORY = "/ext"
@@ -225,6 +225,18 @@ auto-approve 分支，整批 `unsafe_indices` 为空时连中断都不会发出�
 
 TRUST_TOOL_ARGS: dict[str, object] = {"file_path": TRUST_TARGET_PATH, "content": "x"}
 """目录信任场景的工具参数（与预置 presentation 的指纹必须完全一致）。"""
+
+DIFF_FILE_PATH = "/src/calc.py"
+DIFF_TOOL_ARGS = {"file_path": DIFF_FILE_PATH, "content": "def add(a, b):\n    return a + b\n"}
+DIFF_UNIFIED = (
+    "--- /dev/null\n"
+    "+++ /src/calc.py\n"
+    "@@ -0,0 +1,4 @@\n"
+    "+def add(a, b):\n"
+    "+    return a + b\n"
+    "+\n"
+    "+# calc helpers\n"
+)
 
 HISTORY_THREAD_ID = "history-seed"
 """历史场景预置的线程 id（`session/list` 与 `session/load` 都用它）。"""
@@ -251,6 +263,32 @@ def _trust_hook(host_holder: dict[str, Any]) -> Any:
                 "tool_name": TRUST_TOOL_NAME,
                 "access": "write",
                 "shadows_workspace": False,
+            },
+        )
+
+    return prefetch
+
+
+def _diff_hook(host_holder: dict[str, Any]) -> Any:
+    """中断前预置 file_diff presentation（write_file 审批卡需要富文本 diff）。
+
+    与 _trust_hook 同理：脚本化 Agent 里生成 presentation 的预检段不会执行，
+    手工登记一条让串行审批带上 diff 详情。
+    """
+
+    def prefetch() -> None:
+        runs = list(host_holder["host"]._run_coordinator._runs.values())
+        runs[0].approval_presentations.remember(
+            "write_file",
+            DIFF_TOOL_ARGS,
+            {
+                "kind": "file_diff",
+                "operation": "write",
+                "path": DIFF_FILE_PATH,
+                "added_lines": 4,
+                "removed_lines": 0,
+                "truncated": False,
+                "unified_diff": DIFF_UNIFIED,
             },
         )
 
@@ -302,7 +340,7 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
             config_home=home,
             workspace=root,
         )
-    elif scenario in {"approval", "trust"}:
+    elif scenario in {"approval", "trust", "diff"}:
         from tests.support.acp_harness import (
             ApprovalAgent,
             flush,
@@ -313,8 +351,9 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
         )
 
         holder: dict[str, Any] = {}
-        tool_name = TRUST_TOOL_NAME if scenario == "trust" else "execute"
-        args = TRUST_TOOL_ARGS if scenario == "trust" else {"command": "npm test"}
+        tool_name = {"trust": TRUST_TOOL_NAME, "diff": "write_file"}.get(scenario, "execute")
+        args = {"trust": TRUST_TOOL_ARGS, "diff": DIFF_TOOL_ARGS}.get(scenario, {"command": "npm test"})
+        hook = {"trust": _trust_hook, "diff": _diff_hook}.get(scenario)
         agent = ApprovalAgent(
             before=[
                 tool_start("call-1", tool_name),
@@ -329,7 +368,7 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
                     "tool_call_id": "call-1",
                 }
             ],
-            before_interrupt=_trust_hook(holder) if scenario == "trust" else None,
+            before_interrupt=hook(holder) if hook else None,
             on_approve=[
                 tool_result("call-1", "已执行"),
                 text("信任已登记" if scenario == "trust" else "批准后继续"),

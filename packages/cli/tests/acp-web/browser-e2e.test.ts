@@ -14,7 +14,7 @@ import { chromium, type Browser, type ConsoleMessage, type Page } from "playwrig
 
 import { makePythonWorkspace, pythonAgentPlan, pythonAvailable, type AcpScenario } from "./support/python-agent"
 import { startBridge, type BridgeHarness } from "./support/bridge-harness"
-import { browserBundle } from "../../src/acp-web/bundle"
+import { buildBrowserAssetsInSubprocess } from "./support/build-assets-subprocess"
 
 const CHROMIUM = process.env.HARNESS_E2E_CHROMIUM
 const SHOTS = resolve(import.meta.dir, "../../../..", "tmp/hc192-s3/screenshots")
@@ -38,9 +38,19 @@ afterAll(async () => {
   await browser?.close()
 })
 
+let assetsCache: Awaited<ReturnType<typeof buildBrowserAssetsInSubprocess>> | null = null
+
+// 15 个用例共用一次子进程构建（全量并行时进程内 Bun.build 必发 "Unseekable
+// reading file"，见 helper 注释）。
+async function webAssets() {
+  if (assetsCache) return assetsCache
+  assetsCache = await buildBrowserAssetsInSubprocess()
+  return assetsCache
+}
+
 async function up(scenario: AcpScenario): Promise<Page> {
   const workspace = realpathSync(makePythonWorkspace())
-  harness = await startBridge(pythonAgentPlan(scenario, workspace), { cwd: workspace, assets: browserBundle })
+  harness = await startBridge(pythonAgentPlan(scenario, workspace), { cwd: workspace, assets: webAssets })
   const page = await browser!.newPage()
   page.on("console", (msg: ConsoleMessage) => {
     const text = msg.text()
@@ -126,6 +136,107 @@ describe.skipIf(SKIP)("浏览器 E2E", () => {
     await page.getByText(/GAP-11/).first().waitFor({ state: "visible", timeout: 10_000 })
     await shot(page, "06-gap-notices")
   }, 90_000)
+
+
+  test("diff 场景：write_file 审批卡片显示文件路径与 diff → 允许后批准后继续", async () => {
+    const page = await up("diff")
+    await send(page, "写文件")
+    await page.getByText("需要批准").first().waitFor({ state: "visible", timeout: 20_000 })
+    // file_diff presentation：路径、统一 diff 行与增删统计都要渲染
+    await page.getByText("/src/calc.py").first().waitFor({ state: "visible", timeout: 10_000 })
+    expect(await page.getByText(/calc helpers|def add\(a, b\)/).count()).toBeGreaterThan(0)
+    // FileDiffApproval 渲染 +N/−M 统计（file-diff-stats）
+    await page.locator(".file-diff-added").first().waitFor({ state: "visible", timeout: 5_000 })
+    expect(await page.locator(".file-diff-added").first().textContent()).toBe("+4")
+    await page.getByRole("button", { name: "允许一次" }).first().click()
+    await page.getByRole("button", { name: "提交", exact: true }).first().click()
+    await page.getByText("批准后继续").first().waitFor({ state: "visible", timeout: 20_000 })
+    await shot(page, "s4-diff-approve")
+  }, 90_000)
+
+  test("diff 场景：拒绝 → 已拒绝", async () => {
+    const page = await up("diff")
+    await send(page, "写文件")
+    await page.getByText("需要批准").first().waitFor({ state: "visible", timeout: 20_000 })
+    await page.getByText("/src/calc.py").first().waitFor({ state: "visible", timeout: 10_000 })
+    await page.getByRole("button", { name: "拒绝" }).first().click()
+    await page.getByText("已拒绝").first().waitFor({ state: "visible", timeout: 20_000 })
+    await shot(page, "s4-diff-reject")
+  }, 90_000)
+
+  test("trust 场景：目录信任卡片 → 允许 → 信任已登记", async () => {
+    const page = await up("trust")
+    await send(page, "看一眼 /ext")
+    await page.getByText(/目录信任|加入白名单/).first().waitFor({ state: "visible", timeout: 20_000 })
+    await page.getByText("/ext").first().waitFor({ state: "visible", timeout: 10_000 })
+    await page.locator(".directory-trust-form .approval-button-positive").first().click()
+    await page.getByText("信任已登记").first().waitFor({ state: "visible", timeout: 20_000 })
+    await shot(page, "s4-trust-allow")
+  }, 90_000)
+
+  test("trust 场景：拒绝 → 已拒绝信任", async () => {
+    const page = await up("trust")
+    await send(page, "看一眼 /ext")
+    await page.getByText(/目录信任|加入白名单/).first().waitFor({ state: "visible", timeout: 20_000 })
+    await page.locator(".directory-trust-form .approval-button-negative").first().click()
+    await page.getByText("已拒绝信任").first().waitFor({ state: "visible", timeout: 20_000 })
+    await shot(page, "s4-trust-reject")
+  }, 90_000)
+
+  test("刷新恢复：history 场景 reload 后凭据重放、会话保留可回放", async () => {
+    const page = await up("history")
+    await page.getByText("先看一眼").first().waitFor({ state: "visible", timeout: 15_000 })
+    await page.reload()
+    // 二次握手走 sessionStorage 里的 boot code，不能再落到"本地 Agent 暂时不可用"。
+    await page.waitForSelector("textarea", { timeout: 20_000 })
+    expect(await page.getByText("本地 Agent 暂时不可用").count()).toBe(0)
+    const item = page.getByText("先看一眼").first()
+    await item.waitFor({ state: "visible", timeout: 15_000 })
+    await item.click()
+    await page.getByText("看完了。").first().waitFor({ state: "visible", timeout: 15_000 })
+    await shot(page, "s4-reload-history")
+  }, 90_000)
+
+  test("刷新恢复：echo 场景 reload 后重新连上且页面可用", async () => {
+    const page = await up("host")
+    const marker = `echo-${Date.now()}`
+    await send(page, marker)
+    await page.getByText(marker).nth(1).waitFor({ state: "visible", timeout: 15_000 })
+    await page.reload()
+    await page.waitForSelector("textarea", { timeout: 20_000 })
+    expect(await page.getByText("本地 Agent 暂时不可用").count()).toBe(0)
+    // echo 模式没有线程存储（server.py: THREADS_UNAVAILABLE_IN_ECHO_MODE），
+    // 刚跑的 session 不进 session/list——这里锁「刷新后新引导可用」：
+    // 再发一条能收到回显，证明新子进程/新连接真正可用。
+    const marker2 = `echo2-${Date.now()}`
+    await send(page, marker2)
+    await page.getByText(marker2).nth(1).waitFor({ state: "visible", timeout: 15_000 })
+    await shot(page, "s4-reload-host")
+  }, 90_000)
+
+  test("崩溃界面：SIGKILL 子进程后界面显示进程已退出", async () => {
+    const page = await up("host")
+    const spawned = await harness!.waitForEvent(e => e.event === "agent.spawned")
+    expect(typeof spawned.pid).toBe("number")
+    process.kill(spawned.pid!, "SIGKILL")
+    await page.getByText(/本地 Agent 进程已退出（退出码/).first().waitFor({ state: "visible", timeout: 20_000 })
+    await shot(page, "s4-crash")
+  }, 90_000)
+
+  test("关闭回收：page.close() 后子进程 8s 内退出", async () => {
+    const page = await up("host")
+    const spawned = await harness!.waitForEvent(e => e.event === "agent.spawned")
+    const pid = spawned.pid!
+    expect(typeof pid).toBe("number")
+    await page.close()
+    const deadline = Date.now() + 8_000
+    let alive = true
+    while (Date.now() < deadline) {
+      try { process.kill(pid, 0) } catch { alive = false; break }
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    expect(alive).toBe(false)
+  }, 60_000)
 
   test("控制台无 CSP 违规与 pageerror", () => {
     expect(consoleErrors).toEqual([])

@@ -87,6 +87,7 @@ describe("runWeb", () => {
     expect((fake.created[0] as { cwd: string }).cwd).toBe(realpathSync("/tmp"))
     expect((fake.created[0] as { port: number }).port).toBe(0)
     expect(written.join("\n")).toContain("ACP 过渡版本，部分功能暂不可用")
+    expect(written.join("\n")).toContain("暂不支持的功能见 docs/user/Web界面.md「ACP 入口当前不支持的功能」")
     expect(written.join("\n")).toContain("http://127.0.0.1:43210/#c=")
     expect(opened).toEqual([fake.bridge.bootUrl()])
     expect(fake.stops).toEqual([{}])

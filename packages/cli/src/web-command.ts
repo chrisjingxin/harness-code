@@ -84,6 +84,7 @@ export async function runWeb(command: WebCommand, deps: WebCommandDeps = {}): Pr
   const { origin } = await bridge.start()
   const bootUrl = bridge.bootUrl()
   write("Harness Code Web（ACP 过渡版本，部分功能暂不可用）")
+  write("暂不支持的功能见 docs/user/Web界面.md「ACP 入口当前不支持的功能」")
   write(`工作区  ${cwd}`)
   write(`地址    ${bootUrl}`)
   write("Ctrl+C 退出")

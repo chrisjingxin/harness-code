@@ -1502,3 +1502,33 @@ async def _drain_until_closed(socket: Any) -> None:
     """持续读取 socket；预期在连接关闭时抛 ConnectionClosed。"""
     while True:
         await socket.recv()
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_inflight_mcp_connect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP 连接仍在进行时，close() 先取消连接任务再收尾（刷新 Web 页面提速）。
+
+    若 close() 只 gather 不取消，挂起的 connect_all 会把关闭拖到 MCP 超时
+    （桥侧 5s EOF + 3s SIGTERM 宽限内退不出去，页面刷新要等约 9s 重连）。
+    """
+    from harness_agent.extensions.mcp import McpConnectionManager
+
+    async def _hanging_connect_all(self: McpConnectionManager) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(McpConnectionManager, "connect_all", _hanging_connect_all)
+
+    host = AgentHost(allow_echo=True, config_home=tmp_path / "home", workspace=tmp_path)
+
+    async def _send(_message: dict[str, Any]) -> None:
+        return None
+
+    host.send = _send  # type: ignore[method-assign]
+    await host.dispatch(_request("initialize", _initialize("run.cancel"), "owner-init"))
+    assert host._mcp_connect_task is not None
+    # 让后台连接任务真正跑起来（进入 connect_all 的 sleep）。
+    await asyncio.sleep(0.05)
+    assert not host._mcp_connect_task.done()
+
+    await asyncio.wait_for(host.close(), timeout=2)
+    assert host._mcp_connect_task is None or host._mcp_connect_task.cancelled() or host._mcp_connect_task.done()

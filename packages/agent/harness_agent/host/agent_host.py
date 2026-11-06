@@ -775,6 +775,11 @@ class AgentHost:
             await self._code_index_manager.close()
             self._code_index_manager = None
         if self._mcp_connect_task is not None:
+            # 仍在进行的 MCP 连接先取消再收尾：connect_all 里每台服务器的
+            # wait_for(timeout_seconds) 可能拖到超时才返回，直接 gather 会把
+            # 关闭卡在连接超时上（Web 刷新时新页面要等旧进程退出再重连）。
+            if not self._mcp_connect_task.done():
+                self._mcp_connect_task.cancel()
             await asyncio.gather(self._mcp_connect_task, return_exceptions=True)
             self._mcp_connect_task = None
         if self._plugin_runtime_manager is not None:

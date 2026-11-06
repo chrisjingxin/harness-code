@@ -17,7 +17,7 @@ export const AGENT_DIR = join(REPO_ROOT, "packages", "agent")
 export const VENV_PYTHON = join(AGENT_DIR, ".venv", "bin", "python")
 export const pythonAvailable = existsSync(VENV_PYTHON)
 
-export type AcpScenario = "stub" | "host" | "tools" | "commands" | "approval" | "trust" | "history" | "block" | "pollute" | "stubborn"
+export type AcpScenario = "stub" | "host" | "tools" | "commands" | "approval" | "trust" | "diff" | "history" | "block" | "pollute" | "stubborn"
 
 /** 临时工作区（realpath 由调用方处理）。 */
 export function makePythonWorkspace(): string {

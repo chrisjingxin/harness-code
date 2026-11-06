@@ -9,12 +9,15 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { browserBundle, readBuiltAcpWebAssets } from "../../src/acp-web/bundle"
+import { readBuiltAcpWebAssets } from "../../src/acp-web/bundle"
+import { buildBrowserAssetsInSubprocess } from "./support/build-assets-subprocess"
 import { acpWebHtml } from "../../src/acp-web/html"
 
 describe("acp-web 浏览器资产", () => {
   test("源码模式：构建出 app.js/app.css/syntax-worker.js，脚本含 /acp/boot 与 /acp/ws", async () => {
-    const assets = await browserBundle()
+    // 全量并行时进程内 Bun.build 必发 "Unseekable reading file"（测试进程
+    // fd 争用）：把同一个生产函数放到子进程里跑再断言（见 helper 注释）。
+    const assets = await buildBrowserAssetsInSubprocess()
     expect(assets.html).toBe(acpWebHtml)
     expect(Object.keys(assets.files).sort()).toEqual(["app.css", "app.js", "syntax-worker.js"])
     expect(assets.files["app.js"]!.contentType).toBe("text/javascript")

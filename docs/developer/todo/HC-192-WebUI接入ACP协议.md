@@ -4,7 +4,7 @@
 
 规则：每次只推进到下一个停点；到达停点后勾选本节、把证据写回 Task，然后停下等用户确认。每个实现项都先写失败的测试。
 
-状态：S0（0.1 到 0.14）、S1（1.1 到 1.11）、S2（2.0 到 2.9）、S3（3.0 到 3.17，分 A/B/C 三段实施）已完成，等用户确认后进入停点 4。
+状态：S0 到 S3 已完成；S4 的 4.1 到 4.8 已完成，4.9 等用户验收。
 
 ## 停点 0：摸底与重构（无可见变化）
 
@@ -91,12 +91,13 @@
 
 查看方式：按 Task 的 13 条验收逐条核对。重点：浏览器里让 Agent 修改一个文件，看到 diff 审批卡片并分别点允许与拒绝；让 Agent 访问工作区外目录，看到授权卡片；刷新页面后恢复历史会话；用错误 token、错误 Origin 访问被拒绝；点击一个未提供的功能看到带 `GAP-xx` 的提示；查看终端启动提示、`docs/user/Web界面.md` 的「当前不支持」一节和 `architecture/ACP通信.md` 的缺口表。
 
-- [ ] 4.1 浏览器中的文件 diff 审批卡片与目录信任卡片：组件与适配测试先失败，再实现；真实改文件端到端验证。
-- [ ] 4.2 刷新页面恢复历史会话（`session/list` + `session/load`）的浏览器 E2E。
-- [ ] 4.3 安全 E2E：无 token、错 token、重放、过期、错 Origin、超限帧、二进制帧、第二个连接、浏览器关闭回收子进程、子进程崩溃的界面提示。
-- [ ] 4.4 缺口治理：`harness web` 启动提示；界面缺口提示；缺口表（GAP 编号）迁入 `architecture/ACP通信.md`；`docs/user/Web界面.md` 增加「当前不支持」一节。
-- [ ] 4.5 文档：`docs/user/快速开始.md`（`harness web`、`harness acp`）、`架构总览.md` 增量修订、ADR 0003 后续说明。
-- [ ] 4.6 看板：为每组缺口建后续 Task（状态待认领），编号写回缺口表；`npm run tasks:sync`。
-- [ ] 4.7 全量检查：Python 全量、`bun test`、`typecheck`、`build`、`project:check`、`deps:check`；区分既有失败与环境限制。
-- [ ] 4.8 用 `agent-skills:code-review-and-quality` 复核全部 diff，结论写回 Task；修复发现的问题。
+- [x] 4.1 浏览器中的文件 diff 审批卡片与目录信任卡片：组件与适配测试先失败，再实现；真实改文件端到端验证。（已完成：新增 `diff` 脚本场景（write_file + file_diff presentation）与 trust 用例，E2E 批准/拒绝全绿；真实改文件留人工验收）
+- [x] 4.2 刷新页面恢复历史会话（`session/list` + `session/load`）的浏览器 E2E。（已完成：history 场景 reload → 侧栏会话保留 → 点开回放「看完了。」全绿；host echo 不落盘（THREADS_UNAVAILABLE_IN_ECHO_MODE）会话不出现在 session/list，仅验证 reload 恢复）
+  附加：Host 关闭时取消仍在连接的 MCP——真实配置（2 个远程 HTTP MCP）下关闭耗时 4.5s → 0.37s；MCP 不可达时 Host.close 由 >10s 降到 ~0s
+- [x] 4.3 安全 E2E：无 token、错 token、重放、过期、错 Origin、超限帧、二进制帧、第二个连接、浏览器关闭回收子进程、子进程崩溃的界面提示。（已完成：九项拒绝用例在 bridge.routes/framing/lifecycle 已有覆盖，新增 E2E「SIGKILL → 界面显示进程已退出」「page.close → 子进程 8s 内退出」两项补齐界面侧证据）
+- [x] 4.4 缺口治理：`harness web` 启动提示；界面缺口提示；缺口表（GAP 编号）迁入 `architecture/ACP通信.md`；`docs/user/Web界面.md` 增加「当前不支持」一节。（已完成：启动打印第二行指向文档并经 web-command.test 锁定；E2E 实测 GAP-11/12；39 项 GAP 权威表落 ACP通信.md，Spec §12.3 保留初版并指向权威；Web界面.md 新增「ACP 入口当前不支持的功能」覆盖全部编号）
+- [x] 4.5 文档：`docs/user/快速开始.md`（`harness web`、`harness acp`）、`架构总览.md` 增量修订、ADR 0003 后续说明。（已完成：快速开始.md 新增「浏览器与 ACP 入口」；架构总览.md 在 JSON-RPC v3 节后新增「ACP 通信（HC-192）」；ADR 0003 追加「后续说明（HC-192，2026-11）」）
+- [x] 4.6 看板：为每组缺口建后续 Task（状态待认领），编号写回缺口表；`npm run tasks:sync`。（已完成：新建 `HC-193-补齐ACP缺口扩展.md` 与 `HC-194-Electron桌面端.md`（P1/待认领/未认领）；缺口表「后续 Task」列已写回编号；`npm run tasks:sync` 执行无报错）
+- [x] 4.7 全量检查：Python 全量、`bun test`、`typecheck`、`build`、`project:check`、`deps:check`；区分既有失败与环境限制。（已完成：pytest 二次全量 3437 pass/5 skip/0 fail（首次曾现 test_server_modes 1 fail——session/new 收到 NOT_INITIALIZED，疑似测试进程内 initialize 应答竞态；复跑不复现，单跑 15/15 绿，未改代码）；最终全量 bun test 1782 pass/1 skip/7 fail——7 项全部集中在 takeover-recovery.test.ts，缺 Playwright chromium_headless_shell-1217 修订版（环境问题，chromium.launch() 不读 HARNESS_E2E_CHROMIUM，照记不修）；含 E2E 的浏览器用例全量下全绿；typecheck/build/project:check/deps:check 全绿）
+- [x] 4.8 用 `agent-skills:code-review-and-quality` 复核全部 diff，结论写回 Task；修复发现的问题。（已完成：S4 diff 审阅结论写入 Task「S4 实施与 Review 结论」；架构与用户文档的事实错误已更正）
 - [ ] 4.9 Task 证据完整、7 项交付标准逐项对照；停下等待用户验收，**验收通过后才执行** `npm run task:complete -- HC-192 --evidence "..."`。
