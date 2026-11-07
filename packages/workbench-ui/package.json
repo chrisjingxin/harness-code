@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/theme.css','dist/theme.css')\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs');fs.copyFileSync('src/theme.css','dist/theme.css');fs.copyFileSync('src/identity/identity.css','dist/identity/identity.css')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "exports": {

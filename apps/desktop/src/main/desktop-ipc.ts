@@ -3,8 +3,9 @@
  * 目录路径只返回当前窗口显示，不登记项目，也不授予后续文件访问权限。
  */
 import { dialog, ipcMain, nativeTheme } from "electron"
-import type { BrowserWindow, IpcMainInvokeEvent } from "electron"
+import type { BrowserWindow } from "electron"
 import type { ThemeMode, WindowState } from "@workbench/contracts"
+import { verifyDesktopSource } from "./trusted-source.js"
 
 /** 绑定可信主窗口；窗口销毁时移除 IPC 和系统主题监听，允许 macOS 重开。 */
 export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void {
@@ -20,14 +21,10 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void 
     if (process.platform === "win32") window.setTitleBarOverlay({ color: dark ? "#191f1d" : "#f5f5f1", symbolColor: dark ? "#e7ede7" : "#242b28" })
     window.webContents.send("workbench:window-state", readState())
   }
-  function verify(event: IpcMainInvokeEvent) {
-    // 不只核对 URL：子 frame 和其他窗口即使地址相同，也不能操作本窗口。
-    if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== trustedUrl) throw new Error("不允许的桌面请求来源")
-  }
   function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
-      verify(event)
+      verifyDesktopSource(window, trustedUrl, event)
       if (args.length !== count) throw new Error("桌面请求参数无效")
       return action(...args)
     })

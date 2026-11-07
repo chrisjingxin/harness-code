@@ -28,9 +28,17 @@
     "task:complete": "npm run project:tool -- task:complete",
     "version:set": "npm run project:tool -- version:set",
     "release:check": "npm run project:tool -- release:check",
-    "project:check": "npm run check:boundaries && npm run project:tool -- project:check"
+    "project:check": "npm run check:boundaries && npm run project:tool -- project:check",
+    "server:build": "node scripts/workbench/server.mjs build",
+    "server:migrate": "node scripts/workbench/server.mjs migrate",
+    "server:init-demo": "node scripts/workbench/server.mjs init-demo",
+    "server:start": "node scripts/workbench/server.mjs start",
+    "server:contracts": "node scripts/workbench/server.mjs contracts",
+    "contracts:smoke": "node scripts/workbench/check-contracts.mjs"
   },
   "devDependencies": {
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
   }
 }

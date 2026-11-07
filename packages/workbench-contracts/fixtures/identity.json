@@ -1,0 +1,221 @@
+[
+  {
+    "name": "valid-CurrentUserResponse",
+    "schema": "CurrentUserResponse",
+    "valid": true,
+    "data": {
+      "user": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "username": "user01",
+        "displayName": "用户 01"
+      },
+      "workspaces": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "slug": "demo",
+          "name": "演示工作区"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid-DemoUsersResponse",
+    "schema": "DemoUsersResponse",
+    "valid": true,
+    "data": {
+      "users": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "username": "user01",
+          "displayName": "用户 01"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid-WorkspaceListResponse",
+    "schema": "WorkspaceListResponse",
+    "valid": true,
+    "data": {
+      "workspaces": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "slug": "demo",
+          "name": "演示工作区"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid-MembersResponse",
+    "schema": "MembersResponse",
+    "valid": true,
+    "data": {
+      "workspaceId": "22222222-2222-4222-8222-222222222222",
+      "members": [
+        {
+          "user": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "username": "user01",
+            "displayName": "用户 01"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid-DemoLoginRequest",
+    "schema": "DemoLoginRequest",
+    "valid": true,
+    "data": {
+      "username": "user01"
+    }
+  },
+  {
+    "name": "valid-CsrfResponse",
+    "schema": "CsrfResponse",
+    "valid": true,
+    "data": {
+      "headerName": "X-CSRF-TOKEN",
+      "token": "fixture-token"
+    }
+  },
+  {
+    "name": "valid-MetaResponse",
+    "schema": "MetaResponse",
+    "valid": true,
+    "data": {
+      "productVersion": "0.2.0",
+      "protocolVersion": 1,
+      "loginMode": "demo"
+    }
+  },
+  {
+    "name": "valid-HealthResponse",
+    "schema": "HealthResponse",
+    "valid": true,
+    "data": {
+      "status": "UP"
+    }
+  },
+  {
+    "name": "valid-ErrorResponse",
+    "schema": "ErrorResponse",
+    "valid": true,
+    "data": {
+      "error": {
+        "code": "AUTHENTICATION_REQUIRED",
+        "message": "请先登录",
+        "requestId": "11111111-1111-4111-8111-111111111111",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "name": "valid-PlatformMessageHeader",
+    "schema": "PlatformMessageHeader",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "11111111-1111-4111-8111-111111111111",
+      "type": "fixture.example",
+      "occurredAt": "2026-11-06T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "missing",
+    "schema": "DemoLoginRequest",
+    "valid": false,
+    "data": {}
+  },
+  {
+    "name": "extra",
+    "schema": "DemoLoginRequest",
+    "valid": false,
+    "data": {
+      "username": "user01",
+      "role": "admin"
+    }
+  },
+  {
+    "name": "type",
+    "schema": "DemoLoginRequest",
+    "valid": false,
+    "data": {
+      "username": 1
+    }
+  },
+  {
+    "name": "case",
+    "schema": "DemoLoginRequest",
+    "valid": false,
+    "data": {
+      "username": "User01"
+    }
+  },
+  {
+    "name": "invalid-id",
+    "schema": "CurrentUserResponse",
+    "valid": false,
+    "data": {
+      "user": {
+        "id": "old-thread-1",
+        "username": "user01",
+        "displayName": "用户 01"
+      },
+      "workspaces": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "slug": "demo",
+          "name": "演示工作区"
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid-time",
+    "schema": "PlatformMessageHeader",
+    "valid": false,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "11111111-1111-4111-8111-111111111111",
+      "type": "fixture.example",
+      "occurredAt": "2026-02-30T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "wrong-precision",
+    "schema": "PlatformMessageHeader",
+    "valid": false,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "11111111-1111-4111-8111-111111111111",
+      "type": "fixture.example",
+      "occurredAt": "2026-11-06T00:00:00Z"
+    }
+  },
+  {
+    "name": "unknown-version",
+    "schema": "PlatformMessageHeader",
+    "valid": false,
+    "data": {
+      "protocolVersion": 2,
+      "messageId": "11111111-1111-4111-8111-111111111111",
+      "type": "fixture.example",
+      "occurredAt": "2026-11-06T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "unknown-error",
+    "schema": "ErrorResponse",
+    "valid": false,
+    "data": {
+      "error": {
+        "code": "UNREGISTERED",
+        "message": "请先登录",
+        "requestId": "11111111-1111-4111-8111-111111111111",
+        "retryable": false
+      }
+    }
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "schemas": [
+    "platform.schema.json"
+  ],
+  "openapi": [
+    "platform.openapi.json"
+  ],
+  "fixtures": [
+    "identity.json"
+  ]
+}

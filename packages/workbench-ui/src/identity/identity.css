@@ -1,0 +1,10 @@
+/* 身份区域只消费基础主题变量，不复制窗口主题或协作导航布局。 */
+.identity-panel { margin-top:28px; padding:22px; border:1px solid var(--border); border-radius:14px; background:var(--panel); font-size:13px; }
+.identity-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 20px; margin-bottom:12px; }
+.identity-heading span { font-size:11px; color:var(--muted); }
+.identity-panel p { line-height:1.7; }
+.identity-panel h3 { font-size:14px; margin:20px 0 8px; }
+.identity-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.identity-actions label { display:flex; align-items:center; gap:12px; }
+.identity-actions select { padding:9px; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; }
+.identity-panel ul { padding-left:20px; line-height:1.8; }

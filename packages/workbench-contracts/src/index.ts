@@ -22,3 +22,5 @@ export interface DesktopHost {
   adjustZoom(action: ZoomAction): Promise<WindowState>
   onWindowStateChanged(listener: (state: WindowState) => void): () => void
 }
+
+export type * from "./identity.js"

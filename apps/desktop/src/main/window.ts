@@ -3,6 +3,7 @@
 import { BrowserWindow } from "electron"
 import { fileURLToPath } from "node:url"
 import { bindDesktopIpc } from "./desktop-ipc.js"
+import { bindCollaborationIpc } from "./collaboration-ipc.js"
 
 /** 创建基础窗口；开发 URL 必须是实际 electron-vite 本机端口，生产只读取本地页面。 */
 export function createWindow(): BrowserWindow {
@@ -22,6 +23,7 @@ export function createWindow(): BrowserWindow {
     webPreferences: { preload: fileURLToPath(new URL("../preload/index.cjs", import.meta.url)), contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false },
   })
   bindDesktopIpc(window, trustedUrl)
+  bindCollaborationIpc(window, trustedUrl)
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", event => { event.preventDefault() })
   window.webContents.on("will-frame-navigate", event => { event.preventDefault() })

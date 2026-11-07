@@ -3,7 +3,8 @@ import { defineConfig } from "electron-vite"
 import react from "@vitejs/plugin-react"
 
 export default defineConfig({
-  main: { build: { outDir: "dist/main" } },
+  // 将公开schema源编入main，避免外置JSON导入在打包时丢失Node所需的导入属性。
+  main: { build: { outDir: "dist/main", externalizeDeps: { exclude: ["@workbench/contracts"] } } },
   preload: { build: { outDir: "dist/preload", rollupOptions: { output: { format: "cjs", entryFileNames: "index.cjs" } } } },
   renderer: {
     plugins: [react(), {

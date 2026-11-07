@@ -13,7 +13,10 @@
     "@workbench/contracts": "0.2.0",
     "@workbench/ui": "0.2.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "tough-cookie": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
