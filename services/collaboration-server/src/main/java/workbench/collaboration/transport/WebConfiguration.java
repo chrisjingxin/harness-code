@@ -1,15 +1,23 @@
 package workbench.collaboration.transport;
 
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
 import workbench.collaboration.*;
+import workbench.collaboration.conversation.*;
+import workbench.collaboration.device.*;
+import workbench.collaboration.execution.*;
 import workbench.collaboration.identity.IdentityService;
+import workbench.collaboration.identity.WorkspaceAccess;
 import workbench.collaboration.infrastructure.Foundation;
+import workbench.collaboration.realtime.*;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.Environment;
 import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.boot.web.servlet.ServletContextInitializer;
-import org.springframework.http.*;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,31 +27,68 @@ import org.springframework.security.web.context.*;
 import org.springframework.security.web.authentication.*;
 import org.springframework.security.web.authentication.session.*;
 import org.springframework.security.web.csrf.*;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.filter.OncePerRequestFilter;
-import jakarta.servlet.*;
-import jakarta.servlet.http.*;
-import java.io.IOException;
+import java.io.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
- * 身份 HTTP 装配：来源/形状 → CSRF → Spring 认证与会话 → 启用状态/成员 → 安全 DTO。
- * Foundation 保留启动前校验；用户凭据只在 HttpSession，不建立角色或密码认证旁路。
+ * 身份/会话/设备 HTTP 装配：来源/形状 → CSRF → Spring 认证与会话 → 启用状态/成员 → 安全 DTO。
+ * 路由只来自有限 RouteCatalog；设备 Bearer 与浏览器 Cookie 严格分流。
  */
 @Configuration(proxyBeanMethods = false)
-@Import(IdentityController.class)
+@Import({IdentityController.class, ConversationController.class, DeviceController.class,
+  ConversationStreamController.class, ApiExceptionHandler.class, DeviceWebSocketConfiguration.class})
 public class WebConfiguration {
   @Bean UserDetailsService noDefaultUsers() { return new InMemoryUserDetailsManager(); }
+  @Bean WorkspaceAccess workspaceAccess(DataSource source) { return new WorkspaceAccess(source); }
   @Bean IdentityService identityService(DataSource source) { return new IdentityService(source); }
+  @Bean RouteCatalog routeCatalog() { return new RouteCatalog(); }
+  @Bean ExecutionCodec executionCodec() { return new ExecutionCodec(); }
+  @Bean DevicePresence devicePresence() { return new DevicePresence(); }
+  @Bean DeviceService deviceService(DataSource source, Contracts contracts, WorkspaceAccess access, DevicePresence presence) {
+    return new DeviceService(source, contracts, access, presence);
+  }
+  @Bean ConversationStore conversationStore(DataSource source) { return new ConversationStore(source); }
+  @Bean ConversationService conversationService(DataSource source, Contracts contracts, WorkspaceAccess access,
+                                                DeviceService devices, ConversationStore store) {
+    return new ConversationService(source, contracts, access, devices, store);
+  }
+  @Bean ExecutionReceiptsService executionReceiptsService(DataSource source, Contracts contracts, ExecutionCodec codec,
+                                                          ConversationStore store, ConversationService conversations) {
+    return new ExecutionReceiptsService(source, contracts, codec, store, conversations);
+  }
+  @Bean ExecutionRecoveryService executionRecoveryService(DataSource source, ConversationStore store, ExecutionCodec codec) {
+    return new ExecutionRecoveryService(source, store, codec);
+  }
+  @Bean DeviceChannel deviceChannel(Contracts contracts, DeviceService devices, DevicePresence presence,
+                                    ConversationStore store, ConversationService conversations,
+                                    ExecutionReceiptsService receipts, ExecutionRecoveryService recovery, ExecutionCodec codec) {
+    return new DeviceChannel(contracts, devices, presence, store, conversations, receipts, recovery, codec);
+  }
+  @Bean DeviceHandshakeInterceptor deviceHandshakeInterceptor(DeviceService devices) { return new DeviceHandshakeInterceptor(devices); }
+  @Bean(initMethod = "start", destroyMethod = "stop")
+  @DependsOn("foundation")
+  ExecutionDispatcher executionDispatcher(DataSource source, ConversationStore store, ConversationService conversations,
+                                          DeviceDelivery delivery, ExecutionCodec codec) {
+    return new ExecutionDispatcher(source, store, conversations, delivery, codec);
+  }
+  @Bean ConversationStreamService conversationStreamService(DataSource source, ConversationStore store, WorkspaceAccess access, Contracts contracts) {
+    return new ConversationStreamService(source, store, access, contracts);
+  }
+
   @Bean ServletContextInitializer sessionCookieSecurity(Environment env) {
     boolean secure = env.getRequiredProperty("workbench.origin").startsWith("https://");
     return context -> context.getSessionCookieConfig().setSecure(secure);
   }
-  @Bean SecurityFilterChain security(HttpSecurity http, Foundation foundation, Contracts contracts, IdentityService identity, Environment env) throws Exception {
+
+  @Bean SecurityFilterChain security(HttpSecurity http, Foundation foundation, Contracts contracts, IdentityService identity,
+                                     RouteCatalog catalog, Environment env) throws Exception {
     String origin = env.getRequiredProperty("workbench.origin");
     URI uri = URI.create(origin);
     if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null || (uri.getPath() != null && !uri.getPath().isEmpty()) ||
@@ -54,18 +99,26 @@ public class WebConfiguration {
     login.setSecurityContextRepository(contexts);
     login.setSessionAuthenticationStrategy(new CompositeSessionAuthenticationStrategy(List.of(new ChangeSessionIdAuthenticationStrategy(), new CsrfAuthenticationStrategy(csrf))));
     login.setAuthenticationSuccessHandler((request, response, auth) -> {
+      response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+      response.setCharacterEncoding("UTF-8");
       response.getWriter().write(contracts.encode("CurrentUserResponse", identity.current(auth.getName())));
     });
     login.setAuthenticationFailureHandler((request, response, error) -> failure(contracts, request, response, 401, "DEMO_LOGIN_REJECTED"));
+    RequestMatcher deviceRoute = request -> {
+      var match = catalog.match(request.getRequestURI());
+      return match != null && match.route().auth() == RouteCatalog.Auth.DEVICE;
+    };
     return http.securityContext(c -> c.securityContextRepository(contexts))
       .requestCache(c -> c.disable())
-      .csrf(c -> c.csrfTokenRepository(csrf))
-      .authorizeHttpRequests(a -> a.requestMatchers("/health", "/api/v1/meta", "/api/v1/auth/csrf", "/api/v1/auth/demo-users", "/api/v1/auth/demo-login", "/api/v1/auth/logout").permitAll().anyRequest().authenticated())
+      .csrf(c -> c.csrfTokenRepository(csrf).ignoringRequestMatchers(deviceRoute))
+      .authorizeHttpRequests(a -> a.requestMatchers("/health", "/api/v1/meta", "/api/v1/auth/csrf", "/api/v1/auth/demo-users",
+          "/api/v1/auth/demo-login", "/api/v1/auth/logout").permitAll()
+        .requestMatchers(deviceRoute).permitAll().anyRequest().authenticated())
       .exceptionHandling(h -> h.authenticationEntryPoint((request, response, e) -> failure(contracts, request, response, 401, "AUTHENTICATION_REQUIRED"))
         .accessDeniedHandler((request, response, e) -> failure(contracts, request, response, 403, e instanceof CsrfException ? "CSRF_INVALID" : "REQUEST_SOURCE_REJECTED")))
       .logout(l -> l.logoutRequestMatcher(request -> request.getMethod().equals("POST") && request.getRequestURI().equals("/api/v1/auth/logout"))
         .deleteCookies("WBSESSION").logoutSuccessHandler((request, response, auth) -> response.setStatus(204)))
-      .addFilterBefore(new Boundary(contracts, origin, uri.getRawAuthority()), SecurityContextHolderFilter.class)
+      .addFilterBefore(new Boundary(contracts, origin, uri.getRawAuthority(), catalog), SecurityContextHolderFilter.class)
       .addFilterBefore(login, UsernamePasswordAuthenticationFilter.class).build();
   }
 
@@ -92,7 +145,7 @@ public class WebConfiguration {
     FoundationController(Foundation foundation, Contracts contracts) {
       this.foundation = foundation; this.contracts = contracts;
       Properties p = new Properties();
-      try { p.load(new java.io.StringReader(contracts.resource("build.properties"))); }
+      try { p.load(new StringReader(contracts.resource("build.properties"))); }
       catch (IOException e) { throw new IllegalStateException("构建版本缺失", e); }
       version = Objects.requireNonNull(p.getProperty("productVersion"));
     }
@@ -107,7 +160,6 @@ public class WebConfiguration {
 
   /** 固定文案，不将底层异常/SQL/请求体带给客户端或日志。 */
   public static void failure(Contracts contracts, HttpServletRequest request, HttpServletResponse response, int status, String code) throws IOException {
-    // MVC 异常退出可能清掉已选媒体类型；安全错误必须重新明确声明 JSON。
     response.setContentType("application/json"); response.setCharacterEncoding("UTF-8"); response.setHeader("Cache-Control", "no-store");
     if (code.equals("AUTHENTICATION_REQUIRED")) {
       var session = request.getSession(false);
@@ -115,7 +167,10 @@ public class WebConfiguration {
       SecurityContextHolder.clearContext();
     }
     String id = response.getHeader("X-Request-Id");
-    if (id == null) id = UUID.randomUUID().toString();
+    if (id == null) {
+      id = UUID.randomUUID().toString();
+      response.setHeader("X-Request-Id", id);
+    }
     response.setStatus(status);
     String message = switch (code) {
       case "AUTHENTICATION_REQUIRED" -> "请先登录";
@@ -129,6 +184,15 @@ public class WebConfiguration {
       case "METHOD_NOT_ALLOWED" -> "请求方法不支持";
       case "UNSUPPORTED_MEDIA_TYPE" -> "请求正文必须使用 JSON";
       case "PAYLOAD_TOO_LARGE" -> "请求体过大";
+      case "DEVICE_AUTHENTICATION_REQUIRED" -> "设备凭据已失效";
+      case "REQUEST_ID_CONFLICT" -> "请求编号已用于其他操作";
+      case "CURSOR_AHEAD" -> "事件位置超出已提交范围";
+      case "PROJECT_NOT_SHARED" -> "项目未共享或已停止共享";
+      case "TARGET_UNAVAILABLE" -> "目标设备或执行配置不可用";
+      case "EXECUTION_STATE_CONFLICT" -> "执行状态已变化，请刷新";
+      case "REGISTRATION_CONFLICT" -> "设备标识已被占用";
+      case "SHARE_VERSION_CONFLICT" -> "共享版本已变化，请刷新后重试";
+      case "DEVICE_ACTION_REJECTED" -> "当前账号不能管理该设备";
       case "INVALID_REQUEST" -> "请求参数无效";
       default -> "服务暂时无法处理请求";
     };
@@ -141,46 +205,95 @@ public class WebConfiguration {
     response.getWriter().write(body);
   }
 
-  /** 在 CSRF 前限制路由、体积和请求形状，后续只消费已校验的 record。 */
+  /** 在 CSRF 前限制路由、体积和查询形状，后续只消费已校验的请求。 */
   private static final class Boundary extends OncePerRequestFilter {
     private final Contracts contracts;
     private final String origin;
     private final String authority;
-    Boundary(Contracts contracts, String origin, String authority) { this.contracts = contracts; this.origin = origin; this.authority = authority; }
+    private final RouteCatalog catalog;
+    Boundary(Contracts contracts, String origin, String authority, RouteCatalog catalog) {
+      this.contracts = contracts; this.origin = origin; this.authority = authority; this.catalog = catalog;
+    }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
       String requestId = request.getHeader("X-Request-Id");
       if (requestId == null || !requestId.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) requestId = UUID.randomUUID().toString();
-      response.setHeader("X-Request-Id", requestId); response.setHeader("Cache-Control", "no-store"); response.setContentType("application/json"); response.setCharacterEncoding("UTF-8");
+      response.setHeader("X-Request-Id", requestId); response.setHeader("Cache-Control", "no-store");
+      response.setContentType("application/json"); response.setCharacterEncoding("UTF-8");
       try {
         String path = request.getRequestURI();
-        if (!authority.equals(request.getHeader("Host")) || (!path.equals("/health") && !origin.equals(request.getHeader("Origin")))) throw new ApiProblem(403, "REQUEST_SOURCE_REJECTED");
+        RouteCatalog.Match match = catalog.match(path);
+        if (match == null) throw new ApiProblem(404, "RESOURCE_NOT_FOUND");
+        RouteCatalog.Route route = match.route();
+        String method = request.getMethod();
+        if (!route.methods().contains(method)) throw new ApiProblem(405, "METHOD_NOT_ALLOWED");
+        if (!authority.equals(request.getHeader("Host"))) throw new ApiProblem(403, "REQUEST_SOURCE_REJECTED");
+        if (!path.equals("/health") && !origin.equals(request.getHeader("Origin"))) throw new ApiProblem(403, "REQUEST_SOURCE_REJECTED");
         if (!path.equals("/health") && !"1".equals(request.getHeader("X-Workbench-Protocol-Version"))) throw new ApiProblem(426, "PROTOCOL_VERSION_UNSUPPORTED");
-        if (request.getQueryString() != null) throw new ApiProblem(400, "INVALID_REQUEST");
-        boolean post = path.equals("/api/v1/auth/demo-login") || path.equals("/api/v1/auth/logout");
-        boolean memberPath = path.matches("/api/v1/workspaces/[^/]+/members");
-        boolean get = Set.of("/health", "/api/v1/meta", "/api/v1/auth/csrf", "/api/v1/auth/demo-users", "/api/v1/auth/me", "/api/v1/workspaces").contains(path) || memberPath;
-        if (!get && !post) throw new ApiProblem(404, "RESOURCE_NOT_FOUND");
-        if (!request.getMethod().equals(post ? "POST" : "GET")) throw new ApiProblem(405, "METHOD_NOT_ALLOWED");
-        if (memberPath && !path.substring("/api/v1/workspaces/".length(), path.length() - "/members".length()).matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) throw new ApiProblem(400, "INVALID_REQUEST");
-        if (request.getContentLengthLong() > 16384) throw new ApiProblem(413, "PAYLOAD_TOO_LARGE");
-        byte[] bytes = request.getInputStream().readNBytes(16385);
-        if (bytes.length > 16384) throw new ApiProblem(413, "PAYLOAD_TOO_LARGE");
-        if (path.equals("/api/v1/auth/demo-login")) {
-          if (request.getContentType() == null || !request.getContentType().split(";", 2)[0].trim().equalsIgnoreCase("application/json")) throw new ApiProblem(415, "UNSUPPORTED_MEDIA_TYPE");
-          try { request.setAttribute("workbench.login", contracts.decode("DemoLoginRequest", new String(bytes, StandardCharsets.UTF_8), PlatformDtos.DemoLoginRequest.class)); }
-          catch (RuntimeException e) { throw new ApiProblem(400, "INVALID_REQUEST"); }
-        } else if (bytes.length != 0) throw new ApiProblem(400, "INVALID_REQUEST");
-        chain.doFilter(request, response);
+        if (!match.hasValidPathIds()) throw new ApiProblem(400, "INVALID_REQUEST");
+        validateQuery(request, route, method);
+        // 同一路径上的 GET 读取列表、POST 才写入；列表不需要 JSON 正文。
+        int maxBody = method.equals("POST") ? route.maxBody() : 0;
+        if (request.getContentLengthLong() > maxBody) throw new ApiProblem(413, "PAYLOAD_TOO_LARGE");
+        byte[] bytes = request.getInputStream().readNBytes(maxBody + 1);
+        if (bytes.length > maxBody) throw new ApiProblem(413, "PAYLOAD_TOO_LARGE");
+        if (maxBody > 0) {
+          if (request.getContentType() == null || !request.getContentType().split(";", 2)[0].trim().equalsIgnoreCase("application/json"))
+            throw new ApiProblem(415, "UNSUPPORTED_MEDIA_TYPE");
+          if (bytes.length == 0) throw new ApiProblem(400, "INVALID_REQUEST");
+          if (path.equals("/api/v1/auth/demo-login")) {
+            try { request.setAttribute("workbench.login", contracts.decode("DemoLoginRequest", new String(bytes, StandardCharsets.UTF_8), PlatformDtos.DemoLoginRequest.class)); }
+            catch (RuntimeException e) { throw new ApiProblem(400, "INVALID_REQUEST"); }
+          }
+        }
+        chain.doFilter(new CachedBodyRequest(request, bytes), response);
       } catch (Exception e) {
         if (response.isCommitted()) throw e;
         response.resetBuffer();
         Throwable cause = e;
         while (cause.getCause() != null && !(cause instanceof ApiProblem) && !(cause instanceof DataAccessException) && !(cause instanceof CannotCreateTransactionException)) cause = cause.getCause();
         if (cause instanceof ApiProblem p) failure(contracts, request, response, p.status, p.code);
-        // 断库也可能发生在只读事务取连接时，尚未进入 JdbcTemplate 查询。
         else if (cause instanceof DataAccessException || cause instanceof CannotCreateTransactionException) failure(contracts, request, response, 503, "SERVICE_UNAVAILABLE");
         else failure(contracts, request, response, 500, "INTERNAL_ERROR");
       }
     }
+
+    private void validateQuery(HttpServletRequest request, RouteCatalog.Route route, String method) {
+      String query = request.getQueryString();
+      if (query == null) return;
+      if (!method.equals("GET") || route.query().isEmpty()) throw new ApiProblem(400, "INVALID_REQUEST");
+      if (query.isEmpty()) return;
+      Set<String> names = new HashSet<>();
+      for (String pair : query.split("&", -1)) {
+        String[] parts = pair.split("=", 2);
+        String key = decode(parts[0]);
+        String value = parts.length == 2 ? decode(parts[1]) : "";
+        var rule = route.query().get(key);
+        if (!names.add(key) || rule == null || !rule.matcher(value).matches()) throw new ApiProblem(400, "INVALID_REQUEST");
+      }
+    }
+
+    private static String decode(String value) {
+      try { return java.net.URLDecoder.decode(value, StandardCharsets.UTF_8); }
+      catch (IllegalArgumentException e) { throw new ApiProblem(400, "INVALID_REQUEST"); }
+    }
+  }
+
+  /** 已校验正文缓存：控制器仍可通过 @RequestBody 读取同一字节。 */
+  private static final class CachedBodyRequest extends HttpServletRequestWrapper {
+    private final byte[] body;
+    CachedBodyRequest(HttpServletRequest request, byte[] body) { super(request); this.body = body; }
+    @Override public ServletInputStream getInputStream() {
+      ByteArrayInputStream stream = new ByteArrayInputStream(body);
+      return new ServletInputStream() {
+        @Override public int read() { return stream.read(); }
+        @Override public int read(byte[] target, int offset, int length) { return stream.read(target, offset, length); }
+        @Override public boolean isFinished() { return stream.available() == 0; }
+        @Override public boolean isReady() { return true; }
+        @Override public void setReadListener(ReadListener listener) { }
+      };
+    }
+    @Override public BufferedReader getReader() { return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8)); }
+    @Override public int getContentLength() { return body.length; }
+    @Override public long getContentLengthLong() { return body.length; }
   }
 }

@@ -24,3 +24,7 @@ export interface DesktopHost {
 }
 
 export type * from "./identity.js"
+export type * from "./conversation.js"
+export type * from "./execution.js"
+export type * from "./device.js"
+export * from "./deterministic.js"

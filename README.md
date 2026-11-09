@@ -1,6 +1,6 @@
 # 独立桌面协作工作台
 
-本分支以 Electron + React/TypeScript 建立独立桌面产品。目前提供基础窗口、原生目录选择、主题和窗口缩放；另有需显式启动的 Java 数据基础，可执行契约检查、迁移、预置用户初始化和健康探测。最小演示登录、真实工作区/成员与退出已接入，服务需显式配置；共享会话、Agent 执行、文件/Git 与 Trace 尚未接入；没有预置聊天数据。Runner 当前只有工程骨架。
+本分支以 Electron + React/TypeScript 建立独立桌面产品，提供基础窗口、主题、缩放、演示登录及本机项目登记、共享和执行器托管。Java 协作服务支持共享会话持久保存、排队、历史与 SSE 同步，通过设备通道连接本机 Runner。完整对话界面、真实 ACP Agent、文件/Git 与 Trace 由后续任务接入。服务和数据库需显式配置、启动。
 
 ## 从源码启动
 
@@ -43,9 +43,9 @@ npm run server:start
 WORKBENCH_SERVICE_ORIGIN=http://127.0.0.1:18084 npm run dev
 ```
 
-HTTPS用于远程服务；仅本机允许上述loopback HTTP。窗口的“演示身份”选择user01～user03后登录，查看真实成员；“退出 / 切换账号”先退出再重新选择。没有服务配置时基础窗口照常打开并显示身份不可用，不自动启动Java/MySQL，不显示假账号。关闭窗口丢弃本机登录，重开需重登；失败退出明确服务端未确认。Cookie/CSRF只留main内存，不给React或写入磁盘。完整使用边界见用户指南。
+HTTPS用于远程服务；仅本机允许上述loopback HTTP。窗口的“演示身份”选择user01～user03后登录，查看真实成员；“退出 / 切换账号”先退出再重新选择。在“本机设备”选择目录并登记，明确共享后可启动本机执行器。关窗保留已启动的执行器，重开需重新登录；“停止”或应用退出会等待执行器收尾。没有服务配置时基础窗口仍可使用，身份区域显示不可用。Cookie/CSRF只留main内存，设备凭据和执行记录保存在原设备的受限SQLite账本中。完整使用边界见用户指南。
 
-工具按各设备的 OS/CPU/系统版本选择；当前 MySQL 冒烟不代表真实 TDSQL 已验收。具体三表、接口、证书和隔离准备见 [HC-194 Spec](docs/developer/spec/HC-194-协作契约与云端基础.md) 与 [Plan](docs/developer/plan/HC-194-协作契约与云端基础.md)。
+工具按各设备的 OS/CPU/系统版本选择。当前数据迁移为V001身份三表、V002设备三表与V003会话执行六表，普通启动只校验已有迁移。准备方法见 [HC-194 Plan](docs/developer/plan/HC-194-协作契约与云端基础.md)，本轮本机冒烟与覆盖范围见 [HC-195 Task](docs/developer/task/HC-195-共享会话与实时同步.md) 和 [HC-196 Task](docs/developer/task/HC-196-设备接入与本机执行.md)。Windows、目标TDSQL和真实ACP的整体验证留HC-204。
 
 ## 工程检查
 

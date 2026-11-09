@@ -101,12 +101,54 @@ public final class Contracts {
       Map.entry("WorkspaceListResponse", PlatformDtos.WorkspaceListResponse.class), Map.entry("MembersResponse", PlatformDtos.MembersResponse.class),
       Map.entry("DemoLoginRequest", PlatformDtos.DemoLoginRequest.class), Map.entry("CsrfResponse", PlatformDtos.CsrfResponse.class),
       Map.entry("MetaResponse", PlatformDtos.MetaResponse.class), Map.entry("HealthResponse", PlatformDtos.HealthResponse.class),
-      Map.entry("ErrorResponse", PlatformDtos.ErrorResponse.class), Map.entry("PlatformMessageHeader", PlatformDtos.PlatformMessageHeader.class));
+      Map.entry("ErrorResponse", PlatformDtos.ErrorResponse.class), Map.entry("PlatformMessageHeader", PlatformDtos.PlatformMessageHeader.class),
+      Map.entry("ConversationSummary", workbench.collaboration.conversation.ConversationDtos.ConversationSummary.class),
+      Map.entry("Message", workbench.collaboration.conversation.ConversationDtos.Message.class),
+      Map.entry("ExecutionView", workbench.collaboration.conversation.ConversationDtos.ExecutionView.class),
+      Map.entry("CreateConversationRequest", workbench.collaboration.conversation.ConversationDtos.CreateConversationRequest.class),
+      Map.entry("CreateConversationResponse", workbench.collaboration.conversation.ConversationDtos.CreateConversationResponse.class),
+      Map.entry("SendInputRequest", workbench.collaboration.conversation.ConversationDtos.SendInputRequest.class),
+      Map.entry("InputSavedResponse", workbench.collaboration.conversation.ConversationDtos.InputSavedResponse.class),
+      Map.entry("CancelExecutionRequest", workbench.collaboration.conversation.ConversationDtos.CancelExecutionRequest.class),
+      Map.entry("CancelExecutionResponse", workbench.collaboration.conversation.ConversationDtos.CancelExecutionResponse.class),
+      Map.entry("HistoryResponse", workbench.collaboration.conversation.ConversationDtos.HistoryResponse.class),
+      Map.entry("DeviceSummary", workbench.collaboration.device.DeviceDtos.DeviceSummary.class),
+      Map.entry("ProjectSummary", workbench.collaboration.device.DeviceDtos.ProjectSummary.class),
+      Map.entry("DeviceRegistrationRequest", workbench.collaboration.device.DeviceDtos.DeviceRegistrationRequest.class),
+      Map.entry("DeviceRegistrationResponse", workbench.collaboration.device.DeviceDtos.DeviceRegistrationResponse.class),
+      Map.entry("DeviceListResponse", workbench.collaboration.device.DeviceDtos.DeviceListResponse.class),
+      Map.entry("DeviceRevokedResponse", workbench.collaboration.device.DeviceDtos.DeviceRevokedResponse.class),
+      Map.entry("ProjectListResponse", workbench.collaboration.device.DeviceDtos.ProjectListResponse.class),
+      Map.entry("ProjectSavedResponse", workbench.collaboration.device.DeviceDtos.ProjectSavedResponse.class),
+      Map.entry("ExecutionStartMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionStartMessage.class),
+      Map.entry("ExecutionCancelMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionCancelMessage.class),
+      Map.entry("ExecutionStartDecisionMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionStartDecisionMessage.class),
+      Map.entry("ExecutionAcceptedMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionAcceptedMessage.class),
+      Map.entry("ExecutionNativeBoundMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionNativeBoundMessage.class),
+      Map.entry("ExecutionRunningMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionRunningMessage.class),
+      Map.entry("ExecutionOutputMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionOutputMessage.class),
+      Map.entry("ExecutionTerminalMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionTerminalMessage.class),
+      Map.entry("ExecutionCancelReceivedMessage", workbench.collaboration.execution.ExecutionDtos.ExecutionCancelReceivedMessage.class),
+      Map.entry("RecordBatchResult", workbench.collaboration.execution.ExecutionDtos.RecordBatchResult.class),
+      Map.entry("ReconcileResult", workbench.collaboration.execution.ExecutionDtos.ReconcileResult.class),
+      Map.entry("DeviceWelcomeMessage", workbench.collaboration.device.DeviceDtos.DeviceWelcomeMessage.class),
+      Map.entry("DeviceReadyMessage", workbench.collaboration.device.DeviceDtos.DeviceReadyMessage.class),
+      Map.entry("DeviceProblemMessage", workbench.collaboration.device.DeviceDtos.DeviceProblemMessage.class),
+      Map.entry("DeviceProjectChangedMessage", workbench.collaboration.device.DeviceDtos.DeviceProjectChangedMessage.class));
+    workbench.collaboration.execution.ExecutionCodec codec = new workbench.collaboration.execution.ExecutionCodec();
     for (JsonNode file : catalog.get("fixtures")) for (JsonNode fixture : mapper.readTree(resource("platform/fixtures/" + safeName(file.asText())))) {
       String type = fixture.get("schema").asText();
       boolean valid = valid(type, fixture.get("data").toString());
       if (valid != fixture.get("valid").asBoolean()) throw new IllegalStateException("共同夹具失败: " + fixture.get("name").asText());
-      if (valid && records.containsKey(type)) encode(type, mapper.treeToValue(fixture.get("data"), records.get(type)));
+      if (valid && records.containsKey(type)) {
+        Object record = mapper.treeToValue(fixture.get("data"), records.get(type));
+        encode(type, record);
+        // 同一份夹具的确定性正文/指纹必须两端一致；Java 不另存预期值。
+        if (fixture.has("canonical")) {
+          if (!codec.body(record).equals(fixture.get("canonical").asText())) throw new IllegalStateException("确定性正文不一致: " + fixture.get("name").asText());
+          if (!codec.sha256(record).equals(fixture.get("bodySha256").asText())) throw new IllegalStateException("确定性指纹不一致: " + fixture.get("name").asText());
+        }
+      }
       results.add(Map.of("name", fixture.get("name").asText(), "valid", valid));
     }
     System.out.println(mapper.writeValueAsString(Map.of("engine", "java", "results", results)));

@@ -246,7 +246,16 @@
                 "PAYLOAD_TOO_LARGE",
                 "PROTOCOL_VERSION_UNSUPPORTED",
                 "SERVICE_UNAVAILABLE",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "REQUEST_ID_CONFLICT",
+                "CURSOR_AHEAD",
+                "PROJECT_NOT_SHARED",
+                "TARGET_UNAVAILABLE",
+                "EXECUTION_STATE_CONFLICT",
+                "REGISTRATION_CONFLICT",
+                "DEVICE_AUTHENTICATION_REQUIRED",
+                "DEVICE_ACTION_REJECTED",
+                "SHARE_VERSION_CONFLICT"
               ]
             },
             "message": {

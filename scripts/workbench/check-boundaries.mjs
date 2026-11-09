@@ -21,6 +21,8 @@ const allowed = {
 }
 const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|harness-provider|deepagents)/
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
+/** node: 前缀在 Node 新版本中可能尚未进入 builtinModules（如 node:sqlite）；仍按内建处理。 */
+const isBuiltin = specifier => builtins.has(specifier) || specifier.startsWith("node:")
 const inside = (path, base) => { const rel = relative(base, path); return !rel.startsWith("..") && !isAbsolute(rel) }
 const loadJson = async path => JSON.parse(await readFile(path, "utf8"))
 
@@ -45,10 +47,10 @@ function validateImport(specifier, file, owner, packages) {
   }
   if (specifier.startsWith("#")) throw new Error("不允许用 package imports 别名绕过边界")
   const ui = owner.manifest.name === "@workbench/ui" || file.includes(`${join("src", "renderer")}/`)
-  if (builtins.has(specifier) || specifier === "electron") {
+  if (isBuiltin(specifier) || specifier === "electron") {
     if (ui || owner.manifest.name === "@workbench/contracts") throw new Error("UI/契约不能访问 Node/Electron")
   }
-  if (builtins.has(specifier)) return
+  if (isBuiltin(specifier)) return
   const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]
   const declarations = { ...owner.manifest.dependencies, ...owner.manifest.devDependencies, ...owner.manifest.peerDependencies }
   if (!(name in declarations)) throw new Error(`未声明依赖 ${name}`)

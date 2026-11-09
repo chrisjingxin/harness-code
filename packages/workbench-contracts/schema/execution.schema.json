@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.invalid/schema/execution.schema.json",
+  "$defs": {
+    "BodySha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "RunnerSequence": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+    },
+    "NativeSessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "ExecutionInput": {
+      "type": "object",
+      "properties": {
+        "text": { "$ref": "https://workbench.invalid/schema/conversation.schema.json#/$defs/MessageText" }
+      },
+      "required": ["text"],
+      "additionalProperties": false
+    },
+    "StartPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputSequence": { "$ref": "https://workbench.invalid/schema/conversation.schema.json#/$defs/Sequence" },
+        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "shareVersion": { "$ref": "https://workbench.invalid/schema/conversation.schema.json#/$defs/ShareVersion" },
+        "nativeSessionId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/NativeSessionId" }
+          ]
+        },
+        "input": { "$ref": "#/$defs/ExecutionInput" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "inputSequence", "initiatedByUserId", "agentConfigId", "shareVersion", "nativeSessionId", "input", "bodySha256"],
+      "additionalProperties": false
+    },
+    "CancelPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "requestedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "startBodySha256", "requestedByUserId", "bodySha256"],
+      "additionalProperties": false
+    },
+    "DecisionReasonCode": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "enum": ["CANCEL_REQUESTED", "AUTHOR_UNAVAILABLE", "PROJECT_NOT_SHARED", "SHARE_VERSION_CHANGED", "DEVICE_REVOKED", "TARGET_INVALID"]
+        }
+      ]
+    },
+    "StartDecisionPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "decision": { "type": "string", "enum": ["allow", "deny"] },
+        "reasonCode": { "$ref": "#/$defs/DecisionReasonCode" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "startBodySha256", "decision", "reasonCode", "bodySha256"],
+      "additionalProperties": false
+    },
+    "AcceptedPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "bodySha256"],
+      "additionalProperties": false
+    },
+    "NativeBoundPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "startDecisionMessageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "nativeSessionId": { "$ref": "#/$defs/NativeSessionId" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "startDecisionMessageId", "nativeSessionId", "bodySha256"],
+      "additionalProperties": false
+    },
+    "RunningPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "startDecisionMessageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "nativeSessionId": { "$ref": "#/$defs/NativeSessionId" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "startDecisionMessageId", "nativeSessionId", "bodySha256"],
+      "additionalProperties": false
+    },
+    "MessageCreatedChange": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "message.created", "type": "string" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["type", "messageId"],
+      "additionalProperties": false
+    },
+    "MessageTextAppendedChange": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "message.text.appended", "type": "string" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      },
+      "required": ["type", "messageId", "text"],
+      "additionalProperties": false
+    },
+    "MessageClosedChange": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "message.closed", "type": "string" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "state": { "type": "string", "enum": ["completed", "interrupted"] }
+      },
+      "required": ["type", "messageId", "state"],
+      "additionalProperties": false
+    },
+    "ExecutionChange": {
+      "oneOf": [
+        { "$ref": "#/$defs/MessageCreatedChange" },
+        { "$ref": "#/$defs/MessageTextAppendedChange" },
+        { "$ref": "#/$defs/MessageClosedChange" }
+      ]
+    },
+    "OutputPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "startDecisionMessageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "change": { "$ref": "#/$defs/ExecutionChange" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "startDecisionMessageId", "change", "bodySha256"],
+      "additionalProperties": false
+    },
+    "TerminalReasonCode": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "enum": ["AUTHOR_UNAVAILABLE", "PROJECT_NOT_SHARED", "SHARE_VERSION_CHANGED", "DEVICE_REVOKED", "TARGET_INVALID", "NATIVE_SESSION_UNAVAILABLE", "PROJECT_ROOT_CHANGED", "CAPABILITY_UNAVAILABLE", "EXECUTION_FAILED", "CANCELLED_BY_RUNNER"]
+        }
+      ]
+    },
+    "TerminalPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "startDecisionMessageId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+          ]
+        },
+        "nativeSessionId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/NativeSessionId" }
+          ]
+        },
+        "state": { "type": "string", "enum": ["succeeded", "failed", "cancelled", "rejected"] },
+        "reasonCode": { "$ref": "#/$defs/TerminalReasonCode" },
+        "invocationState": { "type": "string", "enum": ["notInvoked", "finished"] },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "startDecisionMessageId", "nativeSessionId", "state", "reasonCode", "invocationState", "bodySha256"],
+      "additionalProperties": false
+    },
+    "CancelReceivedPayload": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "runnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "cancelCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" }
+      },
+      "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "runnerSequence", "startBodySha256", "cancelCommandId", "bodySha256"],
+      "additionalProperties": false
+    },
+    "EventsAckPayload": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "lastCommittedRunnerSequence": { "$ref": "#/$defs/RunnerSequence" }
+      },
+      "required": ["executionId", "lastCommittedRunnerSequence"],
+      "additionalProperties": false
+    },
+    "ExecutionStartMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.start", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/StartPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionCancelMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.cancel", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/CancelPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionStartDecisionMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.start.decision", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/StartDecisionPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionAcceptedMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.accepted", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/AcceptedPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionNativeBoundMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.native.bound", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/NativeBoundPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionRunningMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.running", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/RunningPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionOutputMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.output", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/OutputPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionTerminalMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.terminal", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/TerminalPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionCancelReceivedMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.cancel.received", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/CancelReceivedPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionEventsAckMessage": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.events.ack", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "payload": { "$ref": "#/$defs/EventsAckPayload" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionRunnerMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/ExecutionAcceptedMessage" },
+        { "$ref": "#/$defs/ExecutionNativeBoundMessage" },
+        { "$ref": "#/$defs/ExecutionRunningMessage" },
+        { "$ref": "#/$defs/ExecutionOutputMessage" },
+        { "$ref": "#/$defs/ExecutionTerminalMessage" },
+        { "$ref": "#/$defs/ExecutionCancelReceivedMessage" }
+      ]
+    },
+    "ExecutionMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/ExecutionStartMessage" },
+        { "$ref": "#/$defs/ExecutionCancelMessage" },
+        { "$ref": "#/$defs/ExecutionStartDecisionMessage" },
+        { "$ref": "#/$defs/ExecutionAcceptedMessage" },
+        { "$ref": "#/$defs/ExecutionNativeBoundMessage" },
+        { "$ref": "#/$defs/ExecutionRunningMessage" },
+        { "$ref": "#/$defs/ExecutionOutputMessage" },
+        { "$ref": "#/$defs/ExecutionTerminalMessage" },
+        { "$ref": "#/$defs/ExecutionCancelReceivedMessage" },
+        { "$ref": "#/$defs/ExecutionEventsAckMessage" }
+      ]
+    },
+    "RecordBatchRequest": {
+      "type": "object",
+      "properties": {
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "connectionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ExecutionRunnerMessage" },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": ["deviceId", "connectionId", "executionId", "events"],
+      "additionalProperties": false
+    },
+    "ExecutionAck": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "lastCommittedRunnerSequence": { "$ref": "#/$defs/RunnerSequence" }
+      },
+      "required": ["executionId", "lastCommittedRunnerSequence"],
+      "additionalProperties": false
+    },
+    "RecordBatchResult": {
+      "type": "object",
+      "properties": {
+        "ack": { "$ref": "#/$defs/ExecutionAck" },
+        "startDecision": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/ExecutionStartDecisionMessage" }
+          ]
+        }
+      },
+      "required": ["ack", "startDecision"],
+      "additionalProperties": false
+    },
+    "ExecutionProblemGap": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "gap", "type": "string" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "expectedRunnerSequence": { "$ref": "#/$defs/RunnerSequence" },
+        "lastCommittedRunnerSequence": { "$ref": "#/$defs/RunnerSequence" }
+      },
+      "required": ["kind", "executionId", "expectedRunnerSequence", "lastCommittedRunnerSequence"],
+      "additionalProperties": false
+    },
+    "ExecutionProblemPlain": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["conflict", "targetMismatch", "bindingConflict", "invalidTransition", "storeUnavailable"] },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["kind", "executionId"],
+      "additionalProperties": false
+    },
+    "ExecutionProblem": {
+      "oneOf": [
+        { "$ref": "#/$defs/ExecutionProblemGap" },
+        { "$ref": "#/$defs/ExecutionProblemPlain" }
+      ]
+    },
+    "RecoveryLocalState": {
+      "type": "string",
+      "enum": ["notFound", "accepted", "notInvoked", "invoking", "running", "terminalPending", "unknown"]
+    },
+    "RecoveryAction": {
+      "type": "string",
+      "enum": ["continueOriginal", "resendSame", "waitForEvidence", "terminalSaved"]
+    },
+    "ReconcileRequest": {
+      "type": "object",
+      "properties": {
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "connectionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ledgerId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "startBodySha256": { "$ref": "#/$defs/BodySha256" },
+        "localState": { "$ref": "#/$defs/RecoveryLocalState" },
+        "storedDecisionMessageId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+          ]
+        },
+        "nativeSessionId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/NativeSessionId" }
+          ]
+        }
+      },
+      "required": ["deviceId", "connectionId", "ledgerId", "executionId", "startCommandId", "startBodySha256", "localState", "storedDecisionMessageId", "nativeSessionId"],
+      "additionalProperties": false
+    },
+    "ReconcileResult": {
+      "type": "object",
+      "properties": {
+        "action": { "$ref": "#/$defs/RecoveryAction" },
+        "ack": { "$ref": "#/$defs/ExecutionAck" },
+        "startDecision": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/ExecutionStartDecisionMessage" }
+          ]
+        }
+      },
+      "required": ["action", "ack", "startDecision"],
+      "additionalProperties": false
+    },
+    "DeterministicFixture": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "message": { "$ref": "#/$defs/ExecutionMessage" },
+        "bodySha256": { "$ref": "#/$defs/BodySha256" },
+        "canonical": { "type": "string" }
+      },
+      "required": ["name", "message", "bodySha256", "canonical"],
+      "additionalProperties": false
+    }
+  }
+}

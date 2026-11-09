@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs');fs.copyFileSync('src/theme.css','dist/theme.css');fs.copyFileSync('src/identity/identity.css','dist/identity/identity.css')\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'),p=require('node:path');const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.css')){const rel=p.relative('src',f);fs.mkdirSync(p.dirname(p.join('dist',rel)),{recursive:true});fs.copyFileSync(f,p.join('dist',rel))}}};walk('src')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "exports": {

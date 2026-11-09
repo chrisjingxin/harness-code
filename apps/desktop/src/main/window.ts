@@ -3,10 +3,11 @@
 import { BrowserWindow } from "electron"
 import { fileURLToPath } from "node:url"
 import { bindDesktopIpc } from "./desktop-ipc.js"
+import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { bindCollaborationIpc } from "./collaboration-ipc.js"
 
 /** 创建基础窗口；开发 URL 必须是实际 electron-vite 本机端口，生产只读取本地页面。 */
-export function createWindow(): BrowserWindow {
+export function createWindow(supervisor: RunnerSupervisor): BrowserWindow {
   // 构建时固定开发标志，避免预览或生产进程继承开发环境变量后加载网络页面。
   const developmentUrl = import.meta.env.DEV ? process.env.ELECTRON_RENDERER_URL : undefined
   let trustedUrl = new URL("../renderer/index.html", import.meta.url).href
@@ -23,7 +24,7 @@ export function createWindow(): BrowserWindow {
     webPreferences: { preload: fileURLToPath(new URL("../preload/index.cjs", import.meta.url)), contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false },
   })
   bindDesktopIpc(window, trustedUrl)
-  bindCollaborationIpc(window, trustedUrl)
+  bindCollaborationIpc(window, trustedUrl, supervisor)
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", event => { event.preventDefault() })
   window.webContents.on("will-frame-navigate", event => { event.preventDefault() })
