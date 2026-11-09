@@ -2,6 +2,19 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, Tray } from "electron"
 import { createWindow } from "./window.js"
 import { RunnerSupervisor } from "./runner-supervisor.js"
+import { realpathSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, dirname } from "node:path"
+
+if (__WORKBENCH_UI_PREVIEW__) {
+  // 预览是独立进程，不能读写正式工作台的用户目录或设备账本。
+  const previewData = process.env.WORKBENCH_UI_PREVIEW_DATA
+  if (!previewData || dirname(realpathSync(previewData)) !== realpathSync(tmpdir()) || !basename(previewData).startsWith("hc205-ui-preview-")) {
+    throw new Error("主题预览必须使用隔离的临时用户目录")
+  }
+  app.setPath("userData", previewData)
+  app.setPath("sessionData", previewData)
+}
 
 const supervisor = new RunnerSupervisor()
 let tray: Tray | null = null
@@ -14,7 +27,7 @@ function openWindow(): void {
   else if (!exiting) createWindow(supervisor)
 }
 
-app.setName("协作工作台")
+app.setName(__WORKBENCH_UI_PREVIEW__ ? "工作台主题预览" : "协作工作台")
 app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }] }] : []),
@@ -33,6 +46,7 @@ app.whenReady().then(() => {
 }).catch(error => { console.error("桌面启动失败", error); app.quit() })
 
 app.on("window-all-closed", () => {
+  if (__WORKBENCH_UI_PREVIEW__) { app.quit(); return }
   if (process.platform !== "darwin" && !supervisor.hasChild()) app.quit()
 })
 app.on("before-quit", event => {

@@ -7,6 +7,8 @@ const host: DesktopHost = {
   getWindowState: () => ipcRenderer.invoke("workbench:get-window-state"),
   setThemeMode: mode => ipcRenderer.invoke("workbench:set-theme-mode", mode),
   adjustZoom: action => ipcRenderer.invoke("workbench:adjust-zoom", action),
+  copyText: text => ipcRenderer.invoke("workbench:copy-text", text),
+  openExternal: href => ipcRenderer.invoke("workbench:open-external", href),
   onWindowStateChanged: listener => {
     const receive = (_event: unknown, state: WindowState) => listener(state)
     ipcRenderer.on("workbench:window-state", receive)

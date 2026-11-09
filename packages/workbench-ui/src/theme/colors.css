@@ -1,0 +1,175 @@
+/* 工作台唯一公共色源：品牌色与状态、Diff 和语法色分开；浅深色由根节点决定。 */
+:root { --brand: #6c3cf0; }
+
+/* ---------- Semantic token：唯一 light/dark 映射 ---------- */
+:root:not([data-theme]),
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f3f3f6;
+  --field-bg: #f9f9fa;
+  --surface-3: #e9e9ef;
+  --line: #ececec;
+  --line-strong: #d0d0d8;
+  --text: #29292e;
+  --text-soft: #606067;
+  --muted: #66666e;
+  --subtle: #8b8b95;
+  --accent: var(--brand);
+  --accent-hover: color-mix(in srgb, var(--brand) 88%, #000000);
+  --accent-text: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  --accent-soft-2: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --accent-border: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  --accent-border-strong: color-mix(in srgb, var(--accent) 48%, var(--surface));
+  --action: var(--brand);
+  --action-hover: var(--accent-hover);
+  --action-text: #ffffff;
+  --success: #397047;
+  --warning: #966600;
+  --danger: #a43733;
+  /* 鲜亮 danger：只给停止按钮等图形化中断动作（文字仍用 --danger 保证对比度）。 */
+  --danger-vivid: #e5484d;
+  --danger-soft: rgba(164, 55, 51, .07);
+  --chrome: var(--surface);
+  --tool-output-bg: var(--surface-2);
+  --tool-output-text: var(--text-soft);
+  --interaction-bg: var(--surface);
+  --command-bg: var(--surface-2);
+  --command-text: var(--text-soft);
+  --composer-bg: var(--bg);
+  --drawer-bg: var(--surface);
+  --inline-code-text: var(--accent-hover);
+  --code-bg: var(--accent-soft);
+  --code-border: var(--accent-border);
+  --link-text: var(--accent);
+  --link-text-hover: var(--accent-hover);
+  --success-text: var(--success);
+  --warning-text: var(--warning);
+  --danger-text: var(--danger);
+  --git-diff-add-bg: #edf7f1;
+  --git-diff-remove-bg: #fff0f2;
+  --diff-add-bg: #d5e9da;
+  --diff-remove-bg: #f0d3d0;
+  --diff-add-gutter-bg: #e4f1e7;
+  --diff-remove-gutter-bg: #f7e3e1;
+  --diff-add-stripe: #2dbb69;
+  --diff-remove-stripe: #e94945;
+  --diff-add-sign: #218c4e;
+  --diff-remove-sign: #c93430;
+  /* 文件类型图标色：取自语法色板；装饰性图标，不参与文字对比度验收。 */
+  --file-ts: #1f6c9f;
+  --file-js: #8a5a1f;
+  --file-code: #3a5e36;
+  --file-style: #6e4f7e;
+  --file-config: #2f5d6e;
+  --file-image: #9f2f2d;
+  --shadow: 0 1px 1px rgba(32, 32, 36, .02), 0 10px 30px rgba(32, 32, 36, .05);
+  --shadow-float: 0 2px 10px rgba(32, 32, 36, .05);
+
+  --syntax-comment: #8f8c84;
+  --syntax-keyword: #9f2f2d;
+  --syntax-function: #1f6c9f;
+  --syntax-variable: #6e4f7e;
+  --syntax-string: #3a5e36;
+  --syntax-number: #8a5a1f;
+  --syntax-type: #2f5d6e;
+  --syntax-operator: #6b5f4e;
+  --syntax-punctuation: #8f8c84;
+  --syntax-tag: #9f2f2d;
+  --syntax-attribute: #1f6c9f;
+  --syntax-constant: #8a5a1f;
+
+  /* 品牌、消息与选中各用独立语义；不把紫色铺满消息流。 */
+  --sidebar-bg: #fbfbfe;
+  --sidebar-search-bg: color-mix(in srgb, var(--line) 42%, var(--sidebar-bg));
+  --message-user-bg: #f3f3f6;
+  --thread-selected-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --overlay-scrim: rgba(32, 32, 36, .3);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #19191c;
+  --surface: #212124;
+  --surface-2: #27272b;
+  --field-bg: var(--surface-2);
+  --surface-3: #303037;
+  --line: #36363e;
+  --line-strong: #555560;
+  --text: #f0f0f3;
+  --text-soft: #bdbdc6;
+  --muted: #b5b5c2;
+  --subtle: #83838e;
+  --accent: color-mix(in srgb, var(--brand) 60%, #ffffff);
+  --accent-hover: color-mix(in srgb, var(--brand) 40%, #ffffff);
+  --accent-text: #19191c;
+  --accent-soft: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  --accent-soft-2: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  --accent-border: color-mix(in srgb, var(--accent) 28%, var(--surface));
+  --accent-border-strong: color-mix(in srgb, var(--accent) 56%, var(--surface));
+  --action: var(--brand);
+  --action-hover: color-mix(in srgb, var(--brand) 88%, #000000);
+  --action-text: #ffffff;
+  --success: #8fc39a;
+  --warning: #ddb76d;
+  --danger: #e6a49f;
+  --danger-vivid: #f07068;
+  --danger-soft: rgba(230, 164, 159, .10);
+  --chrome: var(--surface);
+  --tool-output-bg: var(--surface-3);
+  --tool-output-text: var(--text-soft);
+  --interaction-bg: var(--surface);
+  --command-bg: var(--surface-3);
+  --command-text: var(--text-soft);
+  --composer-bg: var(--bg);
+  --drawer-bg: var(--surface);
+  --inline-code-text: var(--accent-hover);
+  --code-bg: var(--accent-soft);
+  --code-border: var(--accent-border);
+  --link-text: var(--accent-hover);
+  --link-text-hover: var(--accent-hover);
+  --success-text: var(--success);
+  --warning-text: var(--warning);
+  --danger-text: var(--danger);
+  --git-diff-add-bg: #20392d;
+  --git-diff-remove-bg: #41232e;
+  --diff-add-bg: #1f3224;
+  --diff-remove-bg: #3c1f1b;
+  --diff-add-gutter-bg: #132116;
+  --diff-remove-gutter-bg: #28130e;
+  --diff-add-stripe: #41c977;
+  --diff-remove-stripe: #f4413d;
+  --diff-add-sign: #41c977;
+  --diff-remove-sign: #f4413d;
+  /* 文件类型图标色：dark 语法色板的柔彩映射。 */
+  --file-ts: #a8c9e8;
+  --file-js: #e0c28a;
+  --file-code: #a6cdac;
+  --file-style: #cdb8e0;
+  --file-config: #a6c6cc;
+  --file-image: #e5b0ae;
+  --shadow: 0 1px 1px rgba(0, 0, 0, .18), 0 10px 30px rgba(0, 0, 0, .34);
+  --shadow-float: 0 2px 10px rgba(0, 0, 0, .28);
+
+  --syntax-comment: #8a877f;
+  --syntax-keyword: #e5b0ae;
+  --syntax-function: #a8c9e8;
+  --syntax-variable: #cdb8e0;
+  --syntax-string: #a6cdac;
+  --syntax-number: #e0c28a;
+  --syntax-type: #a6c6cc;
+  --syntax-operator: #bfb7a6;
+  --syntax-punctuation: #b5b2aa;
+  --syntax-tag: #e5b0ae;
+  --syntax-attribute: #a8c9e8;
+  --syntax-constant: #e0c28a;
+
+  /* 品牌、消息与选中各用独立语义；不把紫色铺满消息流。 */
+  --sidebar-bg: #1d1d20;
+  --sidebar-search-bg: color-mix(in srgb, var(--line) 42%, var(--sidebar-bg));
+  --message-user-bg: #2b2b31;
+  --thread-selected-bg: color-mix(in srgb, var(--accent) 32%, var(--surface));
+  --overlay-scrim: rgba(0, 0, 0, .6);
+}

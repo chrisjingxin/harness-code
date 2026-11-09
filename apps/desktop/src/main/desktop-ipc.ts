@@ -2,9 +2,10 @@
  * 原生桌面请求边界。preload → 来源与参数校验 → 原生操作 → 实际状态。
  * 目录路径只返回当前窗口显示，不登记项目，也不授予后续文件访问权限。
  */
-import { dialog, ipcMain, nativeTheme } from "electron"
+import { clipboard, dialog, ipcMain, nativeTheme, shell } from "electron"
 import type { BrowserWindow } from "electron"
 import type { ThemeMode, WindowState } from "@workbench/contracts"
+import { nativeTheme as workbenchNativeTheme } from "@workbench/ui/native-theme"
 import { verifyDesktopSource } from "./trusted-source.js"
 
 /** 绑定可信主窗口；窗口销毁时移除 IPC 和系统主题监听，允许 macOS 重开。 */
@@ -16,9 +17,9 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void 
   const readState = (): WindowState => ({ themeMode, colorScheme: nativeTheme.shouldUseDarkColors ? "dark" : "light", zoomPercent: Math.round(window.webContents.getZoomFactor() * 100) })
   function publish() {
     if (window.isDestroyed()) return
-    const dark = nativeTheme.shouldUseDarkColors
-    window.setBackgroundColor(dark ? "#191f1d" : "#f5f5f1")
-    if (process.platform === "win32") window.setTitleBarOverlay({ color: dark ? "#191f1d" : "#f5f5f1", symbolColor: dark ? "#e7ede7" : "#242b28" })
+    const colors = workbenchNativeTheme[nativeTheme.shouldUseDarkColors ? "dark" : "light"]
+    window.setBackgroundColor(colors.background)
+    if (process.platform === "win32") window.setTitleBarOverlay({ color: colors.background, symbolColor: colors.text })
     window.webContents.send("workbench:window-state", readState())
   }
   function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {
@@ -52,7 +53,17 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void 
     publish()
     return readState()
   })
-  nativeTheme.themeSource = "system"
+  handle("workbench:copy-text", 1, value => {
+    if (typeof value !== "string") throw new Error("复制内容无效")
+    clipboard.writeText(value)
+  })
+  handle("workbench:open-external", 1, async value => {
+    if (typeof value !== "string" || !value.trim()) throw new Error("链接无效")
+    let url: URL
+    try { url = new URL(value.trim()) } catch { throw new Error("链接无效") }
+    if (url.protocol !== "http:" && url.protocol !== "https:" && url.protocol !== "mailto:") throw new Error("链接协议不受支持")
+    await shell.openExternal(url.href)
+  })
   nativeTheme.on("updated", publish)
   window.webContents.on("did-finish-load", () => {
     window.webContents.setZoomFactor(zoomPercent / 100)

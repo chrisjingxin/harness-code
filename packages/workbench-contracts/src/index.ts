@@ -20,6 +20,10 @@ export interface DesktopHost {
   setThemeMode(mode: ThemeMode): Promise<WindowState>
   /** 按动作调整实际窗口缩放，主进程限制 80%～150%。 */
   adjustZoom(action: ZoomAction): Promise<WindowState>
+  /** 将用户选择的文本写入系统剪贴板；失败时拒绝。 */
+  copyText(text: string): Promise<void>
+  /** 用户主动打开 http、https 或 mailto 地址；无效地址和系统失败均拒绝。 */
+  openExternal(href: string): Promise<void>
   onWindowStateChanged(listener: (state: WindowState) => void): () => void
 }
 

@@ -7,7 +7,10 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "electron-vite dev",
-    "preview": "electron-vite preview --skipBuild"
+    "preview": "electron-vite preview --skipBuild",
+    "dev:ui-preview": "node ../../scripts/workbench/ui-preview.mjs dev",
+    "build:ui-preview": "node ../../scripts/workbench/ui-preview.mjs build",
+    "preview:ui": "node ../../scripts/workbench/ui-preview.mjs preview"
   },
   "dependencies": {
     "@workbench/contracts": "0.2.0",

@@ -4,10 +4,11 @@
  */
 import { useEffect, useState } from "react"
 import type { CollaborationHost, DesktopHost, DeviceHost, ThemeMode, WindowState } from "@workbench/contracts"
+import { BrandMark } from "./common/brand.js"
 import { IdentityPanel } from "./identity/identity-panel.js"
 import { DeviceRegistrationPanel } from "./device-registration/device-registration.js"
 import "./device-registration/device-registration.css"
-import "./theme.css"
+import "./workbench.css"
 
 /** 为原生桌面组合的基础内容；窗口状态订阅随组件销毁解除。 */
 export function Workbench({ host, collaboration, devices }: { host: DesktopHost; collaboration: CollaborationHost; devices?: DeviceHost }) {
@@ -36,7 +37,7 @@ export function Workbench({ host, collaboration, devices }: { host: DesktopHost;
     finally { setChoosing(false) }
   }
   return <div className="workbench">
-    <header className="titlebar"><span className="brand-mark">W</span><span>协作工作台</span><span className="stage">基础桌面</span></header>
+    <header className="titlebar"><span className="brand-mark"><BrandMark /></span><span>协作工作台</span><span className="stage">基础桌面</span></header>
     <main>
       <div className="eyebrow">WORKBENCH</div>
       <h1>从本机开始</h1>
