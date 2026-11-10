@@ -160,3 +160,62 @@ describe("fail closed：形状不对一律 null（网关回 cancelled）", () =>
     expect(buildInteractionRequest({ ...base, options: [{ optionId: "weird_option" }] }, ctx)).toBeNull()
   })
 })
+
+describe("标准 diff 内容块 → file_diff presentation（2.6/2.12）", () => {
+  const ctx2 = ctx
+  const base: PermissionInput = {
+    options: [{ optionId: "approve_once" }, { optionId: "reject" }],
+    toolCall: {
+      toolCallId: "c1",
+      title: "edit a.txt",
+      rawInput: {},
+      _meta: { harnessCode: { approval: { requestId: "int-9", type: "approval", description: "改文件" } } },
+    } as PermissionInput["toolCall"],
+  } as PermissionInput
+  const pres = (extra: { content?: unknown; meta?: unknown }) => {
+    const input = { ...base, toolCall: { ...base.toolCall, content: extra.content, _meta: extra.meta ?? (base.toolCall as { _meta?: unknown })._meta } } as PermissionInput
+    const env = buildInteractionRequest(input, ctx2)!
+    return (env.payload as unknown as { presentation?: Record<string, unknown> }).presentation
+  }
+
+  test("新建（无 oldText）→ write + old_text null", () => {
+    const p = pres({ content: [{ type: "diff", path: "/a/new.txt", newText: "l1\nl2\n" }] })!
+    expect(p.operation).toBe("write")
+    expect(p.old_text).toBeNull()
+    expect(p.new_text).toBe("l1\nl2\n")
+  })
+
+  test("修改 → edit + diff 含 -/+、公共行不重复", () => {
+    const p = pres({ content: [{ type: "diff", path: "/a/x.txt", oldText: "same\nold\nsame2", newText: "same\nnew\nsame2" }] })!
+    expect(p.operation).toBe("edit")
+    expect(p.unified_diff as string).toContain("-old")
+    expect(p.unified_diff as string).toContain("+new")
+    expect(p.unified_diff as string).not.toContain("-same")
+  })
+
+  test("删除（newText 空串）→ delete + new_text null", () => {
+    const p = pres({ content: [{ type: "diff", path: "/a/g.txt", oldText: "gone\n", newText: "" }] })!
+    expect(p.operation).toBe("delete")
+    expect(p.new_text).toBeNull()
+  })
+
+  test("扩展 presentation 存在时优先于标准 diff", () => {
+    const ext = { kind: "file_diff", operation: "edit", path: "/ext.txt", unified_diff: "ext", added_lines: 1, removed_lines: 1, truncated: false }
+    const p = pres({
+      content: [{ type: "diff", path: "/a/x.txt", oldText: "o", newText: "n" }],
+      meta: { harnessCode: { approval: { requestId: "int-9", type: "approval", description: "d", presentation: ext } } },
+    })!
+    expect(p.path).toBe("/ext.txt")
+  })
+
+  test("没有 diff 块 → 无 presentation", () => {
+    const p = pres({ content: [{ type: "text", text: "plain" }] })
+    expect(p).toBeUndefined()
+  })
+
+  test("取第一个 diff 块；CRLF/无换行结尾不抛异常", () => {
+    const p = pres({ content: [{ type: "text", text: "x" }, { type: "diff", path: "/a/f.txt", oldText: "a\r\nb", newText: "a\r\nc" }] })!
+    expect(p.operation).toBe("edit")
+    expect(p.path).toBe("/a/f.txt")
+  })
+})

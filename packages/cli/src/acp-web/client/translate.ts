@@ -17,6 +17,8 @@
 
 import type { EventEnvelope } from "@za38/protocol"
 
+import { parseParentMeta } from "../ext"
+
 /** Python `translate.py` 的 `MAX_OUTPUT_CHARS`：输出超过它就不再增长。 */
 export const MAX_OUTPUT_CHARS = 64 * 1024
 
@@ -197,7 +199,7 @@ export class RunTranslator {
       const terminal = this.terminalEvents(update, tool)
       events.push(...terminal)
     }
-    return events
+    return this.withParent(events, parseParentMeta(update._meta))
   }
 
   private onToolUpdate(update: AcpSessionUpdate): EventEnvelope[] {
@@ -264,6 +266,17 @@ export class RunTranslator {
         original_bytes: new TextEncoder().encode(content).byteLength,
       },
     })]
+  }
+
+  /** 子代理卡（带 harnessCode.parent）的事件补 execution/agent 顶层归属，供分组。 */
+  private withParent(events: EventEnvelope[], parent: { executionId: string; agentId?: string } | undefined): EventEnvelope[] {
+    if (!parent) return events
+    for (const ev of events) {
+      const e = ev as EventEnvelope & { execution_id?: string; agent_id?: string }
+      e.execution_id = parent.executionId
+      if (parent.agentId) e.agent_id = parent.agentId
+    }
+    return events
   }
 
   private emit<T extends EventEnvelope["type"]>(type: T, payload: unknown): EventEnvelope {

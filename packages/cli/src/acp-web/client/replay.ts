@@ -5,7 +5,7 @@
  *
  * 回放规则（设计 §4.6）：`user_message_chunk` / `agent_message_chunk`
  * 文本按 kind 成消息、同 `messageId` 的连续块拼接（Python 对超 64 KiB 的
- * 消息切块共用 messageId）；`tool_call`（回放里一律 completed）取
+ * 消息切块共用 messageId）；`tool_call`（含 rawInput/status 真实状态）取
  * `title` 首段作 tool_name、第一个文本块作 content；`created_at_ms`
  * 一律省略（控制器只在存在时使用）。其它 update 忽略。
  */
@@ -36,15 +36,23 @@ export class ReplayBuffer {
         return
       }
       case "tool_call": {
-        // 回放里的 tool_call 一律 completed；不同 id 断开拼接状态。
+        // 回放 tool_call 带真实状态与参数（2.9）；不同 id 断开拼接状态。
         this.last = null
         const text = updateText(update.content) ?? ""
         if (!text) return
-        this.messages.push({
+        const message: ThreadMessage = {
           kind: "tool",
           tool_name: nameOf(update.title, update.toolCallId, update._meta),
           content: text,
-        })
+        }
+        if (typeof update.toolCallId === "string" && update.toolCallId) {
+          message.tool_call_id = update.toolCallId
+        }
+        if (update.rawInput !== undefined && typeof update.rawInput === "object" && update.rawInput !== null) {
+          message.arguments = update.rawInput as ThreadMessage["arguments"]
+        }
+        message.status = update.status === "failed" ? "failed" : "completed"
+        this.messages.push(message)
         return
       }
       default:

@@ -3695,3 +3695,112 @@ async def test_persistence_log_failure_does_not_roll_back_transcript(tmp_path: P
     records = await store.load_transcript("thread")
     assert any(record.kind == "assistant" for record in records)
     await store.close()
+
+
+async def _stamp(store: ThreadPersistence, mapping: dict[str, int]) -> None:
+    """把若干 thread 的 updated_at_ms 改成定值，造可控的排序与并列边界。"""
+    async with store._lock:
+        for thread_id, updated_at_ms in mapping.items():
+            await store._connection.execute(
+                "UPDATE harness_threads SET updated_at_ms = ? WHERE thread_id = ?",
+                (updated_at_ms, thread_id),
+            )
+        await store._connection.commit()
+
+
+async def test_list_threads_page_orders_like_list_threads(tmp_path: Path) -> None:
+    """分页与 `list_threads` 同序：updated_at_ms DESC、thread_id ASC。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(5):
+        await accept_thread(store, f"thread-{index}", f"消息 {index}")
+    await _stamp(store, {f"thread-{index}": 100 + index for index in range(5)})
+
+    expected = [t.thread_id for t in await store.list_threads(10)]
+    paged: list[str] = []
+    after: tuple[int, str] | None = None
+    while True:
+        page, has_more = await store.list_threads_page(2, after)
+        paged.extend(t.thread_id for t in page)
+        if not has_more:
+            break
+        last = page[-1]
+        after = (last.updated_at_ms, last.thread_id)
+    assert paged == expected
+    await store.close()
+
+
+async def test_list_threads_page_tie_breaks_across_boundary(tmp_path: Path) -> None:
+    """同 updated_at_ms 的线程跨页不重不漏：键 (u, thread_id) 严格续页。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 500 for index in range(4)})
+
+    seen: list[str] = []
+    after: tuple[int, str] | None = None
+    for _ in range(10):  # 防御死循环：最多 10 页
+        page, has_more = await store.list_threads_page(1, after)
+        seen.extend(t.thread_id for t in page)
+        if not has_more:
+            break
+        last = page[-1]
+        after = (last.updated_at_ms, last.thread_id)
+    assert sorted(seen) == ["t-0", "t-1", "t-2", "t-3"]
+    assert len(seen) == len(set(seen))
+    await store.close()
+
+
+async def test_list_threads_page_last_page_has_no_more(tmp_path: Path) -> None:
+    """恰好整页与不足一页时 has_more 都是 False。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 100 + index for index in range(4)})
+
+    page1, more1 = await store.list_threads_page(4, None)
+    assert len(page1) == 4 and more1 is False
+    page2, more2 = await store.list_threads_page(2, None)
+    assert len(page2) == 2 and more2 is True
+    last = page2[-1]
+    page3, more3 = await store.list_threads_page(2, (last.updated_at_ms, last.thread_id))
+    assert len(page3) == 2 and more3 is False
+    await store.close()
+
+
+async def test_list_threads_page_invalid_limit(tmp_path: Path) -> None:
+    """limit 越界（0、201）抛 CHECKPOINT_LIST_INVALID_LIMIT，与 list_threads 同。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for bad in (0, 201):
+        with pytest.raises(ThreadPersistenceError, match="CHECKPOINT_LIST_INVALID_LIMIT"):
+            await store.list_threads_page(bad, None)
+    await store.close()
+
+
+async def test_list_threads_page_after_missing_thread_still_pages(tmp_path: Path) -> None:
+    """after 指向已删除/不存在的线程：按键比较续页，不要求记录存在。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 100 + index for index in range(4)})
+
+    # 游标 (102, "ghost") 不指向任何线程：续页条件是
+    # u < 102 或 (u = 102 且 thread_id > "ghost")——t-2 的 id 恰好满足后者。
+    page, has_more = await store.list_threads_page(10, (102, "ghost"))
+    assert [t.thread_id for t in page] == ["t-2", "t-1", "t-0"]
+    assert has_more is False
+    await store.close()

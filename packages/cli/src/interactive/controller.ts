@@ -69,6 +69,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   private readonly unsubscribeThreadSummary: () => void
   private readonly unsubscribeCodeIndexChanged: () => void
   private readonly unsubscribeClose: () => void
+  private readonly unsubscribeApprovalMode: () => void
   private state: InteractiveState
   private snapshot: InteractiveSnapshot
   private connection: InteractiveConnectionState = { status: "open" }
@@ -147,6 +148,14 @@ export class InteractiveControllerImpl implements InteractiveController {
       this.connection = { status: "closed", message: error.message }
       this.interactionFeature.settlePendingInteraction(this.featureContext)
       this.commit(current => appendNotice(finishContextCompaction(current), `connection-closed: ${error.message}`))
+    }) ?? (() => {})
+
+    this.unsubscribeApprovalMode = this.gateway.onApprovalModeChanged?.(mode => {
+      if (this.closed) return
+      const current = this.runFeature.currentApprovalMode(this.baseRuntime.approvalMode)
+      if (mode === current) return
+      this.runFeature.observeRemoteApprovalMode(current, mode)
+      this.publish()
     }) ?? (() => {})
 
     this.clearInteractionHandler = this.gateway.setInteractionHandler?.(request => {
@@ -279,7 +288,10 @@ export class InteractiveControllerImpl implements InteractiveController {
       case "catalog.refresh":
         await this.catalogFeature.refreshCatalog(intent.catalog, this.featureContext, id => this.adoptThreadSelection(id))
         return { status: "accepted" }
-
+      case "threads-load-more": {
+        void this.catalogFeature.loadMoreThreads(this.featureContext)
+        return { status: "accepted" }
+      }
       case "interaction.respond": {
         if (intent.requestId.startsWith("edit-goal:")) {
           this.interactionFeature.closeGoalViewer(this.featureContext)
@@ -331,6 +343,7 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.unsubscribeThreadSummary()
     this.unsubscribeCodeIndexChanged()
     this.unsubscribeClose()
+    this.unsubscribeApprovalMode()
     this.clearInteractionHandler()
     this.interactionFeature.close(this.featureContext)
     this.catalogFeature.close()
@@ -833,8 +846,8 @@ export function createInteractiveController(options: InteractiveControllerOption
   return new InteractiveControllerImpl(options)
 }
 
-function publicCatalog<T>(catalog: { status: any; items: readonly T[]; message?: string }): LoadableCatalog<T> {
-  return { status: catalog.status, items: catalog.items, message: catalog.message }
+function publicCatalog<T>(catalog: { status: any; items: readonly T[]; message?: string; nextCursor?: string | null; loadingMore?: boolean }): LoadableCatalog<T> & { nextCursor: string | null; loadingMore: boolean } {
+  return { status: catalog.status, items: catalog.items, message: catalog.message, nextCursor: catalog.nextCursor ?? null, loadingMore: catalog.loadingMore ?? false }
 }
 
 /** 压缩期间只允许只读刷新、运行取消和 Interaction 收尾；其余可变入口失败关闭。 */

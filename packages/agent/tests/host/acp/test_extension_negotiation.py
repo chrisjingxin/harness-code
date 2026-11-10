@@ -19,6 +19,7 @@ import pytest
 from harness_agent.host.acp.ext import (
     CAP_APPROVAL,
     CAP_RUN_SUMMARY,
+    CAP_SESSION_SUMMARY,
     EXT_KEY,
     Negotiation,
     agent_capabilities_meta,
@@ -130,6 +131,38 @@ def _trust_target() -> ApprovalTarget:
                 }
             },
             Negotiation(declared=True, approval=True, run_summary=True),
+        ),
+        (
+            {
+                "_meta": {
+                    "harnessCode": {
+                        "version": 1,
+                        "capabilities": [CAP_SESSION_SUMMARY],
+                    }
+                }
+            },
+            Negotiation(declared=True, session_summary=True),
+        ),
+        (
+            {
+                "_meta": {
+                    "harnessCode": {
+                        "version": 1,
+                        "capabilities": [
+                            CAP_SESSION_SUMMARY,
+                            CAP_RUN_SUMMARY,
+                            CAP_APPROVAL,
+                            "future-cap",
+                        ],
+                    }
+                }
+            },
+            Negotiation(
+                declared=True,
+                approval=True,
+                run_summary=True,
+                session_summary=True,
+            ),
         ),
     ],
 )
@@ -443,4 +476,77 @@ async def test_undeclared_client_sees_no_harnesscode_in_list_load_and_commands(
         )
     methods = [frame.get("method") for frame in acp.client.frames]
     assert methods.count("session/update") >= 4
+    _assert_no_harness_code(acp.client.frames)
+
+
+DECLARE_ALL_THREE = {
+    "harnessCode": {
+        "version": 1,
+        "capabilities": [CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY],
+    }
+}
+
+_ISO_MS = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+
+
+async def test_declared_all_three_echoes_in_fixed_order(tmp_path: Path) -> None:
+    """三个能力都声明时，握手回报固定顺序 approval→runSummary→sessionSummary。"""
+    host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
+    async with InProcessAcp(host) as acp:
+        response = await _initialize_with(acp.client, DECLARE_ALL_THREE)
+    assert response["result"]["agentCapabilities"]["_meta"]["harnessCode"] == {
+        "version": 1,
+        "capabilities": ["approval", "runSummary", "sessionSummary"],
+    }
+
+
+async def test_session_list_carries_summary_meta_when_declared(tmp_path: Path) -> None:
+    """声明 sessionSummary：每个 SessionInfo 带 _meta.harnessCode.summary 四字段。"""
+    from tests.support.thread_fixtures import seed_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    long_tail = "长" * 300
+    await seed_thread(
+        store,
+        "thread-1",
+        [
+            {"kind": "user", "content": f"第一行\n第二行\t{long_tail}"},
+            {"kind": "assistant", "content": "尾行\n第二段\t完"},
+        ],
+    )
+    async with InProcessAcp(host) as acp:
+        await _initialize_with(
+            acp.client,
+            {"harnessCode": {"version": 1, "capabilities": [CAP_SESSION_SUMMARY]}},
+        )
+        listed = await acp.client.request(2, "session/list", {})
+    session = listed["result"]["sessions"][0]
+    summary = session["_meta"]["harnessCode"]["summary"]
+    assert set(summary) == {"createdAt", "messageCount", "firstMessage", "latestMessage"}
+    assert _ISO_MS.match(summary["createdAt"])
+    assert isinstance(summary["messageCount"], int) and summary["messageCount"] == 2
+    for key in ("firstMessage", "latestMessage"):
+        value = summary[key]
+        assert isinstance(value, str)
+        assert "\n" not in value and "\t" not in value
+        assert len(value) <= 200
+    assert summary["latestMessage"] == "尾行 第二段 完"
+    assert summary["firstMessage"].startswith("第一行 第二行")
+
+
+async def test_malformed_declaration_means_no_summary_meta(tmp_path: Path) -> None:
+    """声明形状非法（version 错）按未声明处理：session/list 也不带 harnessCode。"""
+    from tests.support.thread_fixtures import seed_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    await seed_thread(store, "thread-1", [{"kind": "user", "content": "你好"}])
+    async with InProcessAcp(host) as acp:
+        await _initialize_with(
+            acp.client,
+            {"harnessCode": {"version": 2, "capabilities": [CAP_SESSION_SUMMARY]}},
+        )
+        listed = await acp.client.request(2, "session/list", {})
+    assert listed["result"]["sessions"]
     _assert_no_harness_code(acp.client.frames)

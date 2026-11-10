@@ -83,6 +83,7 @@ function createPort(options: {
   codeIndexApplyImpl?: AgentGateway["codeIndexApply"]
   compactContextImpl?: AgentGateway["compactContext"]
   openThreadImpl?: AgentGateway["openThread"]
+  listThreadsImpl?: AgentGateway["listThreads"]
   resolveMentions?: import("../../src/interactive/types").InteractiveControllerOptions["resolveMentions"]
 } = {}) {
   const calls: string[] = []
@@ -254,8 +255,9 @@ function createPort(options: {
       calls.push("config.commit")
       return { revision: "r2", changes: [], applies_to: ["new-thread"] }
     },
-    async listThreads() {
+    async listThreads(cursor) {
       calls.push("threads.list")
+      if (options.listThreadsImpl) return options.listThreadsImpl(cursor)
       return { threads: [threadSummary("thread-1", "第一条历史"), threadSummary("thread-2", "第二条历史")] }
     },
     async setThreadTitle(threadId, title) {
@@ -594,12 +596,14 @@ export function makeHarness(options: {
   codeIndexStatusImpl?: AgentGateway["codeIndexStatus"]
   codeIndexApplyImpl?: AgentGateway["codeIndexApply"]
   openThreadImpl?: AgentGateway["openThread"]
+  listThreadsImpl?: AgentGateway["listThreads"]
 } = {}) {
   const portState = createPort({
     codeIndexStatusImpl: options.codeIndexStatusImpl,
     codeIndexApplyImpl: options.codeIndexApplyImpl,
     compactContextImpl: options.compactContextImpl,
     openThreadImpl: options.openThreadImpl,
+    listThreadsImpl: options.listThreadsImpl,
   })
   const runtimeOverride: InteractiveRuntime = {
     ...runtime,

@@ -65,7 +65,7 @@ describe("acp-agent-gateway：回放真实录制帧", () => {
     const agent = wireAgent(name)
     const { client, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, settleCommandsMs: 10 })
+    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 10 })
     gateway.setInteractionHandler(async request =>
       ({ request_id: request.request_id, type: request.type, ...(request.type === "approval" ? { decision: "approve_once" } : { decision: "allow_session" }) }) as never)
     const run = gateway.startRun({
@@ -85,14 +85,14 @@ describe("acp-agent-gateway：回放真实录制帧", () => {
     const agent = wireAgent("history")
     const { client, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, settleCommandsMs: 10 })
+    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 10 })
     const { threads } = await gateway.listThreads()
     expect(threads[0]!.thread_id).toBe("history-seed")
     const result = await gateway.openThread("history-seed")
     expect(result.messages).toEqual([
       { kind: "user", content: "先看一眼" },
       { kind: "assistant", content: "看完了。" },
-      { kind: "tool", tool_name: "read_file", content: "工具输出" },
+      { kind: "tool", tool_name: "read_file", content: "工具输出", tool_call_id: "history-seed:h2", status: "completed" },
     ])
   })
 })

@@ -355,6 +355,8 @@ class StartRun:
     protocol_minor: int = PROTOCOL_MINOR
     requested_primary_profile: str | None = None
     requested_approval_mode: ApprovalMode | None = None
+    # 会话在这次 prompt 之前就已经停在 plan。批准后切回这里，而不是再问一次。
+    pre_plan_mode: ApprovalMode | None = None
 
     @property
     def ref(self) -> RunRef:
@@ -408,6 +410,7 @@ class StartRun:
             self.protocol_minor,
             self.requested_primary_profile,
             self.requested_approval_mode,
+            self.pre_plan_mode,
         )
 
 
@@ -538,7 +541,18 @@ class RunExecution:
     ref: RunRef
     owner: ConnectionRef
     accepted: bool
-    events: AsyncIterator[AgentEvent]
+    events: AsyncIterator[AgentEvent | _FanoutBarrier]
+
+
+@dataclass(slots=True)
+class _FanoutBarrier:
+    """run.events 队列里的顺序屏障（GAP-35 事件/交互乱序修复）。
+
+    扇出任务消费到它时把 done 置完成——此时排在前面的 AgentEvent 已经全部
+    进入 ACP 发送队列。屏障不占 sequence、不产生对外事件，只让「等前面的
+    事件扇出完毕」可以排队等待（交互帧必须晚于已入队事件到达）。
+    """
+    done: asyncio.Future[None]
 
 
 class InteractionPort(Protocol):
@@ -628,7 +642,7 @@ class RunState:
     cancel_requested: bool = False
     completion: RunCompletion | None = None
     terminal_event_emitted: bool = False
-    events: asyncio.Queue[AgentEvent | None] = field(default_factory=asyncio.Queue)
+    events: asyncio.Queue[AgentEvent | _FanoutBarrier | None] = field(default_factory=asyncio.Queue)
     # 多工具逐个串行审批队列：存储待审批的工具调用
     pending_approvals: list[dict[str, object]] = field(default_factory=list)
     # approve_thread/project 在 resumed stream 成功消费前只保存在当前 Run；
@@ -655,10 +669,14 @@ class RunState:
             self.timing = RunTimingLedger(started_at=self.started_at)
         self.diagnostic_log = ensure_log(self.diagnostic_log)
         if self.approval_state is None:
-            self.approval_state = ApprovalModeState(
+            mode = (
                 self.preparation.approval_mode
                 or self.start.requested_approval_mode
                 or DEFAULT_APPROVAL_MODE
+            )
+            self.approval_state = ApprovalModeState(
+                mode,
+                pre_plan=self.start.pre_plan_mode if mode == "plan" else None,
             )
 
     @property
@@ -799,6 +817,20 @@ class _CoordinatorLifecyclePort:
         run.diagnostic_log.info("interaction.started", {"kind": kind, "source": "host"})
         wait_started = run.timing.begin_wait() if run.timing is not None else None
         try:
+            # GAP-35：事件扇出是独立任务，put 完事件同协程立刻发交互会乱序；
+            # 屏障等「前面的 AgentEvent 都被扇出送走」后再放行交互帧。
+            # Run 未启动（run.task 为空）、已终态或已取消时队列不再有消费者，
+            # 直接跳过不挂死——屏障只约束「活着的 Run」内的事件顺序。
+            barrier_task = getattr(run, "task", None)
+            if (
+                run.completion is None
+                and not run.cancel_requested
+                and barrier_task is not None
+                and not barrier_task.done()
+            ):
+                barrier = _FanoutBarrier(done=asyncio.get_running_loop().create_future())
+                run.events.put_nowait(barrier)
+                await barrier.done
             result = await self._coordinator._interaction_port.request(
                 run.owner, run.ref, spec
             )
@@ -827,7 +859,47 @@ class _CoordinatorLifecyclePort:
             agent_id=spec.agent_id,
             compose_scope=spec.compose_scope,
         )
+        restored = await self._restore_plan_approval(run, spec, result)
+        if restored is not None:
+            await self._coordinator._notify_approval_mode(run.thread_id, restored)
         return result
+
+    async def _restore_plan_approval(
+        self,
+        run: RunState,
+        spec: InteractionRequest,
+        result: InteractionResult,
+    ) -> str | None:
+        """计划被批准后切回进 plan 之前的模式。调用方在锁外广播。
+
+        直接改状态，不走 `set_approval_mode`：那条路在计划约束还开着时会拒绝离开 plan。
+        """
+        value = result.value if isinstance(result.value, Mapping) else {}
+        if spec.type != "plan" or result.expired or value.get("decision") != "approved":
+            return None
+        async with self._coordinator._lock:
+            state = run.approval_state
+            if (
+                state is None
+                or state.mode != "plan"
+                or run.completion is not None
+                or run.cancel_requested
+            ):
+                return None
+            previous, _revision = state.snapshot()
+            actual, revision = state.restore_after_plan_approval()
+            if actual == previous:
+                return None
+            run.diagnostic_log.info(
+                "run.approval_mode.changed",
+                {
+                    "from": previous,
+                    "to": actual,
+                    "revision": revision,
+                    "source": "plan_approved",
+                },
+            )
+            return actual
 
     async def request_question(
         self,
@@ -955,6 +1027,8 @@ class RunCoordinator:
         self._maintenance_threads: set[str] = set()
         self._lock = asyncio.Lock()
         self._closed = False
+        # Host 在建好协调器之后赋上。模式真的变了才在锁外调用，避免在锁里发帧。
+        self.on_approval_mode_changed: Callable[[str, str], Awaitable[None]] | None = None
 
     @property
     def execution_registry(self) -> AgentExecutionRegistry:
@@ -1289,7 +1363,8 @@ class RunCoordinator:
                 raise RunError("RUN_APPROVAL_MODE_NOT_FOUND")
             previous_mode, _ = active.approval_state.snapshot()
             actual_mode, revision = active.approval_state.set(approval_mode)
-            if actual_mode != previous_mode:
+            changed = actual_mode != previous_mode
+            if changed:
                 active.diagnostic_log.info(
                     "run.approval_mode.changed",
                     {
@@ -1299,12 +1374,21 @@ class RunCoordinator:
                         "source": "rpc",
                     },
                 )
-            return ApprovalModeResult(
+            result = ApprovalModeResult(
                 thread_id=run.thread_id,
                 run_id=run.run_id,
                 approval_mode=actual_mode,
                 revision=revision,
             )
+        if changed:
+            await self._notify_approval_mode(run.thread_id, actual_mode)
+        return result
+
+    async def _notify_approval_mode(self, thread_id: str, mode: str) -> None:
+        """锁外通知。监听方负责发给别的连接，不能在协调器锁里做 I/O。"""
+        listener = self.on_approval_mode_changed
+        if listener is not None:
+            await listener(thread_id, mode)
 
     async def owner_disconnected(self, connection: ConnectionRef) -> None:
         """处理前端客户端连接断开事件：自动清理该客户端发起的所有运行任务。
@@ -1456,12 +1540,23 @@ class RunCoordinator:
         if False:
             yield AgentEvent("", "", "", "", 0, 0, {}, "root-empty", "main")
 
-    async def _read_events(self, run: RunState) -> AsyncIterator[AgentEvent]:
-        while True:
-            event = await run.events.get()
-            if event is None:
-                return
-            yield event
+    async def _read_events(self, run: RunState) -> AsyncIterator[AgentEvent | _FanoutBarrier]:
+        try:
+            while True:
+                event = await run.events.get()
+                if event is None:
+                    return
+                yield event
+        finally:
+            # 消费者终止（正常结束/取消/异常）后队列里残留的屏障必须解除：
+            # 等屏障的协程不能因没人消费而永久悬挂（如 Run 终态后到达的屏障）。
+            while True:
+                try:
+                    leftover = run.events.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if isinstance(leftover, _FanoutBarrier) and not leftover.done.done():
+                    leftover.done.set_result(None)
 
     async def _cancel_runs(self, predicate: Callable[[RunState], bool]) -> None:
         async with self._lock:
@@ -2149,10 +2244,7 @@ class RunCoordinator:
                 else base_description
             )
             requests = _bounded_json({"action_requests": [dict(action_map)]})
-            _inject_tool_call_id(
-                requests,
-                self._approval_tool_call_id(run, all_requests, tool_name, tool_args),
-            )
+            _inject_tool_call_ids(requests, run)
             payload: dict[str, object] = {
                 "interrupt_id": interrupt_id,
                 "description": description,
@@ -2221,52 +2313,35 @@ class RunCoordinator:
         run.pending_approvals = []
         return {interrupt_id: {"decisions": decisions}}
 
-    def _approval_tool_call_id(
-        self,
-        run: RunState,
-        all_requests: list[object],
-        tool_name: str,
-        tool_args: Mapping[str, object],
-    ) -> str | None:
-        """返回本条审批应带的 provider tool_call_id；不能确定时返回 None。
-
-        输入：整个 interrupt 批次（含自动放行的调用）与当前工具名参数。
-        输出：能给客户端精确关联的 id，或 None（不注入，客户端降级成模糊匹配）。
-
-        为什么重复检测放在这里：只有这个方法手里有整批 action_requests，
-        同批出现两个相同 `(工具名, 参数)` 时，预检登记的 id 已被后者覆盖，
-        注入任何一个都会让两张卡片抢同一个 id，所以宁可不注入。
-        """
-        target = approval_fingerprint(tool_name, tool_args)
-        if target is None:
-            return None
-        matches = 0
-        for action in all_requests:
-            action_map = action if isinstance(action, Mapping) else {}
-            raw_args = action_map.get("args")
-            args = dict(raw_args) if isinstance(raw_args, Mapping) else {}
-            if approval_fingerprint(str(action_map.get("name") or ""), args) == target:
-                matches += 1
-                if matches > 1:
-                    return None
-        return run.tool_call_ids.lookup(tool_name, tool_args)
-
-
-def _inject_tool_call_id(requests: object, tool_call_id: str | None) -> None:
-    """把 provider tool_call_id 写进第一个 action 元素；只能就地改自己造的对象。
+def _inject_tool_call_ids(requests: object, run: RunState) -> None:
+    """给 `action_requests` 每个元素按它自己的 (name, args) 消费一个登记 id。
 
     `_bounded_json` 超限时返回 `{truncated:true, preview}` 而不是 action_requests
-    形状，此时不注入（客户端降级为模糊匹配）。
+    形状，此时不注入（客户端降级处理）。已有 tool_call_id 的元素不覆盖；
+    取不到登记的元素不写 id，但计入诊断日志——静默缺 id 会让卡片对不上。
     """
-    if tool_call_id is None or not isinstance(requests, dict):
+    if not isinstance(requests, dict):
         return
     actions = requests.get("action_requests")
-    if not isinstance(actions, list) or not actions:
+    if not isinstance(actions, list):
         return
-    action = actions[0]
-    if not isinstance(action, dict) or "tool_call_id" in action:
-        return
-    action["tool_call_id"] = tool_call_id
+    missing = 0
+    for action in actions:
+        if not isinstance(action, dict) or "tool_call_id" in action:
+            continue
+        name = str(action.get("name") or "")
+        raw_args = action.get("args")
+        args = dict(raw_args) if isinstance(raw_args, Mapping) else {}
+        tool_call_id = run.tool_call_ids.take(name, args)
+        if tool_call_id is not None:
+            action["tool_call_id"] = tool_call_id
+        else:
+            missing += 1
+    if missing:
+        run.diagnostic_log.warn(
+            "interaction.approval.tool_call_id_missing",
+            {"count": missing, "run_id": run.ref.run_id},
+        )
 
 
 def _generate_permission_rule(

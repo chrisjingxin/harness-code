@@ -51,6 +51,9 @@ APPROVAL_DECISIONS = [
     "reject_with_feedback",
 ]
 
+_WORKSPACE = Path("/workspace")
+"""权限请求测试用的假工作区；只用来解析相对路径，不会被读写。"""
+
 
 def _frame(
     *,
@@ -107,9 +110,39 @@ def test_options_follow_decisions_in_fixed_order() -> None:
     ]
 
 
-def test_reject_with_feedback_is_never_offered() -> None:
-    """ACP 的权限响应没有文字字段，带反馈的拒绝不发（GAP-05）。"""
-    assert "reject_with_feedback" not in {o.option_id for o in approval_options(APPROVAL_DECISIONS)}
+def test_reject_with_feedback_is_offered_only_with_forms() -> None:
+    """没声明表单时不给「拒绝并说明原因」；声明了就排在拒绝后面。"""
+    hidden = approval_options(APPROVAL_DECISIONS)
+    assert "reject_with_feedback" not in {option.option_id for option in hidden}
+    shown = approval_options(APPROVAL_DECISIONS, forms=True)
+    assert [(option.option_id, option.kind, option.name) for option in shown] == [
+        ("approve_once", "allow_once", "允许一次"),
+        ("approve_thread", "allow_always", "本会话内总是允许"),
+        ("approve_project", "allow_always", "本项目内总是允许"),
+        ("reject", "reject_once", "拒绝"),
+        ("reject_with_feedback", "reject_once", "拒绝并说明原因"),
+    ]
+
+
+def test_approval_extension_writes_scope_and_truncates_huge_requests() -> None:
+    """声明 approval 扩展时，选项带范围；原始请求超过 256 KiB 只留截断标记。"""
+    options = approval_options(APPROVAL_DECISIONS, forms=True, ext_approval=True)
+    assert [option.field_meta["harnessCode"]["scope"] for option in options] == [  # type: ignore[index]
+        "once",
+        "thread",
+        "project",
+        "once",
+        "once",
+    ]
+    assert trust_options(["allow_session", "deny"])[0].field_meta is None
+
+    huge = {"action_requests": [{"name": "execute", "args": {"command": "x" * (300 * 1024)}}]}
+    frame = _frame(payload={"description": "太大", "requests": huge, "decisions": ["reject"]})
+    job = build_approval_job(frame, _target(), ext_approval=True, workspace=_WORKSPACE)
+    assert job is not None
+    approval = job.tool_call.field_meta["harnessCode"]["approval"]  # type: ignore[index]
+    assert approval["requestsTruncated"] is True
+    assert "requests" not in approval
 
 
 def test_plan_entry_offers_only_allow_once_and_reject() -> None:
@@ -129,7 +162,7 @@ def test_missing_reject_option_is_added() -> None:
 def test_no_options_returns_no_job() -> None:
     """一个选项都产不出来时不给客户端发空选项的请求。"""
     frame = _frame(payload={"requests": {"action_requests": [{"name": "execute", "args": {}}]}, "decisions": []})
-    assert build_approval_job(frame, _target(), ext_approval=False) is None
+    assert build_approval_job(frame, _target(), ext_approval=False, workspace=_WORKSPACE) is None
     trust = _frame(
         kind="directory_trust",
         payload={"directory": "/ext", "target_path": "/ext/a", "tool_name": "ls", "access": "read", "decisions": []},
@@ -155,7 +188,7 @@ def test_fallback_text_has_description_header_and_diff_block() -> None:
             },
         }
     )
-    text = _text_of(build_approval_job(frame, _target(), ext_approval=False))
+    text = _text_of(build_approval_job(frame, _target(), ext_approval=False, workspace=_WORKSPACE))
     first_line, rest = text.split("\n", 1)
     assert first_line == "写入配置"
     assert "文件变更：写入 /src/a.py（+3 −1）" in rest
@@ -181,7 +214,7 @@ def test_fence_grows_when_diff_contains_backticks() -> None:
             },
         }
     )
-    text = _text_of(build_approval_job(frame, _target(), ext_approval=False))
+    text = _text_of(build_approval_job(frame, _target(), ext_approval=False, workspace=_WORKSPACE))
     assert "````diff" in text
     assert "（diff 已截断）" in text
 
@@ -196,7 +229,7 @@ def test_non_file_diff_presentation_is_ignored() -> None:
             "presentation": {"kind": "file_diff", "operation": "edit", "path": "/a.py"},
         }
     )
-    text = _text_of(build_approval_job(frame, _target(), ext_approval=False))
+    text = _text_of(build_approval_job(frame, _target(), ext_approval=False, workspace=_WORKSPACE))
     assert text == "执行命令"
 
 
@@ -218,7 +251,7 @@ def test_text_strips_control_and_format_characters() -> None:
             },
         }
     )
-    text = _text_of(build_approval_job(frame, _target(), ext_approval=False))
+    text = _text_of(build_approval_job(frame, _target(), ext_approval=False, workspace=_WORKSPACE))
     assert "\x1b" not in text and "\u202e" not in text and "\u200b" not in text
     assert "a[31mbc" in text
     assert "\n二行\t制表" in text
@@ -228,12 +261,12 @@ def test_text_strips_control_and_format_characters() -> None:
 def test_raw_input_over_limit_is_omitted() -> None:
     """审批参数超过 256 KiB 时不发 rawInput，客户端仍能靠标题识别。"""
     small = build_approval_job(
-        _frame(), _target(raw_input={"command": "npm test"}), ext_approval=False
+        _frame(), _target(raw_input={"command": "npm test"}), ext_approval=False, workspace=_WORKSPACE
     )
     assert small is not None and small.tool_call.raw_input == {"command": "npm test"}
 
     huge = build_approval_job(
-        _frame(), _target(raw_input={"command": "x" * (300 * 1024)}), ext_approval=False
+        _frame(), _target(raw_input={"command": "x" * (300 * 1024)}), ext_approval=False, workspace=_WORKSPACE
     )
     assert huge is not None and huge.tool_call.raw_input is None
 
@@ -241,7 +274,7 @@ def test_raw_input_over_limit_is_omitted() -> None:
 def test_meta_only_when_extension_declared() -> None:
     """没声明扩展的客户端一个 harnessCode 字节都收不到（`_meta` 挂在 toolCall 上）。"""
     target = _target(title="edit_file /src/a.py", kind="edit")
-    without = build_approval_job(_frame(), target, ext_approval=False)
+    without = build_approval_job(_frame(), target, ext_approval=False, workspace=_WORKSPACE)
     assert without is not None and without.tool_call.field_meta is None
 
     frame = _frame(
@@ -260,7 +293,7 @@ def test_meta_only_when_extension_declared() -> None:
             },
         }
     )
-    with_meta = build_approval_job(frame, target, ext_approval=True)
+    with_meta = build_approval_job(frame, target, ext_approval=True, workspace=_WORKSPACE)
     assert with_meta is not None and with_meta.tool_call.field_meta is not None
     approval = with_meta.tool_call.field_meta["harnessCode"]["approval"]  # type: ignore[index]
     assert approval == {
@@ -268,10 +301,11 @@ def test_meta_only_when_extension_declared() -> None:
         "requestId": "req-1",
         "description": "写入配置",
         "presentation": frame.payload["presentation"],
+        "requests": frame.payload["requests"],
     }
 
     child = build_approval_job(
-        _frame(is_child=True, agent_id="builder"), target, ext_approval=True
+        _frame(is_child=True, agent_id="builder"), target, ext_approval=True, workspace=_WORKSPACE
     )
     assert child is not None and child.tool_call.field_meta is not None
     assert child.tool_call.field_meta["harnessCode"]["approval"]["agentId"] == (  # type: ignore[index]
@@ -299,7 +333,7 @@ def test_meta_only_when_extension_declared() -> None:
 def test_decision_from_response_table(kind: str, response: object, expected: str) -> None:
     """§3.3 的响应映射表：只有选中本请求真的发出去的选项才算数。"""
     if kind == "approval":
-        job = build_approval_job(_frame(), _target(), ext_approval=False)
+        job = build_approval_job(_frame(), _target(), ext_approval=False, workspace=_WORKSPACE)
     else:
         job = build_trust_job(
             _frame(
@@ -348,13 +382,21 @@ def test_parse_interaction_rejects_malformed_frames() -> None:
     for broken in (
         {**good, "id": None},
         {**good, "params": "nope"},
-        {**good, "method": "interaction.question"},
+        {**good, "method": "interaction.plugin_consent"},
         {**good, "method": "event"},
         {**good, "params": {"run_id": "run-1", "payload": {}}},
         {**good, "params": {"thread_id": "sess-1", "payload": {}}},
         {**good, "params": {"thread_id": "sess-1", "run_id": "run-1", "payload": []}},
     ):
         assert parse_interaction(broken) is None
+
+    for method, kind in (
+        ("interaction.question", "question"),
+        ("interaction.plan", "plan"),
+        ("interaction.goal", "goal"),
+    ):
+        parsed_kind = parse_interaction({**good, "method": method})
+        assert parsed_kind is not None and parsed_kind.kind == kind
 
 
 def test_child_frame_carries_agent_id_and_flag() -> None:
@@ -961,3 +1003,77 @@ async def test_run_end_clears_the_tool_call_id_cache(tmp_path: Path, monkeypatch
             await asyncio.sleep(0.01)
 
         assert cleared
+
+
+def _diff_block(job: object):
+    from acp.schema import FileEditToolCallContent
+    for item in job.tool_call.content or []:
+        if isinstance(item, FileEditToolCallContent):
+            return item
+    return None
+
+
+def _presentation(old_text: str | None, new_text: str | None, *, path: str = "a.txt") -> dict:
+    return {
+        "kind": "file_diff", "operation": "edit", "path": path,
+        "added_lines": 1, "removed_lines": 1, "truncated": False,
+        "unified_diff": "@@ -1 +1 @@", "old_text": old_text, "new_text": new_text,
+    }
+
+
+def test_permission_tool_call_carries_standard_diff(tmp_path: Path) -> None:
+    """2.6：全文键齐全时 toolCall.content 是标准 diff（新建 null/修改双串/删除空串）。"""
+    target = _target()
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation("old\n", "new\n", path="/abs/a.txt")})
+    job = build_approval_job(frame, target, ext_approval=False, workspace=tmp_path)
+    diff = _diff_block(job)
+    assert diff is not None
+    assert diff.path == "/abs/a.txt" and diff.old_text == "old\n" and diff.new_text == "new\n"
+
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation(None, "hello\n", path="new.txt")})
+    job = build_approval_job(frame, target, ext_approval=False, workspace=tmp_path)
+    diff = _diff_block(job)
+    assert diff.path == str(tmp_path / "new.txt") and diff.old_text is None and diff.new_text == "hello\n"
+
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation("gone\n", None, path="/d.txt")})
+    job = build_approval_job(frame, target, ext_approval=False, workspace=tmp_path)
+    diff = _diff_block(job)
+    assert diff.old_text == "gone\n" and diff.new_text == ""
+
+
+def test_permission_without_fulltext_falls_back_to_markdown(tmp_path: Path) -> None:
+    """没有全文键：与改前逐字一致的文本兜底。"""
+    target = _target()
+    pres = _presentation("o", "n"); pres.pop("old_text"); pres.pop("new_text")
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": pres})
+    job = build_approval_job(frame, target, ext_approval=False, workspace=tmp_path)
+    assert _diff_block(job) is None
+    assert "@@ -1 +1 @@" in _text_of(job)
+
+
+def test_permission_diff_oversize_falls_back_to_text(tmp_path: Path) -> None:
+    """全文把请求撑超 6 MiB：退文本兜底，请求仍发得出。"""
+    big = "x" * (7 * 1024 * 1024)
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation(big, big)})
+    job = build_approval_job(frame, _target(), ext_approval=False, workspace=tmp_path)
+    assert _diff_block(job) is None
+    assert _text_of(job)  # 文本兜底仍在
+
+
+def test_permission_standard_diff_has_no_harnesscode_meta(tmp_path: Path) -> None:
+    """未声明 harnessCode 扩展：标准 diff 照发，帧里无 harnessCode 痕迹。"""
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation("o", "n", path="/a.txt")})
+    job = build_approval_job(frame, _target(), ext_approval=False, workspace=tmp_path)
+    assert _diff_block(job) is not None
+    import json
+    assert "harnessCode" not in json.dumps(job.tool_call.model_dump(mode="json", by_alias=True))
+
+
+def test_extension_copy_of_presentation_omits_full_text(tmp_path: Path) -> None:
+    """声明扩展时：标准 diff 带全文，`harnessCode.approval.presentation` 不再重复全文。"""
+    frame = _frame(payload={"decisions": list(APPROVAL_DECISIONS), "presentation": _presentation("o", "n", path="/a.txt")})
+    job = build_approval_job(frame, _target(), ext_approval=True, workspace=tmp_path)
+    assert _diff_block(job) is not None
+    presentation = job.tool_call.field_meta["harnessCode"]["approval"]["presentation"]
+    assert "old_text" not in presentation and "new_text" not in presentation
+    assert presentation["unified_diff"] == "@@ -1 +1 @@"

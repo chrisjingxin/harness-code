@@ -99,16 +99,36 @@ async def test_available_commands_sent_after_session_new_response(tmp_path: Path
     assert commands[0]["input"] == {"hint": "要审的文件"}
 
 
-async def test_no_commands_means_no_update_frame(tmp_path: Path) -> None:
-    """没有命令的 Host 不发这一帧：空列表没有信息量，也不会打乱 S1 的帧序。"""
-    import asyncio
-
+async def test_empty_commands_still_sends_update(tmp_path: Path) -> None:
+    """没有命令也推一帧空表（§11.1 性能优化 1）：客户端靠它判断「表已落定」。"""
     host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
     async with InProcessAcp(host) as acp:
         await _initialize(acp.client)
         await _new_session(acp.client, host.workspace)
-        await asyncio.sleep(0.1)
-    assert not [frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")]
+        update_frame = await acp.client.read_frame()
+    assert _is_update(update_frame, "available_commands_update")
+    assert update_frame["params"]["update"]["availableCommands"] == []
+
+
+async def test_empty_commands_update_after_load(tmp_path: Path) -> None:
+    """session/load 同样在响应后推一次空命令表。"""
+    from tests.support.acp_harness import make_persistent_host
+    from tests.support.thread_fixtures import seed_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    await seed_thread(store, "thread-1", [{"kind": "user", "content": "你好"}])
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        response = await acp.client.request(
+            2,
+            "session/load",
+            {"sessionId": "thread-1", "cwd": str(host.workspace), "mcpServers": []},
+        )
+        assert "result" in response, response
+        update_frame = await acp.client.read_frame()
+    assert _is_update(update_frame, "available_commands_update")
+    assert update_frame["params"]["update"]["availableCommands"] == []
 
 
 async def test_slash_command_completes_requested_skill(tmp_path: Path) -> None:
@@ -228,7 +248,13 @@ async def test_bind_failure_degrades_to_plain_text(
         body = f"/{name} 这些文件"
         response = await _prompt(acp.client, session_id, body)
         assert prompt_response(response).stop_reason == "end_turn", response
-    assert not [frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")]
+    # 绑定失败也要给客户端一个「已落定」信号：空表帧照常到达（§11.1）。
+    updates = [
+        frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")
+    ]
+    assert updates and all(
+        frame["params"]["update"]["availableCommands"] == [] for frame in updates
+    )
     rendered = _rendered(agent)
     assert body in rendered
     assert "Audit the requested files." not in rendered

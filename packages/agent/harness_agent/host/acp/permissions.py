@@ -36,24 +36,36 @@ _pump_interaction ──▶ prepare_approval（建卡/补卡）──▶ _send(u
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final, Literal
 
-from acp.helpers import text_block, tool_content
+from acp.helpers import text_block, tool_content, tool_diff_content
 from acp.schema import PermissionOption, ToolCallUpdate
 
+from harness_agent.host.acp.elicitation import ElicitationBroker
 from harness_agent.host.acp.ext import EXT_KEY
 from harness_agent.host.acp.tool_display import sanitize_block, sanitize_line
-from harness_agent.host.acp.translate import UNSET, ApprovalTarget, bounded_raw_input
+from harness_agent.host.acp.translate import (
+    MAX_OUTBOUND_FRAME_BYTES,
+    UNSET,
+    ApprovalTarget,
+    bounded_raw_input,
+    frame_chars,
+)
 from harness_agent.host.connection import ProtocolConnection, RpcError
 
-InteractionKind = Literal["approval", "directory_trust"]
-"""本模块处理的两种交互类型。"""
+InteractionKind = Literal["approval", "directory_trust", "question", "plan", "goal"]
+"""权限泵认得的交互。提问、计划和 Goal 只在客户端会画表单时才真正发出去。"""
 
 _METHOD_KINDS: Final[Mapping[str, InteractionKind]] = {
     "interaction.approval": "approval",
     "interaction.directory_trust": "directory_trust",
+    "interaction.question": "question",
+    "interaction.plan": "plan",
+    "interaction.goal": "goal",
 }
 
 _APPROVAL_OPTIONS: Final[tuple[tuple[str, str, str], ...]] = (
@@ -62,7 +74,25 @@ _APPROVAL_OPTIONS: Final[tuple[tuple[str, str, str], ...]] = (
     ("approve_project", "allow_always", "本项目内总是允许"),
     ("reject", "reject_once", "拒绝"),
 )
-"""v3 决策 → ACP 权限选项。`reject_with_feedback` 不发：ACP 响应没有文字字段（GAP-05）。"""
+"""v3 决策 → ACP 权限选项。`reject_with_feedback` 另走表单，只在客户端声明了表单能力时追加。"""
+
+_FEEDBACK_OPTION: Final[tuple[str, str, str]] = (
+    "reject_with_feedback",
+    "reject_once",
+    "拒绝并说明原因",
+)
+
+_OPTION_SCOPE: Final[Mapping[str, str]] = {
+    "approve_once": "once",
+    "approve_thread": "thread",
+    "approve_project": "project",
+    "reject": "once",
+    "reject_with_feedback": "once",
+}
+"""声明了 approval 扩展时写进选项 `_meta` 的范围。目录信任不写。"""
+
+_REQUESTS_LIMIT: Final = 256 * 1024
+"""原始审批请求放进扩展时的 UTF-8 上限，超过就只留一个截断标记。"""
 
 _TRUST_OPTIONS: Final[tuple[tuple[str, str, str], ...]] = (
     ("allow_session", "allow_always", "本会话内允许访问该目录"),
@@ -91,6 +121,7 @@ class InteractionFrame:
     payload: Mapping[str, object]
     is_child: bool
     agent_id: str | None
+    execution_id: str | None = None
 
 
 def action_tool(payload: Mapping[str, object]) -> tuple[str, dict[str, object] | None, str | None]:
@@ -146,6 +177,7 @@ def parse_interaction(frame: Mapping[str, object]) -> InteractionFrame | None:
         payload=payload,
         is_child=params.get("parent_execution_id") is not None,
         agent_id=agent_id if isinstance(agent_id, str) and agent_id else None,
+        execution_id=params.get("execution_id") if isinstance(params.get("execution_id"), str) else None,
     )
 
 
@@ -170,11 +202,22 @@ class PermissionDone:
     delivered: Literal["resolved", "expired", "invalid", "failed"]
 
 
-def approval_options(decisions: Sequence[str]) -> list[PermissionOption]:
-    """按固定顺序给出选项；没有拒绝项时补一个（用户永远能说不）。"""
-    options = _options(_APPROVAL_OPTIONS, decisions)
+def approval_options(
+    decisions: Sequence[str],
+    *,
+    forms: bool = False,
+    ext_approval: bool = False,
+) -> list[PermissionOption]:
+    """按固定顺序给出选项；没有拒绝项时补一个（用户永远能说不）。
+
+    `forms` 为真且 payload 里有 `reject_with_feedback` 时，拒绝项后面再加
+    「拒绝并说明原因」。没声明表单能力时不给这个选项，点了也填不了字。
+    """
+    options = _options(_APPROVAL_OPTIONS, decisions, ext_approval=ext_approval)
     if options and "reject" not in {option.option_id for option in options}:
-        options.append(_option(("reject", "reject_once", "拒绝")))
+        options.append(_option(("reject", "reject_once", "拒绝"), ext_approval=ext_approval))
+    if forms and "reject_with_feedback" in set(decisions):
+        options.append(_option(_FEEDBACK_OPTION, ext_approval=ext_approval))
     return options
 
 
@@ -191,9 +234,16 @@ def build_approval_job(
     target: ApprovalTarget,
     *,
     ext_approval: bool,
+    workspace: Path,
+    forms: bool = False,
 ) -> PermissionJob | None:
-    """构造审批权限请求；选项为空时返回 None（调用方 fail-closed）。"""
-    options = approval_options(_decisions(frame.payload))
+    """构造审批权限请求；选项为空时返回 None（调用方 fail-closed）。
+
+    文件变更优先带标准 `diff` 内容（客户端自己画左右对比）；没有全文（超过 256 KiB
+    或二进制）或整帧超过出站上限时，退回 Markdown 文本兜底，保证请求一定发得出去。
+    `workspace` 用来把 presentation 里可能是相对路径的 `path` 解析成绝对路径。
+    """
+    options = approval_options(_decisions(frame.payload), forms=forms, ext_approval=ext_approval)
     if not options:
         return None
     description = frame.payload.get("description")
@@ -202,18 +252,23 @@ def build_approval_job(
     body = f"{text}\n\n{fallback}".strip() if fallback else text.strip()
     # 最后一道门：超过 rawInput 上限就整条不发（参数可能来自任意工具）。
     raw = bounded_raw_input(target.raw_input)
+    text_content = [tool_content(text_block(body or target.title))]
+    diff_block = _diff_content_block(frame.payload.get("presentation"), workspace)
     tool_call = ToolCallUpdate(
         tool_call_id=target.tool_call_id,
         title=target.title,
         kind=target.kind,
         status="pending",
-        content=[tool_content(text_block(body or target.title))],
+        content=[diff_block] if diff_block is not None else text_content,
         locations=target.locations or None,
         raw_input=None if raw is UNSET else raw,
         # `_meta.harnessCode.approval` 只放在 toolCall 上：前面的卡片更新不带，
         # 同一份 diff 不重复发两遍（Web 端消费的是权限请求）。
         field_meta=approval_meta(frame, agent_id=frame.agent_id) if ext_approval else None,
     )
+    if diff_block is not None and frame_chars(tool_call) > MAX_OUTBOUND_FRAME_BYTES:
+        # 全文 diff 让整帧超限：先去掉 diff 改用文本兜底，而不是整条请求发不出去。
+        tool_call = tool_call.model_copy(update={"content": text_content})
     return PermissionJob(
         frame=frame,
         card_id=target.tool_call_id,
@@ -275,6 +330,27 @@ def decision_from_response(job: PermissionJob, response: object) -> str:
     return job.reject_decision
 
 
+def _diff_content_block(presentation: object, workspace: Path) -> Any | None:
+    """presentation 带全文时产出标准 `diff` 内容块，否则返回 `None`（走文本兜底）。
+
+    判断：`kind` 必须是 `file_diff`；`old_text`、`new_text` 两个键都存在才算有全文
+    （Host 超限时两个键一起不写，只剩一边说明数据不完整，宁可不画）。新建文件
+    `old_text` 为 `None` → `oldText` 省略；删除文件 `new_text` 为 `None` → `newText=""`。
+    """
+    if not isinstance(presentation, Mapping) or presentation.get("kind") != "file_diff":
+        return None
+    if "old_text" not in presentation or "new_text" not in presentation:
+        return None
+    path = presentation.get("path")
+    old, new = presentation["old_text"], presentation["new_text"]
+    if not isinstance(path, str) or not path:
+        return None
+    if (old is not None and not isinstance(old, str)) or (new is not None and not isinstance(new, str)):
+        return None
+    absolute = Path(path) if Path(path).is_absolute() else workspace / path
+    return tool_diff_content(str(absolute), "" if new is None else new, old)
+
+
 def render_diff_fallback(presentation: object) -> str | None:
     """用 v3 已有的 `file_diff` 展示数据渲染文本兜底（不重新计算 diff）。"""
     if not isinstance(presentation, Mapping) or presentation.get("kind") != "file_diff":
@@ -304,7 +380,13 @@ def approval_meta(frame: InteractionFrame, *, agent_id: str | None = None) -> di
             body["description"] = description
         presentation = frame.payload.get("presentation")
         if isinstance(presentation, Mapping):
-            body["presentation"] = dict(presentation)
+            # 全文已经在标准 `diff` 内容里，扩展副本不再带一遍（最多省下 512 KiB）。
+            body["presentation"] = {
+                key: value
+                for key, value in presentation.items()
+                if key not in ("old_text", "new_text")
+            }
+        body.update(_bounded_requests(frame.payload.get("requests")))
     else:
         body = {
             "type": "directory_trust",
@@ -331,13 +413,18 @@ class PermissionBroker:
         client: Any,
         log: Any,
         on_done: Callable[[PermissionDone], None],
+        elicitation: ElicitationBroker | None = None,
     ) -> None:
-        """绑定 Host 服务面、连接、SDK 客户端与结果回调；状态只有任务表。"""
+        """绑定 Host 服务面、连接、SDK 客户端与结果回调；状态只有任务表。
+
+        `elicitation` 只在客户端会画表单时传入，用来追问拒绝原因。
+        """
         self._host = host
         self._connection = connection
         self._client = client
         self._log = log
         self._on_done = on_done
+        self._elicitation = elicitation
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._jobs: dict[str, PermissionJob] = {}
 
@@ -381,6 +468,9 @@ class PermissionBroker:
                 job.options,
             )
             decision = decision_from_response(job, response)
+            feedback = await self._feedback_for(job, decision)
+            if decision == "reject_with_feedback" and not feedback:
+                decision = job.reject_decision
         except asyncio.CancelledError:
             # 本地取消（session/cancel、Run 结束、aclose）：让 Host 立刻 fail-closed。
             # Run 若已被取消，pending future 已不在，这里返回 False，什么都不发生。
@@ -402,15 +492,27 @@ class PermissionBroker:
                 },
             )
             decision = job.reject_decision
-        delivered = self._host.resolve_interaction(
-            self._connection, job.frame.request_id, {"decision": decision}
-        )
+            feedback = None
+        value: dict[str, object] = {"decision": decision}
+        if feedback:
+            value["feedback"] = feedback
+        delivered = self._host.resolve_interaction(self._connection, job.frame.request_id, value)
         self._on_done(
             PermissionDone(
                 job=job,
                 decision=decision,
                 delivered=delivered if delivered in {"resolved", "expired", "invalid"} else "failed",
             )
+        )
+
+    async def _feedback_for(self, job: PermissionJob, decision: str) -> str | None:
+        """选了「拒绝并说明原因」才追问。没有表单能力，或用户没填文字，都当普通拒绝。"""
+        if decision != "reject_with_feedback" or self._elicitation is None:
+            return None
+        return await self._elicitation.ask_feedback(
+            request_id=job.frame.request_id,
+            session_id=job.frame.session_id,
+            run_id=job.frame.run_id,
         )
 
     def _cancel(self, predicate: Callable[[PermissionJob], bool]) -> None:
@@ -429,17 +531,34 @@ class PermissionBroker:
 
 
 def _options(
-    table: Sequence[tuple[str, str, str]], decisions: Sequence[str]
+    table: Sequence[tuple[str, str, str]],
+    decisions: Sequence[str],
+    *,
+    ext_approval: bool = False,
 ) -> list[PermissionOption]:
     """按表过滤并保持固定顺序。"""
     wanted = set(decisions)
-    return [_option(entry) for entry in table if entry[0] in wanted]
+    return [_option(entry, ext_approval=ext_approval) for entry in table if entry[0] in wanted]
 
 
-def _option(entry: tuple[str, str, str]) -> PermissionOption:
-    """把表行转成 SDK 的权限选项。"""
+def _option(entry: tuple[str, str, str], *, ext_approval: bool = False) -> PermissionOption:
+    """把表行转成 SDK 的权限选项。扩展开启时带上允许范围。"""
     option_id, kind, name = entry
-    return PermissionOption(option_id=option_id, name=name, kind=kind)  # type: ignore[arg-type]
+    meta = {EXT_KEY: {"scope": _OPTION_SCOPE[option_id]}} if ext_approval else None
+    return PermissionOption(option_id=option_id, name=name, kind=kind, field_meta=meta)  # type: ignore[arg-type]
+
+
+def _bounded_requests(requests: object) -> dict[str, object]:
+    """原始请求放进扩展。序列化失败或超过 256 KiB 时只留截断标记，不把半截 JSON 发出去。"""
+    if requests is None:
+        return {}
+    try:
+        encoded = json.dumps(requests, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError):
+        return {"requestsTruncated": True}
+    if len(encoded) > _REQUESTS_LIMIT:
+        return {"requestsTruncated": True}
+    return {"requests": requests}
 
 
 def _allow_ids(options: Sequence[PermissionOption]) -> frozenset[str]:

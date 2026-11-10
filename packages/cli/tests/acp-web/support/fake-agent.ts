@@ -29,7 +29,11 @@ export type FakeAgentHooks = {
   /** prompt：返回 stopReason + 可选 _meta；脚本可先发任意 update 再 resolve。 */
   onPrompt?: (agent: FakeAgent, sessionId: string, params: { prompt: unknown }) => Promise<{ stopReason: string; _meta?: unknown }> | { stopReason: string; _meta?: unknown }
   onNewSession?: (agent: FakeAgent, params: Record<string, unknown>) => Promise<{ sessionId: string; modes?: unknown }> | { sessionId: string; modes?: unknown }
-  onListSessions?: (agent: FakeAgent) => Promise<unknown> | unknown
+  onListSessions?: (agent: FakeAgent, params: Record<string, unknown>) => Promise<unknown> | unknown
+  onResumeSession?: (agent: FakeAgent, sessionId: string) => Promise<unknown> | unknown
+  onCloseSession?: (agent: FakeAgent, sessionId: string) => Promise<unknown> | unknown
+  /** 声明 session/resume 能力（默认不声明，用于测 resume→load 回退）。 */
+  sessionResume?: boolean
   onLoadSession?: (agent: FakeAgent, sessionId: string) => Promise<unknown> | unknown
   onSetSessionMode?: (agent: FakeAgent, sessionId: string, modeId: string) => Promise<unknown> | unknown
   onCancel?: (agent: FakeAgent, sessionId: string) => void
@@ -69,7 +73,14 @@ export class FakeAgent {
       agentCapabilities: {
         loadSession: this.hooks.loadSession ?? true,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },
-        ...(this.hooks.sessionList === false ? {} : { sessionCapabilities: { list: {} } }),
+        ...(this.hooks.sessionList === false
+          ? {}
+          : {
+              sessionCapabilities: {
+                list: {},
+                ...(this.hooks.sessionResume ? { resume: {}, close: {} } : {}),
+              },
+            }),
         _meta: {
           harnessCode: {
             version: 1,
@@ -116,9 +127,21 @@ export class FakeAgent {
     return { modes: this.hooks.modes ?? undefined }
   }
 
+  async resumeSession(params: Record<string, unknown>): Promise<unknown> {
+    this.requests.push({ method: "session/resume", params })
+    if (this.hooks.onResumeSession) return this.hooks.onResumeSession(this, (params as { sessionId: string }).sessionId)
+    return { modes: this.hooks.modes ?? undefined }
+  }
+
+  async closeSession(params: Record<string, unknown>): Promise<unknown> {
+    this.requests.push({ method: "session/close", params })
+    if (this.hooks.onCloseSession) return this.hooks.onCloseSession(this, (params as { sessionId: string }).sessionId)
+    return {}
+  }
+
   async listSessions(params: Record<string, unknown>): Promise<unknown> {
     this.requests.push({ method: "session/list", params })
-    if (this.hooks.onListSessions) return this.hooks.onListSessions(this)
+    if (this.hooks.onListSessions) return this.hooks.onListSessions(this, params)
     return { sessions: [], nextCursor: null }
   }
 

@@ -31,6 +31,8 @@ export type AcpBootInfo = {
   canLoadSession: boolean
   /** agentCapabilities.sessionCapabilities?.list 存在 */
   canListSessions: boolean
+  /** sessionCapabilities.resume 已声明：openThread 对已登记会话可用 session/resume。 */
+  /** sessionCapabilities.close 已声明。 */
   /** agentCapabilities._meta.harnessCode.capabilities 两个开关 */
   extension: { approval: boolean; runSummary: boolean }
   modes: {

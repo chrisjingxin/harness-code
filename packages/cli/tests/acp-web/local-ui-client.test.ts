@@ -16,7 +16,7 @@ async function makeSession() {
   const agent = new FakeAgent()
   const { client, agent: agentStream } = pairedStreams()
   agent.attach(agentStream)
-  const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", settleCommandsMs: 10 })
+  const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", commandsTimeoutMs: 10 })
   const controller = createInteractiveController({ gateway, baseRuntime: createAcpRuntime(boot) })
   return { agent, controller, client: createLocalUiClient({ controller }) }
 }
@@ -60,7 +60,7 @@ describe("LocalUiClient", () => {
     })
     const { client: ws, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway, boot } = await AcpAgentGateway.connect({ stream: ws, cwd: "/tmp/ws", settleCommandsMs: 10 })
+    const { gateway, boot } = await AcpAgentGateway.connect({ stream: ws, cwd: "/tmp/ws", commandsTimeoutMs: 10 })
     const controller = createInteractiveController({ gateway, baseRuntime: createAcpRuntime(boot) })
     const client = createLocalUiClient({ controller })
     await controller.dispatch({ type: "input.submit", value: "跑" })

@@ -487,6 +487,7 @@ __all__ = [
     "install_command_plugin",
     "make_host",
     "make_persistent_host",
+    "primary_path_resolver",
     "prompt_response",
     "reasoning",
     "resume_decisions",
@@ -495,3 +496,22 @@ __all__ = [
     "tool_result",
     "tool_start",
 ]
+
+
+def primary_path_resolver(workspace):
+    """测试用：只认主工作区的展示路径解析（对应 HostServicePort.resolve_display_path 的最小子集）。
+
+    与 `PathLocator` 新构造签名配套；外部授权根只在 AgentHost 真身上才有。
+    """
+    from harness_agent.policy.workspace_boundary import WorkspacePathPolicy
+
+    policy = WorkspacePathPolicy(workspace)
+
+    def resolve(raw, *, tool_name):
+        try:
+            resolved = policy.validate_direct_path(raw, tool_name=tool_name)
+        except Exception:
+            return None
+        return str(resolved) if resolved.is_absolute() else None
+
+    return resolve

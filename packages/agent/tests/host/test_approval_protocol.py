@@ -12,10 +12,12 @@ from jsonschema.exceptions import ValidationError
 from harness_agent.policy.permission_rules import PermissionRule
 from harness_agent.protocol.generated import ApprovalResponse
 from harness_agent.protocol.runtime import validate_interaction_params
+from harness_agent.host.connection import ProtocolConnection, ProtocolInteractionAdapter
 from harness_agent.host.run_coordinator import (
     ConnectionRef,
     RunCoordinator,
     RunPreparation,
+    RunRef,
     RunState,
     StartRun,
     UserRunInput,
@@ -115,6 +117,84 @@ def test_resume_value_question_maps_answers() -> None:
     )
     result = _resume_value(spec, {"answers": {"question-1": ["选项A"]}})
     assert result == {"int-q": {"status": "answered", "answers": ["选项A"]}}
+
+
+def test_resume_value_question_error_survives_expired_flag() -> None:
+    """客户端不支持提问时的错误文案不能被过期标记收成用户取消。"""
+    spec = InteractionRequest(
+        request_id="req-q",
+        type="question",
+        payload={"interrupt_id": "int-q"},
+        interrupt_id="int-q",
+        questions=({"question": "选哪个"},),
+    )
+    result = _resume_value(
+        spec,
+        {
+            "status": "error",
+            "error": "当前客户端不支持提问，请自行决定或在回复中说明",
+            "answers": {},
+            "expired": True,
+        },
+    )
+    assert result == {
+        "int-q": {
+            "status": "error",
+            "error": "当前客户端不支持提问，请自行决定或在回复中说明",
+            "answers": [],
+        }
+    }
+
+
+class _HandleHost:
+    """只暴露适配器要读的连接表。"""
+
+    def __init__(self, connection: ProtocolConnection) -> None:
+        self._connections = {connection.connection_id: connection}
+
+    @staticmethod
+    def _connection_handles(connection: ProtocolConnection) -> set[str]:
+        return connection.interaction_handles
+
+
+def _question_spec() -> InteractionRequest:
+    return InteractionRequest(
+        request_id="req-q",
+        type="question",
+        payload={"interrupt_id": "int-q"},
+        interrupt_id="int-q",
+    )
+
+
+async def test_live_connection_without_question_handle_returns_the_sentence() -> None:
+    """连接还活着但不会提问时，交回那句固定说明，而不是空答案。"""
+    connection = ProtocolConnection(
+        connection_id="c1",
+        role="owner",
+        interaction_handles={"approval", "directory_trust"},
+    )
+    adapter = ProtocolInteractionAdapter(_HandleHost(connection))  # type: ignore[arg-type]
+    result = await adapter.request(ConnectionRef("c1"), RunRef("thread", "run"), _question_spec())
+    assert result.expired is True
+    assert result.value == {
+        "status": "error",
+        "error": "当前客户端不支持提问，请自行决定或在回复中说明",
+        "answers": {},
+    }
+
+
+async def test_closed_connection_without_question_handle_keeps_empty_answers() -> None:
+    """连接已经关掉时仍走原来的空答案，避免把断开说成客户端不支持。"""
+    connection = ProtocolConnection(
+        connection_id="c1",
+        role="owner",
+        interaction_handles=set(),
+        closed=True,
+    )
+    adapter = ProtocolInteractionAdapter(_HandleHost(connection))  # type: ignore[arg-type]
+    result = await adapter.request(ConnectionRef("c1"), RunRef("thread", "run"), _question_spec())
+    assert result.expired is True
+    assert result.value == {"answers": {}}
 
 
 class _ScriptedInteractionPort:
@@ -491,15 +571,16 @@ class TestApprovalToolCallIdInjection:
         _assert_approval_params_schema_compliant(port.requests[0])
         assert self._first_action(port)["tool_call_id"] == "call-A"
 
-    def test_duplicate_fingerprints_in_one_batch_get_no_id(self) -> None:
-        """同一批两个相同 `(工具名, 参数)` 不注入：注入任一个都会让两张卡片抢同一个 id。"""
+    def test_duplicate_fingerprints_in_one_batch_get_distinct_ids_in_order(self) -> None:
+        """同一批两个相同 `(工具名, 参数)`：按预检登记顺序各拿各的 id，两张卡片不抢同一个。"""
         port = _ScriptedInteractionPort(
             [{"decision": "approve_once"}, {"decision": "approve_once"}]
         )
         coordinator = _coordinator_with_port(port)
         run = _serial_run()
         args = {"command": "npm build"}
-        assert run.tool_call_ids.remember("execute", args, "call-dup")
+        assert run.tool_call_ids.remember("execute", args, "call-A")
+        assert run.tool_call_ids.remember("execute", args, "call-B")
 
         self._collect(
             coordinator,
@@ -512,10 +593,11 @@ class TestApprovalToolCallIdInjection:
         )
 
         assert len(port.requests) == 2
+        ids = []
         for request in port.requests:
             _assert_approval_params_schema_compliant(request)
-            actions = request.payload["requests"]["action_requests"]
-            assert "tool_call_id" not in actions[0]
+            ids.append(request.payload["requests"]["action_requests"][0]["tool_call_id"])
+        assert ids == ["call-A", "call-B"]
 
     def test_unknown_fingerprint_adds_no_key(self) -> None:
         """缓存里没有该指纹时 payload 与改动前逐字一致（不多一个键）。"""

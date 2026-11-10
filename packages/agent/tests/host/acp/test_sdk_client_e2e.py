@@ -472,10 +472,16 @@ async def test_sdk_client_lists_and_loads_a_session(tmp_path: Path) -> None:
         "yolo",
     ]
     # 回放在响应之前到达：客户端在 load 返回时就已收齐三类历史。
-    kinds = [type(update).__name__ for update in client.updates]
+    # session/new 后的命令表总推送与回放无关，先剔掉再核对回放三类。
+    replay_updates = [
+        update
+        for update in client.updates
+        if type(update).__name__ != "AvailableCommandsUpdate"
+    ]
+    kinds = [type(update).__name__ for update in replay_updates]
     assert kinds == ["UserMessageChunk", "AgentMessageChunk", "ToolCallStart"]
-    assert client.updates[0].message_id == "history-seed:h0"
-    assert client.updates[2].tool_call_id == "history-seed:h2"
+    assert replay_updates[0].message_id == "history-seed:h0"
+    assert replay_updates[2].tool_call_id == "history-seed:h2"
 
 
 async def test_sdk_client_cancels_while_approval_is_pending(tmp_path: Path) -> None:

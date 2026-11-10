@@ -86,6 +86,8 @@ class StartRunRequest:
     input: RunInput
     requested_primary_profile: str | None = None
     requested_approval_mode: ApprovalModeName | None = None
+    # 这次 prompt 开始时已经停在 plan：批准计划后 Host 切回这个模式。
+    pre_plan_mode: ApprovalModeName | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +155,12 @@ class HostServicePort(Protocol):
         """返回当前工作区最近活跃的 thread 摘要。"""
         raise NotImplementedError
 
+    async def list_threads_page(
+        self, limit: int, after: tuple[int, str] | None
+    ) -> tuple[list[ThreadSummary], bool]:
+        """keyset 分页版 `list_threads`：返回 (本页摘要, has_more)；after=None 取第一页。"""
+        raise NotImplementedError
+
     async def cancel_run(
         self, connection: ProtocolConnection, thread_id: str, run_id: str
     ) -> CancelResult:
@@ -204,6 +212,16 @@ class HostServicePort(Protocol):
     @property
     def workspace(self) -> Path:
         """Host 启动时固定的工作区绝对路径；AcpServer 用它校验 session/new 的 cwd。"""
+        raise NotImplementedError
+
+    def resolve_display_path(self, raw: object, *, tool_name: str) -> str | None:
+        """把工具参数里的路径解析成可展示的绝对宿主路径；不能解析时返回 None。
+
+        与 `WorkspacePathPolicy.validate_direct_path` 同语义：主工作区内的相对/
+        虚拟/绝对路径照常，外加全部已授权根（session/project/user）；不含本
+        Run 一次性授权（无 run 上下文）。越界、未信任、非字符串一律返回 None，
+        绝不抛异常——位置只是卡片副标题，不能打断事件流。
+        """
         raise NotImplementedError
 
     @staticmethod

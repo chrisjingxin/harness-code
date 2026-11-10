@@ -102,3 +102,73 @@ test("Thread 打开期间重复打开被拒绝，stale 模型结果不覆盖新 
   }
 })
 
+
+test("打开/新建会话不塌回已分页的 Thread 目录（S2 返工 3）", async () => {
+  const pages: Record<string, { threads: ReturnType<typeof Array>[0]; nextCursor: string | null }> = {}
+  const row = (id: string, ms: number) => ({
+    thread_id: id, title: id, created_at_ms: ms, updated_at_ms: ms,
+    first_message: "", latest_message: "", message_count: 0,
+  }) as never
+  const harness = makeHarness({
+    listThreadsImpl: async (cursor?: string) => {
+      if (!cursor) return { threads: [row("t-a", 3000), row("t-b", 2000)], nextCursor: "c1" }
+      if (cursor === "c1") return { threads: [row("t-c", 1500), row("t-d", 1200)], nextCursor: "c2" }
+      return { threads: [], nextCursor: null }
+    },
+  })
+  try {
+    await harness.controller.dispatch({ type: "command.execute", commandId: "thread.resume" })
+    await flush()
+    // 翻第二页
+    await harness.controller.dispatch({ type: "threads-load-more" })
+    await flush()
+    let snap = harness.controller.getSnapshot()
+    expect(snap.catalogs.threads.items).toHaveLength(4)
+    expect(snap.catalogs.threads.nextCursor).toBe("c2")
+    // 打开会话 → reset + refresh：目录不能塌回第一页
+    await harness.controller.dispatch({ type: "thread.open", threadId: "t-a" })
+    await flush()
+    snap = harness.controller.getSnapshot()
+    expect(snap.catalogs.threads.items).toHaveLength(4)
+    expect(snap.catalogs.threads.nextCursor).toBe("c2")
+    // 新建会话同样不塌
+    await harness.controller.dispatch({ type: "command.execute", commandId: "thread.new" })
+    await flush()
+    snap = harness.controller.getSnapshot()
+    expect(snap.catalogs.threads.items).toHaveLength(4)
+    expect(snap.catalogs.threads.nextCursor).toBe("c2")
+  } finally {
+    await harness.controller.close()
+  }
+})
+
+test("打开历史会话：带 rawInput/failed 的 tool_call 在控制器时间线显示为失败+参数（S2 返工）", async () => {
+  const harness = makeHarness({
+    openThreadImpl: async (threadId) => ({
+      thread: {
+        thread_id: threadId, title: null, created_at_ms: 1, updated_at_ms: 1,
+        first_message: "", latest_message: "", message_count: 0,
+      },
+      messages: [
+        { kind: "user", content: "读一下 a.txt" },
+        {
+          kind: "tool", content: "读取失败：文件不存在", tool_name: "read_file",
+          tool_call_id: "s1:h1", arguments: { file_path: "/a.txt" }, status: "failed",
+        },
+      ],
+    }),
+  })
+  try {
+    await harness.controller.dispatch({ type: "command.execute", commandId: "thread.resume" })
+    await flush()
+    await harness.controller.dispatch({ type: "thread.open", threadId: "thread-1" })
+    await flush()
+    const snap = harness.controller.getSnapshot()
+    const tool = snap.timeline.find(i => i.type === "tool")?.tool
+    expect(tool?.status).toBe("failed")
+    expect(tool?.arguments).toBe(JSON.stringify({ file_path: "/a.txt" }))
+    expect(tool?.name).toBe("read_file")
+  } finally {
+    await harness.controller.close()
+  }
+})

@@ -2071,6 +2071,15 @@
     },
     {
       "kind": "notification.params",
+      "name": "thread.approval_mode",
+      "case": "valid",
+      "value": {
+        "thread_id": "x",
+        "mode": "plan"
+      }
+    },
+    {
+      "kind": "notification.params",
       "name": "code_index.changed",
       "case": "valid",
       "value": {
@@ -7374,6 +7383,30 @@
         "latest_message": "x",
         "message_count": 1,
         "title": "x"
+      }
+    },
+    {
+      "kind": "notification.params",
+      "name": "thread.approval_mode",
+      "case": "wrong_type",
+      "value": null
+    },
+    {
+      "kind": "notification.params",
+      "name": "thread.approval_mode",
+      "case": "extra_field",
+      "value": {
+        "thread_id": "x",
+        "mode": "plan",
+        "__extra": true
+      }
+    },
+    {
+      "kind": "notification.params",
+      "name": "thread.approval_mode",
+      "case": "missing_field",
+      "value": {
+        "mode": "plan"
       }
     },
     {

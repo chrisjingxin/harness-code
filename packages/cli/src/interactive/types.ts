@@ -196,6 +196,7 @@ export type InteractiveIntent =
   | { type: "command.execute"; commandId: string; argument?: string }
   | { type: "run.cancel" }
   | { type: "catalog.refresh"; catalog: "threads" | "models" | "skills" | "mcp" | "agents" }
+  | { type: "threads-load-more" }
   | { type: "thread.open"; threadId: string }
   | { type: "thread.undo"; threadId: string; targetTurnId: string; mode?: "both" | "conversation" | "code" }
   | { type: "thread.redo"; threadId: string }
@@ -230,7 +231,7 @@ export type InteractiveSnapshot = {
   readonly connection: InteractiveConnectionState
   readonly commands: readonly InteractiveCommandItem[]
   readonly catalogs: {
-    readonly threads: LoadableCatalog<ThreadSummary>
+    readonly threads: LoadableCatalog<ThreadSummary> & { nextCursor: string | null; loadingMore: boolean }
     readonly models: LoadableCatalog<ModelProfile>
     readonly skills: LoadableCatalog<SkillSummary>
     readonly mcp: LoadableCatalog<McpServerSummary>

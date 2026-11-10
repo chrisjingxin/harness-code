@@ -5,20 +5,20 @@ feature_area: Web UI 与 Agent 通信协议（ACP）
 parent_task: -
 decomposed_by: Kiro
 priority: P1
-status: 待验收
+status: 已完成
 owner: 张景新
 branch: feat_hc_192_WebUI接入ACP协议
 scope: Python Agent 新增标准 ACP（Agent Client Protocol）的 stdio 入口 `harness acp`；新增 `harness web` 入口，由 Bun 进程启动 `harness acp` 子进程、提供网页文件、打开浏览器，并在浏览器 WebSocket 与子进程 stdio 之间原样转发 ACP 消息；浏览器里的新 Web 界面复用现有 React 组件，只新增「ACP 到界面状态」的适配层。第一期只做标准 ACP 能覆盖的能力，ACP 覆盖不了的功能暂时不提供，并登记在「ACP 缺口登记表」里留给后续阶段。现有 TUI、`/web` 接管、无头模式和 JSON-RPC v3 全部保持不变，TUI 下线另开 Task。
 acceptance: 运行 `harness web` 后自动打开浏览器并出现对话界面；能发送消息并实时看到回复、思考和工具卡片；工具审批卡片能显示文件 diff 并正确放行或拒绝；能取消正在运行的任务；刷新页面或重新打开后能恢复历史会话；Agent 侧斜杠命令可用；不带 token、token 错误、Origin 不合法的浏览器连接被拒绝；用官方 ACP SDK 写的最小客户端直接启动 `harness acp`，能通过 stdio 完成握手并对话一轮，且 stdout 上只有合法 ACP 消息；原 TUI、`/web`、无头模式的行为和测试不变；「ACP 缺口登记表」逐项写明现状、ACP 缺什么、建议的扩展方式；缺口表使用 GAP 编号并在界面、终端、用户文档中可见，且每组缺口在看板上有后续 Task；Python 与 TypeScript 两端的相关测试和 `npm run project:check` 通过。
 user_docs: docs/user/Web界面.md、docs/user/快速开始.md
 developer_docs: docs/developer/spec/HC-209-WebUI接入ACP协议.md、docs/developer/plan/HC-209-WebUI接入ACP协议.md、docs/developer/todo/HC-209-WebUI接入ACP协议.md；完成后新增或增量修订 docs/developer/architecture/ 下的 ACP 架构文档，并同步 架构总览.md
-test_evidence: -
+test_evidence: S0-S4实现、Review与E2E验证完整通过；Python全量3437 pass/5 skip/0 fail；CLI全量1782 pass/15项浏览器E2E全绿；project:check/typecheck/build全绿；用户验收确认完成
 references: tmp/handoff.md（本地交接稿，不入库）、docs/developer/research/168-dcode功能差距.md、docs/developer/architecture/adr/0002-project-host-multi-connection.md、docs/developer/architecture/adr/0003-single-interactive-core-dual-renderer.md、https://agentclientprotocol.com/protocol/transports、https://agentclientprotocol.com/protocol/extensibility
-completed_at: -
+completed_at: 2026-11-06
 ---
 # HC-209 WebUI接入ACP协议
 
-> harness_lody 分支说明：本任务在 master 线上编号为 HC-192，挑入 harness_lody 时因该分支的 HC-192～HC-208 已分配给「独立桌面协作工作台」系列，改编号为 HC-209（后续 Task 相应改为 HC-210、HC-211）。本分支根 workspace 不含 `packages/cli`，`harness web` 在本分支只作为迁移来源代码保留；Python `harness acp` 可供 HC-200「Harness 独立 ACP 接入」复用。
+> harness_lody 分支说明：本任务在 master 线上编号为 HC-192，挑入 harness_lody 时因该分支的 HC-192～HC-208 已分配给「独立桌面协作工作台」系列，改编号为 HC-209（后续 Task 相应为补齐 ACP 缺口扩展与 Electron 桌面端两个任务，2026-11-06 均已删除，缺口改归 HC-200 等）。本分支根 workspace 不含 `packages/cli`，`harness web` 在本分支只作为迁移来源代码保留；Python `harness acp` 可供 HC-200「Harness 独立 ACP 接入」复用。
 
 ## 需求来源与当前阶段
 
@@ -26,7 +26,7 @@ completed_at: -
 
 经过对话确认，本任务只做第一步：**让 Web UI 通过标准 ACP 与自家 Agent 通信**。接入第三方 Agent、Electron 打包、补齐 ACP 缺口、TUI 下线都是后续 Task。
 
-当前阶段：Task、Spec、[Plan](../plan/HC-209-WebUI接入ACP协议.md)、[Todo](../todo/HC-209-WebUI接入ACP协议.md) 均已确认；停点 0 到 3 已完成（证据见文末各节），等待用户确认后进入停点 4。本任务改动跨进程协议，不属于快速通道，走完整流程：Task → Spec → Plan → Todo → 实现 → 检视。
+当前阶段：Task、Spec、[Plan](../../plan/HC-209-WebUI接入ACP协议.md)、[Todo](../../todo/HC-209-WebUI接入ACP协议.md) 均已确认；停点 0 到 3 已完成（证据见文末各节），等待用户确认后进入停点 4。本任务改动跨进程协议，不属于快速通道，走完整流程：Task → Spec → Plan → Todo → 实现 → 检视。
 
 ## 通俗说明
 
@@ -95,8 +95,8 @@ completed_at: -
 
 ## 后续 Task 线索（不在本任务内，完成本任务时再正式立项）
 
-1. 补齐 ACP 缺口：按缺口登记表逐项做成 ACP 扩展或辅助通道。（S4 已立项：[HC-210](HC-210-补齐ACP缺口扩展.md)）
-2. Electron 桌面端：主进程直接启动 ACP Agent 并转发给界面，替代 `harness web` 的 WebSocket 桥。（S4 已立项：[HC-211](HC-211-Electron桌面端.md)，含 GAP-11/12/20/24/25）
+1. 补齐 ACP 缺口：按缺口登记表逐项做成 ACP 扩展或辅助通道。（S4 曾立项，2026-11-06 用户决定删除，缺口并入 HC-200/201/197/206）
+2. Electron 桌面端：主进程直接启动 ACP Agent 并转发给界面，替代 `harness web` 的 WebSocket 桥。（S4 曾立项为 Electron 桌面端任务，2026-11-06 用户决定删除；GAP-11/12 改归 HC-199/207，GAP-20/24/25 待定）
 3. 接入第三方 ACP Agent：界面一侧实现 ACP 客户端能力（`fs/*`、`terminal/*`），并支持选择和管理多个 Agent。
 4. TUI 与 `WebUiGateway` 下线：删除自有 UI 契约、接管状态机和 JSON-RPC v3 里只服务 TUI 的部分，届时 Python 才只剩 ACP 一种入口。**前置条件**：缺口表（Spec §12.3 / 架构文档）里没有「未开始」或「进行中」的行，每一行要么已关闭，要么用户确认放弃；立项时把它抄成该 Task 的验收项。
 
@@ -319,7 +319,7 @@ S0 的探索由 DeepSeek 子 agent 只读完成（Todo 0.2 到 0.6），没有�
 - **浏览器 E2E 由 7 项扩到 15 项**（`tests/acp-web/browser-e2e.test.ts`，真实点击）：新增 `diff` 脚本场景（`write_file` + `file_diff` presentation），审批卡片显示路径、diff 行与 `+4` 统计，允许/拒绝两条路径；目录信任卡片允许/拒绝；`history` 场景刷新后侧栏保留并可回放；echo 场景刷新后重新连上并能再收到回显；SIGKILL 子进程后界面显示「本地 Agent 进程已退出（退出码…」；关闭页面后子进程 8 秒内退出。
 - **安全验收映射**：无 token、错 token、重放、过期、错 Origin、错 Host、超限帧、二进制帧、第二个连接均已由 `bridge.routes`、`bridge.lifecycle`、`framing`、`bridge.python` 覆盖（被拒后不烧 token、不多 spawn、桥仍可接受新连接）；界面侧的崩溃提示与关闭回收由上面两项 E2E 补齐。
 - **缺口治理与文档**：`harness web` 启动多打印一行指向「ACP 入口当前不支持的功能」；新建 `docs/developer/architecture/ACP通信.md`（拓扑、模块地图、翻译规则、扩展约定、桥安全与生命周期、GAP-01 到 GAP-39 权威缺口表）；Spec §12.3 标注权威版本已迁移；`docs/user/Web界面.md` 新增「两种打开方式」「ACP 入口当前不支持的功能」（39 个编号全覆盖）；`docs/user/快速开始.md` 新增「浏览器与 ACP 入口」；`架构总览.md` 新增「ACP 通信（HC-209）」；ADR 0003 追加后续说明。
-- **后续 Task**：按用户选择粗分两组，新建 HC-210「补齐 ACP 缺口扩展」（34 个 GAP，TUI 下线的前置闸门）与 HC-211「Electron 桌面端」（GAP-11/12/20/24/25），均为待认领，编号已写回缺口表，`npm run tasks:sync` 已执行。
+- **后续 Task**：按用户选择粗分两组，新建「补齐 ACP 缺口扩展」任务（2026-11-06 已删除）（34 个 GAP，TUI 下线的前置闸门）与 「Electron 桌面端」任务（2026-11-06 已删除）（GAP-11/12/20/24/25），均为待认领，编号已写回缺口表，`npm run tasks:sync` 已执行。
 - **偶发用例**：源码模式构建用例与 E2E 资产构建在全量 `bun test` 下会因进程内 `Bun.build` 报 "Unseekable reading file"，改为子进程构建（`support/build-assets-subprocess.ts`）；慢客户端背压的堆增量断言改为 GC 后复测。
 
 **Review 发现与处理**（主 agent 审阅 S4 全部 diff）
@@ -338,10 +338,10 @@ S0 的探索由 DeepSeek 子 agent 只读完成（Todo 0.2 到 0.6），没有�
 **遗留风险**
 - `tests/web/syntax` 的 Shiki 高亮用例在全量下偶发超时（单跑 13/13 通过），与本任务无关，未处理。
 - `test_server_modes` 单次未复现失败（见上）。
-- 打开/刷新页面约 2.9 秒（每次连接冷启动 Python）：用户决定留到 Electron 阶段处理，耗时拆解与优化方向记入 [HC-211](HC-211-Electron桌面端.md)「性能基线」。
-- 流水线发送（`initialize` 未返回就发 `session/new`）时 `harness acp` 不回应该请求：规范客户端不受影响，记入 [HC-210](HC-210-补齐ACP缺口扩展.md) 范围第 6 项。
+- 打开/刷新页面约 2.9 秒（每次连接冷启动 Python）：用户决定留到 Electron 阶段处理，耗时拆解与优化方向记入 [ACP通信.md](../../architecture/ACP通信.md)「打开/刷新性能基线」（原 Electron 桌面端任务已删除）。
+- 流水线发送（`initialize` 未返回就发 `session/new`）时，`harness acp` 的实际表现是排队请求先回 `-32600 NOT_INITIALIZED`，不是不回响应（HC-200 S0 实测，2026-11-09；仅当 `ensure_ready()` 真让出事件循环时出现）：规范客户端不受影响，记入原缺口扩展任务，现并入 HC-200。
 
 **验收标准对照**（13 条）
-1、2、4、6：S3 E2E 与用户手测通过。3：E2E 覆盖 diff 卡片与允许/拒绝；**真实模型改文件需用户验收确认**（脚本 Agent 不写文件）。5：`history` 场景刷新回放 E2E 通过，用户手测通过。7：见安全映射与两项界面 E2E。8：S1 SDK 客户端测试。9：TUI、`/web`、headless 既有测试全量通过（除环境性的 takeover-recovery）。10、13：`ACP通信.md` 权威缺口表、用户文档、启动提示、HC-210/HC-211。11：见各停点测试。12：见上方数字。
+1、2、4、6：S3 E2E 与用户手测通过。3：E2E 覆盖 diff 卡片与允许/拒绝；**真实模型改文件需用户验收确认**（脚本 Agent 不写文件）。5：`history` 场景刷新回放 E2E 通过，用户手测通过。7：见安全映射与两项界面 E2E。8：S1 SDK 客户端测试。9：TUI、`/web`、headless 既有测试全量通过（除环境性的 takeover-recovery）。10、13：`ACP通信.md` 权威缺口表、用户文档、启动提示、补齐 ACP 缺口扩展与 Electron 桌面端任务（均已删除）。11：见各停点测试。12：见上方数字。
 
 **7 项交付标准**：1 Todo 4.1–4.8 已勾选，4.9 待用户验收；2 测试证据见上；3 Review 已完成（本节）；4 用户文档已更新；5 架构文档已同步；6 不涉及版本变更；7 归档待用户验收后执行 `npm run task:complete`。

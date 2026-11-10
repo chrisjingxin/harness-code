@@ -21,7 +21,7 @@
  *   挂起交互按 cancelled 收敛，活动 Run 的 events 失败、completion 拒绝。
  */
 
-import { ClientSideConnection, RequestError, type Stream } from "@agentclientprotocol/sdk"
+import { ClientSideConnection, RequestError, type CreateElicitationRequest, type CreateElicitationResponse, type Stream } from "@agentclientprotocol/sdk"
 import type {
   ApprovalMode,
   CodeIndexSnapshot,
@@ -43,7 +43,8 @@ import {
   type InteractiveAgentRun,
   type InteractiveRunCompletion,
 } from "../../interactive/ports/agent-gateway"
-import { BRIDGE_EXIT_METHOD } from "../ext"
+import { BRIDGE_EXIT_METHOD, CLIENT_EXTENSION_DECLARATION, parseSessionSummaryMeta } from "../ext"
+import { recognizeForm, toElicitationResponse, toInteractionEnvelope } from "./elicitation"
 import { buildInteractionRequest, mapInteractionResponse, type PermissionOutcome } from "./permission"
 import { ReplayBuffer } from "./replay"
 import { createAcpRuntime } from "./runtime"
@@ -62,8 +63,8 @@ export type AcpGatewayConnectOptions = {
   clientVersion?: string
   now?: () => number
   uuid?: () => string
-  /** available_commands_update 的等待窗口；超时按空表处理。 */
-  settleCommandsMs?: number
+  /** 等第一条 available_commands_update 的兜底超时；超时按空表继续并 warn 一次。 */
+  commandsTimeoutMs?: number
   /** initialize 超时（Python 冷启动约 1 秒）。 */
   initializeTimeoutMs?: number
   log?: (event: { event: string; [key: string]: unknown }) => void
@@ -116,6 +117,16 @@ type PendingPermission = {
 }
 
 const CANCELLED: PermissionOutcome = { outcome: "cancelled" }
+const FEEDBACK_MAX = 4000
+
+type PendingElicitation = {
+  settle: (response: CreateElicitationResponse) => void
+  acpSessionId: string
+}
+
+function isApprovalMode(value: string): value is ApprovalMode {
+  return value === "plan" || value === "default" || value === "auto-edit" || value === "auto" || value === "yolo"
+}
 
 /** 27 个不支持方法 → 缺口编号（GAP）。B8 用它与 AgentGateway 接口做漂移检查。 */
 export const UNSUPPORTED_METHODS: Record<string, { gap: string; label: string }> = {
@@ -160,7 +171,12 @@ export class AcpAgentGateway implements AgentGateway {
   private readonly byAcp = new Map<string, SessionState>()
   private readonly summaries = new Map<string, ThreadSummary>()
   private readonly pendingPermissions = new Map<string, PendingPermission>()
+  private readonly pendingElicitations = new Map<string, PendingElicitation>()
   private readonly threadSummaryListeners = new Set<(thread: ThreadSummary) => void>()
+  private readonly approvalModeListeners = new Set<(mode: ApprovalMode) => void>()
+  /** 审批卡上已经写过的拒绝原因。下一张原因表单直接交回，不再问第二遍。 */
+  private feedbackStash: string | null = null
+  private elicitationSeq = 0
   private readonly closeListeners = new Set<(error: Error) => void>()
   private readonly protocolErrorListeners = new Set<(error: Error) => void>()
   private interactionHandler: ((request: InteractionRequestEnvelope) => Promise<InteractionResponse>) | null = null
@@ -181,7 +197,7 @@ export class AcpAgentGateway implements AgentGateway {
   static async connect(options: AcpGatewayConnectOptions): Promise<{ gateway: AcpAgentGateway; boot: AcpBootInfo }> {
     const gateway = new AcpAgentGateway(options)
     const initializeTimeoutMs = options.initializeTimeoutMs ?? 30_000
-    const settleCommandsMs = options.settleCommandsMs ?? 500
+    const commandsTimeoutMs = options.commandsTimeoutMs ?? 5000
 
     // available_commands_update 到齐时唤醒（见 onSessionUpdate）。
     const commandsDone = new Promise<void>(resolve => { gateway.commandsArrived = resolve })
@@ -192,12 +208,14 @@ export class AcpAgentGateway implements AgentGateway {
       },
       requestPermission: (params: { sessionId: string; toolCall: Record<string, unknown>; options: Array<{ optionId?: string }> }) =>
         gateway.onRequestPermission(params),
+      unstable_createElicitation: (params: CreateElicitationRequest) => gateway.onCreateElicitation(params),
     }) as never, options.stream)
 
     const initializePromise = gateway.conn.initialize({
       protocolVersion: 1,
       clientCapabilities: {
-        _meta: { harnessCode: { version: 1, capabilities: ["approval", "runSummary"] } },
+        _meta: { harnessCode: CLIENT_EXTENSION_DECLARATION },
+        elicitation: { form: {} },
       } as never,
       clientInfo: { name: "harness-web", title: "Harness Code Web", version: options.clientVersion ?? "0.0.0" },
     } as never)
@@ -223,7 +241,7 @@ export class AcpAgentGateway implements AgentGateway {
     const harnessMeta = (caps as { _meta?: { harnessCode?: { capabilities?: unknown } } })._meta?.harnessCode
     const declared = new Set(Array.isArray(harnessMeta?.capabilities) ? harnessMeta.capabilities : [])
 
-    // 暖会话：命令表在 session/new 响应之后才到，等 settleCommandsMs。
+    // 暖会话：命令表在 session/new 响应之后才到，等它到达（兜底 commandsTimeoutMs）。
     gateway.pendingWarmCommands = []
     const session = await gateway.conn.newSession({ cwd: options.cwd, mcpServers: [] } as never) as {
       sessionId: string
@@ -256,14 +274,22 @@ export class AcpAgentGateway implements AgentGateway {
       commands: [],
     }
 
-    // 等命令落定：收到第一条 available_commands_update 提前结束，
-    // 提前结束时把计时器清掉，不留悬挂引用。
-    let settleTimer: ReturnType<typeof setTimeout> | null = null
-    await Promise.race([
-      commandsDone,
-      new Promise<void>(resolve => { settleTimer = setTimeout(resolve, settleCommandsMs) }),
+    // 等命令落定：第一条 available_commands_update 一到就继续，不再有固定
+    // settle 窗口；对端不发时按 commandsTimeoutMs 兜底为空表并 warn 一次，
+    // 避免界面永久挂起。无论哪条路赢都要清掉计时器，不留悬挂引用。
+    let commandsTimer: ReturnType<typeof setTimeout> | null = null
+    const commandsTimedOut = await Promise.race([
+      commandsDone.then(() => false),
+      new Promise<boolean>(resolve => {
+        commandsTimer = setTimeout(() => resolve(true), commandsTimeoutMs)
+      }),
     ])
-    if (settleTimer) clearTimeout(settleTimer)
+    if (commandsTimer) clearTimeout(commandsTimer)
+    if (commandsTimedOut) {
+      console.warn(
+        `harness-web: ${commandsTimeoutMs}ms 内未收到 available_commands_update，按空命令表继续`
+      )
+    }
     gateway.boot.commands = gateway.pendingWarmCommands ?? []
     gateway.pendingWarmCommands = null
 
@@ -293,7 +319,11 @@ export class AcpAgentGateway implements AgentGateway {
         return
       }
       case "current_mode_update": {
-        session.currentModeId = typeof update.currentModeId === "string" ? update.currentModeId : session.currentModeId
+        const next = typeof update.currentModeId === "string" ? update.currentModeId : ""
+        if (next) session.currentModeId = next
+        if (isApprovalMode(next)) {
+          for (const listener of this.approvalModeListeners) listener(next)
+        }
         return
       }
       case "available_commands_update": {
@@ -388,9 +418,65 @@ export class AcpAgentGateway implements AgentGateway {
       // acpSessionId 记进条目：cancel() 只结算本会话挂起的审批。
       this.pendingPermissions.set(pendingKey, { settle, request: coreEnvelope, abandoned: false, acpSessionId: params.sessionId })
       void this.interactionHandler!(coreEnvelope)
-        .then(response => settle(mapInteractionResponse(response, coreEnvelope)))
+        .then(response => {
+          const outcome = mapInteractionResponse(response, coreEnvelope)
+          // 先记下原因再应答：Agent 要等这次审批返回，才会发下一张原因表。
+          if (outcome.outcome === "selected" && outcome.optionId === "reject_with_feedback" && response.type === "approval") {
+            const text = (response.feedback ?? "").trim()
+            if (text) this.feedbackStash = text.slice(0, FEEDBACK_MAX)
+          }
+          settle(outcome)
+        })
         .catch(() => settle(CANCELLED))
     })
+  }
+
+  /**
+   * Agent 发来的表单。原因表如果审批卡上已经写过，直接交回；
+   * 其余交给现有卡片。取消和断线都按 cancel 结束，不再等用户。
+   */
+  private onCreateElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    if (params.mode !== "form" || !("sessionId" in params)) return Promise.resolve({ action: "decline" })
+    const session = this.byAcp.get(params.sessionId)
+    const run = session?.run ?? null
+    if (!session?.coreThreadId || !run || run.cancelRequested || !this.interactionHandler) {
+      return Promise.resolve({ action: "cancel" })
+    }
+    const form = recognizeForm(params.requestedSchema, params.message)
+    if (form.kind === "feedback") {
+      const stashed = this.feedbackStash?.trim() ?? ""
+      this.feedbackStash = null
+      if (stashed) return Promise.resolve({ action: "accept", content: { feedback: stashed.slice(0, FEEDBACK_MAX) } })
+    }
+    const requestId = `elicitation:${run.ref.runId}:${++this.elicitationSeq}`
+    const envelope = toInteractionEnvelope(form, {
+      requestId,
+      threadId: session.coreThreadId,
+      runId: run.ref.runId,
+      message: params.message,
+    })
+    if (!envelope) return Promise.resolve({ action: "decline" })
+    const sessionId = params.sessionId
+    return new Promise(resolve => {
+      const settle = (response: CreateElicitationResponse): void => {
+        if (!this.pendingElicitations.has(requestId)) return
+        this.pendingElicitations.delete(requestId)
+        resolve(response)
+      }
+      this.pendingElicitations.set(requestId, { settle, acpSessionId: sessionId })
+      void this.interactionHandler!(envelope)
+        .then(response => settle(toElicitationResponse(form, response)))
+        .catch(() => settle({ action: "cancel" }))
+    })
+  }
+
+  /** 结束本会话还挂着的表单。sessionId 为空时全部结束（连接已经断了）。 */
+  private cancelElicitations(acpSessionId: string | null): void {
+    this.feedbackStash = null
+    for (const pending of [...this.pendingElicitations.values()]) {
+      if (acpSessionId !== null && pending.acpSessionId !== acpSessionId) continue
+      pending.settle({ action: "cancel" })
+    }
   }
 
   // ---------------- AgentGateway：监听登记 ----------------
@@ -403,6 +489,11 @@ export class AcpAgentGateway implements AgentGateway {
   onThreadSummary(listener: (thread: ThreadSummary) => void): () => void {
     this.threadSummaryListeners.add(listener)
     return () => this.threadSummaryListeners.delete(listener)
+  }
+
+  onApprovalModeChanged(listener: (mode: ApprovalMode) => void): () => void {
+    this.approvalModeListeners.add(listener)
+    return () => this.approvalModeListeners.delete(listener)
   }
 
   onCodeIndexChanged(_listener: (snapshot: CodeIndexSnapshot) => void): () => void {
@@ -471,7 +562,12 @@ export class AcpAgentGateway implements AgentGateway {
     if (input.modelSelection?.primary_profile) return this.failRun(run, notSupported("GAP-08", "模型选择与切换"))
     const requestedSkill = (input.input as { requested_skill?: { raw_invocation?: string } }).requested_skill
     if (requestedSkill && !requestedSkill.raw_invocation) return this.failRun(run, notSupported("GAP-28", "武装 Skill"))
-    if (input.approvalMode === "plan") return this.failRun(run, notSupported("GAP-02", "plan 审批模式"))
+    const planMissing = (ids: readonly string[] | null | undefined) => input.approvalMode === "plan" && !ids?.includes("plan")
+    // 已经知道模式表时，先拒绝，避免把暖会话认领走。
+    const known = input.threadId
+      ? (this.byCore.get(input.threadId) ?? this.byAcp.get(input.threadId) ?? null)
+      : (this.warmSession?.warm && !this.warmSession.coreThreadId ? this.warmSession : null)
+    if (known && planMissing(known.availableModeIds)) return this.failRun(run, notSupported("GAP-02", "plan 审批模式"))
 
     // ② 取会话：已有别名 → 用；否则认领暖会话；否则 session/new。
     let session: SessionState | null = null
@@ -502,7 +598,8 @@ export class AcpAgentGateway implements AgentGateway {
         return this.failRun(run, this.mapError(error, "创建会话失败"))
       }
     }
-    // ③ 会话已有活动 Run → THREAD_BUSY
+    // ③ 会话已有活动 Run → THREAD_BUSY。新建会话的模式表到这里才看得见。
+    if (planMissing(session.availableModeIds)) return this.failRun(run, notSupported("GAP-02", "plan 审批模式"))
     if (session.run) return this.failRun(run, new AgentGatewayError("THREAD_BUSY", "该会话已有活动 Run"))
     session.run = run
 
@@ -592,18 +689,19 @@ export class AcpAgentGateway implements AgentGateway {
     for (const pending of this.pendingPermissions.values()) {
       if (pending.acpSessionId === session.acpSessionId) pending.settle(CANCELLED)
     }
+    this.cancelElicitations(session.acpSessionId)
     this.conn.cancel({ sessionId: session.acpSessionId } as never).catch(() => {})
     return { run_id: runId, cancelled: true }
   }
 
   async setApprovalMode(threadId: string, runId: string, approvalMode: ApprovalMode): Promise<RunSetApprovalModeResult> {
-    if (approvalMode === "plan") {
-      throw new AgentGatewayError("ACP_NOT_SUPPORTED", "该功能暂未通过 ACP 提供（GAP-02：plan 审批模式）")
-    }
     const session = this.byCore.get(threadId) ?? this.byAcp.get(threadId)
     const run = session?.run
     if (!session || !run || run.ref.runId !== runId) {
       throw new AgentGatewayError("RUN_NOT_FOUND", "没有匹配的活动 Run")
+    }
+    if (approvalMode === "plan" && !session.availableModeIds?.includes("plan")) {
+      throw new AgentGatewayError("ACP_NOT_SUPPORTED", "该功能暂未通过 ACP 提供（GAP-02：plan 审批模式）")
     }
     await this.conn.setSessionMode({ sessionId: session.acpSessionId, modeId: approvalMode } as never)
     session.currentModeId = approvalMode
@@ -613,13 +711,16 @@ export class AcpAgentGateway implements AgentGateway {
 
   // ---------------- listThreads / openThread ----------------
 
-  async listThreads(): Promise<ThreadsListResult> {
+  async listThreads(cursor?: string): Promise<ThreadsListResult & { nextCursor: string | null }> {
     if (!this.boot.canListSessions) {
       throw new AgentGatewayError("ACP_NOT_SUPPORTED", "该功能暂未通过 ACP 提供（GAP-36：会话列表）")
     }
-    let result: { sessions?: Array<{ sessionId: string; title?: string | null; updatedAt?: string }> }
+    let result: {
+      sessions?: Array<{ sessionId: string; title?: string | null; updatedAt?: string; _meta?: unknown }>
+      nextCursor?: string | null
+    }
     try {
-      result = await this.conn.listSessions({ cwd: this.cwd } as never) as typeof result
+      result = await this.conn.listSessions({ cwd: this.cwd, cursor: cursor ?? null } as never) as typeof result
     } catch (error) {
       throw this.mapError(error, "列出会话失败")
     }
@@ -627,19 +728,22 @@ export class AcpAgentGateway implements AgentGateway {
       const session = this.byAcp.get(info.sessionId)
       const coreId = session?.coreThreadId ?? info.sessionId
       const updatedAt = typeof info.updatedAt === "string" ? Date.parse(info.updatedAt) : NaN
+      // 已声明 sessionSummary 的服务端总会给摘要；没有就当空预览，不再退回旧字段。
+      const ext = parseSessionSummaryMeta(info._meta)
+      const createdAtMs = ext ? Date.parse(ext.createdAt) : NaN
       const summary: ThreadSummary = {
         thread_id: coreId,
         title: info.title ?? null,
         updated_at_ms: Number.isNaN(updatedAt) ? this.now() : updatedAt,
-        created_at_ms: Number.isNaN(updatedAt) ? this.now() : updatedAt,
-        first_message: info.title ?? "",
-        latest_message: "",
-        message_count: 0,
+        created_at_ms: Number.isNaN(createdAtMs) ? (Number.isNaN(updatedAt) ? this.now() : updatedAt) : createdAtMs,
+        first_message: ext?.firstMessage ?? "",
+        latest_message: ext?.latestMessage ?? "",
+        message_count: ext?.messageCount ?? 0,
       }
       this.summaries.set(coreId, summary)
       return summary
     })
-    return { threads } as ThreadsListResult
+    return { threads, nextCursor: result.nextCursor ?? null }
   }
 
   async openThread(threadId: string): Promise<ThreadsOpenResult> {
@@ -657,6 +761,7 @@ export class AcpAgentGateway implements AgentGateway {
     }
     session.replay = new ReplayBuffer()
     try {
+      // 一律 session/load：界面靠返回的 messages 重建时间线，resume 不给历史会清空。
       const response = await this.conn.loadSession({ sessionId, cwd: this.cwd, mcpServers: [] } as never) as {
         modes?: { currentModeId?: string }
       }
@@ -727,6 +832,7 @@ export class AcpAgentGateway implements AgentGateway {
     if (this.closedFlag) return
     this.closedFlag = true
     for (const pending of this.pendingPermissions.values()) pending.settle(CANCELLED)
+    this.cancelElicitations(null)
     for (const session of this.byAcp.values()) {
       if (session.run) {
         const error = new Error(describeClose(info))

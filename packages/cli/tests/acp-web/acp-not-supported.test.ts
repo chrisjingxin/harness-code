@@ -1,6 +1,6 @@
 /**
  * `UNSUPPORTED_METHODS` 漂移与行为锁定（设计 §6.5）：
- * ① 与 `AgentGateway` 接口的 38 个方法去掉 11 个已实现后完全相同——
+ * ① 与 `AgentGateway` 接口的 39 个方法去掉 12 个已实现后完全相同——
  *    接口新增方法而没归类时本测试失败；
  * ② 每个方法调用返回被拒绝的 Promise，`code = ACP_NOT_SUPPORTED`、
  *    `message` 含表里登记的 GAP 编号；
@@ -19,7 +19,7 @@ import { FakeAgent, pairedStreams } from "./support/fake-agent"
 
 /** `AgentGateway` 接口的全部方法名（写在测试里，新增方法漏归类会红）。 */
 const ALL_METHODS = [
-  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose",
+  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose", "onApprovalModeChanged",
   "setInteractionHandler", "abandonInteraction",
   "startRun", "cancel", "setApprovalMode",
   "compactContext", "configDetails", "previewConfig", "commitConfig",
@@ -34,7 +34,7 @@ const ALL_METHODS = [
 ] as const
 
 const IMPLEMENTED = new Set([
-  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose",
+  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose", "onApprovalModeChanged",
   "setInteractionHandler", "abandonInteraction",
   "startRun", "cancel", "setApprovalMode", "listThreads", "openThread",
 ])
@@ -42,14 +42,14 @@ const IMPLEMENTED = new Set([
 async function gateway(): Promise<AcpAgentGateway> {
   const { client, agent } = pairedStreams()
   new FakeAgent().attach(agent)
-  return (await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, settleCommandsMs: 10 })).gateway
+  return (await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 10 })).gateway
 }
 
 describe("UNSUPPORTED_METHODS", () => {
-  test("与 AgentGateway 接口 38 个方法去掉 11 个已实现后完全相同", () => {
+  test("与 AgentGateway 接口 39 个方法去掉 12 个已实现后完全相同", () => {
     const expected = ALL_METHODS.filter(m => !IMPLEMENTED.has(m)).sort()
     expect(Object.keys(UNSUPPORTED_METHODS).sort()).toEqual(expected)
-    expect(ALL_METHODS).toHaveLength(38)
+    expect(ALL_METHODS).toHaveLength(39)
     expect(Object.keys(UNSUPPORTED_METHODS)).toHaveLength(27)
   })
 

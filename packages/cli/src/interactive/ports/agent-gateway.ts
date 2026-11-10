@@ -105,6 +105,8 @@ export interface AgentGateway {
   onCodeIndexChanged(listener: (snapshot: CodeIndexSnapshot) => void): () => void
   /** 订阅连接关闭；返回取消函数。 */
   onClose(listener: (error: Error) => void): () => void
+  /** 对端把审批档位改了。ACP 的 current_mode_update 走这里；IPC 网关可以不实现。 */
+  onApprovalModeChanged?(listener: (mode: ApprovalMode) => void): () => void
   /** 注册反向 Interaction 处理器；返回取消函数。 */
   setInteractionHandler(handler: (request: InteractionRequestEnvelope) => Promise<InteractionResponse>): () => void
   /** 服务端超时或终态后停止回写已经失效的交互响应。 */
@@ -118,7 +120,8 @@ export interface AgentGateway {
   configDetails(): Promise<{ revision: string; fields: readonly unknown[]; immutable_fields: readonly unknown[] }>
   previewConfig(changes: ConfigChange[]): Promise<{ revision: string; changes: readonly unknown[]; applies_to: readonly string[] }>
   commitConfig(expectedRevision: string, changes: ConfigChange[]): Promise<{ revision: string; changes: readonly unknown[]; applies_to: readonly string[] }>
-  listThreads(): Promise<ThreadsListResult>
+  /** 分页结果：nextCursor 为 null 表示没有下一页。 */
+  listThreads(cursor?: string): Promise<ThreadsPageResult>
   openThread(threadId: string): Promise<ThreadsOpenResult>
   setThreadTitle(threadId: string, title: string): Promise<ThreadsSetTitleResult>
   inspectGoal(threadId: string): Promise<GoalInspectResult>
@@ -155,6 +158,9 @@ export interface AgentGateway {
   sideQuestion(params: ThreadsSideQuestionParams): Promise<ThreadsSideQuestionResult>
 }
 
+/** session/list 的分页结果：nextCursor 为 null 表示没有下一页。 */
+export type ThreadsPageResult = ThreadsListResult & { nextCursor: string | null }
+
 export function createFallbackNoopGateway(): AgentGateway {
   return {
     startRun() {
@@ -170,7 +176,7 @@ export function createFallbackNoopGateway(): AgentGateway {
     async setApprovalMode(threadId, runId, approvalMode) {
       return { thread_id: threadId, run_id: runId, approval_mode: approvalMode, revision: 0 }
     },
-    async listThreads() { return { threads: [] } },
+    async listThreads() { return { threads: [], nextCursor: null } },
     async setThreadTitle(threadId, title) {
       return {
         thread: { thread_id: threadId, created_at_ms: 0, updated_at_ms: 0, first_message: "", latest_message: "", message_count: 0, title },

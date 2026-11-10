@@ -43,12 +43,18 @@ class ApprovalModeState:
 
     mode: ApprovalMode
     revision: int = 0
+    # 进入 plan 之前的模式。批准计划后切回去；不是 plan 时必须为空。
+    pre_plan: ApprovalMode | None = None
 
     def __post_init__(self) -> None:
         """校验初始 mode/revision，避免无效权限语义进入运行时。"""
         self._validate_mode(self.mode)
         if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 0:
             raise ValueError("APPROVAL_MODE_REVISION_INVALID")
+        if self.pre_plan is not None:
+            self._validate_mode(self.pre_plan)
+        if self.mode != "plan" or self.pre_plan == "plan":
+            self.pre_plan = None
 
     def snapshot(self) -> tuple[ApprovalMode, int]:
         """返回当前实际 mode 与单调 revision。"""
@@ -58,9 +64,18 @@ class ApprovalModeState:
         """更新 mode；幂等重复写不推进 revision。"""
         self._validate_mode(mode)
         if mode != self.mode:
+            # 记下进 plan 之前的模式；离开 plan 后这份记忆作废。
+            self.pre_plan = self.mode if mode == "plan" else None
             self.mode = mode
             self.revision += 1
         return self.snapshot()
+
+    def restore_after_plan_approval(self) -> tuple[ApprovalMode, int]:
+        """计划被批准后回到进入 plan 之前的模式；没有记录时回到 default。"""
+        if self.mode != "plan":
+            return self.snapshot()
+        target: ApprovalMode = "default" if self.pre_plan in (None, "plan") else self.pre_plan
+        return self.set(target)
 
     @staticmethod
     def _validate_mode(mode: object) -> None:

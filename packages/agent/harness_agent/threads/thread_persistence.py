@@ -34,7 +34,7 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterable, Literal, Mapping
 
@@ -4824,6 +4824,54 @@ class ThreadPersistence:
         except aiosqlite.Error as exc:
             raise ThreadPersistenceError(f"CHECKPOINT_LIST_FAILED: {exc}") from exc
 
+    async def list_threads_page(
+        self, limit: int, after: tuple[int, str] | None
+    ) -> tuple[tuple[ThreadSummary, ...], bool]:
+        """按最后活动时间分页返回当前 project 的线程摘要（keyset 分页）。
+
+        输入：`limit` 1～200；`after` 是上一页最后一条的 (updated_at_ms, thread_id)，
+              `None` 表示第一页。续页只依赖排序键比较，不要求游标里的线程还在。
+        输出：(本页摘要, has_more)。排序与 `list_threads` 完全一致；
+              内部多取一行判断 has_more，返回时不带那行。
+        异常：limit 越界抛 `CHECKPOINT_LIST_INVALID_LIMIT`（与 `list_threads` 同）。
+        """
+        self._ensure_open()
+        if limit < 1 or limit > 200:
+            raise ThreadPersistenceError("CHECKPOINT_LIST_INVALID_LIMIT")
+        where = "project_fingerprint = :project"
+        params: dict[str, object] = {
+            "project": self._project_fingerprint,
+            "limit": limit + 1,
+        }
+        if after is not None:
+            # keyset 续页：(u,t) 之后是「u 更小」或「u 相同且 t 更大」，与排序同向。
+            where += " AND (updated_at_ms < :after_u OR (updated_at_ms = :after_u AND thread_id > :after_t))"
+            params["after_u"] = int(after[0])
+            params["after_t"] = after[1]
+        try:
+            async with self._lock:
+                cursor = await self._connection.execute(
+                    f"""
+                    SELECT thread_id,
+                           created_at_ms,
+                           updated_at_ms,
+                           first_message,
+                           latest_message,
+                           message_count,
+                           title
+                    FROM harness_threads
+                    WHERE {where}
+                    ORDER BY updated_at_ms DESC, thread_id ASC LIMIT :limit
+                    """,
+                    params,
+                )
+                rows = await cursor.fetchall()
+                await cursor.close()
+            has_more = len(rows) > limit
+            return tuple(_summary(row) for row in rows[:limit]), has_more
+        except aiosqlite.Error as exc:
+            raise ThreadPersistenceError(f"CHECKPOINT_LIST_FAILED: {exc}") from exc
+
     async def set_user_title(self, thread_id: str, raw: str) -> ThreadSummary:
         """把当前 thread 的标题写成用户给定值，不刷新活动时间。"""
         written = await self._write_title(
@@ -5038,13 +5086,7 @@ class ThreadPersistence:
                 activities = ()
             return OpenThread(
                 summary=_summary(summary_row),
-                messages=tuple(
-                    message
-                    for record in records
-                    if record.kind != "context"
-                    for message in (_thread_message_from_transcript(record),)
-                    if message is not None
-                ),
+                messages=_replay_messages(records),
                 legacy_incomplete_history=history_incomplete,
                 compose_activities=activities,
             )
@@ -10130,3 +10172,45 @@ async def run_legacy_migration_child(
                 and not persistence._closed
         ):
             await connection.close()
+
+
+def _replay_messages(records: tuple) -> tuple[object, ...]:
+    """Transcript → ThreadMessage；tool 记录按 tool_call_id 补上 assistant 登记的参数。
+
+    参数存在 tool 记录之前的 assistant 记录 payload `tool_calls` 里；
+    同 id 多次出现取最近一次（先全量建表再投影，语义=最后一版有效）。
+    参数 canonical json 超 256 KiB 不带——超协议帧预算时宁可缺字段。
+    """
+    args_by_id: dict[str, object] = {}
+    for record in records:
+        if record.kind != "assistant":
+            continue
+        calls = record.payload.get("tool_calls")
+        if not isinstance(calls, (list, tuple)):
+            continue
+        for call in calls:
+            if not isinstance(call, Mapping):
+                continue
+            cid = call.get("id")
+            if isinstance(cid, str) and cid:
+                args_by_id[cid] = call.get("args")
+    messages: list[object] = []
+    for record in records:
+        if record.kind == "context":
+            continue
+        message = _thread_message_from_transcript(record)
+        if message is None:
+            continue
+        if message.kind == "tool" and message.tool_call_id:
+            args = args_by_id.get(message.tool_call_id)
+            if args is not None:
+                try:
+                    if len(json.dumps(args, ensure_ascii=False)) <= 262144:
+                        message = replace(message, tool_arguments=args)
+                except (TypeError, ValueError):
+                    pass  # 参数不可序列化就不带，不能因此丢整条消息
+        messages.append(message)
+    return tuple(messages)
+
+
+

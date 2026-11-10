@@ -220,7 +220,11 @@ async def test_message_id_is_scoped_to_run(tmp_path: Path) -> None:
         await _initialize(acp.client)
         session_id = await _new_session(acp.client, acp.host.workspace)
         await acp.client.request(3, "session/prompt", _prompt_params(session_id))
-        updates = [frame["params"]["update"] for frame in acp.client.updates()]
+        updates = [
+            frame["params"]["update"]
+            for frame in acp.client.updates()
+            if "messageId" in frame["params"]["update"]
+        ]
         message_ids = {update["messageId"] for update in updates}
         assert len(message_ids) == 1
         assert next(iter(message_ids)).endswith(":m0")

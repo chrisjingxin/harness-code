@@ -972,6 +972,8 @@ def test_approval_diff_is_the_prepared_content_and_conflict_invalidates_approval
         "removed_lines": 1,
         "truncated": False,
         "unified_diff": details.presentation["unified_diff"],
+        "old_text": "before\n",
+        "new_text": "approved\n",
     }
     assert "-before" in details.presentation["unified_diff"]
     assert "+approved" in details.presentation["unified_diff"]
@@ -1725,3 +1727,45 @@ def test_plan_file_accepts_only_a_single_edit(tmp_path: Path) -> None:
         )
     )
     assert result["error"]["code"] == "TOO_MANY_EDITS"
+
+
+def _file_diff_details(tmp_path: Path, tool: str, args: dict, *, before: str | None = None):
+    target = tmp_path / "t.txt"
+    if before is not None:
+        target.write_text(before, encoding="utf-8")
+    args = {**args, "file_path": "/t.txt"}
+    request = _request(tool, args, call_id="diff-fulltext")
+    local = _contract(tmp_path)
+    assert local.approval_preflight(request) is True
+    return local.approval_details(request.tool_call, None, request.runtime).presentation
+
+
+def test_file_diff_presentation_carries_full_text_for_create_edit_delete(tmp_path: Path) -> None:
+    """2.5：create 只有 new_text、edit 双侧（delete 在快照契约里不经审批门，无此用例）。"""
+    p = _file_diff_details(tmp_path, "write_file", {"content": "hello\n"})
+    assert p["old_text"] is None and p["new_text"] == "hello\n"
+
+    # edit：先读取得 snapshot_id，才能走审批（快照契约要求编辑引用已读快照）。
+    local = _contract(tmp_path)
+    (tmp_path / "t.txt").write_text("hello\n", encoding="utf-8")
+    read = _payload(local.dispatch(_request("read_file", {"file_path": "/t.txt"})))
+    req = _request("edit_file", {
+        "file_path": "/t.txt",
+        "snapshot_id": read["snapshot_id"],
+        "edits": [{"old_string": "hello", "new_string": "bye"}],
+    }, call_id="diff-edit")
+    assert local.approval_preflight(req) is True
+    p = local.approval_details(req.tool_call, None, req.runtime).presentation
+    assert p["old_text"] == "hello\n" and p["new_text"] == "bye\n"
+
+
+
+def test_file_diff_full_text_drops_both_keys_over_limit(tmp_path: Path) -> None:
+    """任一边超 256 KiB（按 UTF-8 字节）：两个键整体不写，不留半边。"""
+    big = "甲" * 300_000  # ~900 KiB UTF-8
+    p = _file_diff_details(tmp_path, "write_file", {"content": big})
+    assert "old_text" not in p and "new_text" not in p
+    # 恰好在限内仍写（按字节计，不是按字符数）
+    just = "a" * 262144
+    p = _file_diff_details(tmp_path, "write_file", {"content": just})
+    assert p["new_text"] == just

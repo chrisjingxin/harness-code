@@ -369,3 +369,90 @@ async def test_mode_changed_during_run_preparation_is_applied_on_accept(
         done = await acp.client.read_until(lambda frame: frame.get("id") == 3)
         assert prompt_response(done).stop_reason == "end_turn"
     assert calls == ["yolo"]
+
+
+async def _initialize_forms(client: Any) -> dict[str, Any]:
+    """握手并声明会画表单。"""
+    response = await client.request(
+        1,
+        "initialize",
+        {"protocolVersion": 1, "clientCapabilities": {"elicitation": {"form": {}}}},
+    )
+    assert "result" in response, response
+    return response
+
+
+async def test_forms_client_lists_plan_and_keeps_configured_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """声明了表单时广告五项，配置默认 plan 就停在 plan。"""
+    host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
+    original = host.ensure_ready
+
+    async def plan_snapshot() -> Any:
+        return dataclasses.replace(await original(), default_approval_mode="plan")
+
+    monkeypatch.setattr(host, "ensure_ready", plan_snapshot)
+    async with InProcessAcp(host) as acp:
+        await _initialize_forms(acp.client)
+        response = await acp.client.request(
+            2, "session/new", {"cwd": str(host.workspace), "mcpServers": []}
+        )
+    modes = response["result"]["modes"]
+    assert [item["id"] for item in modes["availableModes"]] == [
+        "plan",
+        *(item[0] for item in MODE_TABLE),
+    ]
+    assert modes["availableModes"][0]["name"] == "先出计划"
+    assert modes["currentModeId"] == "plan"
+
+
+async def test_set_plan_remembers_the_previous_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """切到先出计划时记下之前的模式，下一轮 prompt 把它交给 Host。"""
+    seen: list[tuple[str | None, str | None]] = []
+    host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
+    original = host.start_run
+
+    async def spy(connection: Any, request: Any, *, on_accepted: Any = None) -> Any:
+        seen.append((request.requested_approval_mode, request.pre_plan_mode))
+        return await original(connection, request, on_accepted=on_accepted)
+
+    monkeypatch.setattr(host, "start_run", spy)
+    async with InProcessAcp(host) as acp:
+        await _initialize_forms(acp.client)
+        session_id = await _new_session(acp.client, host.workspace)
+        response = await acp.client.request(
+            3, "session/set_mode", {"sessionId": session_id, "modeId": "plan"}
+        )
+        assert "result" in response, response
+        assert acp.server._sessions[session_id].mode_before_plan == "auto"
+        await _send_prompt(acp.client, session_id, request_id=4)
+        done = await acp.client.read_until(lambda frame: frame.get("id") == 4)
+        assert prompt_response(done).stop_reason == "end_turn"
+    assert seen == [("plan", "auto")]
+
+
+async def test_approval_mode_echo_skips_the_mode_already_shown(tmp_path: Path) -> None:
+    """会话已经是这个模式时，回声不再补第二帧；变了才补一帧。"""
+    host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
+    async with InProcessAcp(host) as acp:
+        await _initialize_forms(acp.client)
+        session_id = await _new_session(acp.client, host.workspace)
+        changed = await acp.client.request(
+            3, "session/set_mode", {"sessionId": session_id, "modeId": "yolo"}
+        )
+        assert "result" in changed, changed
+        yolo_updates = [frame for frame in acp.client.frames if _is_mode_update(frame, "yolo")]
+        assert len(yolo_updates) == 1
+        await host._broadcast_approval_mode(session_id, "yolo")
+        for _ in range(20):
+            if acp.server._outbox.empty():
+                break
+            await asyncio.sleep(0.01)
+        assert [frame for frame in acp.client.frames if _is_mode_update(frame, "yolo")] == yolo_updates
+        await host._broadcast_approval_mode(session_id, "default")
+        await acp.client.read_until(lambda frame: _is_mode_update(frame, "default"))
+        assert acp.server._sessions[session_id].approval_mode == "default"
+        assert acp.server._sessions[session_id].mode_before_plan is None

@@ -33,6 +33,21 @@ def test_current_approval_mode_uses_bounded_provider_view() -> None:
     assert current_approval_mode(view) == "auto-edit"
 
 
+def test_approval_mode_state_remembers_the_mode_before_plan() -> None:
+    """进 plan 时记下之前的模式；批准后切回去，再进一次仍能记住。"""
+    state = ApprovalModeState("yolo")
+    assert state.set("plan") == ("plan", 1)
+    assert state.pre_plan == "yolo"
+    assert state.set("plan") == ("plan", 1)
+    assert state.restore_after_plan_approval() == ("yolo", 2)
+    assert state.pre_plan is None
+    seeded = ApprovalModeState("plan", pre_plan="auto-edit")
+    assert seeded.pre_plan == "auto-edit"
+    assert seeded.restore_after_plan_approval() == ("auto-edit", 1)
+    assert ApprovalModeState("default", pre_plan="yolo").pre_plan is None
+    assert ApprovalModeState("plan", pre_plan="plan").pre_plan is None
+
+
 def test_approval_mode_state_rejects_invalid_mode() -> None:
     """状态对象不能接受协议枚举之外的权限语义。"""
     with pytest.raises(ValueError, match="APPROVAL_MODE_INVALID"):

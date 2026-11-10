@@ -409,6 +409,10 @@
         "params": "#/$defs/threadSummary",
         "min_minor": 9
       },
+      "thread.approval_mode": {
+        "params": "#/$defs/threadApprovalMode",
+        "min_minor": 8
+      },
       "code_index.changed": {
         "params": "#/$defs/codeIndexSnapshot",
         "min_minor": 10
@@ -2253,6 +2257,22 @@
       },
       "additionalProperties": false
     },
+    "threadApprovalMode": {
+      "type": "object",
+      "required": [
+        "thread_id",
+        "mode"
+      ],
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/approvalMode"
+        }
+      },
+      "additionalProperties": false
+    },
     "composeActivityRecord": {
       "type": "object",
       "required": [
@@ -2361,6 +2381,19 @@
         "created_at_ms": {
           "type": "integer",
           "minimum": 0
+        },
+        "tool_call_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed"
+          ]
         }
       },
       "additionalProperties": false
@@ -5062,6 +5095,20 @@
         "unified_diff": {
           "type": "string",
           "maxLength": 16384
+        },
+        "old_text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 262144
+        },
+        "new_text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 262144
         }
       },
       "additionalProperties": false

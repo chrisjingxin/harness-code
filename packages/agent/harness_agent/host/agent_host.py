@@ -234,6 +234,7 @@ from harness_agent.host.run_coordinator import (
     RequestedSkill,
     StartRun,
     UserRunInput,
+    _FanoutBarrier,
 )
 from harness_agent.host.run_execution import _bounded_json
 from harness_agent.host.service_types import (
@@ -470,12 +471,18 @@ class AgentHost:
         # worktree/sandbox 有稳定资源身份或吞吐证明不足时再按资源拆分。
         self._tool_concurrency_lock = AsyncRWLock()
         from harness_agent.policy.workspace_roots import WorkspaceRootRegistry
+        from harness_agent.policy.workspace_boundary import WorkspacePathPolicy
 
         # 额外工作目录 registry：内容可变，不进入执行资源池 fingerprint。
         self._workspace_root_registry = WorkspaceRootRegistry(
             self._workspace,
             project_dir=self._workspace,
             load_persisted=True,
+        )
+        # 展示用只读路径解析：与 WorkspacePathPolicy 同语义（主根+全部已授权根），
+        # 只为 PathLocator 提供绝对路径，不参与 Run 的执行资源。
+        self._display_path_policy = WorkspacePathPolicy(
+            self._workspace_root_registry.readonly_view()
         )
         # 在 Host 启动时冻结只读 roots/policy 输入；Settings store 不再自行扫描
         # 可变 registry，Run/generation 期间也不会因外部授权变化而漂移。
@@ -550,6 +557,8 @@ class AgentHost:
         self._settings_snapshot = SettingsSnapshot.not_loaded()
         self._agent_catalog: AgentCatalog | None = None
         self._thread_persistence: ThreadPersistence | None = None
+        # 打开串行化：并发调用者共享这一次打开。
+        self._thread_persistence_lock = asyncio.Lock()
         # Snapshot 只存在于 Host 进程内；不复用 SQLite，也不跨 Host/进程恢复。
         self._snapshot_store = ThreadSnapshotStore()
         # Deferred 工具 reveal 状态按 Thread 隔离存储于 Host 生命周期内。
@@ -602,6 +611,7 @@ class AgentHost:
             goal_terminal_reconciler=self._reconcile_goal_terminal,
             diagnostic_log=diagnostic_log,
         )
+        self._run_coordinator.on_approval_mode_changed = self._broadcast_approval_mode
         self._handlers = {
             METHOD["INITIALIZE"]: self._handle_initialize,
             METHOD["COMMANDS_BIND"]: self._handle_commands_bind,
@@ -1275,6 +1285,18 @@ class AgentHost:
                 await self._ensure_code_index_manager().start()
         return self._host_snapshot()
 
+    def resolve_display_path(self, raw: object, *, tool_name: str) -> str | None:
+        """端口实现：按 validate_direct_path 语义解析为绝对路径字符串，失败 None。"""
+        try:
+            resolved = self._display_path_policy.validate_direct_path(
+                raw, tool_name=tool_name
+            )
+        except Exception:  # noqa: BLE001 - 展示路径的宽捕获与 PathLocator 一致
+            return None
+        if not resolved.is_absolute():
+            return None
+        return str(resolved)
+
     @property
     def workspace(self) -> Path:
         """Host 启动时固定的工作区绝对路径；AcpServer 用它校验 session/new 的 cwd。"""
@@ -1635,6 +1657,7 @@ class AgentHost:
             protocol_minor=connection.protocol_minor,
             requested_primary_profile=request.requested_primary_profile,
             requested_approval_mode=request.requested_approval_mode,
+            pre_plan_mode=request.pre_plan_mode,
         )
         if self._thread_persistence_enabled():
             persistence = await self._ensure_thread_persistence()
@@ -2018,6 +2041,11 @@ class AgentHost:
         """把领域事件广播给 owner 和已 watch 该 Thread 的连接。"""
         try:
             async for event in execution.events:
+                # 屏障项不发帧：它被消费即说明之前的事件都已入 ACP 发送队列。
+                if isinstance(event, _FanoutBarrier):
+                    if not event.done.done():
+                        event.done.set_result(None)
+                    continue
                 await self._fanout_agent_event(execution.owner, event)
         finally:
             await self._record_workspace_git_checkpoint(execution.ref.thread_id, execution.ref.run_id)
@@ -2431,6 +2459,15 @@ class AgentHost:
         persistence = await self._ensure_thread_persistence()
         return await persistence.list_threads(limit)
 
+    async def list_threads_page(
+        self, limit: int, after: tuple[int, str] | None
+    ) -> tuple[list[ThreadSummary], bool]:
+        """`session/list` 翻页入口；错误语义与 `list_threads` 完全相同。"""
+        self._require_threads_available()
+        persistence = await self._ensure_thread_persistence()
+        threads, has_more = await persistence.list_threads_page(limit, after)
+        return list(threads), has_more
+
     async def _handle_threads_set_title(self, params: dict[str, Any], _id: str) -> dict[str, object]:
         """把当前 project 的 thread 标题写成用户给定值。"""
         self._require_threads_capability()
@@ -2566,6 +2603,33 @@ class AgentHost:
             return content if isinstance(content, str) else str(content)
         finally:
             await provider_lease.release()
+
+    async def _broadcast_approval_mode(self, thread_id: str, mode: str) -> None:
+        """把审批模式变化发给声明了 `run.approval_mode` 的连接。
+
+        计划被批准后 Host 自己切回原来的模式，ACP 靠这一帧把下拉框拨回去。
+        不在协调器的锁里调用：发帧可能很慢。
+        """
+        message = {
+            "jsonrpc": "2.0",
+            "method": METHOD["THREAD_APPROVAL_MODE"],
+            "params": {"thread_id": thread_id, "mode": mode},
+        }
+        targets = [
+            connection
+            for connection in self._connections.values()
+            if not connection.closed
+            and CAPABILITY["RUN_APPROVAL_MODE"] in connection.enabled_capabilities
+        ]
+        if not targets:
+            return
+        results = await asyncio.gather(
+            *(self._send_to(connection, message) for connection in targets),
+            return_exceptions=True,
+        )
+        for connection, result in zip(targets, results, strict=True):
+            if isinstance(result, Exception) and connection is not self._owner_connection:
+                asyncio.create_task(self.close_connection(connection))
 
     async def _broadcast_thread_summary(
         self,
@@ -5101,6 +5165,9 @@ class AgentHost:
         async def cleanup_stage_execution(checkpoint_thread_id: str) -> None:
             """同时清理 stage 的 SQLite checkpoint 与进程内 Snapshot scope。"""
             try:
+                # 闭包里原本引用了不存在的 persistence（pyflakes F821，调用必 NameError）；
+                # 与同函数上方一致：优先用本次 Run 绑定的持久层。
+                persistence = run.persistence or await self._ensure_thread_persistence()
                 await persistence.delete_execution_checkpoint(checkpoint_thread_id)
             finally:
                 self._snapshot_store.close_thread(checkpoint_thread_id)
@@ -6416,15 +6483,21 @@ class AgentHost:
             raise RpcError(-32602, "GOAL_INTERACTION_UNSUPPORTED")
 
     async def _ensure_thread_persistence(self) -> ThreadPersistence:
-        """延迟打开用户级数据库；配置读取不应因为存储创建而被阻塞。"""
+        """延迟打开用户级数据库；配置读取不应因为存储创建而被阻塞。
+
+        锁只包住「检查 + 打开」：打开失败不留半成品，下一个调用者会重开；
+        并发调用者共享这一次打开。
+        """
         if self._thread_persistence is None:
             if not self._thread_persistence_enabled():
                 raise ThreadPersistenceError("THREADS_UNAVAILABLE_IN_ECHO_MODE")
-            self._thread_persistence = await ThreadPersistence.open(
-                project=self._workspace,
-                home=self._config_home,
-            )
-            self._thread_persistence.bind_diagnostic_log(self._diagnostic_log)
+            async with self._thread_persistence_lock:
+                if self._thread_persistence is None:
+                    self._thread_persistence = await ThreadPersistence.open(
+                        project=self._workspace,
+                        home=self._config_home,
+                    )
+                    self._thread_persistence.bind_diagnostic_log(self._diagnostic_log)
         return self._thread_persistence
 
     async def _close_thread_persistence(self) -> None:
@@ -6576,6 +6649,16 @@ def _thread_message_payload(message: Any) -> dict[str, object]:
         payload["tool_name"] = message.tool_name
     if message.created_at_ms is not None:
         payload["created_at_ms"] = message.created_at_ms
+    # tool 记录的卡片关联三键（2.8）：旧数据没有时逐字不写，回放端无差异。
+    if getattr(message, "tool_call_id", None) is not None:
+        payload["tool_call_id"] = message.tool_call_id
+    if getattr(message, "tool_arguments", None) is not None:
+        payload["arguments"] = message.tool_arguments
+    tool_status = getattr(message, "tool_status", None)
+    if tool_status is not None:
+        payload["status"] = {"success": "completed", "error": "failed"}.get(
+            tool_status, "completed"
+        )
     return payload
 
 

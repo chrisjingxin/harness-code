@@ -268,17 +268,30 @@ class FileMutationService:
 
     def approval_details(self, plan: PreparedFileMutation) -> FileMutationApprovalDetails:
         """生成供前端组件渲染富文本高亮对比的结构化详情对象。"""
+        presentation: dict[str, object] = {
+            "kind": "file_diff",
+            "operation": plan.metadata.operation,
+            "path": plan.metadata.path,
+            "added_lines": plan.diff.added_lines,
+            "removed_lines": plan.diff.removed_lines,
+            "truncated": plan.diff.truncated,
+            "unified_diff": plan.diff.text,
+        }
+        # v3 §8.1：审批卡带改前/改后全文，客户端可直接渲染完整对比。
+        # 任一边按 UTF-8 超 256 KiB 时两个键都不写——只写一边会让客户端
+        # 误判缺失侧是空文件，整体回退到 unified_diff 预览才是安全降级。
+        old_text = plan.current.content if plan.current is not None else None
+        new_text = (
+            None if plan.metadata.operation == "delete" else plan.proposed_content
+        )
+        old_bytes = 0 if old_text is None else len(old_text.encode("utf-8"))
+        new_bytes = 0 if new_text is None else len(new_text.encode("utf-8"))
+        if max(old_bytes, new_bytes) <= _FULL_TEXT_LIMIT_BYTES:
+            presentation["old_text"] = old_text
+            presentation["new_text"] = new_text
         return FileMutationApprovalDetails(
             description="文件变更需要审批",
-            presentation={
-                "kind": "file_diff",
-                "operation": plan.metadata.operation,
-                "path": plan.metadata.path,
-                "added_lines": plan.diff.added_lines,
-                "removed_lines": plan.diff.removed_lines,
-                "truncated": plan.diff.truncated,
-                "unified_diff": plan.diff.text,
-            },
+            presentation=presentation,
         )
 
     def commit(self, plan: PreparedFileMutation) -> CommittedFileMutation:
@@ -410,6 +423,9 @@ class FileMutationService:
         if metadata.operation == "delete" and (current is None or proposed_content is not None):
             raise ValueError("MUTATION_DELETE_INPUT_INVALID")
 
+
+
+_FULL_TEXT_LIMIT_BYTES = 262144
 
 def mutation_fingerprint(name: str, args: dict[str, object]) -> str:
     """为同一模型调用生成稳定参数指纹，避免批准计划被改参复用。"""

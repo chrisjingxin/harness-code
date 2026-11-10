@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { AcpAgentGateway, UNSUPPORTED_METHODS } from "../../src/acp-web/client/acp-agent-gateway"
+import { composeAcpWebSession } from "../../src/acp-web/client/session"
 import type { EventEnvelope, InteractionRequestEnvelope, InteractionResponse } from "@za38/protocol"
 import { AgentGatewayError } from "../../src/interactive/ports/agent-gateway"
 import { FakeAgent, pairedStreams } from "./support/fake-agent"
@@ -20,7 +21,7 @@ const connect = async (agent: FakeAgent, options: Record<string, unknown> = {}) 
     cwd: "/tmp/ws",
     uuid: () => `uuid-${++uuidCounter}`,
     now: () => 5000,
-    settleCommandsMs: 20,
+    commandsTimeoutMs: 50,
     ...options,
   })
 }
@@ -48,7 +49,8 @@ describe("AcpAgentGateway：握手", () => {
     const params = init.params as Record<string, unknown>
     expect(params.protocolVersion).toBe(1)
     expect((params.clientCapabilities as { _meta: { harnessCode: { version: number; capabilities: string[] } } })._meta.harnessCode)
-      .toEqual({ version: 1, capabilities: ["approval", "runSummary"] })
+      .toEqual({ version: 1, capabilities: ["approval", "runSummary", "sessionSummary", "subagent", "goal"] })
+    expect((params.clientCapabilities as { elicitation?: { form?: unknown } }).elicitation).toEqual({ form: {} })
     expect(boot.cwd).toBe("/tmp/ws")
     expect(boot.canLoadSession).toBe(true)
     expect(boot.canListSessions).toBe(true)
@@ -73,17 +75,63 @@ describe("AcpAgentGateway：暖会话与命令", () => {
   test("握手后 newSession 恰好一次；延迟到达的 available_commands_update 仍进 boot.commands", async () => {
     const agent = new FakeAgent({
       afterNewSession: async (a, sessionId) => {
-        // 响应后 50ms 才发命令更新——在 settleCommandsMs 窗口内。
+        // 响应后 50ms 才发命令更新——在 commandsTimeoutMs 兜底之内，会被等到。
         await new Promise(resolve => setTimeout(resolve, 50))
         await a.update(sessionId, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "review", description: "评审", input: { hint: "<文件>" } }] })
       },
     })
-    const { boot } = await connect(agent, { settleCommandsMs: 500 })
+    const { boot } = await connect(agent, { commandsTimeoutMs: 500 })
     expect(agent.requests.filter(r => r.method === "session/new")).toHaveLength(1)
     expect(boot.commands).toEqual([{ name: "review", description: "评审", hint: "<文件>" }])
   })
 
-  test("超过 settleCommandsMs 到达的命令更新被丢弃并记日志", async () => {
+  test("第一条命令更新一到就继续，不再等固定窗口", async () => {
+    const agent = new FakeAgent({
+      afterNewSession: async (a, sessionId) => {
+        // 真实 Agent 在响应之后由后台任务推这一帧；给 20ms 模拟「下一拍到达」，
+        // 与真实时序一致（同块紧跟响应的 update 会先被当成 orphan）。
+        await new Promise(resolve => setTimeout(resolve, 20))
+        await a.update(sessionId, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "review", description: "评审", input: null }] })
+      },
+    })
+    const started = Date.now()
+    const { boot } = await connect(agent, { commandsTimeoutMs: 10_000 })
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(boot.commands).toEqual([{ name: "review", description: "评审", hint: null }])
+  })
+
+  test("命令表晚到 300ms：等到它而不是按固定窗口返回", async () => {
+    const agent = new FakeAgent({
+      afterNewSession: async (a, sessionId) => {
+        await new Promise(resolve => setTimeout(resolve, 300))
+        await a.update(sessionId, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "slow", description: "慢", input: null }] })
+      },
+    })
+    const started = Date.now()
+    const { boot } = await connect(agent, { commandsTimeoutMs: 5_000 })
+    const elapsed = Date.now() - started
+    expect(boot.commands).toEqual([{ name: "slow", description: "慢", hint: null }])
+    expect(elapsed).toBeGreaterThanOrEqual(250)
+    expect(elapsed).toBeLessThan(4000)
+  })
+
+  test("命令表永不到达：commandsTimeoutMs 兜底后按空表继续并 warn 一次", async () => {
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+    try {
+      const started = Date.now()
+      const { boot } = await connect(new FakeAgent(), { commandsTimeoutMs: 100 })
+      const elapsed = Date.now() - started
+      expect(boot.commands).toEqual([])
+      expect(elapsed).toBeLessThan(3000)
+    } finally {
+      console.warn = original
+    }
+    expect(warnings).toHaveLength(1)
+  })
+
+  test("超过 commandsTimeoutMs 到达的命令更新被丢弃并记日志", async () => {
     const agent = new FakeAgent({
       afterNewSession: async (a, sessionId) => {
         await new Promise(resolve => setTimeout(resolve, 80))
@@ -91,10 +139,18 @@ describe("AcpAgentGateway：暖会话与命令", () => {
       },
     })
     const logs: Array<{ event: string }> = []
-    const { boot } = await connect(agent, { settleCommandsMs: 30, log: (e: { event: string }) => logs.push(e) })
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(boot.commands).toEqual([])
-    expect(logs.some(e => e.event === "commands.late")).toBe(true)
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")) }
+    try {
+      const { boot } = await connect(agent, { commandsTimeoutMs: 30, log: (e: { event: string }) => logs.push(e) })
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(boot.commands).toEqual([])
+      expect(logs.some(e => e.event === "commands.late")).toBe(true)
+    } finally {
+      console.warn = original
+    }
+    expect(warnings).toHaveLength(1)
   })
 })
 
@@ -205,6 +261,25 @@ describe("AcpAgentGateway：审批模式", () => {
     expect(agent.requests.some(r => r.method === "session/prompt")).toBe(false)
   })
 
+  test("会话广告了 plan 时，startRun 先切模式再发 prompt", async () => {
+    const agent = new FakeAgent({
+      modes: {
+        currentModeId: "auto",
+        availableModes: [
+          { id: "plan", name: "先出计划", description: null },
+          { id: "auto", name: "自动判断", description: null },
+        ],
+      },
+    })
+    const { gateway } = await connect(agent)
+    const run = gateway.startRun(userInput({ approvalMode: "plan" }))
+    await run.completion
+    const order = agent.requests.map(request => request.method)
+    expect(order.indexOf("session/set_mode")).toBeGreaterThan(-1)
+    expect(order.indexOf("session/set_mode")).toBeLessThan(order.indexOf("session/prompt"))
+    expect((agent.requests.find(request => request.method === "session/set_mode")!.params as { modeId: string }).modeId).toBe("plan")
+  })
+
   test("运行中 setApprovalMode 返回 Core id 与递增 revision", async () => {
     const agent = new FakeAgent({
       onPrompt: () => new Promise(() => {}), // Run 挂起
@@ -291,7 +366,7 @@ describe("AcpAgentGateway：列表与打开", () => {
       title: "旧会话",
       created_at_ms: Date.parse("2025-01-01T00:00:00Z"),
       updated_at_ms: Date.parse("2025-01-01T00:00:00Z"),
-      first_message: "旧会话",
+      first_message: "",
       latest_message: "",
       message_count: 0,
     })
@@ -359,7 +434,7 @@ describe("AcpAgentGateway：关闭", () => {
     const agent = new FakeAgent({ onPrompt: () => new Promise(() => {}) })
     const { client, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1 })
+    const { gateway } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 50 })
     const closes: Error[] = []
     gateway.onClose(e => closes.push(e))
     const run = gateway.startRun(userInput({}))
@@ -667,5 +742,136 @@ describe("AcpAgentGateway：重复 requestId 的跨 Run 审批", () => {
     // Run2 的应答必须是 selected{approve_once}，不是被 Run1 污染成 cancelled/reject
     expect(outcomes).toHaveLength(2)
     expect((outcomes[1] as { outcome: unknown }).outcome).toEqual({ outcome: "selected", optionId: "approve_once" })
+  })
+})
+
+describe("AcpAgentGateway：表单", () => {
+  test("提问表单进现有提问卡，回答按属性名交回", async () => {
+    const agent = new FakeAgent({
+      onPrompt: async (a, sessionId) => {
+        const response = await a.conn.unstable_createElicitation({
+          mode: "form",
+          sessionId,
+          message: "用哪种方案",
+          requestedSchema: {
+            type: "object",
+            required: ["q_0"],
+            properties: {
+              q_0: {
+                type: "string",
+                title: "方案",
+                oneOf: [{ const: "a", title: "甲" }, { const: "b", title: "乙" }],
+              },
+              q_0_other: { type: "string", title: "其他（可选）" },
+            },
+          },
+        })
+        expect(response).toEqual({ action: "accept", content: { q_0: "a", q_0_other: "丙" } })
+        return { stopReason: "end_turn" }
+      },
+    })
+    const { gateway } = await connect(agent)
+    gateway.setInteractionHandler(async request => {
+      expect(request.type).toBe("question")
+      if (request.type !== "question") throw new Error("unreachable")
+      expect(request.payload.questions[0]).toMatchObject({ id: "q_0", allow_other: true, multi_select: false })
+      return { request_id: request.request_id, type: "question", answers: { q_0: ["a", "丙"] } }
+    })
+    const run = gateway.startRun(userInput({}))
+    expect((await run.completion).outcome).toBe("completed")
+  })
+
+  test("审批卡上的拒绝原因直接交回下一张原因表，不再弹第二张卡", async () => {
+    const toolCall = {
+      toolCallId: "x:call-1",
+      title: "execute rm",
+      rawInput: { command: "rm" },
+      _meta: { harnessCode: { approval: { type: "approval", requestId: "int-1", description: "删文件" } } },
+    }
+    const options = [
+      { optionId: "reject", name: "拒绝", kind: "reject_once" },
+      { optionId: "reject_with_feedback", name: "拒绝并说明原因", kind: "reject_once" },
+    ]
+    const agent = new FakeAgent({
+      onPrompt: async (a, sessionId) => {
+        const permission = await a.requestPermission(sessionId, toolCall, options) as { outcome: { outcome: string; optionId?: string } }
+        expect(permission.outcome).toEqual({ outcome: "selected", optionId: "reject_with_feedback" })
+        const form = await a.conn.unstable_createElicitation({
+          mode: "form",
+          sessionId,
+          message: "请说明拒绝原因，Agent 会据此调整",
+          requestedSchema: {
+            type: "object",
+            required: ["feedback"],
+            properties: { feedback: { type: "string", maxLength: 4000 } },
+          },
+        })
+        expect(form).toEqual({ action: "accept", content: { feedback: "因为会删文件" } })
+        return { stopReason: "end_turn" }
+      },
+    })
+    const { gateway } = await connect(agent)
+    const seen: string[] = []
+    gateway.setInteractionHandler(async request => {
+      seen.push(request.type)
+      return {
+        request_id: request.request_id,
+        type: "approval",
+        decision: "reject_with_feedback",
+        feedback: "因为会删文件",
+      }
+    })
+    const run = gateway.startRun(userInput({}))
+    expect((await run.completion).outcome).toBe("completed")
+    expect(seen).toEqual(["approval"])
+  })
+
+  test("cancel 让还挂着的表单以 cancel 结束", async () => {
+    let form: Promise<unknown> = Promise.resolve()
+    const agent = new FakeAgent({
+      onPrompt: (a, sessionId) => {
+        form = a.conn.unstable_createElicitation({
+          mode: "form",
+          sessionId,
+          message: "用哪种方案",
+          requestedSchema: {
+            type: "object",
+            properties: { q_0: { type: "string", title: "方案", oneOf: [{ const: "a", title: "甲" }] } },
+          },
+        })
+        return new Promise(() => {})
+      },
+    })
+    const { gateway } = await connect(agent)
+    gateway.setInteractionHandler(() => new Promise(() => {}))
+    const run = gateway.startRun(userInput({}))
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await gateway.cancel(run.ref.threadId, run.ref.runId)
+    await expect(form).resolves.toEqual({ action: "cancel" })
+  })
+
+  test("current_mode_update 把界面上的审批档位改回去", async () => {
+    const agent = new FakeAgent({
+      modes: {
+        currentModeId: "auto",
+        availableModes: [
+          { id: "plan", name: "先出计划", description: null },
+          { id: "auto", name: "自动判断", description: null },
+        ],
+      },
+      onPrompt: async (a, sessionId) => {
+        await a.update(sessionId, { sessionUpdate: "current_mode_update", currentModeId: "auto" })
+        return { stopReason: "end_turn" }
+      },
+    })
+    const { client, agent: agentStream } = pairedStreams()
+    agent.attach(agentStream)
+    const session = await composeAcpWebSession({ stream: client, cwd: "/tmp/ws", commandsTimeoutMs: 30, now: () => 1 })
+    await session.controller.dispatch({ type: "approval-mode.set", mode: "plan" })
+    expect(session.controller.getSnapshot().runtime.approvalMode).toBe("plan")
+    const run = session.gateway.startRun(userInput({ threadId: "thread-1", runId: "run-1" }))
+    expect((await run.completion).outcome).toBe("completed")
+    expect(session.controller.getSnapshot().runtime.approvalMode).toBe("auto")
+    await session.close()
   })
 })

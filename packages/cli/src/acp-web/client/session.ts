@@ -30,7 +30,7 @@ export async function composeAcpWebSession(options: {
   closed?: Promise<WsCloseInfo>
   now?: () => number
   uuid?: () => string
-  settleCommandsMs?: number
+  commandsTimeoutMs?: number
 }): Promise<AcpWebSession> {
   const { gateway, boot } = await AcpAgentGateway.connect(options)
   const runtime = createAcpRuntime(boot)

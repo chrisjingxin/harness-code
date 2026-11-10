@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from acp.schema import ToolCallLocation, ToolKind
@@ -144,16 +144,13 @@ class PathLocator:
     搜索根，缺省时会搜整个工作区，把它当作「被访问的文件」会误导客户端。
     """
 
-    def __init__(self, workspace: Path) -> None:
-        """绑定主工作区；只构造一个只含主根的注册表。
+    def __init__(self, resolve: Callable[[object, str], str | None]) -> None:
+        """绑定一个把工具路径参数解析为绝对宿主路径的函数（HostServicePort.resolve_display_path）。
 
-        已知限制：`HostServicePort` 不暴露 Host 的 `WorkspaceRootRegistry`，所以用户
-        已信任的外部目录在这里不会出现在 `locations` 中。这是刻意的取舍——为了不改
-        `agent_host.py`（S0 已冻结），S1 只保证主工作区内的跳转准确。
+        分层上 acp/ 不能 import policy.*：位置解析的「哪些根可信」的事实源在
+        Host 侧，这里只拿结果——主工作区与全部已授权外部根都会产出位置。
         """
-        from harness_agent.policy.workspace_boundary import WorkspacePathPolicy
-
-        self._policy = WorkspacePathPolicy(workspace)
+        self._resolve = resolve
 
     def locations(self, name: str, args: Mapping[str, object] | None) -> list[ToolCallLocation]:
         """返回文件位置列表；无法确定时返回空列表，绝不抛异常。"""
@@ -161,16 +158,12 @@ class PathLocator:
         if argument_name is None or not args:
             return []
         raw = args.get(argument_name)
-        try:
-            resolved = self._policy.validate_direct_path(raw, tool_name=name)
-        except Exception:  # noqa: BLE001 - 展示逻辑的宽捕获是刻意的，见下方注释
-            # 展示逻辑的宽捕获是刻意的：越界路径（ValueError）、未信任的外部路径
-            # （ExternalPathNotTrusted）、fstat 失败（OSError）都只能导致「不显示位置」，
-            # 绝不能因为一张卡片的副标题打断整个 Run 的事件流。
+        resolved = self._resolve(raw, tool_name=name)
+        # 解析失败（越界/未信任/非字符串）由 Host 一侧返回 None：只少一个副标题，
+        # 绝不能因为一张卡片的副标题打断整个 Run 的事件流。
+        if not resolved:
             return []
-        if not resolved.is_absolute():
-            return []
-        return [ToolCallLocation(path=str(resolved))]
+        return [ToolCallLocation(path=resolved)]
 
 
 __all__ = [

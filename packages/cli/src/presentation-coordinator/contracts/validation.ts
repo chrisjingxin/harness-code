@@ -161,6 +161,7 @@ const INTENT_TYPE_FLAGS: Record<InteractiveIntent["type"], true> = {
   "command.execute": true,
   "run.cancel": true,
   "catalog.refresh": true,
+  "threads-load-more": true,
   "thread.open": true,
   "thread.undo": true,
   "thread.redo": true,
@@ -268,6 +269,8 @@ function isInteractiveIntent(value: unknown): value is InteractiveIntent {
       return exactFields(value, ["type", "executionId"])
         && isNonEmptyString(value.executionId, MAX_EXECUTION_ID_LENGTH)
     case "child-timeline.leave":
+      return exactFields(value, ["type"])
+    case "threads-load-more":
       return exactFields(value, ["type"])
     default: {
       // 穷尽检查：InteractiveIntent 新增类型而此处没有分支时，这一行会编译失败。

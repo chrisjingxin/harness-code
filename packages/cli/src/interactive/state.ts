@@ -176,6 +176,10 @@ export type RestoredThreadMessage = {
   content: string
   toolName?: string
   createdAtMs?: number
+  /** tool 记录的回放细节（HC-200 S2）：缺省=旧数据，界面回退为完成+无参数。 */
+  toolCallId?: string
+  toolArguments?: Record<string, unknown>
+  toolStatus?: "completed" | "failed"
 }
 
 /** Thread reopen 恢复的有界 Compose activity；不含 Reasoning/原始 Tool 正文。 */
@@ -526,9 +530,10 @@ export function restoreThread(
           id,
           runId: restoredRunId,
           name: message.toolName || "tool",
-          arguments: "",
+          // 与直播卡同一形状：参数存 JSON 字符串；status 用失败/完成真实值。
+          arguments: message.toolArguments ? JSON.stringify(message.toolArguments) : "",
           output: message.content,
-          status: "completed",
+          status: message.toolStatus === "failed" ? "failed" : "completed",
         },
       }
     }
@@ -1412,10 +1417,13 @@ function resolveEventIdentity(event: EventEnvelope): EventIdentity | null {
       composeScope,
     }
   }
+  const executionId = typeof event.execution_id === "string" && event.execution_id ? event.execution_id : "root"
+  // 非 root execution（子代理）没有 compose_scope：用 execution 自身做 activity 键，
+  // 让同一子代理的工具卡聚成一组（GAP-16/2.12，组标题靠 agentId）。
   return {
     runId: event.run_id,
-    executionId: typeof event.execution_id === "string" && event.execution_id ? event.execution_id : "root",
-    activityId: "root",
+    executionId,
+    activityId: executionId,
     agentId: typeof event.agent_id === "string" && event.agent_id ? event.agent_id : undefined,
   }
 }

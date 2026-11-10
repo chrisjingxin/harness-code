@@ -212,6 +212,11 @@ export class RunFeature {
     return { status: "accepted" }
   }
 
+  /** 对端已经改了档位（例如批准计划后自动退回）。只改本地显示，不再发一次切换。 */
+  observeRemoteApprovalMode(current: InteractiveApprovalMode, next: InteractiveApprovalMode): void {
+    this.applyApprovalModeChange(current, next)
+  }
+
   /** 进出 plan 时递增 revision；从 plan 用非 restore 路径离开则丢掉 prePlanMode。 */
   private applyApprovalModeChange(current: InteractiveApprovalMode, next: InteractiveApprovalMode): void {
     if (next === current) return
