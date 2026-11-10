@@ -2,6 +2,8 @@
 /** @jsxImportSource react */
 
 import { act, useState } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { TraceDetail } from "../../../src/web/presentation/trace/trace-detail"
 import { afterAll, describe, expect, test } from "bun:test"
 
 import type { TraceSpanEvent } from "../../../src/presentation-coordinator/contracts/trace"
@@ -12,6 +14,46 @@ import { registerTestDom, render } from "./render"
 
 const unregister = registerTestDom()
 afterAll(unregister)
+
+test("v2 Run 在 Input 泳道显示用户输入", () => {
+  const root = span({ spanId: "root", name: "run", type: "ROOT", raw: { schema_version: 2, run_id: "run-1" } })
+  expect(ganttLanes(buildTree([root])).get(`${root.traceId}:${root.spanId}`)).toBe(0)
+})
+
+test("本轮 ROOT 与分组使用权威耗时，诊断跨度和子节点不改变总耗时", () => {
+  const root = span({ spanId: "root-duration", name: "run", type: "ROOT", startTime: 0, endTime: 9999, durationMs: 9999, metadata: { run_duration_ms: 2764 }, raw: { schema_version: 2 } })
+  const child = span({ spanId: "llm-duration", parentSpanId: "root-duration", name: "llm.call", type: "LLM", startTime: 100, endTime: 9000, durationMs: 2262 })
+  const { handle } = mountTraceView({ "thread-1": [root, child] })
+  try {
+    expect(handle.container.querySelector(".trace-run-meta")?.textContent).toContain("2.8s")
+    expect(handle.container.querySelector("[data-span-key='t-1:root-duration'] .trace-dur")?.textContent).toBe("2.8s")
+    expect(handle.container.querySelector("[data-span-key='t-1:llm-duration'] .trace-dur")?.textContent).toBe("2262ms")
+    const detail = renderToStaticMarkup(<TraceDetail node={{ span: root, children: [] }} />)
+    expect(detail).toContain("本轮总耗时（ms）")
+    expect(detail).toContain("轨迹采集耗时（ms）")
+    expect(detail).toContain("2764")
+    expect(detail).toContain("9999")
+  } finally { handle.unmount() }
+})
+
+test("旧轨迹没有权威总耗时时显示未记录，不取采集耗时冒充", () => {
+  const root = span({ spanId: "old-root", name: "run", type: "ROOT", durationMs: 9999, metadata: {}, raw: { schema_version: 2 } })
+  const { handle } = mountTraceView({ "thread-1": [root] })
+  try {
+    expect(handle.container.querySelector(".trace-run-meta")?.textContent).toContain("未记录")
+    expect(handle.container.querySelector("[data-span-key='t-1:old-root'] .trace-dur")?.textContent).toBe("未记录")
+  } finally { handle.unmount() }
+})
+
+test("v2 六区详情展开载荷并提示缺失引用，Step 下事务分组", () => {
+  const item = span({ spanId: "step", name: "step", raw: { schema_version: 2 } })
+  const db = (id: string) => span({ spanId: id, parentSpanId: "step", name: "db.persist" })
+  const tree = buildTree([item, db("a"), db("b")])
+  expect(tree[0]!.children[0]!.children).toHaveLength(2)
+  const selected = span({ name: "llm.call", metadata: { output_ref: "p", system_ref: "missing" }, raw: { schema_version: 2, payloads: { p: { bytes: 5, kind: "output", body: "hello" } } } })
+  const html = renderToStaticMarkup(<TraceDetail node={{ span: selected, children: [] }} />)
+  for (const title of ["参数", "输入", "输出", "用量", "耗时", "错误", "hello", "载荷不在当前读取范围内"]) expect(html).toContain(title)
+})
 
 /** 构造最小 TraceSpanEvent。 */
 function span(overrides: Partial<TraceSpanEvent> = {}): TraceSpanEvent {

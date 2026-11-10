@@ -135,6 +135,7 @@ function createPort(options: {
     ?? (async () => { throw new Error("code index apply not configured") })
   const openThreadImpl: AgentGateway["openThread"] = options.openThreadImpl ?? (async threadId => ({
     thread: threadSummary(threadId, "恢复的请求"),
+    run_summaries: [],
     messages: [{ kind: "user", content: "恢复的请求" }, { kind: "tool", tool_name: "execute", content: "恢复的工具结果" }],
     plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
     goal: null,

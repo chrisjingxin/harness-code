@@ -136,7 +136,7 @@ function Bar({
         className="trace-gantt-bar"
         data-span-key={`${span.traceId}:${span.spanId}`}
         style={style}
-        title={`${displayName(node) || displayType(span)}  ${formatMs(span.durationMs)}  ${shownStatusLabel(span)}`}
+        title={`${typeof span.metadata?.user_input === "string" ? span.metadata.user_input : displayName(node) || displayType(span)}  ${formatMs(span.durationMs)}  ${shownStatusLabel(span)}`}
         onClick={() => onSelect(span)}
       />
     </>

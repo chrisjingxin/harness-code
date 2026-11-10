@@ -3,6 +3,8 @@
 import type { IntentOutcome } from "../ports"
 import {
   appendNotice,
+  usageValue,
+  type RunSummary,
   applyGoalSnapshot,
   applyThreadMode,
   applyWorkItem,
@@ -26,6 +28,7 @@ function threadOpenResult(value: unknown): {
   threadId: string
   messages: RestoredThreadMessage[]
   composeActivities: RestoredComposeActivity[]
+  runSummaries: Record<string, RunSummary>
   threadMode: unknown
   workItem: unknown
   goal: unknown
@@ -34,7 +37,7 @@ function threadOpenResult(value: unknown): {
 } {
   const record = value as Record<string, unknown>
   const thread = record.thread
-  if (!thread || typeof thread !== "object" || !Array.isArray(record.messages)) {
+  if (!thread || typeof thread !== "object" || !Array.isArray(record.messages) || !Array.isArray(record.run_summaries)) {
     throw new Error("Agent 返回的 thread 恢复结果无效")
   }
   const threadRecord = thread as Record<string, unknown>
@@ -51,6 +54,8 @@ function threadOpenResult(value: unknown): {
     if (typeof message.content !== "string") throw new Error("Agent 返回了无效的 thread message")
     messages.push({
       kind: message.kind,
+      runId: typeof message.run_id === "string" ? message.run_id : undefined,
+      recordId: typeof message.record_id === "string" ? message.record_id : undefined,
       content: message.content,
       toolName: typeof message.tool_name === "string" ? message.tool_name : undefined,
       createdAtMs: typeof message.created_at_ms === "number" && Number.isSafeInteger(message.created_at_ms) && message.created_at_ms > 0
@@ -88,8 +93,23 @@ function threadOpenResult(value: unknown): {
       boundedText: typeof activity.bounded_text === "string" ? activity.bounded_text : undefined,
     })
   }
+  const runSummaries: Record<string, RunSummary> = Object.create(null)
+  for (const item of record.run_summaries) {
+    const summary = item as Record<string, unknown> | null
+    const usage = usageValue(summary?.usage)
+    if (!summary || typeof summary.run_id !== "string" || !usage || !["completed", "failed", "cancelled"].includes(String(summary.outcome))) {
+      throw new Error("Agent 返回了无效的每轮用量摘要")
+    }
+    runSummaries[summary.run_id] = {
+      runId: summary.run_id,
+      outcome: summary.outcome as RunSummary["outcome"],
+      usage,
+      ...(typeof summary.duration_ms === "number" && Number.isSafeInteger(summary.duration_ms) && summary.duration_ms >= 0 ? { durationMs: summary.duration_ms } : {}),
+    }
+  }
   return {
     threadId,
+    runSummaries,
     messages,
     composeActivities,
     threadMode: record.thread_mode ?? null,
@@ -138,6 +158,7 @@ export class ThreadFeature {
           current.workMode,
           opened.composeActivities,
           opened.threadMode === "build" || opened.threadMode === "compose" ? opened.threadMode : null,
+          opened.runSummaries,
         )
         const withMode = applyThreadMode(restored, opened.threadMode)
         const withWorkItem = opened.workItem != null ? applyWorkItem(withMode, opened.workItem) : withMode
@@ -182,6 +203,7 @@ export class ThreadFeature {
         current.workMode,
         opened.composeActivities,
         opened.threadMode === "build" || opened.threadMode === "compose" ? opened.threadMode : null,
+        opened.runSummaries,
       ), {
         goal: opened.goal as any,
         pending: opened.goalPending as any,

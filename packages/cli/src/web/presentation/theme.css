@@ -108,7 +108,7 @@
   --trace-interaction: #9c1c1c;
   --trace-policy: #827717;
   --trace-db: #188b2f;
-  --trace-context: #178257;
+  --trace-context: #1f1fc1;
   --trace-success: var(--success);
   --trace-failed: var(--danger);
   --trace-error: var(--danger);
@@ -218,7 +218,7 @@
   --trace-interaction: #e19898;
   --trace-policy: #e1da98;
   --trace-db: #98e1a7;
-  --trace-context: #98e1c4;
+  --trace-context: #5c6bff;
   --trace-success: var(--success);
   --trace-failed: var(--danger);
   --trace-error: var(--danger);

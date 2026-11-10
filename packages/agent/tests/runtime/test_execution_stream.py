@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.support.usage_callbacks import model_request
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
 from harness_agent.tracing import TraceRecorder, use_trace
@@ -62,8 +63,31 @@ class _FakeAgent:
 
     async def astream(self, stream_input: object, **kwargs: Any):
         self.calls.append({"input": stream_input, **kwargs})
-        for event in self.events:
-            yield event
+        with model_request(kwargs.get("config", {})) as request:
+            for event in self.events:
+                if len(event) == 2 and event[0] == "messages" and isinstance(event[1], tuple) and type(event[1][0]).__name__ in {"AIMessage", "AIMessageChunk"}:
+                    request["message"] = event[1][0]
+                yield event
+
+
+def test_stream_reports_two_requests_to_root_and_session_without_event_loop() -> None:
+    """fake graph 的 await 均立即完成，验证生产 execute 的采集接线且不启动 socketpair。"""
+    from harness_agent.runtime.run_usage import RunUsage, current_run_usage
+    root = RunUsage()
+    token = current_run_usage.set(root)
+    session = StreamSession(run_id="root")
+    config = {"configurable": {"thread_id": "thread"}}
+    try:
+        for input_tokens, output_tokens in ((100, 20), (150, 30)):
+            agent = _FakeAgent([("messages", (AIMessageChunk(content="answer", usage_metadata={"input_tokens": input_tokens, "output_tokens": output_tokens, "total_tokens": input_tokens + output_tokens}), {}))])
+            coroutine = execute(ExecutionStreamRequest(agent=agent, stream_input={}, graph_config=config, context=None, content_visibility="passthrough", session=session, is_cancelled=lambda: False), _RecordingPorts())
+            with pytest.raises(StopIteration):
+                coroutine.send(None)
+        assert "callbacks" not in config
+        assert root.freeze() == dict(input_tokens=250, output_tokens=50, input_complete=True, output_complete=True)
+        assert session.usage == dict(input_tokens=250, output_tokens=50)
+    finally:
+        current_run_usage.reset(token)
 
 
 @pytest.mark.asyncio
@@ -94,12 +118,14 @@ async def test_stream_appends_current_recorder_without_mutating_shared_callbacks
     assert len(agent.calls) == 2
     for call in agent.calls:
         assert call["config"] is not graph_config
-        assert call["config"]["callbacks"] == [existing, context.recorder]
+        assert call["config"]["callbacks"][0] is existing
+        assert call["config"]["callbacks"][-1] is context.recorder
+        assert len(call["config"]["callbacks"]) == 3
 
 
 @pytest.mark.asyncio
-async def test_stream_without_trace_preserves_existing_callback_shape() -> None:
-    """无活跃 Trace 时不增加 callbacks 键，也不改变既有配置语义。"""
+async def test_stream_without_trace_still_collects_usage() -> None:
+    """无活跃 Trace 时用量 callback 仍生效，不依赖日志开关。"""
     agent = _FakeAgent([])
     await execute(
         ExecutionStreamRequest(
@@ -114,7 +140,7 @@ async def test_stream_without_trace_preserves_existing_callback_shape() -> None:
         _RecordingPorts(),
     )
 
-    assert "callbacks" not in agent.calls[0]["config"]
+    assert len(agent.calls[0]["config"]["callbacks"]) == 1
 
 
 @pytest.mark.asyncio
@@ -468,31 +494,21 @@ def test_child_namespace_interrupt_is_ignored_at_root() -> None:
     assert auto is None
 
 
-def test_update_usage_with_openai_and_langchain_cached_tokens() -> None:
-    """update_usage 正确提取 OpenAI prompt_tokens_details 与 LangChain usage_metadata 中的 cached_tokens。"""
+def test_stream_chunks_do_not_duplicate_final_callback_usage() -> None:
+    """流式正文不累计 Token；最终 callback 是唯一用量来源。"""
+    from harness_agent.runtime.run_usage import UsageCallback
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, LLMResult
+
     session = StreamSession(run_id="run-usage")
-
-    # 1. 模拟 LangChain input_token_details.cache_read
-    chunk_lc = AIMessageChunk(content="hi")
-    setattr(chunk_lc, "usage_metadata", {
-        "input_tokens": 1000,
-        "output_tokens": 100,
-        "input_token_details": {"cache_read": 800},
-    })
-    translate_stream_event(("messages", (chunk_lc, {})), session, content_visibility="passthrough")
+    chunk = AIMessageChunk(content="hi", usage_metadata={"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100})
+    translate_stream_event(("messages", (chunk, {})), session)
+    callback = UsageCallback(session.usage_collector, session.usage)
+    callback.on_chat_model_start({}, [[]], run_id="one")
+    result = LLMResult(generations=[[ChatGeneration(message=AIMessage(content="hi", usage_metadata={"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100, "input_token_details": {"cache_read": 800}}))]])
+    callback.on_llm_end(result, run_id="one")
+    callback.on_llm_end(result, run_id="one")
     assert session.usage == {"input_tokens": 1000, "output_tokens": 100, "cached_tokens": 800}
-
-    # 2. 模拟 OpenAI response_metadata.token_usage.prompt_tokens_details.cached_tokens
-    chunk_oai = AIMessageChunk(content="there")
-    setattr(chunk_oai, "response_metadata", {
-        "token_usage": {
-            "prompt_tokens": 1200,
-            "completion_tokens": 150,
-            "prompt_tokens_details": {"cached_tokens": 950},
-        }
-    })
-    translate_stream_event(("messages", (chunk_oai, {})), session, content_visibility="passthrough")
-    assert session.usage == {"input_tokens": 1200, "output_tokens": 150, "cached_tokens": 950}
 
 
 def test_classifier_message_events_are_suppressed_by_metadata_and_tags() -> None:

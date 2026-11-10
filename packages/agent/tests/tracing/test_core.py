@@ -61,7 +61,7 @@ def test_trace_and_func_share_envelope_parent_and_safe_attributes(tmp_path: Path
     assert span_end["attributes"] == {"decision": "allow"}
     assert "prompt" not in json.dumps(events, ensure_ascii=False)
     assert len({event["trace_id"] for event in events}) == 1
-    assert {event["schema_version"] for event in events} == {1}
+    assert {event["schema_version"] for event in events} == {2}
     assert {event["session_id"] for event in events} == {"thread-1"}
     assert {event["run_id"] for event in events} == {"run-1"}
     assert span_end["status"] == "SUCCESS"

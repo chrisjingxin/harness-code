@@ -1283,12 +1283,13 @@ async def test_run_started_emits_authoritative_primary_model_binding():
     assert started.payload["primary_model"] == binding.protocol_primary_model()
 
 
-async def test_context_compact_rewrites_idle_thread_and_returns_context_summary():
-    """手动压缩只允许空闲 thread，成功后写回 checkpoint 并同步摘要状态。"""
+async def test_context_compact_rewrites_idle_thread_and_returns_context_summary(tmp_path: Path):
+    """手动压缩写回 checkpoint，并留下归属当前 Thread 的独立 Trace。"""
     from langchain_core.messages import HumanMessage
 
     from harness_agent.threads.context_compaction import CompressionResult
     from harness_agent.host.agent_host import AgentHost
+    from harness_agent.tracing import func_monitor
     from types import SimpleNamespace
 
     class Store:
@@ -1329,6 +1330,11 @@ async def test_context_compact_rewrites_idle_thread_and_returns_context_summary(
         def __init__(self, store: Store) -> None:
             self.store = store
 
+        @func_monitor(
+            name="context.compact",
+            kind="CONTEXT",
+            attributes={"trigger": "manual"},
+        )
         async def compact_now(self, request: object) -> CompressionResult:
             compacted = (HumanMessage(content="<harness_context_summary>摘要</harness_context_summary>"),)
             self.store.messages = compacted
@@ -1348,7 +1354,7 @@ async def test_context_compact_rewrites_idle_thread_and_returns_context_summary(
 
     store = Store()
     agent = Agent()
-    server = AgentHost(agent=agent)
+    server = AgentHost(agent=agent, config_home=tmp_path / "home", workspace=tmp_path)
     server._owner_connection.initialized = True
     server._owner_connection.enabled_capabilities = {"context.manage"}
     server._thread_persistence = store  # type: ignore[assignment]
@@ -1376,6 +1382,23 @@ async def test_context_compact_rewrites_idle_thread_and_returns_context_summary(
     assert store.refreshed == ["thread"]
     assert agent.updates[0][0] == {"configurable": {"thread_id": "thread"}}
     assert len(agent.updates[0][1]["messages"]) == 2
+
+    from harness_agent.threads.thread_records import workspace_fingerprint
+
+    trace_dir = tmp_path / "home" / ".harness" / "trace" / workspace_fingerprint(tmp_path)
+    events = [
+        json.loads(line)
+        for path in trace_dir.glob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["event"] == "trace.start"
+    assert events[-1]["event"] == "trace.end"
+    assert all(event["session_id"] == "thread" for event in events)
+    compact = next(
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "context.compact"
+    )
+    assert compact["attributes"]["trigger"] == "manual"
 
 
 async def test_context_compact_rejects_active_run():

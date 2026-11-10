@@ -31,7 +31,7 @@ export function createTraceRuntime(options: TraceRuntimeOptions = {}): TraceRunt
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   const stamp = `${day.replaceAll("-", "")}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
   const target = options.file ?? (process.env.HARNESS_ZA38_TRACE_LOG || join(root, day, `za38-trace-${stamp}.log`))
-  const workspaceReader = options.workspace ? createWorkspaceTraceReader(options.workspace) : undefined
+  const workspaceReader = options.workspace ? createWorkspaceTraceReader(options.workspace, root) : undefined
   return new TraceRuntimeImpl(root, target, options.onError, workspaceReader)
 }
 

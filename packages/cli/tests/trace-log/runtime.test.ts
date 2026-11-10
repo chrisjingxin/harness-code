@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { realpath } from "node:fs/promises"
 /** 实时 SDK 日志消费：合成字节流经过落盘、索引、回读与订阅，不调用真实模型。 */
 import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
@@ -64,13 +66,14 @@ test("工作区 session JSONL 增量刷新并实时发布，历史与快照一�
   const root = await mkdtemp(join(tmpdir(), "hc-session-live-")); roots.push(root)
   const runtime = createTraceRuntime({ root, file: "off", workspace: root })
   const events: unknown[] = []; runtime.subscribe(span => events.push(span))
-  const start = { schema_version: 1, event: "span.start", session_id: "thread-1", trace_id: "trace-1", span_id: "llm", parent_span_id: "root", name: "graph.llm", kind: "LLM", start_time_ms: 1000, attributes: { model: "mock-model" } }
-  await mkdir(join(root, "log"))
-  await writeFile(join(root, "log", "session.jsonl"), JSON.stringify(start) + "\n")
+  const start = { schema_version: 2, event: "span.start", session_id: "thread-1", trace_id: "trace-1", span_id: "llm", parent_span_id: "root", name: "graph.llm", kind: "LLM", start_time_ms: 1000, attributes: { model: "mock-model" } }
+  const fingerprint = createHash("sha256").update(await realpath(root)).digest("hex")
+  await mkdir(join(root, fingerprint))
+  await writeFile(join(root, fingerprint, "session.jsonl"), JSON.stringify(start) + "\n")
   await runtime.flush()
   expect(runtime.snapshot()).toHaveLength(1)
   expect(runtime.snapshot()[0]).toMatchObject({ threadId: "thread-1", type: "LLM", endTime: null })
-  await writeFile(join(root, "log", "session.jsonl"), JSON.stringify(start) + "\n" + JSON.stringify({ ...start, event: "span.end", end_time_ms: 1250, duration_ms: 250, status: "SUCCESS" }) + "\n")
+  await writeFile(join(root, fingerprint, "session.jsonl"), JSON.stringify(start) + "\n" + JSON.stringify({ ...start, event: "span.end", end_time_ms: 1250, duration_ms: 250, status: "SUCCESS" }) + "\n")
   await runtime.flush()
   expect(runtime.snapshot()[0]).toMatchObject({ endTime: 1250, durationMs: 250, status: "SUCCESS" })
   expect((await runtime.loadThread("thread-1")).spans).toEqual(runtime.snapshot())

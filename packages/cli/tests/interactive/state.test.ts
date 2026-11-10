@@ -6,6 +6,35 @@ import { applyAgentEvent, applyCodeIndexSnapshot, applyComposeState, applyIntera
 
 const run = { threadId: "thread-1", runId: "run-1" }
 
+test("逐轮用量通过稳定 runId 恢复，重复终态不累计并保留未知", () => {
+  let state = startRun(createInitialState(), run, "first")
+  const terminal = event("run.completed", 1, { usage: { input_tokens: 100, output_tokens: 20, input_complete: true, output_complete: true } })
+  state = applyAgentEvent(state, terminal)
+  const first = state.runSummaries[run.runId]
+  expect(first?.usage?.inputTokens).toBe(100)
+  expect(applyAgentEvent(state, terminal)).toBe(state)
+  const restored = restoreThread(run.threadId, [
+    { kind: "user", content: "first", runId: run.runId, recordId: "u1" },
+    { kind: "assistant", content: "answer", runId: run.runId, recordId: "a1" },
+    { kind: "user", content: "second", runId: "r2", recordId: "u2" },
+  ], "build", [], null, state.runSummaries)
+  expect(restored.runSummaries[run.runId]).toEqual(first)
+  expect(restored.timeline[1]).toMatchObject({ message: { id: "a1", runId: run.runId } })
+  expect(restored.runSummaries.r2).toBeUndefined()
+})
+
+test("失败或取消仍保存已知小计，方向完整性分别保留", () => {
+  for (const type of ["run.failed", "run.cancelled"]) {
+    const state = applyAgentEvent(startRun(createInitialState(), run, "question"), event(type, 1, {
+      duration_ms: 2764,
+      reason: "cancelled", error: { code: "FAILED", message: "failed", retryable: false },
+      usage: { input_tokens: 100, output_tokens: null, input_complete: false, output_complete: false },
+    }))
+    expect(state.runSummaries[run.runId]?.usage).toMatchObject({ inputTokens: 100, outputTokens: null, inputComplete: false, outputComplete: false })
+    expect(state.runSummaries[run.runId]?.durationMs).toBe(2764)
+  }
+})
+
 test("初始状态和清空后的状态进入首页", () => {
   const initial = createInitialState()
   expect(isHomeState(initial)).toBeTrue()
@@ -116,7 +145,7 @@ test("v3 事件按 sequence 更新消息、工具和终态", () => {
   state = applyAgentEvent(state, event("content.delta", 1, { text: "正在" }))
   state = applyAgentEvent(state, event("tool.started", 2, { tool_call_id: "tool-1", name: "read_file" }))
   state = applyAgentEvent(state, event("tool.completed", 3, { tool_call_id: "tool-1", result: { content: "src/app.ts", is_error: false } }))
-  state = applyAgentEvent(state, event("run.completed", 4, { duration_ms: 1340, usage: { input_tokens: 1200, output_tokens: 35 } }))
+  state = applyAgentEvent(state, event("run.completed", 4, { duration_ms: 1340, usage: { input_tokens: 1200, output_tokens: 35, input_complete: true, output_complete: true } }))
   expect(state.timeline.map(item => item.type)).toEqual(["message", "message", "tool"])
   expect(tools(state)[0]).toMatchObject({ name: "read_file", output: "src/app.ts", status: "completed" })
   expect(state.lastRun).toMatchObject({ outcome: "completed", durationMs: 1340, usage: { inputTokens: 1200, outputTokens: 35 } })
@@ -550,6 +579,8 @@ test("run.completed 正确解析并保留 usage.cached_tokens 到 lastRun", () =
     duration_ms: 1200,
     finish_reason: "completed",
     usage: {
+      input_complete: true,
+      output_complete: true,
       input_tokens: 1500,
       output_tokens: 200,
       cached_tokens: 1200,
@@ -557,6 +588,8 @@ test("run.completed 正确解析并保留 usage.cached_tokens 到 lastRun", () =
     context: { action: "run", estimated_tokens: 1500, input_cap_tokens: 128000 },
   }))
   expect(state.lastRun?.usage).toEqual({
+    inputComplete: true,
+    outputComplete: true,
     inputTokens: 1500,
     outputTokens: 200,
     cachedTokens: 1200,

@@ -47,7 +47,7 @@ test("文件标签显示完整路径提示，关闭不触发打开；箭头和 D
   } finally { handle.unmount() }
 })
 
-test("轨迹模式使用完整模式名称，并把时间线用户输入关联到轮次标题", () => {
+test("轨迹固定开发者展示且无模式切换，并关联时间线用户输入", () => {
   const snapshot = makeSnapshot({
     viewMode: "trace",
     interactive: makeInteractive({
@@ -80,7 +80,7 @@ test("轨迹模式使用完整模式名称，并把时间线用户输入关联�
   const handle = render(<WorkbenchViews snapshot={snapshot} dispatch={() => {}} disabled={false}><div /></WorkbenchViews>)
   try {
     const modes = handle.container.querySelectorAll(".trace-mode-switch button")
-    expect([...modes].map(button => button.textContent)).toEqual(["开发者模式", "简化模式"])
+    expect(modes.length).toBe(0)
     expect(handle.container.querySelector(".trace-run-label")?.textContent).toBe("时间线里的用户输入")
     expect(handle.container.querySelector(".trace-run-label")?.textContent).not.toContain("trace-number-must-not-show")
   } finally { handle.unmount() }

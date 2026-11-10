@@ -1,20 +1,20 @@
 /** 中央工作区页签：对话、轨迹与只读文件切换时保留各自内容和滚动。 */
 /** @jsxImportSource react */
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 import { Activity, FileCode2, MessageSquare, X } from "lucide-react"
 import type { WebAdapterSnapshot, WebIntent } from "../application/adapter"
 import { TraceView } from "./trace"
 import { FilePreviewHeader } from "./context-dock/code/file-preview-header"
 import { FileCodeView } from "./context-dock/code/file-code-view"
 
-/** 保留已打开视图的 DOM；隐藏区域同时使用 hidden 与 inert。 */
-export function WorkbenchViews({ snapshot, dispatch, disabled, children }: {
+/** 保留已打开视图的 DOM；隐藏区域同时使用 hidden 与 inert。toolbarEnd 与页签同一行，靠右。 */
+export function WorkbenchViews({ snapshot, dispatch, disabled, children, toolbarEnd }: {
   snapshot: WebAdapterSnapshot
   dispatch: (intent: WebIntent) => void
   disabled: boolean
   children: ReactNode
+  toolbarEnd?: ReactNode
 }) {
-  const [mode, setMode] = useState<"dev" | "simple">("dev")
   const tabList = useRef<HTMLDivElement>(null)
   const focusAfterClose = useRef(false)
   const trace = snapshot.viewMode === "trace"
@@ -83,14 +83,13 @@ export function WorkbenchViews({ snapshot, dispatch, disabled, children }: {
           </div>
         })}
       </div>
-      {trace ? <div className="trace-mode-switch" role="group" aria-label="轨迹显示模式">
-        <button type="button" aria-pressed={mode === "dev"} onClick={() => setMode("dev")}>开发者模式</button>
-        <button type="button" aria-pressed={mode === "simple"} onClick={() => setMode("simple")}>简化模式</button>
-      </div> : null}
+      <div className="workbench-toolbar-end">
+        {toolbarEnd}
+      </div>
     </div>
     <section id="view-panel-chat" role="tabpanel" aria-labelledby="view-tab-chat" className="conversation-chat" hidden={snapshot.viewMode !== "chat"} inert={snapshot.viewMode !== "chat"}>{children}</section>
     <section id="view-panel-trace" role="tabpanel" aria-labelledby="view-tab-trace" className="conversation-trace" hidden={!trace} inert={!trace}>
-      <TraceView state={snapshot.trace} disabled={disabled} mode={mode} userMessages={userMessages} />
+      <TraceView state={snapshot.trace} disabled={disabled} mode="dev" userMessages={userMessages} />
     </section>
     {paths.map(path => {
       const visible = snapshot.viewMode === "file" && path === activePath

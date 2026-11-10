@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.usage_callbacks import model_request
 from langchain_core.messages import AIMessageChunk
 
 from harness_agent.runtime.execution_stream import ExecutionSignal, StreamSession
@@ -37,11 +38,14 @@ class _FakeAgent:
     async def astream(self, stream_input: object, **kwargs: object):
         """记录调用参数，并产出当前模型回合的事件。"""
         self.calls.append({"input": stream_input, **kwargs})
-        outcome = self._rounds.pop(0)
-        if isinstance(outcome, BaseException):
-            raise outcome
-        for event in outcome:
-            yield event
+        with model_request(kwargs.get("config", {})) as request:
+            outcome = self._rounds.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            for event in outcome:
+                if len(event) == 2 and event[0] == "messages" and isinstance(event[1], tuple) and type(event[1][0]).__name__ in {"AIMessage", "AIMessageChunk"}:
+                    request["message"] = event[1][0]
+                yield event
 
 
 class _Lifecycle:
@@ -570,7 +574,7 @@ async def test_pooled_runtime_hides_engine_graph_and_releases_run_then_engine() 
 
     assert result.final_content == "完成"
     assert events == ["run", "engine", "finalize"]
-    assert graph.calls[0]["config"] == {"configurable": {"thread_id": "thread-1"}}
+    assert graph.calls[0]["config"]["configurable"] == {"thread_id": "thread-1"}
 
 
 @pytest.mark.asyncio
@@ -753,35 +757,30 @@ def _trace_events(root: Path) -> list[dict[str, object]]:
     ]
 
 
-@pytest.mark.asyncio
-async def test_executor_trace_covers_acquire_stream_and_finally_release(tmp_path: Path) -> None:
-    """run.execute 包含 runtime 获取与释放，两个子 Span 共享执行父级。"""
+def test_executor_trace_covers_acquire_stream_and_finally_release(tmp_path: Path) -> None:
+    """无 I/O 的 echo 路径可内联驱动；资源正常释放且不生成记账节点。"""
     recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
     context = recorder.start_trace()
     runtime = _Runtime(None)
     with use_trace(context):
-        result = await ManagedAgentExecutor().execute(_request(runtime), _Observer())
+        # fake 的所有 await 均立即完成；若引入真实挂起，此测试会直接失败。
+        coroutine = ManagedAgentExecutor().execute(_request(runtime), _Observer())
+        with pytest.raises(StopIteration) as completed:
+            coroutine.send(None)
+        result = completed.value.value
     context.recorder.end_trace()
 
     assert result.final_content == "修复当前问题"
     events = _trace_events(tmp_path)
     names = [event["name"] for event in events if event["event"] == "span.start"]
-    assert names == ["run.execute", "runtime.acquire", "runtime.release"]
-    execute_start = events[1]
-    assert execute_start["name"] == "run.execute"
-    child_starts = [event for event in events if event["event"] == "span.start"][1:]
-    assert all(event["parent_span_id"] == execute_start["span_id"] for event in child_starts)
-    assert [event["name"] for event in events if event["event"] == "span.end"] == [
-        "runtime.acquire",
-        "runtime.release",
-        "run.execute",
-    ]
-    assert all(event["status"] == "SUCCESS" for event in events if event["event"] == "span.end")
+    assert names == []
+    assert runtime.release_calls == 1
+    assert events[-1]["attributes"]["source"] == "reused"
 
 
 @pytest.mark.asyncio
 async def test_executor_acquire_failure_does_not_fake_release(tmp_path: Path) -> None:
-    """runtime 获取失败只结束 execute/acquire，不记录未发生的 release。"""
+    """runtime 获取失败仍传播原异常，不制造记账或 release 节点。"""
     recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
     context = recorder.start_trace()
     request = _request(_Runtime(None))
@@ -795,13 +794,10 @@ async def test_executor_acquire_failure_does_not_fake_release(tmp_path: Path) ->
     context.recorder.end_trace(TraceStatus.FAILED)
 
     events = _trace_events(tmp_path)
-    assert [event["name"] for event in events if event["event"] == "span.start"] == [
-        "run.execute",
-        "runtime.acquire",
-    ]
+    assert [event for event in events if event["event"] == "span.start"] == []
     ends = [event for event in events if event["event"] == "span.end"]
-    assert [event["name"] for event in ends] == ["runtime.acquire", "run.execute"]
-    assert all(event["status"] == "FAILED" for event in ends)
+    assert ends == []
+    assert events[-1]["status"] == "FAILED"
 
 
 @pytest.mark.asyncio
@@ -849,7 +845,7 @@ async def test_executor_owns_runtime_release_checkpoint_and_passthrough_stream()
     assert usage == {"input_tokens": 3, "output_tokens": 2}
     first_input = agent.calls[0]["input"]
     assert first_input["messages"][0].content == "修复当前问题"
-    assert agent.calls[0]["config"] == {"configurable": {"thread_id": "thread-1"}}
+    assert agent.calls[0]["config"]["configurable"] == {"thread_id": "thread-1"}
 
 
 @pytest.mark.asyncio

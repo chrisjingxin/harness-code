@@ -1,4 +1,5 @@
 /** Trace 历史端口与只读实现：读取内网索引日志和工作区 session JSONL，并按真实会话归属过滤。 */
+import { createHash } from "node:crypto"
 import { constants } from "node:fs"
 import { open, readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
@@ -30,7 +31,7 @@ export function createTraceHistorySource(options: {
 } = {}): TraceHistorySource {
   const root = resolve(options.root ?? join(homedir(), ".harness", "trace"))
   const configuredFile = options.configuredFile ? resolve(options.configuredFile) : undefined
-  const workspaceReader = options.workspaceReader ?? (options.workspace ? createWorkspaceTraceReader(options.workspace) : undefined)
+  const workspaceReader = options.workspaceReader ?? (options.workspace ? createWorkspaceTraceReader(options.workspace, root) : undefined)
   return {
     async loadThread(threadId, signal) {
       try {
@@ -102,50 +103,33 @@ async function loadIndexedThread(root: string, configuredFile: string | undefine
   }) }
 }
 
-/** 扫描当前工作区 log/*.jsonl；文件名仅用于定位，会话隔离始终以事件内 session_id 为准。 */
-export function createWorkspaceTraceReader(workspace: string): WorkspaceTraceReader {
-  const root = resolve(workspace, "log")
-  const cache = new Map<string, { mtimeMs: number; size: number; spans: readonly TraceSpanEvent[] }>()
+/** 按 Python workspace_fingerprint 的真实绝对路径 SHA-256 读取用户目录。 */
+export function createWorkspaceTraceReader(workspace: string, traceRoot = join(homedir(), ".harness", "trace")): WorkspaceTraceReader {
   return {
     async read(signal) {
       signal?.throwIfAborted()
+      const canonicalWorkspace = await realpath(resolve(workspace))
+      const fingerprint = createHash("sha256").update(canonicalWorkspace, "utf8").digest("hex")
+      const root = join(traceRoot, fingerprint)
       const canonicalRoot = await realpath(root).catch(error => { if (missing(error)) return undefined; throw error })
-      if (!canonicalRoot) {
-        cache.clear()
-        return EMPTY
-      }
+      if (!canonicalRoot) return EMPTY
       const entries = (await readdir(canonicalRoot, { withFileTypes: true }))
         .filter(entry => entry.isFile() && entry.name.endsWith(".jsonl"))
         .sort((a, b) => a.name.localeCompare(b.name))
       if (entries.length > 256) throw new Error("limit")
-      const present = new Set<string>()
-      const spans: TraceSpanEvent[] = []
+      const parser = new TraceLogParser(false)
       let total = 0
-      let hasAnyTrace = false
       for (const entry of entries) {
         signal?.throwIfAborted()
         const path = await checkedPath(join(canonicalRoot, entry.name), canonicalRoot)
         if (!path) continue
-        const info = await stat(path)
-        if (!info.isFile() || info.size > FILE_LIMIT) throw new Error("limit")
-        total += info.size
-        if (total > TOTAL_LIMIT) throw new Error("limit")
-        present.add(path)
-        let cached = cache.get(path)
-        if (!cached || cached.mtimeMs !== info.mtimeMs || cached.size !== info.size) {
-          const text = await readBounded(path, FILE_LIMIT, signal)
-          const parser = new TraceLogParser()
-          parser.pushText(text)
-          if (parser.size > 100000) throw new Error("limit")
-          // 缺少 session_id 的事件不参与展示，避免把其他工作区或匿名数据并入当前会话。
-          cached = { mtimeMs: info.mtimeMs, size: info.size, spans: parser.snapshot().filter(span => span.threadId !== null) }
-          cache.set(path, cached)
-        }
-        if (cached.spans.length > 0) hasAnyTrace = true
-        spans.push(...cached.spans)
+        const text = await readBounded(path, Math.min(FILE_LIMIT, TOTAL_LIMIT - total), signal)
+        total += Buffer.byteLength(text)
+        parser.pushText(text)
+        if (parser.size > 100000) throw new Error("limit")
       }
-      for (const path of cache.keys()) if (!present.has(path)) cache.delete(path)
-      return { spans, hasAnyTrace }
+      const spans = parser.snapshot().filter(span => span.threadId !== null)
+      return { spans, hasAnyTrace: spans.length > 0 }
     },
   }
 }

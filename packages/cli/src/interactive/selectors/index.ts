@@ -111,6 +111,7 @@ export function selectConversationView(snapshot: InteractiveSnapshot): Conversat
     timeline: snapshot.timeline,
     runProgress: snapshot.runProgress,
     lastRun: snapshot.lastRun,
+    runSummaries: snapshot.runSummaries,
     childTimelineExecutionId: snapshot.childTimelineExecutionId,
     goal: snapshot.goal,
     goalPending: snapshot.goalPending,

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import math
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -23,7 +24,7 @@ from harness_agent.tracing.writer import JsonlTraceWriter
 
 _LOGGER = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_STATUS_MESSAGE = 512
 _SENSITIVE_ATTRIBUTES = {
     "api_key",
@@ -76,6 +77,7 @@ class SpanHandle:
     idempotency_key: str | None
     start_time_ms: int
     started_ns: int
+    attributes: dict[str, object] = field(default_factory=dict)
 
 
 def _callback_safe(method):
@@ -109,12 +111,22 @@ class TraceRecorder(AsyncCallbackHandler):
         run_id: str,
         log_dir: Path | str,
         writer: JsonlTraceWriter | None = None,
+        capture: str = "full",
+        retention_days: int = 14,
+        max_file_bytes: int = 64 * 1024 * 1024,
     ) -> None:
         self.session_id = session_id
         self.run_id = run_id
         self.trace_id = uuid.uuid4().hex
         self.root_span_id = uuid.uuid4().hex
-        self._writer = writer or JsonlTraceWriter(log_dir)
+        self._capture = capture if capture in {"full", "meta", "off"} else "full"
+        self._payloads: dict[str, str] = {}
+        self._first_tokens: dict[str, int] = {}
+        self._writer = writer or JsonlTraceWriter(
+            log_dir,
+            max_file_bytes=max_file_bytes,
+            retention_days=retention_days,
+        )
         self._context = TraceContext(
             recorder=self,
             session_id=session_id,
@@ -122,7 +134,13 @@ class TraceRecorder(AsyncCallbackHandler):
             trace_id=self.trace_id,
             root_span_id=self.root_span_id,
         )
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._steps: dict[str, SpanHandle] = {}
+        self._step_numbers: dict[str, int] = {}
+        self._handles: dict[str, SpanHandle] = {}
+        self._deferred_spans: dict[str, int] = {}
+        self._usage: dict[str, int] = {}
+        self._policy_spans: dict[str, str] = {}
         self._started = False
         self._closed = False
         self._root_started_ns = 0
@@ -146,7 +164,7 @@ class TraceRecorder(AsyncCallbackHandler):
             self._started = True
             self._root_started_ns = time.perf_counter_ns()
             self._root_start_time_ms = _now_ms()
-            self._root_attributes = _safe_attributes(attributes)
+            self._root_attributes = self._project(attributes)
             self._write(
                 "trace.start",
                 span_id=self.root_span_id,
@@ -162,13 +180,22 @@ class TraceRecorder(AsyncCallbackHandler):
         self,
         status: TraceStatus | str = TraceStatus.SUCCESS,
         *,
+        attributes: Mapping[str, object] | None = None,
         error: BaseException | None = None,
     ) -> None:
         """恰好发出一次 trace.end，并让所有后续 Span 写入失效。"""
+        for handle in tuple(self._steps.values()):
+            self.end_span(handle, status, error=error)
+        self._steps.clear()
         with self._lock:
             if not self._started or self._closed:
                 return
             self._closed = True
+            merged = dict(self._root_attributes)
+            merged["usage"] = dict(self._usage)
+            if self._usage.get("input_tokens", 0) > 0:
+                merged["cache_hit_ratio"] = self._usage.get("cache_read_tokens", 0) / self._usage["input_tokens"]
+            merged.update(self._project(attributes))
             self._write(
                 "trace.end",
                 span_id=self.root_span_id,
@@ -179,7 +206,7 @@ class TraceRecorder(AsyncCallbackHandler):
                 end_time_ms=_now_ms(),
                 duration_ms=_elapsed_ms(self._root_started_ns),
                 status=_status_value(status),
-                attributes=self._root_attributes,
+                attributes=merged,
                 **_error_fields(status, error),
             )
             self._open_spans.clear()
@@ -194,6 +221,8 @@ class TraceRecorder(AsyncCallbackHandler):
         parent_span_id: str | None = None,
         idempotency_key: str | None = None,
         span_id: str | None = None,
+        minimum_duration_ms: int = 0,
+        defer_start: bool = False,
     ) -> SpanHandle | None:
         """开始图外或手动 Span；相同幂等键及关闭后的 start 均被抑制。"""
         with self._lock:
@@ -214,7 +243,19 @@ class TraceRecorder(AsyncCallbackHandler):
             parent = parent_span_id
             if parent is None:
                 active = current_span()
-                parent = active.span_id if active is not None else self.root_span_id
+                branch_step = self._steps.get(self._step_parent())
+                if active is not None and active.span_id in self._open_spans:
+                    parent = branch_step.span_id if active.name == "tool.call" and branch_step is not None else active.span_id
+                else:
+                    parent = branch_step.span_id if branch_step is not None else self.root_span_id
+            projected = self._project(attributes)
+            ancestor = self._handles.get(parent)
+            while ancestor is not None:
+                if ancestor.name == "step":
+                    if "step" in ancestor.attributes:
+                        projected.setdefault("step", ancestor.attributes["step"])
+                    break
+                ancestor = self._handles.get(ancestor.parent_span_id)
             span = SpanHandle(
                 span_id=span_id,
                 parent_span_id=parent,
@@ -223,23 +264,36 @@ class TraceRecorder(AsyncCallbackHandler):
                 idempotency_key=idempotency_key,
                 start_time_ms=_now_ms(),
                 started_ns=time.perf_counter_ns(),
+                attributes=projected,
             )
             self._open_spans.add(span_id)
+            self._handles[span_id] = span
+            if name == "policy.evaluate" and attributes and attributes.get("call_id"):
+                self._policy_spans[str(attributes["call_id"])] = span_id
             event: dict[str, object] = {
                 "start_time_ms": span.start_time_ms,
-                "attributes": _safe_attributes(attributes),
+                "attributes": span.attributes,
             }
             if idempotency_key is not None:
                 event["idempotency_key"] = idempotency_key
-            self._write(
-                "span.start",
-                span_id=span_id,
-                parent_span_id=parent,
-                name=name,
-                kind=kind,
-                **event,
-            )
+            if minimum_duration_ms > 0 or defer_start:
+                self._deferred_spans[span_id] = minimum_duration_ms
+            else:
+                self._write(
+                    "span.start", span_id=span_id, parent_span_id=parent,
+                    name=name, kind=kind, **event,
+                )
             return span
+
+    def discard_deferred_span(self, span: SpanHandle | None) -> None:
+        """丢弃尚未发布的 Span，供无重试的逻辑调用省略首次 attempt。"""
+        if span is None:
+            return
+        with self._lock:
+            if self._closed or span.span_id not in self._deferred_spans:
+                return
+            self._deferred_spans.pop(span.span_id, None)
+            self._open_spans.discard(span.span_id)
 
     def end_span(
         self,
@@ -256,12 +310,28 @@ class TraceRecorder(AsyncCallbackHandler):
             if self._closed or span.span_id not in self._open_spans:
                 return
             self._open_spans.remove(span.span_id)
+            threshold = self._deferred_spans.pop(span.span_id, None)
+            if threshold is not None:
+                if threshold and _status_value(status) == TraceStatus.SUCCESS.value and _elapsed_ms(span.started_ns) < threshold:
+                    return
+                # 延迟节点结束时成对发布；阈值未达标的成功节点不产生孤立 start。
+                self._write(
+                    "span.start", span_id=span.span_id, parent_span_id=span.parent_span_id,
+                    name=span.name, kind=span.kind, start_time_ms=span.start_time_ms,
+                    attributes=span.attributes,
+                )
+            merged = dict(span.attributes)
+            merged.update(self._project(attributes))
+            if span.name == "llm.call" and isinstance(merged.get("usage"), Mapping):
+                for key, value in merged["usage"].items():
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        self._usage[key] = self._usage.get(key, 0) + value
             event: dict[str, object] = {
                 "start_time_ms": span.start_time_ms,
                 "end_time_ms": _now_ms(),
                 "duration_ms": _elapsed_ms(span.started_ns),
                 "status": _status_value(status),
-                "attributes": _safe_attributes(attributes),
+                "attributes": merged,
             }
             if span.idempotency_key is not None:
                 event["idempotency_key"] = span.idempotency_key
@@ -332,6 +402,7 @@ class TraceRecorder(AsyncCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """仅记录首 Token 延迟，token/chunk 内容既不读取也不落盘。"""
+        self.note_first_token()
         state = self._callback_spans.get(run_id)
         if state is not None and state.first_token_latency_ms is None:
             state.first_token_latency_ms = _elapsed_ms(state.handle.started_ns)
@@ -374,16 +445,16 @@ class TraceRecorder(AsyncCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        """把 LangGraph chain 统一记录为 AGENT 或 NODE，忽略输入内容。"""
-        marker = _chain_marker(serialized, metadata)
-        kind = "AGENT" if "agent" in marker.lower() else "NODE"
-        self._start_callback_span(
-            run_id,
-            parent_run_id,
-            name="agent.run" if kind == "AGENT" else "graph.node",
-            kind=kind,
-            attributes={"node": marker} if marker else None,
-        )
+        """只观察中间件自身的前后钩子；图和模型包装耗时不冒充中间件。"""
+        marker = _chain_marker(serialized or {}, metadata)
+        if not marker.endswith((".before_model", ".after_model", ".before_agent", ".after_agent")):
+            return
+        actual_name = kwargs.get("name") or (serialized or {}).get("name") or marker
+        if actual_name != marker:
+            return
+        handle = self.start_span("graph.node", kind="NODE", attributes={"node": marker}, minimum_duration_ms=50)
+        if handle is not None:
+            self._callback_spans[run_id] = _CallbackSpan(handle)
 
     @_callback_safe
     async def on_chain_end(
@@ -533,25 +604,8 @@ class TraceRecorder(AsyncCallbackHandler):
         kind: str,
         attributes: Mapping[str, object] | None = None,
     ) -> None:
-        if run_id in self._callback_spans:
-            return
-        active_span = current_span()
-        parent_span_id = (
-            parent_run_id.hex
-            if parent_run_id is not None
-            else active_span.span_id
-            if active_span is not None
-            else self.root_span_id
-        )
-        handle = self.start_span(
-            name,
-            kind=kind,
-            attributes=attributes,
-            parent_span_id=parent_span_id,
-            span_id=run_id.hex,
-        )
-        if handle is not None:
-            self._callback_spans[run_id] = _CallbackSpan(handle=handle)
+        # v2 的模型、工具和节点 span 由显式中间件发出。通用回调不再建树。
+        return
 
     def _end_callback_span(
         self,
@@ -569,7 +623,110 @@ class TraceRecorder(AsyncCallbackHandler):
             final_attributes["first_token_latency_ms"] = state.first_token_latency_ms
         self.end_span(state.handle, status, attributes=final_attributes, error=error)
 
+    def policy_span(self, call_id: str) -> str | None:
+        """返回本次 Run 中工具调用实际对应的审批 span。"""
+        return self._policy_spans.get(call_id)
+
+    def span_for_key(self, idempotency_key: str) -> SpanHandle | None:
+        """取得尚未关闭的手动 span，供生命周期所有者接手收尾。"""
+        with self._lock:
+            return next((span for span in self._handles.values()
+                         if span.idempotency_key == idempotency_key and span.span_id in self._open_spans), None)
+
+    def annotate_root(self, attributes: Mapping[str, object]) -> None:
+        """把已观测运行信息并入根结束记录，不增加记账节点。"""
+        with self._lock:
+            self._root_attributes.update(self._project(attributes))
+
+    def annotate_span(self, span: SpanHandle, attributes: Mapping[str, object]) -> None:
+        """向仍打开的 span 补充已观测元数据，始终经过档位过滤。"""
+        with self._lock:
+            if span.span_id in self._open_spans:
+                span.attributes.update(self._project(attributes))
+
+    def _step_parent(self) -> str:
+        """从当前调用祖先确定执行分支；每个父工具拥有独立 Step 窗口。"""
+        active = current_span()
+        while active is not None and active.span_id in self._handles:
+            if active.name == "step":
+                return active.parent_span_id
+            if active.name == "tool.call":
+                return active.span_id
+            active = self._handles.get(active.parent_span_id)
+        return self.root_span_id
+
+    def open_step(self) -> SpanHandle | None:
+        """打开新的一轮。上一轮还开着时先关掉，工具 span 才能挂在当前轮下面。"""
+        parent = self._step_parent()
+        self.close_step()
+        number = self._step_numbers.get(parent, 0) + 1
+        self._step_numbers[parent] = number
+        handle = self.start_span("step", kind="STEP", parent_span_id=parent, attributes={"step": number})
+        if handle is not None:
+            self._steps[parent] = handle
+        return handle
+
+    def close_step(
+        self,
+        status: TraceStatus | str = TraceStatus.SUCCESS,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        """结束当前轮次。没有打开的轮次时不写事件。"""
+        handle = self._steps.pop(self._step_parent(), None)
+        if handle is not None:
+            self.end_span(handle, status, error=error)
+
+    def payload(self, kind: str, body: object) -> str:
+        """脱敏后按内容去重写入 payload。meta 和 off 不落正文。"""
+        if self._capture != "full" or not self._started or self._closed:
+            return ""
+        from harness_agent.tracing.session import payload_digest, redact
+
+        redacted = redact(body)
+        digest = payload_digest(redacted)
+        with self._lock:
+            existing = self._payloads.get(digest)
+            if existing is not None:
+                return existing
+            payload_id = f"p{len(self._payloads) + 1}"
+            self._payloads[digest] = payload_id
+            encoded = json.dumps(redacted, ensure_ascii=False, separators=(",", ":"))
+            self._write(
+                "payload",
+                payload_id=payload_id,
+                sha256=digest,
+                bytes=len(encoded.encode("utf-8")),
+                kind=kind,
+                body=redacted,
+            )
+            return payload_id
+
+    def note_first_token(self) -> None:
+        """把当前 llm.call 的首 token 延迟记在内存里，结束时再写入属性。"""
+        active = current_span()
+        if active is None or active.name != "llm.call":
+            return
+        self._first_tokens.setdefault(active.span_id, _elapsed_ms(active.started_ns))
+
+    def first_token_ms(self, span_id: str) -> int | None:
+        """返回已观察到的首 token 延迟。"""
+        return self._first_tokens.get(span_id)
+
+    def _project(self, attributes: Mapping[str, object] | None) -> dict[str, object]:
+        """meta 档位去掉载荷引用，避免只关正文却留下指针。"""
+        safe = _safe_attributes(attributes)
+        if self._capture == "full":
+            return safe
+        return {
+            key: value
+            for key, value in safe.items()
+            if not key.endswith("_ref") and not key.endswith("_refs")
+        }
+
     def _write(self, event: str, **fields: object) -> None:
+        if self._capture == "off":
+            return
         record = {
             "schema_version": _SCHEMA_VERSION,
             "event": event,

@@ -1,18 +1,15 @@
 /* 中央页签与视图容器；Trace 业务样式仍由 trace/trace.css 独立维护。 */
 .workbench-view-toolbar { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; min-height: 36px; padding: 0 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.workbench-toolbar-end { display: flex; align-items: center; gap: 12px; margin-left: auto; flex: 0 0 auto; min-width: 0; }
 .workbench-view-tabs { display: flex; gap: 16px; align-self: stretch; min-width: 0; overflow-x: auto; }
 .workbench-view-tab { display: flex; align-items: center; gap: 6px; padding: 0 2px; border: 0;  background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
 .workbench-view-tab[aria-selected="true"] { color: var(--accent); font-weight: 600; }
-.trace-mode-switch { display: flex; padding: 2px; border-radius: var(--radius-control); background: var(--surface-2); }
-.trace-mode-switch button { background: transparent; border: 0; border-radius: var(--radius-control); color: var(--muted); font: inherit; font-size: 12px; padding: 3px 8px; cursor: pointer; }
-.trace-mode-switch button[aria-pressed="true"] { background: var(--bg); color: var(--accent); }
 .conversation-chat, .conversation-trace { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .conversation-chat[hidden], .conversation-trace[hidden] { display: none; }
 /* Trace 保留双列最小阅读宽度，窄窗口可横向滚动，不能直接裁掉详情。 */
 .conversation-trace { overflow-x: auto; }
 .dock-toggle[hidden] { display: none; }
 .desktop-workspace.is-trace-view { --dock-width-reserved: 0px; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0px; }
-.is-trace-view .conversation-heading { max-width: none; width: auto; margin-inline: 0; }
 @media (max-width: 900px) {
   .desktop-workspace.is-trace-view { grid-template-columns: minmax(0, 1fr); }
 }
@@ -32,4 +29,3 @@
 .workbench-file-panel .file-preview-path { flex: 1 1 160px; }
 .workbench-file-panel .file-preview-actions { flex-wrap: wrap; min-width: 0; }
 .workbench-file-panel .file-preview-meta, .workbench-file-panel .file-preview-truncated { white-space: normal; }
-.trace-mode-switch { flex: 0 0 auto; }

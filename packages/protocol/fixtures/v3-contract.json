@@ -426,7 +426,8 @@
           "updated_at_ms": 1,
           "error_code": "x"
         },
-        "goal_activities": []
+        "goal_activities": [],
+        "run_summaries": []
       }
     },
     {
@@ -496,7 +497,8 @@
           "updated_at_ms": 1,
           "error_code": "x"
         },
-        "goal_activities": []
+        "goal_activities": [],
+        "run_summaries": []
       }
     },
     {
@@ -1788,7 +1790,9 @@
         "payload": {
           "usage": {
             "input_tokens": 1,
-            "output_tokens": 1
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
           },
           "duration_ms": 1,
           "finish_reason": "x",
@@ -1808,7 +1812,14 @@
         "sequence": 1,
         "timestamp_ms": 1,
         "payload": {
-          "reason": "x"
+          "reason": "x",
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         }
       }
     },
@@ -1828,7 +1839,14 @@
             "code": "x",
             "message": "x",
             "retryable": false
-          }
+          },
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         }
       }
     },
@@ -3724,6 +3742,7 @@
           "error_code": "x"
         },
         "goal_activities": [],
+        "run_summaries": [],
         "__extra": true
       }
     },
@@ -3777,7 +3796,8 @@
           "updated_at_ms": 1,
           "error_code": "x"
         },
-        "goal_activities": []
+        "goal_activities": [],
+        "run_summaries": []
       }
     },
     {
@@ -3867,6 +3887,7 @@
           "error_code": "x"
         },
         "goal_activities": [],
+        "run_summaries": [],
         "__extra": true
       }
     },
@@ -3920,7 +3941,8 @@
           "updated_at_ms": 1,
           "error_code": "x"
         },
-        "goal_activities": []
+        "goal_activities": [],
+        "run_summaries": []
       }
     },
     {
@@ -6702,7 +6724,9 @@
         "payload": {
           "usage": {
             "input_tokens": 1,
-            "output_tokens": 1
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
           },
           "duration_ms": 1,
           "finish_reason": "x",
@@ -6724,7 +6748,9 @@
         "payload": {
           "usage": {
             "input_tokens": 1,
-            "output_tokens": 1
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
           },
           "duration_ms": 1,
           "finish_reason": "x",
@@ -6750,7 +6776,14 @@
         "sequence": 1,
         "timestamp_ms": 1,
         "payload": {
-          "reason": "x"
+          "reason": "x",
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         },
         "__extra": true
       }
@@ -6766,7 +6799,14 @@
         "sequence": 1,
         "timestamp_ms": 1,
         "payload": {
-          "reason": "x"
+          "reason": "x",
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         }
       }
     },
@@ -6792,7 +6832,14 @@
             "code": "x",
             "message": "x",
             "retryable": false
-          }
+          },
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         },
         "__extra": true
       }
@@ -6812,7 +6859,14 @@
             "code": "x",
             "message": "x",
             "retryable": false
-          }
+          },
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "input_complete": false,
+            "output_complete": false
+          },
+          "duration_ms": 1
         }
       }
     },

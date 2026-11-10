@@ -7,7 +7,6 @@ import { useSyncExternalStore } from "react"
 import { selectWorkItemView } from "../../interactive/selectors"
 import type { WebInteractiveAdapter, WebAdapterSnapshot, WebIntent, WebTheme } from "../application/adapter"
 import { workspaceLabel, type InteractiveRuntime } from "../../interactive/runtime"
-import { threadDisplayTitle } from "../../presentation-shared/thread-title"
 import { activityLabel } from "../../presentation-shared/timeline-presenter"
 import { HarnessBrandLogo } from "./brand-logo"
 import { WorkbenchViews } from "./workbench-views"
@@ -47,7 +46,6 @@ export function WebApp(props: {
   const readOnly = !props.active || snapshot.leaving || connectionReadOnly || interactive.git.busy
   const returnBlocked = Boolean(interactive.activeRun || interactive.interaction || interactive.git.busy)
   const workItemView = selectWorkItemView(interactive)
-  const currentThread = interactive.catalogs.threads.items.find(thread => thread.thread_id === interactive.currentThreadId)
 
   const overflowTriggerRef = useRef<HTMLButtonElement | null>(null)
   const headerMenuRef = useRef<HTMLDivElement | null>(null)
@@ -200,11 +198,9 @@ export function WebApp(props: {
         <div className={`desktop-workspace${dockVisible ? " has-context-dock" : ""}${showingTrace ? " is-trace-view" : ""}`}>
           <WorkspaceSidebar snapshot={snapshot} dispatch={onIntent} disabled={readOnly} />
           <main className="conversation-column">
-            <header className="conversation-heading">
-              <div className="conversation-heading-copy"><h1>{currentThread ? threadDisplayTitle(currentThread) : "新对话"}</h1><span>{interactive.workMode === "compose" ? "Compose" : "Build"} · {interactive.runtime.executionMode === "local" ? "本地工作区" : "远端沙箱"}</span></div>
+            <WorkbenchViews snapshot={snapshot} dispatch={onIntent} disabled={!props.active || snapshot.leaving} toolbarEnd={
               <div className="conversation-heading-actions"><span className="conversation-run-status" role="status"><span className={`status-dot status-dot-${interactive.activity.kind}`} />{activityLabel(interactive.activity.kind)}</span><button type="button" className="icon-button" aria-label="查看文件变更" disabled={readOnly} onClick={() => onIntent({ type: "dock-open", panel: "changes" })}><GitCompareArrows size={16} aria-hidden="true" /></button></div>
-            </header>
-            <WorkbenchViews snapshot={snapshot} dispatch={onIntent} disabled={!props.active || snapshot.leaving}>
+            }>
             <WorkItemBanner view={workItemView} />
             <GoalBanner interactive={interactive} />
             <div className="timeline-scroll">

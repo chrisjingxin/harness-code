@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -12,7 +13,11 @@ from typing import Any, TypeVar
 import httpx
 import openai
 
+from harness_agent.tracing.context import current_span, current_trace
+from harness_agent.tracing.recorder import SpanHandle, TraceStatus
 
+
+_LOGGER = logging.getLogger(__name__)
 _RETRY_AFTER = re.compile(r"(\d+)\s*(ms|s|min|h)?", re.IGNORECASE)
 _RATE_LIMIT_CODES = frozenset(
     {"RATE_LIMITED", "PROVIDER_RATE_LIMITED", "429", "THROTTLED"}
@@ -105,6 +110,64 @@ def retry_after_seconds(error: BaseException) -> float | None:
     return None
 
 
+def _start_attempt_trace(attempt: int) -> SpanHandle | None:
+    """在当前逻辑模型调用下延迟创建 attempt，首次无重试时可完整省略。"""
+    trace, parent = current_trace(), current_span()
+    if trace is None or parent is None or parent.name != "llm.call":
+        return None
+    try:
+        return trace.recorder.start_span(
+            "llm.attempt",
+            kind="LLM",
+            parent_span_id=parent.span_id,
+            attributes={"attempt": attempt},
+            defer_start=True,
+        )
+    except Exception:
+        _LOGGER.warning("模型 attempt trace 创建失败", exc_info=True)
+        return None
+
+
+def _finish_attempt_trace(
+    span: SpanHandle | None,
+    status: TraceStatus,
+    *,
+    error: BaseException | None = None,
+    backoff_ms: int | None = None,
+) -> None:
+    """只写稳定 provider 错误元数据，不把上游异常正文带入 trace。"""
+    trace = current_trace()
+    if span is None or trace is None:
+        return
+    attributes: dict[str, object] = {}
+    if error is not None:
+        code = getattr(error, "code", None)
+        attributes["provider_error"] = (
+            code if isinstance(code, str) and code else type(error).__name__
+        )
+        attributes["retryable"] = is_provider_transient(error)
+        status_code = provider_status_code(error)
+        if status_code is not None:
+            attributes["http_status"] = status_code
+    if backoff_ms is not None:
+        attributes["backoff_ms"] = backoff_ms
+    try:
+        trace.recorder.end_span(span, status, attributes=attributes)
+    except Exception:
+        _LOGGER.warning("模型 attempt trace 关闭失败", exc_info=True)
+
+
+def _discard_attempt_trace(span: SpanHandle | None) -> None:
+    """首次调用没有发生重试时，不发布多余的 attempt 节点。"""
+    trace = current_trace()
+    if span is None or trace is None:
+        return
+    try:
+        trace.recorder.discard_deferred_span(span)
+    except Exception:
+        _LOGGER.warning("模型 attempt trace 丢弃失败", exc_info=True)
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedProviderRetry:
     """所有模型调用方共享的线性、有上限 provider retry 策略。"""
@@ -144,15 +207,37 @@ async def run_with_provider_retry(
     """为 managed executor 之外的直接异步模型调用复用同一 retry owner。"""
     attempt = 1
     while True:
+        attempt_span = _start_attempt_trace(attempt)
         try:
-            return await operation()
-        except asyncio.CancelledError:
+            result = await operation()
+        except asyncio.CancelledError as error:
+            if attempt == 1:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(attempt_span, TraceStatus.CANCELLED, error=error)
             raise
         except Exception as error:  # noqa: BLE001 - policy 决定是否重试
-            if policy is None or not policy.should_retry(attempt, error):
+            should_retry = policy is not None and policy.should_retry(attempt, error)
+            delay = policy.retry_delay_seconds(error, attempt) if should_retry else None
+            if attempt == 1 and not should_retry:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(
+                    attempt_span,
+                    TraceStatus.FAILED,
+                    error=error,
+                    backoff_ms=None if delay is None else round(delay * 1000),
+                )
+            if not should_retry:
                 raise
-            await sleep(policy.retry_delay_seconds(error, attempt))
+            await sleep(delay)
             attempt += 1
+        else:
+            if attempt == 1:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(attempt_span, TraceStatus.SUCCESS)
+            return result
 
 
 def run_with_provider_retry_sync(
@@ -164,12 +249,34 @@ def run_with_provider_retry_sync(
     """为同步分类器模型调用复用同一 bounded retry 语义。"""
     attempt = 1
     while True:
+        attempt_span = _start_attempt_trace(attempt)
         try:
-            return operation()
-        except asyncio.CancelledError:
+            result = operation()
+        except asyncio.CancelledError as error:
+            if attempt == 1:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(attempt_span, TraceStatus.CANCELLED, error=error)
             raise
         except Exception as error:  # noqa: BLE001 - policy 决定是否重试
-            if policy is None or not policy.should_retry(attempt, error):
+            should_retry = policy is not None and policy.should_retry(attempt, error)
+            delay = policy.retry_delay_seconds(error, attempt) if should_retry else None
+            if attempt == 1 and not should_retry:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(
+                    attempt_span,
+                    TraceStatus.FAILED,
+                    error=error,
+                    backoff_ms=None if delay is None else round(delay * 1000),
+                )
+            if not should_retry:
                 raise
-            sleep(policy.retry_delay_seconds(error, attempt))
+            sleep(delay)
             attempt += 1
+        else:
+            if attempt == 1:
+                _discard_attempt_trace(attempt_span)
+            else:
+                _finish_attempt_trace(attempt_span, TraceStatus.SUCCESS)
+            return result

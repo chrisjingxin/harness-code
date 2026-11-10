@@ -139,7 +139,7 @@ export type RunSummary = {
   runId: string
   outcome: "completed" | "cancelled" | "failed"
   durationMs?: number
-  usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number }
+  usage?: { inputTokens: number | null; outputTokens: number | null; inputComplete: boolean; outputComplete: boolean; cachedTokens?: number }
   context?: { action: string; estimatedTokens?: number; inputCapTokens?: number }
   /** Compose Run 的终态快照：完整 projection，供 Timeline 结果摘要（失败/取消后仍可见）。 */
   composeSummary?: ComposeProjection
@@ -172,6 +172,8 @@ type EventIdentity = {
 }
 
 export type RestoredThreadMessage = {
+  runId?: string
+  recordId?: string
   kind: "user" | "assistant" | "tool"
   content: string
   toolName?: string
@@ -226,6 +228,7 @@ export type InteractiveState = {
   /** 仅当前 Run 可见的事实进度，不进入 Timeline 或 Thread 历史。 */
   runProgress: RunProgress | null
   lastRun?: RunSummary
+  runSummaries: Record<string, RunSummary>
   sequences: Record<string, number>
   composeState: ComposeProjection | null
   /** 当前 Thread 持久化的 Work Item 投影；无未终结项或 Build Thread 为 null。 */
@@ -252,6 +255,7 @@ export type InteractiveState = {
 export function createInitialState(threadId: string | null = null, workMode: WorkMode = "build"): InteractiveState {
   return {
     currentThreadId: threadId,
+    runSummaries: {},
     activeRun: null,
     pendingOperation: null,
     timeline: [],
@@ -515,16 +519,18 @@ export function restoreThread(
   workMode: WorkMode = "build",
   composeActivities: readonly RestoredComposeActivity[] = [],
   threadMode: WorkMode | null = null,
+  runSummaries: Record<string, RunSummary> = {},
 ): InteractiveState {
   const restoredRunId = `restored-${threadId}`
   const timeline: TimelineItem[] = messages.map((message, index) => {
-    const id = `restored-${index + 1}`
+    const id = message.recordId ?? `restored-${index + 1}`
+    const messageRunId = message.runId ?? restoredRunId
     if (message.kind === "tool") {
       return {
         type: "tool",
         tool: {
           id,
-          runId: restoredRunId,
+          runId: messageRunId,
           name: message.toolName || "tool",
           arguments: "",
           output: message.content,
@@ -536,7 +542,7 @@ export function restoreThread(
       id,
       role: message.kind,
       content: message.content,
-      runId: restoredRunId,
+      runId: messageRunId,
       streaming: false,
     }
     if (message.createdAtMs !== undefined) restoredMessage.createdAtMs = message.createdAtMs
@@ -594,8 +600,11 @@ export function restoreThread(
       })
     }
   }
+  const latestRunId = messages.findLast(message => message.runId)?.runId
   return {
     currentThreadId: threadId,
+    runSummaries,
+    lastRun: latestRunId ? runSummaries[latestRunId] : undefined,
     activeRun: null,
     pendingOperation: null,
     timeline,
@@ -815,8 +824,17 @@ export function markRunFailed(state: InteractiveState, runId: string, message: s
   }
 }
 
-/** 丢弃旧 run、重复帧和乱序帧。 */
+/** 丢弃旧/重复/乱序帧，并按 Run 保留终态用量，历史不参与重新累计。 */
 export function applyAgentEvent(state: InteractiveState, event: EventEnvelope, idGenerator: IdGenerator = defaultIdGenerator): InteractiveState {
+  const next = reduceAgentEvent(state, event, idGenerator)
+  if (next !== state && (event.type === EventType.RUN_COMPLETED || event.type === EventType.RUN_FAILED || event.type === EventType.RUN_CANCELLED) && next.lastRun?.runId === event.run_id) {
+    const summary = { ...next.lastRun, usage: usageValue(event.payload.usage), durationMs: event.payload.duration_ms }
+    return { ...next, lastRun: summary, runSummaries: { ...next.runSummaries, [summary.runId]: summary } }
+  }
+  return next
+}
+
+function reduceAgentEvent(state: InteractiveState, event: EventEnvelope, idGenerator: IdGenerator): InteractiveState {
   const active = state.activeRun
   if (!active || active.threadId !== event.thread_id || active.runId !== event.run_id) return state
   const next = acceptSequence(state, event.thread_id, event.run_id, event.sequence)
@@ -1445,15 +1463,22 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
-function usageValue(value: unknown): { inputTokens: number; outputTokens: number; cachedTokens?: number } | undefined {
+/** 解析供应商实际用量，未知与零保持区分。 */
+export function usageValue(value: unknown): RunSummary["usage"] {
   const record = objectRecord(value)
-  const inputTokens = numberValue(record.input_tokens)
-  const outputTokens = numberValue(record.output_tokens)
-  const cachedTokens = numberValue(record.cached_tokens)
-  if (inputTokens !== undefined && outputTokens !== undefined) {
-    return { inputTokens, outputTokens, ...(cachedTokens !== undefined ? { cachedTokens } : {}) }
+  const count = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null
+  if (typeof record.input_complete !== "boolean" || typeof record.output_complete !== "boolean") return undefined
+  const inputTokens = count(record.input_tokens)
+  const outputTokens = count(record.output_tokens)
+  const cachedTokens = count(record.cached_tokens)
+  const inputComplete = record.input_complete && inputTokens !== null
+  return {
+    inputTokens,
+    outputTokens,
+    inputComplete,
+    outputComplete: record.output_complete && outputTokens !== null,
+    ...(inputComplete && cachedTokens !== null && cachedTokens <= inputTokens! ? { cachedTokens } : {}),
   }
-  return undefined
 }
 
 function contextValue(value: unknown): { action: string; estimatedTokens?: number; inputCapTokens?: number } | undefined {

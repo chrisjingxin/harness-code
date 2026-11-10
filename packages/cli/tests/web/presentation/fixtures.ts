@@ -58,6 +58,7 @@ export function makeInteractive(
   overrides: Partial<InteractiveSnapshot> = {},
 ): InteractiveSnapshot {
   return {
+    runSummaries: {},
     git: {busy:false,repository:null,diff:null,result:null,error:null},
     currentThreadId: null,
     activity: { kind: "home" },

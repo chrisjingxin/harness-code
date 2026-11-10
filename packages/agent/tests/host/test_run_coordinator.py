@@ -983,7 +983,7 @@ async def test_pending_transcript_does_not_emit_sqlite_span(tmp_path: Path) -> N
 
     assert len(run.pending_transcript) == 1
     events = _trace_events(tmp_path)
-    assert not [event for event in events if event.get("name") == "thread.persist"]
+    assert not [event for event in events if event.get("name") == "db.persist"]
     assert "CANARY_PENDING_TRANSCRIPT" not in json.dumps(events)
 
 
@@ -992,6 +992,7 @@ async def test_agent_host_preparation_failure_closes_root_trace(tmp_path: Path) 
     """准备失败时 run.prepare 与根 Trace 都以 FAILED 恰好收尾一次。"""
     host = object.__new__(AgentHost)
     host._workspace = tmp_path
+    host._config_home = tmp_path
 
     async def fail_reservation():
         raise RuntimeError("prepare failed")
@@ -1027,7 +1028,7 @@ async def test_agent_host_preparation_failure_closes_root_trace(tmp_path: Path) 
 async def test_run_trace_maps_terminal_and_inherits_background_context(
     tmp_path: Path, terminal: str, trace_status: str
 ) -> None:
-    """后台 adapter 继承同一 Trace，终态只产生一个 run.complete 与 trace.end。"""
+    """后台 adapter 使用同一 Trace，准备跨到受理，终态只写根结束记录。"""
     inherited = []
     executed_runs = []
 
@@ -1039,6 +1040,10 @@ async def test_run_trace_maps_terminal_and_inherits_background_context(
 
     coordinator = _coordinator([])
     coordinator._execution_adapters["build"] = _OutcomeAdapter()
+    coordinator._preparation_provider = func_monitor(
+        name="run.prepare", manual=True,
+        idempotency_key=lambda call: f"run.prepare:{call.args[0].run_id}",
+    )(coordinator._preparation_provider)
     recorder = TraceRecorder(session_id="thread", run_id=f"run-{terminal}", log_dir=tmp_path)
     context = recorder.start_trace()
     with use_trace(context):
@@ -1058,17 +1063,13 @@ async def test_run_trace_maps_terminal_and_inherits_background_context(
 
     assert inherited == [context]
     events = _trace_events(tmp_path)
-    accept = [event for event in events if event["name"] == "run.accept"]
+    accept = [event for event in events if event["name"] == "run.prepare"]
     assert [event["event"] for event in accept] == ["span.start", "span.end"]
-    assert accept[0]["idempotency_key"] == f"run.accept:run-{terminal}"
-    assert all(
-        event["attributes"]["requested_approval_mode"] == "yolo"
-        for event in accept
-    )
+    assert accept[0]["idempotency_key"] == f"run.prepare:run-{terminal}"
+    assert accept[-1]["attributes"]["requested_approval_mode"] == "yolo"
     complete = [event for event in events if event["name"] == "run.complete"]
-    assert [event["event"] for event in complete] == ["span.start", "span.end"]
-    assert complete[-1]["attributes"]["status"] == terminal
-    assert complete[-1]["status"] == trace_status
+    assert complete == []
+    assert events[-1]["attributes"]["status"] == terminal
     assert events[-1]["event"] == "trace.end"
     assert events[-1]["status"] == trace_status
     assert len({event["trace_id"] for event in events}) == 1
@@ -1122,7 +1123,7 @@ async def test_mock_run_combines_lifecycle_and_graph_callbacks_in_one_trace(
 
     agent = _CallbackAgent()
 
-    @func_monitor(name="run.prepare", idempotency_key="run.prepare:run-mock")
+    @func_monitor(name="run.prepare", idempotency_key="run.prepare:run-mock", manual=True)
     async def prepare(_command, _persistence):
         return RunPreparation()
 
@@ -1161,33 +1162,9 @@ async def test_mock_run_combines_lifecycle_and_graph_callbacks_in_one_trace(
     starts = [event for event in events if event["event"] == "span.start"]
     assert [event["name"] for event in starts] == [
         "run.prepare",
-        "run.accept",
-        "run.execute",
-        "runtime.acquire",
-        "agent.run",
-        "graph.node",
-        "graph.llm",
-        "tool.call",
-        "runtime.release",
-        "run.complete",
     ]
-    by_span = {event["span_id"]: event for event in starts}
-    execute = next(event for event in starts if event["name"] == "run.execute")
-    agent = next(event for event in starts if event["name"] == "agent.run")
-    node = next(event for event in starts if event["name"] == "graph.node")
-    llm = next(event for event in starts if event["name"] == "graph.llm")
-    tool = next(event for event in starts if event["name"] == "tool.call")
-    assert agent["parent_span_id"] == execute["span_id"]
-    assert node["parent_span_id"] == agent["span_id"]
-    assert llm["parent_span_id"] == tool["parent_span_id"] == node["span_id"]
-    assert by_span[agent_run_id.hex]["kind"] == "AGENT"
     lifecycle_names = {
         "run.prepare",
-        "run.accept",
-        "run.execute",
-        "runtime.acquire",
-        "runtime.release",
-        "run.complete",
     }
     assert all(
         event.get("idempotency_key")
@@ -1203,6 +1180,9 @@ async def test_mock_run_combines_lifecycle_and_graph_callbacks_in_one_trace(
 async def test_run_acceptance_failure_closes_prepared_trace(tmp_path: Path) -> None:
     """准备完成后受理失败也必须关链，不能把手动 Trace 留在内存中。"""
     coordinator = _coordinator([])
+    coordinator._preparation_provider = func_monitor(
+        name="run.prepare", idempotency_key="run.prepare:run-accept", manual=True,
+    )(coordinator._preparation_provider)
 
     async def fail_accept(_binding):
         raise RuntimeError("accept failed")
@@ -1223,7 +1203,7 @@ async def test_run_acceptance_failure_closes_prepared_trace(tmp_path: Path) -> N
 
     events = _trace_events(tmp_path)
     assert [event["name"] for event in events if event["event"] == "span.start"] == [
-        "run.accept"
+        "run.prepare"
     ]
     assert events[-1]["event"] == "trace.end"
     assert events[-1]["status"] == "FAILED"
@@ -1240,6 +1220,7 @@ async def test_duplicate_active_acceptance_does_not_start_another_trace(tmp_path
             run.status = "running"
             await gate.wait()
 
+    @func_monitor(name="run.prepare", idempotency_key="run.prepare:run-duplicate", manual=True)
     async def prepare(_command, _persistence):
         nonlocal preparations
         preparations += 1
@@ -1273,7 +1254,7 @@ async def test_duplicate_active_acceptance_does_not_start_another_trace(tmp_path
     events = _trace_events(tmp_path)
     assert [event["event"] for event in events].count("trace.start") == 1
     assert [event["event"] for event in events].count("trace.end") == 1
-    accept = [event for event in events if event["name"] == "run.accept"]
+    accept = [event for event in events if event["name"] == "run.prepare"]
     assert [event["event"] for event in accept] == ["span.start", "span.end"]
 
 
@@ -1305,6 +1286,7 @@ async def test_interaction_wait_records_outcome_without_payload(
         owner=ConnectionRef("owner"),
         persistence=None,
         preparation=RunPreparation(),
+        trace_context=context,
     )
     with use_trace(context):
         result = await coordinator._lifecycle_port.request_interaction(
@@ -1323,8 +1305,10 @@ async def test_interaction_wait_records_outcome_without_payload(
     events = [event for event in _trace_events(tmp_path) if event["name"] == "interaction.wait"]
     assert [event["event"] for event in events] == ["span.start", "span.end"]
     assert events[0]["kind"] == "INTERACTION"
-    assert events[0]["attributes"] == {"phase": "wait"}
-    assert events[1]["attributes"] == {"phase": "wait", "outcome": expected}
+    assert events[0]["attributes"]["request_id"] == "approval-trace"
+    assert events[0]["attributes"]["interaction_type"] == "approval"
+    assert events[1]["attributes"]["outcome"] == expected
+    assert events[1]["attributes"]["wait_ms"] >= 0
     assert events[1]["duration_ms"] >= 0
     assert "CANARY_TRACE_INTERACTION" not in json.dumps(events)
 
@@ -1363,6 +1347,7 @@ async def test_cancelled_interaction_wait_ends_exactly_once(
         owner=ConnectionRef("owner"),
         persistence=None,
         preparation=RunPreparation(),
+        trace_context=context,
     )
     with use_trace(context), pytest.raises(asyncio.CancelledError):
         await coordinator._lifecycle_port.request_interaction(
@@ -2438,6 +2423,9 @@ async def test_failed_run_flushes_completed_semantics_but_discards_partial_assis
         async def append_transcript_batch(self, records):
             self.records.extend(records)
 
+        async def save_run_summary(self, _thread_id, _run_id, _outcome, _usage, _duration_ms):
+            pass
+
         async def complete_run(self, _thread_id: str) -> None:
             self.completed = True
 
@@ -2580,6 +2568,9 @@ async def test_provider_retry_drops_failed_build_output_before_transcript_commit
 
         async def append_transcript_batch(self, records) -> None:
             self.records.extend(records)
+
+        async def save_run_summary(self, _thread_id, _run_id, _outcome, _usage, _duration_ms):
+            pass
 
         async def complete_run(self, _thread_id: str) -> None:
             self.completed = True
