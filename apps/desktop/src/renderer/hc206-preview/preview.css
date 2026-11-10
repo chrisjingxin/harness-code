@@ -1,0 +1,37 @@
+/* 独立预览的外壳；不进入正式工作台，也不替代中央页签布局。 */
+.hc206-preview { min-height: 100vh; background: var(--bg); color: var(--text); }
+.hc206-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; padding: 0 24px 0 88px; border-bottom: 1px solid var(--line); background: var(--chrome); -webkit-app-region: drag; }
+.hc206-preview-header > div:first-child { display: flex; align-items: baseline; gap: 12px; }
+.hc206-preview-header strong { font-size: 14px; }
+.hc206-preview-header span { color: var(--muted); font-size: 12px; }
+.hc206-preview-appearance { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+.hc206-preview-appearance label, .hc206-preview-intro label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.hc206-preview select { min-height: var(--control-compact); padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); }
+.hc206-preview-main { width: min(1040px, 100%); margin: 0 auto; padding: 24px 28px 40px; }
+.hc206-preview-intro { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.hc206-preview-intro h1 { margin: 0; font-size: 22px; }
+.hc206-preview-intro p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.hc206-preview-error { color: var(--danger-text); font-size: 12px; }
+.hc206-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.hc206-preview-fixtures { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; }
+.hc206-preview-fixtures label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.hc206-preview-extension { min-width: 0; padding: 5px 8px; border: 1px dashed var(--accent-border-strong); border-radius: var(--radius-control); color: var(--muted); font-size: 12px; }
+.hc206-preview-composer-extension { color: var(--muted); font-size: 12px; }
+.hc206-preview-workspace { display: flex; flex-direction: column; min-width: 0; height: clamp(340px, 58vh, 700px); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--surface); }
+.hc206-preview-tabs { display: flex; flex: 0 0 auto; gap: 16px; min-height: 42px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.hc206-preview-tabs button { padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.hc206-preview-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-hover); }
+.hc206-preview-panel { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; padding: 18px 20px; }
+.hc206-preview-panel[hidden] { display: none; }
+.hc206-preview-placeholder { align-items: center; justify-content: center; margin: 0; color: var(--muted); font-size: 13px; }
+.hc206-preview-records { margin-top: 16px; color: var(--muted); font-size: 12px; }
+.hc206-preview-records strong { color: var(--text-soft); }
+.hc206-preview-records ol { max-height: 140px; overflow-y: auto; margin: 6px 0; padding-left: 22px; }
+.hc206-preview-records p { margin: 6px 0; }
+.hc206-preview-paste { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.hc206-preview-paste textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--field-bg); color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 700px) {
+  .hc206-preview-header { align-items: flex-start; flex-direction: column; padding: 14px 14px 12px 88px; }
+  .hc206-preview-main { padding: 18px 14px 30px; }
+  .hc206-preview-panel { padding: 14px 10px; }
+}

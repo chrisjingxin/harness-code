@@ -13,6 +13,8 @@
       "import": "./dist/index.js"
     },
     "./theme.css": "./dist/theme.css",
+    "./project.css": "./dist/project/project.css",
+    "./conversation.css": "./dist/conversation/conversation.css",
     "./native-theme": {
       "types": "./dist/native-theme.d.ts",
       "import": "./dist/native-theme.js"

@@ -9,8 +9,9 @@ import { basename, dirname } from "node:path"
 if (__WORKBENCH_UI_PREVIEW__) {
   // 预览是独立进程，不能读写正式工作台的用户目录或设备账本。
   const previewData = process.env.WORKBENCH_UI_PREVIEW_DATA
-  if (!previewData || dirname(realpathSync(previewData)) !== realpathSync(tmpdir()) || !basename(previewData).startsWith("hc205-ui-preview-")) {
-    throw new Error("主题预览必须使用隔离的临时用户目录")
+  const previewPrefix = `${__WORKBENCH_UI_PREVIEW__}-ui-preview-`
+  if (!previewData || dirname(realpathSync(previewData)) !== realpathSync(tmpdir()) || !basename(previewData).startsWith(previewPrefix)) {
+    throw new Error("组件预览必须使用自身隔离的临时用户目录")
   }
   app.setPath("userData", previewData)
   app.setPath("sessionData", previewData)
@@ -27,7 +28,9 @@ function openWindow(): void {
   else if (!exiting) createWindow(supervisor)
 }
 
-app.setName(__WORKBENCH_UI_PREVIEW__ ? "工作台主题预览" : "协作工作台")
+app.setName(__WORKBENCH_UI_PREVIEW__ ? {
+  hc205: "工作台主题预览", hc206: "工作台对话预览", hc207: "工作台项目预览",
+}[__WORKBENCH_UI_PREVIEW__] : "协作工作台")
 app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }] }] : []),

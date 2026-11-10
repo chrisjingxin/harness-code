@@ -1,0 +1,36 @@
+/* 仅用于独立预览的宿主布局；正式工作台不会加载。 */
+.hc207-preview { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--text); background: var(--bg); }
+.hc207-preview-header { flex: 0 0 auto; min-height: 54px; display: flex; align-items: center; gap: 14px; padding: 0 20px 0 88px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+.hc207-preview-header strong { font-family: var(--font-serif); font-size: 14px; white-space: nowrap; }
+.hc207-preview-header > span { color: var(--muted); font-size: 12px; }
+.hc207-window-controls { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.hc207-window-controls label, .hc207-preview-controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.hc207-window-controls select, .hc207-preview-controls select { max-width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--text); background: var(--surface); font: inherit; }
+.hc207-preview-controls { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.hc207-preview-controls input { accent-color: var(--accent); }
+.hc207-preview-git-controls { padding-block: 6px; }
+.hc207-preview-git-controls select { max-width: 220px; }
+.hc207-preview-git-log { flex: 1 1 220px; min-width: 0; max-height: 2.8em; overflow: auto; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.hc207-window-error { margin: 4px 16px; color: var(--danger-text); font-size: 12px; }
+.hc207-preview-scope { flex: 1; min-height: 0; display: flex; }
+.hc207-preview-scope[hidden] { display: none; }
+.hc207-preview-workspace { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.hc207-preview-workspace .project-context-dock { max-width: 60%; }
+.hc207-preview-center { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.hc207-preview-tabs { flex: 0 0 auto; min-width: 0; min-height: 44px; display: flex; align-items: stretch; gap: 18px; padding: 0 20px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.hc207-chat-tab { flex: 0 0 auto; display: flex; border-bottom: 2px solid transparent; }
+.hc207-chat-tab[data-selected="true"] { border-bottom-color: var(--accent); }
+.hc207-chat-tab button { padding: 0 2px; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.hc207-chat-tab[data-selected="true"] button { color: var(--accent); }
+.hc207-chat-placeholder { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; overflow: auto; text-align: center; }
+.hc207-chat-placeholder[hidden] { display: none; }
+.hc207-chat-placeholder h1 { margin: 0; font-family: var(--font-serif); font-size: 22px; }
+.hc207-chat-placeholder p { max-width: 440px; margin: 0; color: var(--muted); font-size: 13px; }
+.hc207-chat-placeholder label { width: min(420px, 100%); display: flex; flex-direction: column; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 12px; text-align: left; }
+.hc207-chat-placeholder textarea { min-height: 72px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--text); background: var(--field-bg); font: inherit; }
+@media (max-width: 800px) {
+  .hc207-preview-header > span { display: none; }
+  .hc207-preview-controls { gap: 6px 10px; }
+  .hc207-preview-tabs { padding-inline: 12px; }
+  .hc207-chat-placeholder { padding: 16px; }
+}

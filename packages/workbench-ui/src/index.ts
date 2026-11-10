@@ -13,3 +13,23 @@ export type { RenderingActions, MarkdownProps, CodeBlockProps } from "./renderin
 export type { SyntaxScope, SyntaxSpan } from "./rendering/syntax/protocol.js"
 export type { HighlightResult } from "./rendering/syntax/use-syntax-highlight.js"
 export type { LanguageId } from "./rendering/syntax/language-catalog.js"
+export { FileTypeIcon, fileIconFor } from "./common/file-type-icon.js"
+export type { FileIconType, FileIconSpec } from "./common/file-type-icon.js"
+export { parseFileDiff, alignFileDiffHunk } from "./rendering/file-diff.js"
+export type { FileDiffLineKind, FileDiffLine, FileDiffHunk, ParsedFileDiff, FileDiffSplitRow } from "./rendering/file-diff.js"
+export { ProjectDock, ProjectFileTab, ProjectFilePanel } from "./project/index.js"
+export type {
+  ProjectFilePanelProps, ProjectFileTabProps, ProjectScope, ProjectAvailability, ProjectActionAvailability,
+  ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileView, ProjectChangedFile, ProjectChangesView,
+  ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps,
+} from "./project/index.js"
+export { ConversationView } from "./conversation/index.js"
+export type {
+  ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft,
+  ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,
+  ConversationInteractionAnswer, ConversationInteractionView,
+  ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
+  ConversationReferenceView, ConversationScope, ConversationSendResult, ConversationTimelineActivity,
+  ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,
+  ConversationViewProps,
+} from "./conversation/index.js"

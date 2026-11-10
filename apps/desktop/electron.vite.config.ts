@@ -3,19 +3,23 @@ import { defineConfig } from "electron-vite"
 import react from "@vitejs/plugin-react"
 import { resolve } from "node:path"
 
-/** 预览只在独立构建时选择夹具入口；正式构建不包含该入口或运行时开关。 */
-export function desktopConfig(preview: boolean) {
-  const previewRoot = resolve("src/renderer/hc205-preview")
-  const previewOutput = resolve("../../tmp/hc205-ui-preview")
+type PreviewTarget = "hc205" | "hc206" | "hc207"
+
+/** 预览身份只由各自的固定构建配置选择；正式构建没有运行时入口开关。 */
+export function desktopConfig(preview: PreviewTarget | null = null) {
+  const profile = preview ? {
+    root: resolve(`src/renderer/${preview}-preview`),
+    output: resolve(`../../tmp/${preview}-ui-preview`),
+  } : null
   return defineConfig({
     // 将公开 schema 源编入 main，避免外置 JSON 丢失 Node 所需的导入属性。
     main: {
       define: { __WORKBENCH_UI_PREVIEW__: JSON.stringify(preview) },
-      build: { outDir: preview ? resolve(previewOutput, "main") : "dist/main", externalizeDeps: { exclude: ["@workbench/contracts"] } },
+      build: { outDir: profile ? resolve(profile.output, "main") : "dist/main", externalizeDeps: { exclude: ["@workbench/contracts"] } },
     },
-    preload: { build: { outDir: preview ? resolve(previewOutput, "preload") : "dist/preload", rollupOptions: { output: { format: "cjs", entryFileNames: "index.cjs" } } } },
+    preload: { build: { outDir: profile ? resolve(profile.output, "preload") : "dist/preload", rollupOptions: { output: { format: "cjs", entryFileNames: "index.cjs" } } } },
     renderer: {
-      ...(preview ? { root: previewRoot } : {}),
+      ...(profile ? { root: profile.root } : {}),
       plugins: [react(), {
         name: "workbench-content-policy",
         transformIndexHtml(html, context) {
@@ -28,11 +32,11 @@ export function desktopConfig(preview: boolean) {
       resolve: { dedupe: ["react", "react-dom"] },
       server: { host: "127.0.0.1" },
       build: {
-        outDir: preview ? resolve(previewOutput, "renderer") : "dist/renderer",
-        ...(preview ? { rollupOptions: { input: resolve(previewRoot, "index.html") } } : {}),
+        outDir: profile ? resolve(profile.output, "renderer") : "dist/renderer",
+        ...(profile ? { rollupOptions: { input: resolve(profile.root, "index.html") } } : {}),
       },
     },
   })
 }
 
-export default desktopConfig(false)
+export default desktopConfig()

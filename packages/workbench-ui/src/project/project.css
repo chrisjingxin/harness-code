@@ -1,0 +1,127 @@
+/* 文件/变更区域：按旧 Web 最终生效样式拆分；颜色来自公共主题。 */
+.project-context-dock { position: relative; flex: 0 0 auto; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface); overflow: hidden; }
+.project-dock-resize { position: absolute; inset: 0 auto 0 0; z-index: 1; width: 4px; cursor: col-resize; }
+.project-dock-resize:hover, .project-dock-resize.is-dragging { background: var(--accent-border); }
+.project-dock-header { flex: 0 0 auto; display: flex; align-items: stretch; min-height: 54px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.project-dock-tabs { min-width: 0; flex: 1 1 auto; display: flex; align-items: stretch; gap: 17px; overflow-x: auto; }
+.project-dock-tab { min-height: 54px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.project-dock-tab:hover { color: var(--text-soft); }
+.project-dock-tab.is-selected { border-bottom-color: var(--accent); color: var(--accent); }
+.project-dock-close { align-self: center; flex: 0 0 auto; margin-left: 8px; }
+.project-git-count { min-width: 17px; height: 17px; display: inline-grid; place-items: center; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
+.project-availability { flex: 0 0 auto; margin: 0; padding: 8px 14px; color: var(--warning-text); font-size: 12px; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.project-dock-body { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; overflow: auto; }
+.project-dock-body[hidden], .project-dock-file-panel[hidden], .project-workbench-file-panel[hidden] { display: none; }
+.project-dock-code-body { overflow: hidden; }
+.project-code-layout { min-height: 0; flex: 1 1 auto; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.project-code-layout.has-file-preview { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
+.project-file-explorer { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 12px 12px; }
+.project-file-explorer-header { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 6px; }
+.project-file-explorer-title { min-width: 0; display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; font-weight: 500; }
+.project-file-explorer-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-file-explorer-title > svg { flex: 0 0 auto; }
+.project-file-tree { min-height: 0; flex: 1; overflow: auto; padding: 0; outline: none; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.project-file-tree:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.project-file-row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 6px 2px 0; border-radius: 5px; color: var(--text-soft); font-size: 11px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.project-file-row:hover:not(.is-selected) { background: var(--surface-2); }
+.project-file-row.is-selected { background: var(--accent-soft); color: var(--accent-hover); }
+.project-file-row.is-focused { outline: 1px solid var(--accent-border); outline-offset: -1px; }
+.project-file-row[aria-disabled="true"] { cursor: default; }
+.project-file-row-arrow { width: 14px; flex: 0 0 14px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.project-file-row-icon { flex: 0 0 14px; color: var(--muted); }
+.project-file-row .wb-file-type-icon { flex: 0 0 14px; }
+.project-file-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.project-file-row-loading, .project-tree-status, .project-tree-notice { color: var(--muted); }
+.project-tree-status, .project-tree-notice, .project-tree-limited { margin: 6px 4px; font-size: 12px; overflow-wrap: anywhere; }
+.project-tree-error { color: var(--danger-text); }
+.project-tree-limited { color: var(--warning-text); }
+.project-panel-empty, .project-file-empty { margin: 12px 14px; color: var(--muted); font-size: 12px; }
+.project-code-panel { min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--line); }
+.project-file-tabs { flex: 0 0 auto; min-width: 0; display: flex; overflow-x: auto; padding: 0 10px; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.project-file-tab { min-height: 34px; max-width: 220px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 2px solid transparent; color: var(--muted); }
+.project-file-tab.is-active { border-bottom-color: var(--accent); color: var(--accent); }
+.project-file-tab-select { min-width: 0; align-self: stretch; display: flex; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+.project-file-tab-name, .project-workbench-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-file-tab-close { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; display: inline-grid; place-items: center; border: 0; border-radius: 9999px; background: transparent; color: inherit; cursor: pointer; }
+.project-file-tab-close svg { display: block; width: 12px; height: 12px; }
+.project-file-tab-close:hover { background: var(--accent-soft-2); }
+.project-dock-file-panel, .project-workbench-file-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.project-file-preview-header { flex: 0 0 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.project-file-preview-path { flex: 1 1 100%; min-width: 0; display: grid; gap: 2px; }
+.project-file-preview-path-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); font-family: var(--font-mono); font-size: 11px; }
+.project-file-preview-error { color: var(--danger-text); font-size: 12px; overflow-wrap: anywhere; }
+.project-file-preview-actions { min-width: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.project-file-preview-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.project-file-preview-warning { color: var(--warning-text); font-size: 12px; overflow-wrap: anywhere; }
+.project-file-preview-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.project-file-preview-tools .wb-icon-button { width: 28px; height: 28px; min-width: 28px; }
+.project-file-code-view { flex: 1; min-height: 0; display: flex; overflow: auto; background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.project-file-code-meta, .project-file-code-error { display: block; padding: 14px; }
+.project-file-code-status { margin: 14px; color: var(--muted); font-size: 13px; }
+.project-file-code-meta .project-file-code-status, .project-file-code-error .project-file-code-status { margin: 0; }
+.project-file-code-error .project-file-code-status { color: var(--danger-text); }
+.project-line-numbers { flex: 0 0 auto; padding: 12px 9px; border-right: 1px solid var(--line); color: var(--subtle); background: var(--surface); font: 11px/1.7 var(--font-mono); text-align: right; user-select: none; white-space: pre; }
+.project-file-code-pre { margin: 0; padding: 12px 14px; color: var(--text); font: 11px/1.7 var(--font-mono); white-space: pre; }
+.project-file-code-pre code { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; word-break: normal; }
+.project-workbench-tab-item { flex: 0 0 auto; min-height: 42px; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; color: var(--muted); }
+.project-workbench-tab-item[data-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
+.project-workbench-tab { min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 6px; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.project-workbench-tab svg { flex: 0 0 auto; }
+.project-workbench-tab-name { max-width: 180px; }
+.project-workbench-file-panel .project-file-preview-header { padding: 12px 20px; }
+.project-workbench-file-panel .project-file-preview-path { flex: 1 1 160px; }
+.project-workbench-file-panel .project-file-preview-actions { width: auto; }
+
+/* 变更面板沿用旧 Web 的分区和颜色；列表、Diff 与结果各自可滚动。 */
+.project-git-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+.project-git-review { flex: 1; min-height: min(100px, 25%); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.project-git-info { display: flex; align-items: center; gap: 6px; padding: 10px 14px 6px; color: var(--text-soft); font-size: 11px; }
+.project-git-info > svg { color: var(--accent); }
+.project-git-info .wb-icon-button { margin-left: auto; }
+.project-git-select-all { display: flex; align-items: center; gap: 8px; padding: 10px 14px 6px; }
+.project-git-selection-count { margin-left: auto; color: var(--muted); font-size: 11px; }
+.project-git-panel input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+.project-git-files { max-height: min(250px, 30dvh); overflow: auto; padding: 0 7px 10px; scrollbar-width: thin; }
+.project-git-file { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 8px; border-radius: 6px; }
+.project-git-file:hover, .project-git-file[data-active="true"] { background: var(--accent-soft); }
+.project-git-file button { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; border: 0; padding: 7px 4px 7px 0; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.project-git-file button:disabled { opacity: .65; cursor: not-allowed; }
+.project-git-file button > svg { flex-shrink: 0; }
+.project-git-file-identity { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.project-git-file-name, .project-git-file-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-git-file-location { color: var(--muted); font-size: 10px; }
+.project-git-file-status { margin-left: auto; color: var(--muted); font-size: 11px; }
+.project-git-diff { max-height: min(340px, 36dvh); min-height: 100px; overflow: auto; border-top: 1px solid var(--line); scrollbar-width: thin; }
+.project-git-diff-title { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--field-bg); color: var(--text-soft); font-size: 11px; }
+.project-git-diff-title > svg { flex-shrink: 0; }
+.project-git-diff-title > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.project-git-diff-comparison { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.project-git-diff-path { padding: 10px 14px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.project-git-diff pre { overflow: auto; margin: 0; padding: 0 0 20px; font: 11px/1.7 var(--font-mono); }
+.project-git-diff-fallback { padding-inline: 14px !important; white-space: pre-wrap; overflow-wrap: anywhere; }
+.project-git-diff-lines { padding-bottom: 20px; color: var(--text-soft); font: 11px/1.9 var(--font-mono); }
+.project-git-line-hunk { padding: 3px 14px; background: var(--accent-soft); color: var(--accent); overflow-wrap: anywhere; }
+.project-git-diff-line { display: grid; grid-template-columns: 34px 16px minmax(0, 1fr); padding: 1px 12px 1px 0; }
+.project-git-line-add { background: var(--diff-add-bg); color: var(--success-text); }
+.project-git-line-remove { background: var(--diff-remove-bg); color: var(--danger-text); }
+.project-git-line-no-newline { color: var(--warning-text); font-style: italic; }
+.project-git-line-number { padding-right: 7px; text-align: right; color: var(--muted); user-select: none; }
+.project-git-line-sign { user-select: none; }
+.project-git-line-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.project-git-diff-raw { padding: 0 14px 12px; color: var(--muted); font-size: 11px; }
+.project-git-diff-raw summary { cursor: pointer; }
+.project-git-commit { flex: 0 1 auto; min-height: 0; max-height: 65%; overflow-y: auto; padding: 14px; margin-top: auto; border-top: 1px solid var(--line); background: var(--surface); }
+.project-git-commit > label { display: block; margin-bottom: 8px; font-weight: 500; }
+.project-git-commit textarea { box-sizing: border-box; width: 100%; min-height: 76px; max-height: max(76px, 25dvh); resize: vertical; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; background: var(--field-bg); color: var(--text); font: inherit; }
+.project-git-empty, .project-git-hint, .project-git-notice, .project-git-error { margin: 8px 14px; overflow-wrap: anywhere; font-size: 11px; }
+.project-git-empty, .project-git-hint, .project-git-notice { color: var(--muted); }
+.project-git-error { color: var(--danger-text); }
+.project-git-warning { color: var(--warning-text); }
+.project-git-commit .project-git-hint, .project-git-diff .project-git-hint { margin-inline: 0; }
+.project-git-diff .project-git-hint { padding-inline: 14px; }
+.project-git-target { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 8px 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.project-git-commit-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-top: 12px; }
+.project-git-commit-actions .wb-button { min-width: 0; min-height: 34px; padding-inline: 8px; font-size: 12px; }
+.project-git-result { flex: 0 1 auto; min-height: 0; max-height: min(160px, 25%); overflow: auto; padding: 0 14px 14px; color: var(--success-text); font-size: 12px; }
+.project-git-result p { margin: 8px 0; overflow-wrap: anywhere; }
+.project-git-result code { overflow-wrap: anywhere; }
