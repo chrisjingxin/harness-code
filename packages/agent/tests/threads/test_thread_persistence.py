@@ -23,14 +23,19 @@ from langchain_core.runnables import Runnable
 from langgraph.checkpoint.base import empty_checkpoint
 
 import harness_agent.threads.thread_persistence as thread_persistence_module
-from harness_agent.threads.context_projection import ContextProjectionError, ContextProjector
+from harness_agent.threads.context_projection import (
+    CompressionCheckpointDraft,
+    ContextProjectionError,
+    ContextProjector,
+)
 from harness_agent.runtime.execution_binding import (
     RunExecutionBinding,
     SafeModelProfile,
     SelectionOrigin,
     ThreadExecutionSelection,
 )
-from harness_agent.threads.prompting import canonical_json
+from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json
+from harness_agent.tracing import TraceRecorder, use_trace
 from harness_agent.threads.thread_persistence import (
     AcceptRun,
     CommitContextRewrite,
@@ -38,6 +43,7 @@ from harness_agent.threads.thread_persistence import (
     ContextState,
     ContextSummaryDraft,
     TranscriptAppend,
+    TranscriptRecord,
     ThreadPersistence,
     ThreadPersistenceError,
 )
@@ -3694,4 +3700,149 @@ async def test_persistence_log_failure_does_not_roll_back_transcript(tmp_path: P
     )
     records = await store.load_transcript("thread")
     assert any(record.kind == "assistant" for record in records)
+    await store.close()
+
+
+def _trace_events(log_dir: Path) -> list[dict[str, Any]]:
+    """读取临时 session 文件中的统一 Trace 事件。"""
+    path = next(log_dir.glob("*.jsonl"))
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _persist_ends(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """只保留真实持久化 Span 的结束事件。"""
+    return [
+        event
+        for event in events
+        if event["event"] == "span.end" and event["name"] == "db.persist"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_thread_persist_records_each_transaction_including_replays(
+    tmp_path: Path,
+) -> None:
+    """每次真实事务记录一次，业务幂等重放不隐藏事务的成本。"""
+    project = tmp_path / "project-persist-trace"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=tmp_path / "home-persist-trace")
+    binding = make_test_binding("thread-persist-trace", "run-persist-trace")
+    command = CommitContextRewrite(
+        thread_id="thread-persist-trace",
+        checkpoint=CompressionCheckpointDraft(
+            checkpoint_id="checkpoint-persist-trace",
+            mode="full",
+            rewrite_version=HISTORY_REWRITE_VERSION,
+            projected_messages=(HumanMessage(content="summary"),),
+        ),
+    )
+    recorder = TraceRecorder(
+        session_id="thread-persist-trace",
+        run_id="run-persist-trace",
+        log_dir=tmp_path / "trace-persist",
+    )
+    with use_trace(recorder.start_trace()):
+        assert (await store.accept_run(AcceptRun(message="secret-user", binding=binding))).created
+        assert not (await store.accept_run(AcceptRun(message="secret-user", binding=binding))).created
+        await store.append_transcript(
+            TranscriptAppend(
+                thread_id="thread-persist-trace",
+                record_id="assistant-once",
+                kind="assistant",
+                content="secret-assistant",
+            )
+        )
+        await store.append_transcript_batch(
+            (
+                TranscriptAppend(
+                    thread_id="thread-persist-trace",
+                    record_id="assistant-batch",
+                    kind="assistant",
+                    content="secret-batch-a",
+                ),
+                TranscriptAppend(
+                    thread_id="thread-persist-trace",
+                    record_id="assistant-batch-two",
+                    kind="assistant",
+                    content="secret-batch-b",
+                ),
+            )
+        )
+        await store.complete_run("thread-persist-trace")
+        await store.complete_run("thread-persist-trace")
+        await store.commit_context(command)
+        await store.commit_context(command)
+    recorder.end_trace()
+
+    events = _trace_events(tmp_path / "trace-persist")
+    ends = _persist_ends(events)
+    assert [event["attributes"]["operation"] for event in ends] == [
+        "accept_run",
+        "accept_run",
+        "transcript_batch",
+        "transcript_batch",
+        "run_complete",
+        "run_complete",
+        "context_commit",
+        "context_commit",
+    ]
+    assert ends[0]["attributes"]["outcome"] == "committed"
+    assert ends[1]["attributes"]["outcome"] == "duplicate"
+    assert ends[2]["attributes"]["record_ids"] == ["assistant-once"]
+    assert ends[3]["attributes"]["seq_from"] == 3
+    assert ends[3]["attributes"]["seq_to"] == 4
+    assert ends[6]["attributes"]["seq_to"] == 4
+    assert all(event["kind"] == "DB" for event in ends)
+    assert all(event["attributes"]["lock_wait_ms"] >= 0 for event in ends)
+    assert "secret-user" not in repr(events)
+    assert "secret-assistant" not in repr(events)
+    assert "secret-batch" not in repr(events)
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_thread_persist_failure_has_no_committed_sequence_or_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """批量事务失败保留原异常与 FAILED Span，不伪造 seq、committed 或正文。"""
+    project = tmp_path / "project-persist-failure"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=tmp_path / "home-persist-failure")
+    await accept_thread(store, "thread-persist-failure", "setup")
+    original = store._append_transcript_in_transaction
+
+    async def fail_before_commit(command: TranscriptAppend) -> TranscriptRecord:
+        await original(command)
+        raise aiosqlite.OperationalError("injected before commit")
+
+    monkeypatch.setattr(store, "_append_transcript_in_transaction", fail_before_commit)
+    recorder = TraceRecorder(
+        session_id="thread-persist-failure",
+        run_id="run-persist-failure",
+        log_dir=tmp_path / "trace-persist-failure",
+    )
+    with use_trace(recorder.start_trace()):
+        with pytest.raises(ThreadPersistenceError, match="TRANSCRIPT_WRITE_FAILED"):
+            await store.append_transcript_batch(
+                (
+                    TranscriptAppend(
+                        thread_id="thread-persist-failure",
+                        record_id="assistant-failed",
+                        kind="assistant",
+                        content="CANARY_TRANSCRIPT_ROLLBACK",
+                    ),
+                )
+            )
+    recorder.end_trace()
+
+    events = _trace_events(tmp_path / "trace-persist-failure")
+    end = next(event for event in _persist_ends(events) if event["attributes"]["operation"] == "transcript_batch")
+    assert end["status"] == "FAILED"
+    assert end["attributes"]["outcome"] == "failed"
+    assert end["attributes"]["lock_wait_ms"] >= 0
+    assert "seq_from" not in end["attributes"]
+    assert "seq_to" not in end["attributes"]
+    assert "CANARY_TRANSCRIPT_ROLLBACK" not in repr(events)
+    assert len(await store.load_transcript("thread-persist-failure")) == 1
     await store.close()

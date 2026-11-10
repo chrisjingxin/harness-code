@@ -10,10 +10,11 @@ import { MAX_FRAME_BYTES } from "@za38/protocol"
 import type { CommandView, ConversationView, InteractionView, NavigationView, RuntimeView, WorkItemView } from "../../interactive/selectors"
 import type { InteractiveIntent, IntentOutcome } from "../../interactive/types"
 import type { WorkspaceIntent, WorkspaceOutcome, WorkspacePreviewState, WorkspaceTreeState } from "../../workspace/types"
+import type { TraceLoadRequest, TraceHistoryMessage, TraceLiveMessage } from "./trace"
 import type { PresentationState } from "../state"
 
 /** UI 契约版本：网关与 Browser 共享同一常量，消息形状变更时递增。 */
-export const UI_CONTRACT_VERSION = 7
+export const UI_CONTRACT_VERSION = 11
 
 /** 单帧上限与跨进程协议一致；replace 需承载完整 Timeline，因此不用旧 lifecycle 的 16 KiB。 */
 export const MAX_UI_FRAME_BYTES = MAX_FRAME_BYTES
@@ -62,6 +63,7 @@ export type WebUiPatch = {
  * 与生命周期事件。主题/Dock/Tab 等纯表现状态全部留在 Browser Adapter 本地，不走契约。
  */
 export type WebUiClientMessage =
+  | TraceLoadRequest
   | { type: "interactive.intent"; requestId: string; revision: number; intent: InteractiveIntent }
   | { type: "workspace.intent"; requestId: string; revision: number; intent: WorkspaceIntent }
   | { type: "handoff.ready" }
@@ -70,6 +72,8 @@ export type WebUiClientMessage =
 
 /** 网关（CLI）→ Browser 消息：状态发布、按 domain 的 intent 结果与接管状态。 */
 export type WebUiServerMessage =
+  | TraceHistoryMessage
+  | TraceLiveMessage
   | { type: "handoff.token"; token: string }
   | { type: "state.replace"; revision: number; state: WebUiState }
   | { type: "state.patch"; revision: number; patch: WebUiPatch }

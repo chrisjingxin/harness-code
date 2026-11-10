@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { createTraceRuntime, type TraceRuntime } from "./trace-log/runtime"
+import { createWorkspaceGit } from "./infrastructure/workspace-git"
 /** za38 CLI 启动层：管理 Python sidecar 生命周期并选择 TUI 或无头执行模式。 */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -49,6 +51,7 @@ type RunningAgent = {
   client: AgentClient
   runtime: InteractiveRuntime
   log: DiagnosticLog
+  trace: TraceRuntime
   stop: () => Promise<void>
 }
 
@@ -220,9 +223,11 @@ async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<
     await lifecycle.close()
     throw new Error("Unable to create agent stdio pipes")
   }
+  const trace = createTraceRuntime({ startedAtMs, workspace: command.cwd, onError: () => log.error("logging.writer_failed", { failure_stage: "trace.capture", error_type: "TraceCaptureError", summary_code: "trace_capture_stopped", retryable: false }) })
   const stderrDrain = new SidecarStderrDrain()
   child.stderr.on("data", chunk => {
     stderrDrain.push(chunk)
+    trace.push(chunk)
   })
   const client = new AgentClient(new StdioRpcTransport(child.stdin, child.stdout), log)
   child.on("exit", code => {
@@ -283,6 +288,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<
       client,
       runtime,
       log,
+      trace,
       stop: async () => {
         if (stopped) return
         stopped = true
@@ -305,6 +311,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<
           ])
         }
         if (child.exitCode === null && child.signalCode === null) child.kill()
+        await trace.close()
         await lifecycle.close()
       },
     }
@@ -316,6 +323,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" }>): Promise<
     })
     await client.close().catch(() => undefined)
     if (child.exitCode === null && child.signalCode === null) child.kill()
+    await trace.close()
     await lifecycle.close()
     throw error
   }
@@ -541,6 +549,7 @@ export async function execute(
       const gateway = new AgentClientGateway(agent.client)
       controller = createInteractiveController({
         gateway,
+        workspaceGit: createWorkspaceGit(command.cwd),
         baseRuntime: agent.runtime,
       })
       if (!command.nonInteractive) {
@@ -564,6 +573,8 @@ export async function execute(
           diagnostics: agent.log,
         })
         webUiGateway = createWebUiGateway({
+          traceHistory: agent.trace,
+          traceLive: agent.trace,
           coordinator: presentationCoordinator,
           controller,
           workspaceExplorer,

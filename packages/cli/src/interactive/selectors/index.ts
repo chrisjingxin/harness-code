@@ -10,7 +10,7 @@ export function selectFeatureAvailability(snapshot: InteractiveSnapshot): Featur
   const capabilities = new Set<string>(snapshot.runtime.capabilities ?? [])
   const hasRun = snapshot.activeRun !== null
   const hasInteraction = snapshot.interaction !== null
-  const hasPendingOperation = snapshot.activity.kind === "compacting"
+  const hasPendingOperation = snapshot.activity.kind === "compacting" || snapshot.git.busy
   const cancelling = snapshot.activity.kind === "cancelling"
   const isChildTimeline = Boolean(snapshot.childTimelineExecutionId)
 
@@ -39,6 +39,7 @@ export function selectConversationView(snapshot: InteractiveSnapshot): Conversat
     timeline: snapshot.timeline,
     runProgress: snapshot.runProgress,
     lastRun: snapshot.lastRun,
+    runSummaries: snapshot.runSummaries,
     childTimelineExecutionId: snapshot.childTimelineExecutionId,
     goal: snapshot.goal,
     goalPending: snapshot.goalPending,
@@ -86,6 +87,7 @@ export function selectCommandView(snapshot: InteractiveSnapshot): CommandView {
 export function selectRuntimeView(snapshot: InteractiveSnapshot): RuntimeView {
   const availability = selectFeatureAvailability(snapshot)
   return {
+    git: snapshot.git,
     runtime: snapshot.runtime,
     connection: snapshot.connection,
     selection: snapshot.selection,
@@ -108,3 +110,5 @@ export function selectWorkItemView(snapshot: InteractiveSnapshot): WorkItemView 
     modeLocked: snapshot.threadMode != null,
   }
 }
+
+export { gitWriteBlockedReason } from "../features/workspace-git"

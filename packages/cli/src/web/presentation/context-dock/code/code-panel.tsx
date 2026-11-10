@@ -20,7 +20,7 @@ export function CodePanel({
   if (code.activePath === null) {
     return (
       <div className="panel code-panel code-panel-empty">
-        <p className="panel-empty">从左侧文件树打开文件查看预览</p>
+        <p className="panel-empty">从上方文件树打开文件查看预览</p>
       </div>
     )
   }
@@ -30,6 +30,7 @@ export function CodePanel({
     <div className="panel code-panel">
       <FileTabs tabs={code.tabs} activePath={code.activePath} dispatch={dispatch} disabled={disabled} />
       <FilePreviewHeader
+        openInWorkbench
         path={code.activePath}
         preview={preview}
         error={error}

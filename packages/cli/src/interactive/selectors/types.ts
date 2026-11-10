@@ -50,6 +50,7 @@ export type ConversationView = {
   readonly timeline: readonly TimelineItem[]
   readonly runProgress: InteractiveSnapshot["runProgress"]
   readonly lastRun: RunSummary | null
+  readonly runSummaries: Record<string, RunSummary>
   readonly childTimelineExecutionId: string | null
   readonly goal: InteractiveSnapshot["goal"]
   readonly goalPending: InteractiveSnapshot["goalPending"]
@@ -87,6 +88,7 @@ export type CommandView = {
 
 /** 运行时视图：runtime/connection/selection 与运行控制可用性；UI 契约 runtime 分片。 */
 export type RuntimeView = {
+  readonly git: import("../ports/workspace-git").WorkspaceGitView
   readonly runtime: InteractiveRuntime
   readonly connection: InteractiveConnectionState
   readonly selection: InteractiveSnapshot["selection"]

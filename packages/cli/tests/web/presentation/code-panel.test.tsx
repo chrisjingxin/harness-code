@@ -41,7 +41,7 @@ describe("CodePanel", () => {
   test("空状态：无 Tab 时显示引导文案", () => {
     const handle = mountCodePanel({ tabs: [], activePath: null, previews: {}, previewErrors: {} }, [])
     try {
-      expect(handle.container.querySelector(".code-panel-empty")?.textContent).toContain("从左侧文件树打开文件")
+      expect(handle.container.querySelector(".code-panel-empty")?.textContent).toContain("从上方文件树打开文件")
     } finally {
       handle.unmount()
     }

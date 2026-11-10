@@ -115,6 +115,7 @@ function createPort(options: {
     ?? (async () => ({ compacted: true, context: { action: "manual_summary" } }))
   const openThreadImpl: AgentGateway["openThread"] = options.openThreadImpl ?? (async threadId => ({
     thread: threadSummary(threadId, "恢复的请求"),
+    run_summaries: [],
     messages: [{ kind: "user", content: "恢复的请求" }, { kind: "tool", tool_name: "execute", content: "恢复的工具结果" }],
     plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
     goal: null,
@@ -540,6 +541,7 @@ function createPort(options: {
 }
 
 export function makeHarness(options: {
+  workspaceGit?: import("../../src/interactive/ports/workspace-git").WorkspaceGit
   workspace?: string
   initialThreadId?: string | null
   configError?: boolean
@@ -565,6 +567,7 @@ export function makeHarness(options: {
   }
   const controller = createInteractiveController({
     gateway: portState.port,
+    workspaceGit: options.workspaceGit,
     baseRuntime: runtimeOverride,
     ...(options.initialThreadId !== undefined ? { initialThreadId: options.initialThreadId } : {}),
     ...(options.scheduler !== undefined ? { scheduler: options.scheduler } : {}),

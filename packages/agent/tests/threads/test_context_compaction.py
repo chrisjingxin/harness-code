@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from harness_agent.threads.context_projection import ContextProjector
 from harness_agent.threads.context_window import ContextWindowMiddleware
 from harness_agent.runtime.provider_retry import BoundedProviderRetry
 from harness_agent.threads.prompting import estimate_tokens
+from harness_agent.tracing import TraceRecorder, use_trace
 from harness_agent.threads.runtime_state import (
     RuntimeExecutionPolicy,
     RuntimeStateError,
@@ -326,6 +328,86 @@ def _request(thread_id: str, projection: Any, trigger: str, estimated: int | Non
     )
 
 
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取压缩测试的临时 session JSONL。"""
+    return [
+        json.loads(line)
+        for path in root.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_compact_trace_records_real_outcomes_and_separate_commit(
+    tmp_path: Path,
+) -> None:
+    """压缩、跳过和失败保留真实结果，成功压缩与 SQLite 提交分别计时。"""
+    store = await _store(tmp_path)
+    await _tool_thread(store, "trace-compact")
+    projection = await ContextProjector(store).project("trace-compact")
+    await store.accept_run(
+        AcceptRun(
+            message="短历史",
+            binding=make_binding("trace-short", "run-trace-short"),
+        )
+    )
+    short_projection = await ContextProjector(store).project("trace-short")
+    service = ContextCompactor(
+        CountingModel(responses=[]),
+        context_window_tokens=16_384,
+        thread_persistence=store,
+    )
+    recorder = TraceRecorder(
+        session_id="trace-compact",
+        run_id="run-trace-compact",
+        log_dir=tmp_path / "trace",
+    )
+    skipped_request = _request("trace-short", short_projection, "manual")
+    with use_trace(recorder.start_trace()):
+        compressed = await service.compress(
+            _request("trace-compact", projection, "auto", estimated=8_000)
+        )
+        skipped = await service.compress(skipped_request)
+        replayed = await service.compress(skipped_request)
+        failed = await service.compress(_request("", short_projection, "manual"))
+    recorder.end_trace()
+
+    assert (compressed.outcome, skipped.outcome, failed.outcome) == (
+        "compressed",
+        "skipped",
+        "failed",
+    )
+    assert replayed.outcome == "skipped"
+    events = _trace_events(tmp_path / "trace")
+    compact_ends = [
+        event
+        for event in events
+        if event["event"] == "span.end" and event["name"] == "context.compact"
+    ]
+    assert [event["attributes"]["outcome"] for event in compact_ends] == ["committed", "skipped", "failed"]
+    assert all("tokens_before" in event["attributes"] for event in compact_ends)
+    assert all(event["kind"] == "CONTEXT" for event in compact_ends)
+    assert all(event.get("idempotency_key") for event in compact_ends)
+    assert len({event["idempotency_key"] for event in compact_ends}) == 3
+    commit_ends = [
+        event
+        for event in events
+        if event["event"] == "span.end"
+        and event["name"] == "db.persist"
+        and event["attributes"].get("operation") == "context_commit"
+    ]
+    assert len(commit_ends) == 1
+    assert commit_ends[0]["span_id"] != compact_ends[0]["span_id"]
+    assert commit_ends[0]["parent_span_id"] == compact_ends[0]["span_id"]
+    assert commit_ends[0]["duration_ms"] >= 0
+    assert commit_ends[0]["attributes"]["rows"] >= 1
+    assert commit_ends[0]["attributes"]["lock_wait_ms"] >= 0
+    assert commit_ends[0]["attributes"]["thread_id"] == "trace-compact"
+    assert compact_ends[0]["duration_ms"] >= commit_ends[0]["duration_ms"]
+    assert "第一轮" not in json.dumps(events, ensure_ascii=False)
+    await store.close()
+
+
 def _message_with_summary_payload_tokens(
     service: ContextCompactor, target: int
 ) -> HumanMessage:
@@ -407,12 +489,41 @@ async def test_context_compaction_retries_direct_summary_ainvoke(tmp_path: Path)
         provider_retry=BoundedProviderRetry(max_attempts=2),
     )
 
-    result = await service.compress(
-        _request("direct-summary-retry", projection, "manual", estimated=30_000)
+    recorder = TraceRecorder(
+        session_id="direct-summary-retry",
+        run_id="run-direct-summary-retry",
+        log_dir=tmp_path / "trace",
     )
+    with use_trace(recorder.start_trace()):
+        result = await service.compress(
+            _request("direct-summary-retry", projection, "manual", estimated=30_000)
+        )
+        recorder.end_trace()
+    await store.close()
 
     assert result.outcome == "compressed"
-    await store.close()
+    events = _trace_events(tmp_path / "trace")
+    compact = next(
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "context.compact"
+    )
+    summary = next(
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "llm.call"
+    )
+    attempts = [
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "llm.attempt"
+    ]
+    assert compact["attributes"]["summary_ref"]
+    assert summary["parent_span_id"] == compact["span_id"]
+    assert [event["attributes"]["attempt"] for event in attempts] == [1, 2]
+    assert all(event["parent_span_id"] == summary["span_id"] for event in attempts)
+    assert attempts[0]["attributes"]["http_status"] == 503
+    assert attempts[0]["attributes"]["retryable"] is True
+    assert attempts[0]["attributes"]["backoff_ms"] == 1000
+    assert "gateway unavailable" not in json.dumps(events)
+    assert not any(event.get("name") == "step" for event in events)
 
 
 @pytest.mark.asyncio

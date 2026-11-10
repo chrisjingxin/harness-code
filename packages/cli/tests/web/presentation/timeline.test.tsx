@@ -53,6 +53,104 @@ function interactionItem(item: Partial<InteractionCard> & { id: string }): Timel
 }
 
 describe("Timeline", () => {
+  test("子时间线不重复显示整轮主 Run 用量", () => {
+    const interactive = makeInteractive({
+      childTimelineExecutionId: "child",
+      runSummaries: { r: { runId: "r", outcome: "completed", usage: { inputTokens: 400, outputTokens: 75, inputComplete: true, outputComplete: true } } },
+      timeline: [message({ id: "child-answer", role: "assistant", content: "child answer", runId: "r", executionId: "child" })],
+    })
+    const handle = render(<Timeline snapshot={makeSnapshot({ interactive })} dispatch={() => {}} />)
+    try { expect(handle.container.querySelectorAll(".message-usage")).toHaveLength(0) }
+    finally { handle.unmount() }
+  })
+  test("各轮最终回答底部显示自己的用量，未知和部分用量不伪装成零", () => {
+    const interactive = makeInteractive({
+      runSummaries: {
+        r1: { runId: "r1", outcome: "completed", durationMs: 2764, usage: { inputTokens: 12345, outputTokens: 678, inputComplete: true, outputComplete: true } },
+        r2: { runId: "r2", outcome: "cancelled", usage: { inputTokens: null, outputTokens: 20, inputComplete: false, outputComplete: false } },
+      },
+      timeline: [
+        message({ id: "u1", role: "user", content: "first", runId: "r1" }),
+        message({ id: "a1", role: "assistant", content: "one", runId: "r1" }),
+        message({ id: "u2", role: "user", content: "second", runId: "r2" }),
+        message({ id: "a2", role: "assistant", content: "two", runId: "r2" }),
+      ],
+    })
+    const handle = render(<Timeline snapshot={makeSnapshot({ interactive })} dispatch={() => {}} />)
+    try {
+      const values = [...handle.container.querySelectorAll(".message-footer .message-usage")].map(node => node.textContent)
+      expect(values).toEqual(["输入 12,345 · 输出 678 Token", "输入 未知 · 输出 ≥20（统计不完整） Token"])
+      expect(handle.container.querySelector(".timeline-run-process > summary")?.textContent).toContain("2.8s")
+    } finally { handle.unmount() }
+  })
+  test("同一个 Run 切换阶段时总耗时不回退，流式回答没有底部操作行", () => {
+    const build = (phase: "preparing" | "model", elapsedMs: number) => makeSnapshot({ interactive: makeInteractive({
+      activeRun: { threadId: "thread-1", runId: "r" }, runProgress: { phase, elapsedMs },
+      timeline: [message({ id: "a", role: "assistant", content: "streaming", runId: "r", streaming: true })],
+    }) })
+    const handle = render(<Timeline snapshot={build("preparing", 10000)} dispatch={() => {}} />)
+    try {
+      act(() => handle.root.render(<Timeline snapshot={build("model", 1000)} dispatch={() => {}} />))
+      expect(handle.container.querySelector(".timeline-run-time")?.textContent).toContain("10")
+      expect(handle.container.querySelector(".timeline-run-phase") === null).toBe(true)
+      expect(handle.container.querySelectorAll(".message-assistant .message-footer")).toHaveLength(0)
+      expect(handle.container.querySelectorAll(".message-author")).toHaveLength(1)
+    } finally { handle.unmount() }
+  })
+  test("一轮完成后仅最终回答显示操作行，过程默认折叠且可展开", async () => {
+    const interactive = makeInteractive({ lastRun: { runId: "r", outcome: "completed", durationMs: 85000 }, timeline: [
+      message({ id: "u", role: "user", content: "question", runId: "r" }),
+      message({ id: "a", role: "assistant", content: "intermediate", runId: "r" }),
+      toolItem({ id: "t", name: "read_file", runId: "r" }),
+      message({ id: "b", role: "assistant", content: "final answer", runId: "r" }),
+    ] })
+    const handle = render(<Timeline snapshot={makeSnapshot({ interactive })} dispatch={() => {}} />)
+    try {
+      const disclosure = handle.container.querySelector<HTMLDetailsElement>(".timeline-run-process")
+      expect(disclosure).not.toBeNull()
+      expect(disclosure?.open).toBe(false)
+      expect(disclosure?.textContent).toContain("intermediate")
+      expect(handle.container.querySelector(".run-status-live")?.textContent).not.toContain("已完成")
+      expect(handle.container.querySelectorAll(".timeline-run-final .message-footer")).toHaveLength(1)
+    } finally { handle.unmount() }
+  })
+  test("用户和 Agent 消息把时间放在正文下方，并可以复制正文", async () => {
+    const createdAtMs = Date.UTC(2026, 9, 28, 1, 13)
+    const writes: string[] = []
+    const clipboard = navigator.clipboard
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (text: string) => { writes.push(text); return Promise.resolve() } },
+    })
+    const interactive = makeInteractive({
+      timeline: [
+        message({ id: "u1", role: "user", content: "你好", createdAtMs }),
+        message({ id: "a1", role: "assistant", content: "我很好", createdAtMs }),
+      ],
+    })
+    const handle = render(<Timeline snapshot={makeSnapshot({ interactive })} dispatch={() => {}} />)
+    try {
+      for (const selector of [".message-user", ".message-assistant"]) {
+        const card = handle.container.querySelector(selector)
+        expect(card?.querySelector(".message-head .message-time")).toBeNull()
+        if (selector === ".message-user") {
+          expect(card?.querySelector(".message-head")).toBeNull()
+          expect(card?.querySelector(".message-author")).toBeNull()
+          expect(card?.querySelector(".avatar-user")).toBeNull()
+        }
+        const footer = card?.querySelector(".message-footer")
+        expect(footer?.querySelector("time.message-time")).not.toBeNull()
+        const copy = footer?.querySelector<HTMLButtonElement>(".message-copy")
+        expect(copy?.getAttribute("aria-label")).toBe("复制消息")
+        await act(async () => { copy?.click() })
+      }
+      expect(writes).toEqual(["你好", "我很好"])
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard })
+      handle.unmount()
+    }
+  })
+
   test("渲染 user/assistant/tool/interaction 四种时间线条目", () => {
     const interactive = makeInteractive({
       timeline: [
@@ -872,7 +970,7 @@ describe("Timeline", () => {
     }
   })
 
-  test("运行期间显示事实阶段、活动时长和取消提示", () => {
+  test("运行期间只显示连续总时长", () => {
     const interactive = makeInteractive({
       activeRun: { threadId: "thread-1", runId: "run-1" },
       activity: { kind: "running" },
@@ -886,8 +984,11 @@ describe("Timeline", () => {
       expect(progress?.getAttribute("data-phase")).toBe("model")
       expect(progress?.getAttribute("role")).toBe("status")
       expect(progress?.getAttribute("aria-live")).toBe("polite")
-      expect(progress?.textContent).toContain("1.2s")
-      expect(progress?.textContent).toContain("点停止取消")
+      expect(progress?.textContent).toContain("1s")
+      expect(progress?.textContent).not.toContain("1.2s")
+      expect(progress?.textContent).toContain("已处理")
+      expect(handle.container.querySelector(".run-status-live .message-author")?.textContent).toBe("Agent")
+      expect(handle.container.querySelector(".run-status-live .run-progress-spinner") === null).toBe(true)
     } finally {
       handle.unmount()
     }
@@ -1258,4 +1359,22 @@ test("task 派出卡展开后展示进入子时间线按钮并可点击", () => 
   } finally {
     handle.unmount()
   }
+})
+
+
+test("轨迹隐藏聊天时流式消息不覆盖原滚动位置", () => {
+  let update: ((mode: "chat" | "trace") => void) | undefined
+  function Host() {
+    const [snapshot, setSnapshot] = useState(makeSnapshot())
+    update = mode => setSnapshot(previous => makeSnapshot({ viewMode: mode, interactive: makeInteractive({ timeline: [...previous.interactive.timeline, message({ id: String(previous.interactive.timeline.length), role: "assistant", content: "新增" })] }) }))
+    return <div className="timeline-scroll"><Timeline snapshot={snapshot} dispatch={() => {}} /></div>
+  }
+  const handle = render(<Host />)
+  try {
+    const scroller = handle.container.querySelector<HTMLElement>(".timeline-scroll")!
+    Object.defineProperty(scroller, "scrollHeight", { value: 0, configurable: true })
+    scroller.scrollTop = 123
+    act(() => update?.("trace"))
+    expect(scroller.scrollTop).toBe(123)
+  } finally { handle.unmount() }
 })

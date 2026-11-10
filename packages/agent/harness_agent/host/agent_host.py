@@ -23,6 +23,7 @@ from jsonschema.exceptions import ValidationError
 
 from harness_agent import __version__
 from harness_agent.diagnostic_log.runtime import DiagnosticLog, ensure_log, safe_context_value
+from harness_agent.tracing import func_monitor, trace_monitor
 from harness_agent.host.attachments import AttachmentManager
 from harness_agent.host.control_lease import (
     ActivityFacts,
@@ -1497,6 +1498,32 @@ class AgentHost:
             return None
         return await self._ensure_thread_persistence()
 
+    def _trace_log_dir(self) -> Path:
+        """链路日志按工作区指纹分目录，写到用户目录而不是仓库 log。"""
+        from harness_agent.threads.thread_records import workspace_fingerprint
+
+        home = (getattr(self, "_config_home", None) or Path.home()).expanduser()
+        return home / ".harness" / "trace" / workspace_fingerprint(self._workspace)
+
+    @trace_monitor(
+        session_id=lambda _self, command, _persistence: command.thread_id,
+        run_id=lambda _self, command, _persistence: command.run_id,
+        log_dir=lambda self, _command, _persistence: self._trace_log_dir(),
+        capture=lambda self, _command, _persistence: (
+            self._config.trace.capture if getattr(self, "_config", None) is not None else "full"
+        ),
+        retention_days=lambda self, _command, _persistence: (
+            self._config.trace.retention_days
+            if getattr(self, "_config", None) is not None
+            else 14
+        ),
+        manual=True,
+    )
+    @func_monitor(
+        name="run.prepare",
+        idempotency_key=lambda call: f"run.prepare:{call.args[1].run_id}",
+        manual=True,
+    )
     async def _prepare_run(
         self,
         command: StartRun,
@@ -1783,8 +1810,21 @@ class AgentHost:
             if isinstance(result, Exception) and connection is not self._owner_connection:
                 asyncio.create_task(self.close_connection(connection))
 
+    @trace_monitor(
+        session_id=lambda _self, params, _id: str(params["thread_id"]),
+        run_id=lambda _self, _params, request_id: f"context-compact:{request_id}",
+        log_dir=lambda self, _params, _id: self._trace_log_dir(),
+        capture=lambda self, _params, _id: (
+            self._config.trace.capture if getattr(self, "_config", None) is not None else "full"
+        ),
+        retention_days=lambda self, _params, _id: (
+            self._config.trace.retention_days
+            if getattr(self, "_config", None) is not None
+            else 14
+        ),
+    )
     async def _handle_context_compact(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """在空闲 thread 上按用户命令强制生成结构化摘要，不把能力暴露给模型。"""
+        """在空闲 thread 上按用户命令强制生成结构化摘要，并记录独立 Trace。"""
         self._require_context_capability()
         parsed = ContextCompactParams.model_validate(params)
         try:
@@ -2354,6 +2394,7 @@ class AgentHost:
         return {
             "thread": _thread_summary_payload(opened.summary),
             "messages": [_thread_message_payload(message) for message in opened.messages],
+            "run_summaries": await persistence.load_run_summaries(parsed.thread_id),
             "plan": {
                 "has_plan": has_plan,
                 "plan_markdown": plan_markdown,
@@ -5843,6 +5884,8 @@ def _thread_summary_payload(summary: Any) -> dict[str, object]:
 def _thread_message_payload(message: Any) -> dict[str, object]:
     """把 Transcript 消息限制为 TUI 可回放的 project/thread/message 数据。"""
     payload: dict[str, object] = {"kind": message.kind, "content": message.content}
+    payload["run_id"] = message.run_id
+    payload["record_id"] = message.record_id
     if message.tool_name is not None:
         payload["tool_name"] = message.tool_name
     if message.created_at_ms is not None:

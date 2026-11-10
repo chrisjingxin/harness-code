@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -25,6 +26,7 @@ from harness_agent.policy.bash_parser import extract_segments
 from harness_agent.policy.concurrency import is_shell_command_mutating
 from harness_agent.tools.file_tool_catalog import FILESYSTEM_WRITE_TOOL_NAMES
 from harness_agent.tools.plan_file import PLAN_VIRTUAL_PATH, is_plan_virtual_path
+from harness_agent.tracing import FunctionCall, current_trace, func_monitor
 
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -96,6 +98,72 @@ PlanShellDecision = Literal["allow", "ask", "deny"]
 """Plan 约束下 Shell 命令的三态处置结果。"""
 
 
+def emit_policy_decision(
+    *,
+    tool: str,
+    tool_args: Mapping[str, object],
+    approval_mode: str,
+    decision: str,
+    layer: str,
+    call_id: str | None = None,
+    rule_source: str | None = None,
+    rule_pattern: str | None = None,
+    classifier: str | None = None,
+    floors: list[str] | None = None,
+) -> None:
+    """把一次审批决定写成 policy.evaluate。没有活跃 trace 时不产生事件。"""
+    context = current_trace()
+    if context is None:
+        return
+    recorder = context.recorder
+    attributes: dict[str, object] = {
+        "tool": tool,
+        "approval_mode": approval_mode,
+        "decision": decision,
+        "layer": layer,
+    }
+    if call_id:
+        attributes["call_id"] = call_id
+    payload_id = recorder.payload("tool_args", dict(tool_args))
+    if payload_id:
+        attributes["args_ref"] = payload_id
+    if rule_source:
+        attributes["rule_source"] = rule_source
+    if rule_pattern:
+        attributes["rule_pattern"] = rule_pattern
+    if classifier:
+        attributes["classifier"] = classifier
+    if floors:
+        attributes["floors"] = floors
+    identity = repr((tool, sorted(tool_args.items()), approval_mode, call_id or ""))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    span = recorder.start_span(
+        "policy.evaluate",
+        kind="POLICY",
+        attributes=attributes,
+        idempotency_key=f"policy:{digest}",
+    )
+    recorder.end_span(span)
+
+
+def _decision_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """仅投影真实决策；异常或敏感调用参数不进入 Trace。"""
+    return {} if call.error is not None else {"decision": call.result}
+
+
+def _decision_idempotency_key(call: FunctionCall) -> str:
+    """按决策输入识别重放；JSONL 只保留不可逆摘要，不写命令或路径。"""
+    identity = repr((call.function.__name__, call.args, sorted(call.kwargs.items())))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"policy:{digest}"
+
+
+@func_monitor(
+    name="policy.classifier",
+    kind="POLICY",
+    attributes=_decision_attributes,
+    idempotency_key=_decision_idempotency_key,
+)
 def classify_plan_shell_command(command: object) -> PlanShellDecision:
     """把 Plan Shell 命令分为只读、明确写入和未知三类。
 
@@ -761,6 +829,7 @@ def evaluate_permission(
     rules: list[PermissionRule] | None = None,
     *,
     auto_filter: Callable[[str, dict[str, Any]], PermissionDecision] | None = None,
+    call_id: str | None = None,
 ) -> PermissionDecision:
     """多级审批流水线：L1 工具风险声明 → L2 deny 硬拦截 → L3 只读放行 → L3.5 敏感路径 → L4 规则评估 → L5 模式覆盖 → L6 Extension 钩子。
 
@@ -774,6 +843,23 @@ def evaluate_permission(
     Returns:
         "allow" 直接执行，"ask" 需要用户审批，"deny" 硬拒绝。
     """
+    def finish(decision: PermissionDecision, layer: str, **extra: object) -> PermissionDecision:
+        """记录这一层的决定后返回，供父代理预检复用同一字段。"""
+        raw_floors = extra.get("floors")
+        emit_policy_decision(
+            tool=tool_name,
+            tool_args=tool_args,
+            approval_mode=str(approval_mode),
+            decision=decision,
+            layer=layer,
+            call_id=call_id,
+            rule_source=extra.get("rule_source") if isinstance(extra.get("rule_source"), str) else None,
+            rule_pattern=extra.get("rule_pattern") if isinstance(extra.get("rule_pattern"), str) else None,
+            classifier=extra.get("classifier") if isinstance(extra.get("classifier"), str) else None,
+            floors=[item for item in raw_floors if isinstance(item, str)] if isinstance(raw_floors, list) else None,
+        )
+        return decision
+
     # L1: 工具风险声明提取
     kind = get_tool_kind(tool_name)
 
@@ -781,11 +867,11 @@ def evaluate_permission(
     if rules:
         effect = evaluate_tool_rules(tool_name, tool_args, rules)
         if effect == "deny":
-            return "deny"
+            return finish("deny", "L2")
 
     # L3: 只读工具放行（READ/INTERACT/PLAN 类别）
     if is_read_only(tool_name):
-        return "allow"
+        return finish("allow", "L3")
 
     # L3.1: Shell 安全命令白名单（非 plan 模式下自动放行只读安全的命令）
     # 仅对 execute 工具生效，且需要检查安全底线。
@@ -799,14 +885,19 @@ def evaluate_permission(
                 # 白名单命中，但仍需检查安全底线
                 floors = evaluate_safety_floors(command)
                 if not floors["any_floor_triggered"]:
-                    return "allow"
+                    return finish("allow", "L3.1")
                 # 底线触发，强制 ask
                 logger.info("安全命令白名单命中但底线触发: %s", command)
-                return "ask"
+                names = [
+                    str(item.get("floor"))
+                    for item in floors.get("floors", [])
+                    if isinstance(item, dict) and item.get("floor")
+                ]
+                return finish("ask", "L3.1", floors=names)
 
     # L3.5: 敏感路径 safetyCheck（yolo 免疫）
     if approval_mode != "yolo" and requires_safety_check(tool_name, tool_args):
-        return "ask"
+        return finish("ask", "L3.5")
 
     # L4: 规则评估（allow/ask 规则，两级优先级）
     if rules:
@@ -818,10 +909,10 @@ def evaluate_permission(
 
                 command = str(tool_args.get("command", "")).strip()
                 if command and allow_remainder_triggers_floor(command, rules):
-                    return "ask"
-            return "allow"
+                    return finish("ask", "L4")
+            return finish("allow", "L4")
         if effect == "ask":
-            return "ask"
+            return finish("ask", "L4")
 
     # L5: 审批模式覆盖（按 ToolKind 查表）
     mode_perm = get_mode_permission(kind, approval_mode)
@@ -829,9 +920,9 @@ def evaluate_permission(
     # auto 模式下 "filter" 表示进入 AUTO 四层过滤器
     if mode_perm == "filter":
         if auto_filter is not None:
-            return auto_filter(tool_name, tool_args)
+            return finish(auto_filter(tool_name, tool_args), "L5")
         # 过滤器不可用时回退到 ask（安全优先）
-        return "ask"
+        return finish("ask", "L5")
 
     decision = mode_perm  # type: ignore[assignment]
 
@@ -840,6 +931,6 @@ def evaluate_permission(
         for hook in _extension_permission_hooks:
             hook_result = hook.check(tool_name, tool_args, decision)
             if hook_result == "deny":
-                return "deny"
+                return finish("deny", "L6")
 
-    return decision
+    return finish(decision, "L5")

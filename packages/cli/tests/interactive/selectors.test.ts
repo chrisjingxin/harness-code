@@ -25,6 +25,7 @@ const CAPS = [
 
 function snapshot(overrides: Partial<InteractiveSnapshot> = {}): InteractiveSnapshot {
   return {
+    git: {busy:false,repository:null,diff:null,result:null,error:null},
     currentThreadId: "thread-1",
     activity: { kind: "idle" },
     activeRun: null,

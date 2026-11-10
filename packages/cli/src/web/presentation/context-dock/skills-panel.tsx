@@ -32,13 +32,13 @@ export function SkillsPanel({
         query={query}
         placeholder="搜索 Skill…"
         onSearch={value => dispatch({ type: "panel-search", panel: "skills", query: value })}
-        onRefresh={() => dispatch({ type: "dock-panel-select", panel: "skills" })}
+        onRefresh={() => dispatch({ type: "settings-panel-select", panel: "skills" })}
         disabled={disabled}
       />
       {catalog.status === "error" ? (
         <PanelError
           message={catalog.message}
-          onRetry={() => dispatch({ type: "dock-panel-select", panel: "skills" })}
+          onRetry={() => dispatch({ type: "settings-panel-select", panel: "skills" })}
           disabled={disabled}
         />
       ) : isLoading ? (

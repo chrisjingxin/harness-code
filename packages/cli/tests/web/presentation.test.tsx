@@ -16,6 +16,7 @@ afterAll(() => unregisterTestDom())
 
 function snapshot(overrides: Partial<InteractiveSnapshot> = {}): InteractiveSnapshot {
   const base: InteractiveSnapshot = {
+    git: {busy:false,repository:null,diff:null,result:null,error:null},
     currentThreadId: "thread-1",
     activity: { kind: "idle", label: "就绪" },
     activeRun: null,
@@ -23,6 +24,7 @@ function snapshot(overrides: Partial<InteractiveSnapshot> = {}): InteractiveSnap
     interaction: null,
     confirmation: null,
     lastRun: null,
+    runSummaries: {},
     runtime: {
       workspace: "/workspace",
       cliVersion: "0.1.0",
@@ -60,9 +62,10 @@ function adapterSnapshot(interactive: InteractiveSnapshot, overrides: Partial<We
       code: { tabs: [], activePath: null, previews: {}, previewErrors: {} },
     },
     workspaceTree: { status: "idle", rows: [], selectedPath: null, limited: false },
-    workspaceSidebar: { threadRatio: 0.38, selectedPath: null, widthPx: 280 },
+    workspaceSidebar: { selectedPath: null, widthPx: 280 },
     panelSearch: {
       code: { query: "", submitting: false, error: null },
+    changes: { query: "", submitting: false, error: null },
       models: { query: "", submitting: false, error: null },
       skills: { query: "", submitting: false, error: null },
       mcp: { query: "", submitting: false, error: null },

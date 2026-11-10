@@ -338,6 +338,18 @@ class DiagnosticsSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class TraceSettings:
+    """链路日志采集档位和保留天数。"""
+
+    capture: Literal["full", "meta", "off"] = "full"
+    retention_days: int = 14
+
+    def redacted(self) -> dict[str, object]:
+        """返回可写入配置摘要的有效值。"""
+        return {"capture": self.capture, "retention_days": self.retention_days}
+
+
+@dataclass(frozen=True, slots=True)
 class GoalSettings:
     """Build 目标验收与 Grader 配置。"""
 
@@ -375,6 +387,7 @@ class Za38Config:
     ui: UiSettings = field(default_factory=UiSettings)
     diagnostics: DiagnosticsSettings = field(default_factory=DiagnosticsSettings)
     goal: GoalSettings = field(default_factory=GoalSettings)
+    trace: TraceSettings = field(default_factory=TraceSettings)
 
     def require_model(self, profile_id: str | None = None) -> ModelSettings:
         """返回指定或默认模型；保留单 Profile 调用方的兼容入口。"""
@@ -419,6 +432,7 @@ class Za38Config:
             "ui": self.ui.redacted(),
             "diagnostics": self.diagnostics.redacted(),
             "goal": self.goal.redacted(),
+            "trace": self.trace.redacted(),
         }
 
 
@@ -461,6 +475,7 @@ def load_config(
         ui_values,
         diagnostics_values,
         goal_values,
+        trace_values,
         sources,
     ) = _merge_documents(documents)
     _apply_environment_overrides(
@@ -493,6 +508,7 @@ def load_config(
         ui=_parse_ui(ui_values),
         diagnostics=_parse_diagnostics(diagnostics_values),
         goal=_parse_goal(goal_values),
+        trace=_parse_trace(trace_values),
     )
 
 
@@ -584,6 +600,7 @@ def _merge_documents(
     dict[str, object],
     dict[str, object],
     dict[str, object],
+    dict[str, object],
     dict[str, str],
 ]:
     """按用户到显式配置的顺序合并已验证字段，并记录最后贡献来源。"""
@@ -597,6 +614,7 @@ def _merge_documents(
     ui_values: dict[str, object] = {}
     diagnostics_values: dict[str, object] = {}
     goal_values: dict[str, object] = {}
+    trace_values: dict[str, object] = {}
     sources = {
         "models": "default",
         "approval": "default",
@@ -608,6 +626,7 @@ def _merge_documents(
         "ui": "default",
         "diagnostics": "default",
         "goal": "default",
+        "trace": "default",
     }
     for _, source, document in documents:
         if "models" in document:
@@ -642,6 +661,9 @@ def _merge_documents(
         if "goal" in document:
             goal_values = _merge_flat_values(goal_values, document["goal"])
             sources["goal"] = source.value
+        if "trace" in document:
+            trace_values = _merge_flat_values(trace_values, document["trace"])
+            sources["trace"] = source.value
     return (
         models,
         approval_values,
@@ -653,6 +675,7 @@ def _merge_documents(
         ui_values,
         diagnostics_values,
         goal_values,
+        trace_values,
         sources,
     )
 
@@ -1076,6 +1099,18 @@ def _parse_ui(values: Mapping[str, object]) -> UiSettings:
     if not isinstance(raw_show_cache, bool):
         raise ConfigError("ui.show_cache_hit_rate must be a boolean")
     return UiSettings(show_cache_hit_rate=raw_show_cache)
+
+
+def _parse_trace(values: Mapping[str, object]) -> TraceSettings:
+    """解析 ``[trace]``。非法档位或保留天数直接失败，不静默回退。"""
+    unknown = set(values) - {"capture", "retention_days"}
+    if unknown:
+        raise ConfigError(f"[trace] contains unsupported fields: {', '.join(sorted(unknown))}")
+    capture = values.get("capture", "full")
+    if capture not in {"full", "meta", "off"}:
+        raise ConfigError("trace.capture must be full, meta, or off")
+    retention_days = _integer(values.get("retention_days", 14), "trace.retention_days", minimum=1, maximum=365)
+    return TraceSettings(capture=capture, retention_days=retention_days)
 
 
 def _parse_diagnostics(values: Mapping[str, object]) -> DiagnosticsSettings:

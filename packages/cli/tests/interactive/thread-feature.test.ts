@@ -1,6 +1,22 @@
 import { expect, test } from "bun:test"
 import { makeHarness, flush } from "./harness"
 
+test("重新打开会话恢复同一轮权威耗时，缺失的旧耗时不推算", async () => {
+  const harness = makeHarness({ openThreadImpl: async threadId => ({
+    thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "hello", latest_message: "answer", message_count: 2, title: null },
+    messages: [{ kind: "user", content: "hello", run_id: "r" }, { kind: "assistant", content: "answer", run_id: "r" }],
+    run_summaries: [{ run_id: "r", outcome: "completed", duration_ms: 2764, usage: { input_tokens: 100, output_tokens: 20, input_complete: true, output_complete: true } }],
+    plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: "test" },
+    goal: null, goal_pending: null, goal_activities: [],
+  }) })
+  try {
+    await harness.controller.dispatch({ type: "thread.open", threadId: "thread" })
+    await flush()
+    expect(harness.controller.getSnapshot().runSummaries.r?.durationMs).toBe(2764)
+    expect(harness.controller.getSnapshot().lastRun?.durationMs).toBe(2764)
+  } finally { await harness.controller.close() }
+})
+
 test("Thread 切换：/resume 打开选择器并原子恢复，运行中禁止切换", async () => {
   const harness = makeHarness()
   try {

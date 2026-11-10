@@ -1,3 +1,4 @@
+import { WorkspaceGitFeature, gitWriteBlockedReason, type GitIntent } from "./features/workspace-git"
 /** Interactive Core 薄协调器：只做 intent 路由、listener 管理、snapshot 组装与 Feature 生命周期编排；具体业务逻辑在 features/ 下按 Feature 拆分。 */
 
 import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
@@ -27,6 +28,8 @@ export class InteractiveControllerImpl implements InteractiveController {
   private confirmation: InteractiveConfirmation | null = null
   private closed = false
   private compactInFlight = false
+  private readonly workspaceGit: WorkspaceGitFeature
+  private coreMutations = 0
 
   // 九个 Feature 子模块各管一块业务；Controller 只做路由、状态组装与生命周期。
   private readonly catalogFeature = new CatalogFeature()
@@ -61,6 +64,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   }
   constructor(options: InteractiveControllerOptions) {
     this.gateway = options.gateway
+    this.workspaceGit = new WorkspaceGitFeature(options.workspaceGit)
     const defaultRuntime: InteractiveRuntime = { workspace: "", cliVersion: "0.1.0", modelConfigured: false, executionMode: "local", approvalMode: DEFAULT_APPROVAL_MODE, capabilities: builtinCommandCapabilities }
     const rawRuntime = options.baseRuntime ?? defaultRuntime
     this.baseRuntime = { ...defaultRuntime, ...rawRuntime, capabilities: rawRuntime.capabilities ?? builtinCommandCapabilities }
@@ -116,7 +120,19 @@ export class InteractiveControllerImpl implements InteractiveController {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
+  /** Git 与普通业务意图共用互斥门禁，覆盖 await 中尚未发布 activeRun 的启动窗口。 */
   async dispatch(intent: InteractiveIntent): Promise<IntentOutcome> {
+    if (this.closed) return {status:"rejected",code:"connection-closed",message:"Controller is closed"}
+    const mutating = !["catalog.refresh","run.cancel","child-timeline.open","child-timeline.leave","plan-view.close","goal-view.close"].includes(intent.type)
+    if (this.workspaceGit.view.busy && mutating) return {status:"rejected",code:"busy",message:"Git 操作进行中，请稍候。"}
+    if (intent.type.startsWith("git.")) {
+      const blocked = this.coreMutations || this.threadFeature.openingThread ? "当前操作尚未结束，请稍候。" : gitWriteBlockedReason(this.getSnapshot())
+      return this.workspaceGit.execute(intent as GitIntent,blocked,()=>this.publish())
+    }
+    if (mutating) this.coreMutations++
+    try { return await this.dispatchCore(intent) } finally { if (mutating) this.coreMutations-- }
+  }
+  private async dispatchCore(intent: InteractiveIntent): Promise<IntentOutcome> {
     if (this.closed) return { status: "rejected", code: "connection-closed", message: "Controller is closed" }
     if (this.state.pendingOperation && blocksPendingOperation(intent)) {
       return { status: "rejected", code: "busy", message: "上下文正在压缩；完成前不能执行该操作" }
@@ -688,6 +704,7 @@ export class InteractiveControllerImpl implements InteractiveController {
   }
   private buildSnapshot(): InteractiveSnapshot {
     return {
+      git: this.workspaceGit.view,
       currentThreadId: this.state.currentThreadId,
       activity: this.state.activity,
       activeRun: this.state.activeRun,
@@ -697,6 +714,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       interaction: this.interactionFeature.interactionDto(this.interactionFeature.pendingInteraction, this.clock),
       confirmation: this.confirmation,
       lastRun: this.state.lastRun ?? null,
+      runSummaries: this.state.runSummaries,
       runtime: { ...this.baseRuntime, approvalMode: this.runFeature.currentApprovalMode(this.baseRuntime.approvalMode), approvalModeRevision: this.runFeature.approvalModeRevision, modelProfileId: this.modelFeature.requestedModelProfileId ?? undefined },
       connection: this.connection,
       catalogs: { threads: publicCatalog(this.catalogFeature.state.threads), models: publicCatalog(this.catalogFeature.state.models), skills: publicCatalog(this.catalogFeature.state.skills), mcp: publicCatalog(this.catalogFeature.state.mcp), agents: publicCatalog(this.catalogFeature.state.agents) },

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import time
+from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Mapping, Sequence
 
@@ -18,6 +20,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from harness_agent.threads.context_pressure import (
     ContextPressurePolicy,
+    ContextPressurePolicyConfig,
     ContextPressureSnapshot,
     ModelCallType,
 )
@@ -32,6 +35,9 @@ from harness_agent.threads.context_projection import (
 )
 from harness_agent.diagnostic_log.runtime import ensure_log, safe_context_value
 from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json, estimate_tokens, input_cap_tokens
+from harness_agent.tracing import FunctionCall, func_monitor, current_trace
+from harness_agent.tracing.context import current_span
+from harness_agent.tracing.model import TraceModelMiddleware
 from harness_agent.threads.runtime_state import (
     RuntimeExecutionPolicy,
     RuntimeStateRehydrator,
@@ -46,6 +52,7 @@ from harness_agent.threads.thread_persistence import (
     ThreadPersistenceError,
 )
 from harness_agent.runtime.provider_retry import run_with_provider_retry
+from harness_agent.runtime.run_usage import model_usage_config
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -112,6 +119,79 @@ class CompressionResult:
         return self.outcome == "compressed"
 
 
+def _trace_compaction_decision(action: str, config: ContextPressurePolicyConfig) -> None:
+    """只记录真正选择的压缩档位和占用率阈值；跳过时不虚构档位。"""
+    trace, span = current_trace(), current_span()
+    if action not in {"micro", "full"} or trace is None or span is None:
+        return
+    try:
+        trace.recorder.annotate_span(span, {
+            "tier": action,
+            "threshold": config.micro_ratio if action == "micro" else config.full_ratio,
+        })
+    except Exception:
+        logging.getLogger(__name__).warning("压缩决策 trace 采集失败", exc_info=True)
+
+
+def _trace_compaction_commit(committed: Any, summary: ContextSummaryDraft | None) -> None:
+    """采集已提交的归档与摘要，写日志失败不能反转成功的压缩事务。"""
+    trace, span = current_trace(), current_span()
+    if trace is None or span is None:
+        return
+    try:
+        trace.recorder.annotate_span(span, {"artifacts": [
+            {"id": item.artifact_id, "bytes": item.byte_length,
+             "source_start": item.source_start, "source_end": item.source_end}
+            for item in committed.artifacts
+        ]})
+        if summary is not None:
+            trace.recorder.annotate_span(span, {"summary_ref": trace.recorder.payload("summary", summary.content)})
+    except Exception:
+        logging.getLogger(__name__).warning("已提交压缩的 trace 采集失败", exc_info=True)
+
+
+def _compaction_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """记录请求的真实缓存来源与 typed outcome，不把 skipped/failed 当成功。"""
+    if call.error is not None or not isinstance(call.result, CompressionResult):
+        return {}
+    request = call.args[1]
+    if not isinstance(request, CompressionRequest):
+        return {}
+    result = call.result
+    attributes: dict[str, object] = {
+        "trigger": request.trigger,
+        "outcome": "committed" if result.compressed else result.outcome,
+        "tokens_before": request.estimated_tokens if request.estimated_tokens is not None else _messages_tokens(request.projection.messages),
+        "tokens_after": result.estimated_tokens,
+        "messages_before": len(request.projection.messages),
+        "messages_after": len(result.projected_messages),
+        "context_window": call.args[0]._window,
+        "input_cap": result.input_cap_tokens,
+    }
+    if result.reason is not None:
+        attributes["skip_reason"] = result.reason
+    if result.checkpoint is not None:
+        attributes["checkpoint_id"] = result.checkpoint.checkpoint_id
+        attributes["tier"] = result.checkpoint.mode
+    return attributes
+
+
+def _compaction_idempotency_key(call: FunctionCall) -> str:
+    """以来源投影识别同一压缩请求，不把历史正文写入幂等键。"""
+    request = call.args[1]
+    if not isinstance(request, CompressionRequest):
+        raise TypeError("未知压缩请求")
+    projection = request.projection
+    checkpoint_id = (
+        projection.checkpoint.checkpoint_id if projection.checkpoint is not None else None
+    )
+    identity = canonical_json(
+        [request.thread_id, request.trigger, projection.source_record_sequence, checkpoint_id]
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"context.compact:{digest}"
+
+
 @dataclass(frozen=True, slots=True)
 class _MicroPlan:
     """只存在于当前压缩调用内的微压缩草稿。"""
@@ -152,6 +232,12 @@ class ContextCompactor:
         self._runtime_state_provider = runtime_state_provider
         self._provider_retry = provider_retry
 
+    @func_monitor(
+        name="context.compact",
+        kind="CONTEXT",
+        attributes=_compaction_attributes,
+        idempotency_key=_compaction_idempotency_key,
+    )
     async def compress(self, request: CompressionRequest) -> CompressionResult:
         """按 trigger 统一执行完整压缩闭环，并在失败时保持旧投影。"""
         self._compress_started = time.monotonic()
@@ -207,6 +293,7 @@ class ContextCompactor:
             manual=request.trigger == "manual",
             overflow=request.trigger == "overflow",
         )
+        _trace_compaction_decision(decision.action, self._pressure_policy.config)
         if request.trigger == "auto" and decision.action not in {"micro", "full"}:
             return self._skipped(
                 request,
@@ -391,15 +478,10 @@ class ContextCompactor:
                     previous_state,
                 )
 
-        response = await run_with_provider_retry(
-            lambda: self._model.ainvoke(
-                [
-                    SystemMessage(content=_SUMMARY_PROMPT),
-                    HumanMessage(content=_render_messages(summary_input)),
-                ]
-            ),
-            self._provider_retry,
-        )
+        summary_messages = [SystemMessage(content=_SUMMARY_PROMPT),
+                            HumanMessage(content=_render_messages(summary_input))]
+
+        response = await self._invoke_summary(summary_messages)
         summary = _summary_text(response)
         validation_reason = _validate_summary_response(response, summary, self._summary_cap())
         if validation_reason is not None:
@@ -496,6 +578,19 @@ class ContextCompactor:
             estimated_tokens=after_tokens,
         )
 
+    async def _invoke_summary(self, summary_messages: Sequence[BaseMessage]) -> BaseMessage:
+        """摘要模型共享根 Run 用量，Trace 开关和摘要提交成败不改变已发生的消耗。"""
+        config = model_usage_config()
+        async def invoke_summary(_request: object) -> object:
+            message = await run_with_provider_retry(
+                lambda: self._model.ainvoke(summary_messages, config=config), self._provider_retry,
+            )
+            return SimpleNamespace(result=[message])
+        captured = await TraceModelMiddleware().awrap_model_call(
+            SimpleNamespace(model=self._model, messages=summary_messages, tools=[]), invoke_summary,
+        )
+        return captured.result[0]
+
     async def _commit_projection(
         self,
         request: CompressionRequest,
@@ -545,6 +640,7 @@ class ContextCompactor:
         checkpoint = committed.checkpoint
         if checkpoint is None:
             raise ThreadPersistenceError("COMPRESSION_CHECKPOINT_MISSING")
+        _trace_compaction_commit(committed, summary)
         new_artifact_ids = tuple(
             artifact.artifact_id for artifact in committed.artifacts
         )

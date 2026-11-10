@@ -6,8 +6,8 @@ import { act } from "react"
 
 import { WebApp } from "../../../src/web/presentation/web-app"
 import type { WebAdapterSnapshot, WebIntent, WebInteractiveAdapter } from "../../../src/web/application/adapter"
-import { makeInteractive, makeSnapshot } from "./fixtures"
-import { registerTestDom, render, type RenderHandle } from "./render"
+import { makeInteractive, makeRuntime, makeSnapshot } from "./fixtures"
+import { registerTestDom, render, setControlledValue, type RenderHandle } from "./render"
 
 const unregisterTestDom = registerTestDom()
 afterAll(() => unregisterTestDom())
@@ -96,12 +96,12 @@ describe("WebApp", () => {
     }
   })
 
-  test("顶栏中段不放任何控件：工作区标识已迁侧栏，模型/审批已下沉 Composer rail", () => {
+  test("顶栏按设计稿显示工作区路径，模型和审批保留 Composer rail", () => {
     const { handle } = mountWebApp(true, makeSnapshot())
     try {
       expect(handle.container.querySelector(".brand-name")?.textContent).toBe("Harness Code")
       const main = handle.container.querySelector(".topbar-main")
-      expect(main?.querySelector(".topbar-project") === null).toBe(true)
+      expect(main?.querySelector(".topbar-project")?.textContent).toContain("workspace")
       expect(main?.querySelector(".topbar-model") === null).toBe(true)
       expect(main?.querySelector(".topbar-approval-mode") === null).toBe(true)
       expect(main?.querySelector(".topbar-meta") === null).toBe(true)
@@ -112,14 +112,42 @@ describe("WebApp", () => {
     }
   })
 
-  test("顶栏品牌使用 Harness 交织标志，不再显示通用 Shield 图标", () => {
+  test.each([
+    ["/projects/harness-code", "/projects/harness-code", "harness-code"],
+    ["/projects/harness-code/packages/cli", "/projects/harness-code/", "harness-code / packages/cli"],
+    ["/projects/harness-code-other/cli", "/projects/harness-code", "cli"],
+    ["/projects/notes/", null, "notes"],
+    ["C:\\Projects\\harness-code\\packages\\cli\\", "C:\\Projects\\harness-code", "harness-code / packages/cli"],
+    ["c:/Projects/harness-code/packages/cli", "C:/Projects/harness-code", "harness-code / packages/cli"],
+  ])("顶部项目标识：%s", (workspace, root, expected) => {
+    const { handle } = mountWebApp(true, makeSnapshot({ interactive: makeInteractive({
+      runtime: makeRuntime({ workspace, gitWorkspace: root ? { kind: "branch", root, branch: "main" } : { kind: "not-repository" } }),
+    }) }))
+    try {
+      const project = handle.container.querySelector(".topbar-project")
+      expect(project?.textContent).toBe(expected)
+      expect(project?.getAttribute("title")).toBe(workspace)
+    } finally { handle.unmount() }
+  })
+
+  test("detached HEAD 仍显示项目与子目录，Git 信息不可用时显示目录名", () => {
+    const runtime = makeRuntime({ workspace: "/projects/demo/src", gitWorkspace: { kind: "detached", root: "/projects/demo", shortSha: "abc1234" } })
+    const { adapter, handle } = mountWebApp(true, makeSnapshot({ interactive: makeInteractive({ runtime }) }))
+    try {
+      expect(handle.container.querySelector(".topbar-project")?.textContent).toBe("demo / src")
+      act(() => adapter.emit(makeSnapshot({ interactive: makeInteractive({ runtime: { ...runtime, gitWorkspace: { kind: "unavailable", message: "Git 不可用" } } }) })))
+      expect(handle.container.querySelector(".topbar-project")?.textContent).toBe("src")
+    } finally { handle.unmount() }
+  })
+
+  test("顶栏品牌使用设计稿 Command 图标", () => {
     const { handle } = mountWebApp(true, makeSnapshot())
     try {
       const mark = handle.container.querySelector(".brand-mark")
       const logo = mark?.querySelector("svg.harness-brand-logo")
       expect(logo).not.toBeNull()
-      expect(logo?.getAttribute("viewBox")).toBe("0 0 110 110")
-      expect(logo?.querySelectorAll("path").length).toBe(4)
+      expect(logo?.getAttribute("viewBox")).toBe("0 0 24 24")
+      expect(logo?.classList.contains("lucide-command")).toBe(true)
       expect(mark?.querySelector("svg.lucide-shield")).toBeNull()
     } finally {
       handle.unmount()
@@ -181,6 +209,7 @@ describe("WebApp", () => {
     })
     const { adapter, handle } = mountWebApp(true, makeSnapshot({ interactive }))
     try {
+      expect(handle.container.querySelector('.connection-banner[role="alert"]')?.textContent).toBe("连接已断开")
       const header = handle.container.querySelector<HTMLButtonElement>(".tool-row-header")
       expect(header).not.toBeNull()
       act(() => { header?.click() })
@@ -328,4 +357,123 @@ describe("WebApp", () => {
       handle.unmount()
     }
   })
+})
+
+ test("顶栏可重新打开文件面板；对话页签与就绪状态同一行，不显示会话标题", () => {
+  const { adapter, handle } = mountWebApp(true, makeSnapshot())
+  try {
+    const toggle = handle.container.querySelector<HTMLButtonElement>('[aria-label="展开右侧面板"]')!
+    expect(toggle).not.toBeNull()
+    act(() => toggle.click())
+    expect(adapter.intentLog).toContainEqual({ type: "dock-open", panel: "code" })
+    const toolbar = handle.container.querySelector(".workbench-view-toolbar")
+    expect(toolbar?.textContent).toContain("对话")
+    expect(toolbar?.textContent).toContain("就绪")
+    expect(toolbar?.querySelector('[aria-label="查看文件变更"]')).not.toBeNull()
+    expect(handle.container.querySelector(".conversation-heading")).toBeNull()
+    expect(handle.container.querySelector(".conversation-column h1")).toBeNull()
+    expect(handle.container.textContent).not.toContain("本地工作区")
+  } finally { handle.unmount() }
+})
+
+test("Git 忙碌提示不误称为尚未接管，输入和新建均禁用",()=>{
+ const {handle}=mountWebApp(true,makeSnapshot({interactive:makeInteractive({git:{busy:true,repository:null,diff:null,result:null,error:null}})}))
+ try{expect(handle.container.textContent).toContain("Git 操作进行中");expect(handle.container.querySelector<HTMLTextAreaElement>(".composer-textarea")?.disabled).toBe(true);expect(handle.container.querySelector<HTMLButtonElement>(".new-thread-button")?.disabled).toBe(true)}finally{handle.unmount()}
+})
+
+test("设置打开与关闭保留 Git 勾选、提交说明、滚动和会话草稿，Escape 不关闭 Dock", () => {
+  const base = makeSnapshot({
+    draft: "未发送的对话",
+    settings: { open: false, activePanel: "help" },
+    contextDock: { ...makeSnapshot().contextDock, open: true, activePanel: "changes" },
+    interactive: makeInteractive({ git: {
+      busy: false, error: null, result: null, diff: null,
+      repository: { snapshot: "s1", branch: "main", head: "head", upstream: null, blockedReason: null,
+        files: [{ path: "a.ts", oldPath: null, status: " M", fingerprint: "f1" }] },
+    } }),
+  })
+  const { adapter, handle } = mountWebApp(true, base)
+  try {
+    const selected = handle.container.querySelector<HTMLInputElement>('[data-file-check]')!
+    const message = handle.container.querySelector<HTMLTextAreaElement>('.git-commit textarea')!
+    const review = handle.container.querySelector<HTMLElement>('.git-review')!
+    act(() => selected.click())
+    act(() => setControlledValue(message, "保留提交说明"))
+    review.scrollTop = 72
+    const trigger = handle.container.querySelector<HTMLButtonElement>('[data-settings-trigger]')!
+    trigger.focus()
+    act(() => trigger.click())
+    expect(adapter.intentLog).toContainEqual({ type: "settings-open" })
+    act(() => adapter.emit({ ...base, settings: { open: true, activePanel: "help" } }))
+    expect(handle.container.querySelector('.workbench-content')?.hasAttribute('inert')).toBe(true)
+    const close = handle.container.querySelector<HTMLButtonElement>('[aria-label="关闭设置"]')!
+    expect(document.activeElement === close).toBe(true)
+    act(() => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
+    expect(adapter.intentLog).toContainEqual({ type: "settings-close" })
+    expect(adapter.intentLog.some(intent => intent.type === "dock-close")).toBe(false)
+    act(() => adapter.emit(base))
+    expect(document.activeElement === trigger).toBe(true)
+    expect(handle.container.querySelector('[data-file-check]') === selected).toBe(true)
+    expect(selected.checked).toBe(true)
+    expect(message.value).toBe("保留提交说明")
+    expect(review.scrollTop).toBe(72)
+    expect(handle.container.querySelector<HTMLTextAreaElement>('.composer-textarea')?.value).toBe("未发送的对话")
+  } finally { handle.unmount() }
+})
+
+test("设置内的确认框优先接收 Escape，取消后仍保留设置分类", () => {
+  const base = makeSnapshot({ settings: { open: true, activePanel: "mcp" } })
+  const { adapter, handle } = mountWebApp(true, base)
+  try {
+    act(() => adapter.emit({ ...base, interactive: { ...base.interactive, confirmation: {
+      confirmationId: "settings-confirm", title: "移除 MCP", message: "确认移除？",
+    } } }))
+    expect(handle.container.querySelector('.settings-overlay')?.hasAttribute('inert')).toBe(true)
+    const confirm = handle.container.querySelector<HTMLButtonElement>('.dialog-confirm')!
+    expect(document.activeElement === confirm).toBe(true)
+    act(() => confirm.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
+    expect(adapter.intentLog).toEqual([{ type: "confirmation-resolve", confirmationId: "settings-confirm", confirmed: false }])
+    act(() => adapter.emit(base))
+    expect(handle.container.querySelector('.settings-overlay')?.hasAttribute('inert')).toBe(false)
+    expect(handle.container.querySelector('.settings-dialog')?.contains(document.activeElement)).toBe(true)
+  } finally { handle.unmount() }
+})
+
+test("设置内查看浮层获得焦点，Escape 只关闭查看并回到设置", () => {
+  const base = makeSnapshot({ settings: { open: true, activePanel: "mcp" } })
+  const { adapter, handle } = mountWebApp(true, base)
+  try {
+    act(() => adapter.emit({ ...base, inspectOverlay: { visible: true, kind: "mcp", title: "MCP 详情", body: "已连接" } }))
+    const overlay = handle.container.querySelector('.runtime-overlay')!
+    expect(overlay.contains(document.activeElement)).toBe(true)
+    act(() => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
+    expect(adapter.intentLog).toEqual([{ type: "inspect-overlay-close" }])
+    act(() => adapter.emit(base))
+    expect(handle.container.querySelector('.settings-dialog')?.contains(document.activeElement)).toBe(true)
+  } finally { handle.unmount() }
+})
+
+
+test("轨迹页签切换保留聊天 DOM 和右栏实例，隐藏区域不可聚焦", () => {
+  const base = makeSnapshot()
+  const initial = makeSnapshot({ draft: "保留草稿", contextDock: { ...base.contextDock, open: true } })
+  const { adapter, handle } = mountWebApp(true, initial)
+  try {
+    const composer = handle.container.querySelector(".composer-textarea")
+    const dock = handle.container.querySelector(".context-dock")
+    const tab = handle.container.querySelector<HTMLButtonElement>('[role="tab"][data-view="trace"]')
+    expect(tab).not.toBeNull()
+    act(() => tab!.click())
+    expect(adapter.intentLog.at(-1)).toEqual({ type: "view-mode-set", mode: "trace" })
+    act(() => adapter.emit({ ...initial, viewMode: "trace" }))
+    expect(handle.container.querySelector(".composer-textarea")).toBe(composer)
+    expect(handle.container.querySelector(".context-dock")).toBe(dock)
+    expect(handle.container.querySelector(".conversation-chat")?.hasAttribute("hidden")).toBe(true)
+    expect(dock?.getAttribute("aria-hidden")).toBe("true")
+    expect(handle.container.querySelector(".desktop-workspace")?.classList.contains("has-context-dock")).toBe(false)
+    act(() => adapter.emit(initial))
+    expect(handle.container.querySelector(".composer-textarea")).toBe(composer)
+    expect(handle.container.querySelector(".conversation-chat")?.hasAttribute("hidden")).toBe(false)
+    expect(dock?.getAttribute("aria-hidden")).toBeNull()
+  } finally { handle.unmount() }
 })

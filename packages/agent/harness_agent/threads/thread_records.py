@@ -53,6 +53,8 @@ class ThreadMessage:
     content: str
     tool_name: str | None = None
     created_at_ms: int | None = None
+    run_id: str | None = None
+    record_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -616,6 +618,8 @@ def _thread_message_from_transcript(record: TranscriptRecord) -> ThreadMessage |
         content=content,
         tool_name=tool_name,
         created_at_ms=record.created_at_ms,
+        run_id=record.run_id,
+        record_id=record.record_id,
     )  # type: ignore[arg-type]
 
 

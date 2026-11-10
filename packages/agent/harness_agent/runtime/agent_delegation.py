@@ -457,8 +457,30 @@ class AgentDelegator:
             raise asyncio.CancelledError
         if timeout_seconds <= 0:
             raise TimeoutError
+        from harness_agent.tracing import current_trace, use_trace
+        from harness_agent.tracing.context import current_span
+
+        trace, parent_span = current_trace(), current_span()
+
+        async def run_traced_child() -> Mapping[str, Any]:
+            """显式绑定父工具；子分支收尾不能关闭父代理的 Step。"""
+            if trace is None:
+                return await runner(command)
+            with use_trace(trace, parent=parent_span):
+                from harness_agent.tracing import TraceStatus
+
+                status, error = TraceStatus.SUCCESS, None
+                try:
+                    return await runner(command)
+                except BaseException as exc:
+                    error = exc
+                    status = TraceStatus.CANCELLED if isinstance(exc, asyncio.CancelledError) else TraceStatus.FAILED
+                    raise
+                finally:
+                    trace.recorder.close_step(status, error=error)
+
         runner_task = asyncio.create_task(
-            runner(command),
+            run_traced_child(),
             name=f"harness-delegation-{command.target_agent_id}",
         )
         cancel_task = asyncio.create_task(command.cancellation_token.wait())
@@ -469,17 +491,17 @@ class AgentDelegator:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if not done:
-                runner_task.cancel()
-                await asyncio.gather(runner_task, return_exceptions=True)
                 raise TimeoutError
             if cancel_task in done:
-                runner_task.cancel()
-                await asyncio.gather(runner_task, return_exceptions=True)
                 raise asyncio.CancelledError
             return await runner_task
         finally:
+            # 父任务本身被取消也会直接离开 wait，必须在此统一收拢 runner，
+            # 让 child 最终回调在父 Run 冻结统计之前完成，且不遗留 slot/lease。
+            if not runner_task.done():
+                runner_task.cancel()
             cancel_task.cancel()
-            await asyncio.gather(cancel_task, return_exceptions=True)
+            await asyncio.gather(runner_task, cancel_task, return_exceptions=True)
 
     async def _finalize_if_running(
         self,

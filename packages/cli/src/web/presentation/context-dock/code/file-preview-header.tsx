@@ -1,7 +1,7 @@
 /** 文件预览头部：相对路径 + 刷新按钮 + 语言/大小/行数元信息 + 截断/错误提示。 */
 /** @jsxImportSource react */
 
-import { RefreshCw } from "lucide-react"
+import { ExternalLink, RefreshCw } from "lucide-react"
 
 import type { WorkspacePreviewView } from "../../../../presentation-coordinator"
 import type { WebIntent } from "../../../application/adapter"
@@ -14,6 +14,7 @@ export function FilePreviewHeader({
   error,
   dispatch,
   disabled = false,
+  openInWorkbench = false,
 }: {
   path: string
   preview: WorkspacePreviewView | undefined
@@ -21,6 +22,7 @@ export function FilePreviewHeader({
   error: string | undefined
   dispatch: (intent: WebIntent) => void
   disabled?: boolean
+  openInWorkbench?: boolean
 }): React.ReactElement {
   const meta = preview?.status === "ready" || preview?.status === "unsupported"
     ? buildMeta(preview)
@@ -36,16 +38,22 @@ export function FilePreviewHeader({
         {preview?.status === "ready" && preview.file.truncated ? (
           <span className="file-preview-truncated">文件较大，仅展示前 256 KiB</span>
         ) : null}
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="刷新预览"
-          title="刷新"
-          disabled={disabled}
-          onClick={() => dispatch({ type: "workspace-preview-refresh", path })}
-        >
-          <RefreshCw aria-hidden="true" size={14} />
-        </button>
+        <div className="file-preview-tools" role="group" aria-label="文件预览操作">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="刷新预览"
+            title="刷新"
+            disabled={disabled}
+            onClick={() => dispatch({ type: "workspace-preview-refresh", path })}
+          >
+            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.75} />
+          </button>
+          {openInWorkbench ? <button type="button" className="icon-button" aria-label="在主区域打开"
+            title="在主区域打开" disabled={disabled} onClick={() => dispatch({ type: "workbench-file-open", path })}>
+            <ExternalLink aria-hidden="true" size={16} strokeWidth={1.75} />
+          </button> : null}
+        </div>
       </div>
     </div>
   )

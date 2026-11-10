@@ -91,11 +91,15 @@ test("源码与 dist CLI 都解析到 packages/agent sidecar", () => {
   expect(dist.pythonExecutables).toContain(resolve(agentDir, ".venv/bin/python"))
 })
 
-test("根 dev 命令直接启动 CLI，避免 workspace 转发丢失 TTY", async () => {
+test("根 dev 命令按统一 npm 入口转入 CLI 的 Bun 运行边界并转发参数", async () => {
   const rootPackage = JSON.parse(await readFile(resolve(import.meta.dir, "../../../package.json"), "utf8")) as {
     scripts: Record<string, string>
   }
-  expect(rootPackage.scripts.dev).toBe("bun packages/cli/src/index.ts")
+  const cliPackage = JSON.parse(await readFile(resolve(import.meta.dir, "../package.json"), "utf8")) as {
+    scripts: Record<string, string>
+  }
+  expect(rootPackage.scripts.dev).toBe("npm --workspace @za38/cli run dev --")
+  expect(cliPackage.scripts.dev).toBe("bun src/index.ts")
 })
 
 test("无头 CLI 不声明 Interaction handler", () => {

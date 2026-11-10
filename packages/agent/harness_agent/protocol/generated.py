@@ -6,8 +6,8 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 from harness_agent.protocol.runtime import event_model, schema_model
 
 PROTOCOL_MAJOR = 3
-PROTOCOL_MINOR = 9
-PROTOCOL_SCHEMA_SHA256 = "a41f41b2d8aae9b5a49e28626f158cce460373a282210a86f5585f9a99cae901"
+PROTOCOL_MINOR = 11
+PROTOCOL_SCHEMA_SHA256 = "658e631d569a8fbfd6f1ce46c0a851998d583e6564382a08de8531bbb72b69ca"
 MAX_FRAME_BYTES = 8388608
 MAX_TOOL_PAYLOAD_BYTES = 1048576
 CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate"]
@@ -284,6 +284,8 @@ class ThreadMessageWire(TypedDict):
     content: str
     tool_name: NotRequired[str]
     created_at_ms: NotRequired[int]
+    run_id: NotRequired[str | None]
+    record_id: NotRequired[str | None]
 
 class ThreadsListParamsWire(TypedDict):
     limit: NotRequired[int]
@@ -303,6 +305,7 @@ class ThreadsOpenResultWire(TypedDict):
     goal: GoalProjectionWire | None
     goal_pending: GoalPendingProjectionWire | None
     goal_activities: list[GoalActivityProjectionWire]
+    run_summaries: list[RunSummaryWire]
 
 class ThreadPlanWire(TypedDict):
     has_plan: bool
@@ -774,8 +777,10 @@ class InteractionResolvedPayloadWire(TypedDict):
     type: Literal["approval", "question", "directory_trust", "plan", "plugin_consent", "goal"]
 
 class UsageWire(TypedDict):
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int | None
+    output_tokens: int | None
+    input_complete: bool
+    output_complete: bool
     cached_tokens: NotRequired[int]
 
 class RunCompletedPayloadWire(TypedDict):
@@ -786,6 +791,8 @@ class RunCompletedPayloadWire(TypedDict):
 
 class RunCancelledPayloadWire(TypedDict):
     reason: str
+    usage: UsageWire
+    duration_ms: int
 
 class RunFailureWire(TypedDict):
     code: str
@@ -794,6 +801,8 @@ class RunFailureWire(TypedDict):
 
 class RunFailedPayloadWire(TypedDict):
     error: RunFailureWire
+    usage: UsageWire
+    duration_ms: int
 
 class InteractionBaseWire(TypedDict):
     thread_id: str
@@ -1038,6 +1047,12 @@ class GoalInteractionRequestWire(TypedDict):
     payload: dict[str, Any]
 
 GoalInteractionResponseWire: TypeAlias = dict[str, Any] | dict[str, Any] | dict[str, Any] | dict[str, Any]
+
+class RunSummaryWire(TypedDict):
+    run_id: str
+    outcome: Literal["completed", "failed", "cancelled"]
+    usage: UsageWire
+    duration_ms: NotRequired[int]
 
 CommandsBindParamsWire = CommandBindingsParamsWire
 CommandsBindResultWire = CommandBindingsResultWire

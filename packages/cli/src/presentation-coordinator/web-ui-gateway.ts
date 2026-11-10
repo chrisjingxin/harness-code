@@ -8,6 +8,11 @@
  * 序列化、revision 门禁与 intent 受理。
  */
 
+import type { TraceLiveSource } from "../trace-log/runtime"
+import type { TraceSpanEvent } from "./contracts/trace"
+import { parseServerFrame } from "./contracts/validation"
+import { TraceHistorySession } from "./trace-history-session"
+import type { TraceHistorySource } from "../trace-log/history"
 import {
   selectCommandView,
   selectConversationView,
@@ -32,6 +37,8 @@ export type WebUiGatewayOptions = {
   coordinator: PresentationCoordinator
   controller: InteractiveController
   workspaceExplorer: WorkspaceExplorer
+  traceHistory?: TraceHistorySource
+  traceLive?: TraceLiveSource
   diagnostics?: DiagnosticLog
 }
 
@@ -52,12 +59,22 @@ class WebUiGatewayImpl implements WebUiGateway {
   private readonly unsubscribeCoordinator: () => void
   private readonly unsubscribeExplorer: () => void
 
+  private readonly traceLive: TraceLiveSource | undefined
+  private readonly unsubscribeTrace: () => void
+  private traceRevision = 0
+  private traceSending = Promise.resolve()
+  private readonly traceHistory: TraceHistorySource | undefined
+  private traceSession: TraceHistorySession | null = null
   private channel: GatewayChannel | null = null
   private lastState: WebUiState | null = null
   private revision = 0
+  private readonly inFlight = new Map<string, Promise<IntentOutcome>>()
   private readonly outcomeCache = new Map<string, CachedOutcome>()
 
   constructor(options: WebUiGatewayOptions) {
+    this.traceLive = options.traceLive
+    this.unsubscribeTrace = options.traceLive?.subscribe(span => this.onTraceSpan(span)) ?? (() => {})
+    this.traceHistory = options.traceHistory
     this.coordinator = options.coordinator
     this.controller = options.controller
     this.workspaceExplorer = options.workspaceExplorer
@@ -68,17 +85,24 @@ class WebUiGatewayImpl implements WebUiGateway {
   }
 
   connectRenderer(channel: GatewayChannel, reconnectToken: string): void {
+    this.traceSession?.close()
     this.channel = channel
+    this.traceSession = new TraceHistorySession(this.traceHistory, message => channel.send(message), () => this.channel === channel && isWebActive(this.coordinator.getSnapshot()))
     this.revision = BASE_REVISION
     this.lastState = buildWebUiState(this.controller.getSnapshot(), this.workspaceExplorer.getSnapshot())
     this.diagnostics?.info("presentation.gateway.connected", {})
     void this.send({ type: "handoff.token", token: reconnectToken })
     void this.send({ type: "state.replace", revision: this.revision, state: this.lastState })
     void this.send({ type: "handoff.state", state: this.coordinator.getSnapshot() })
+    this.traceRevision = 0
+    this.traceSending = Promise.resolve()
+    for (const span of this.traceLive?.snapshot() ?? []) this.onTraceSpan(span)
     void this.consume(channel)
   }
 
   async close(): Promise<void> {
+    this.traceSession?.close()
+    this.unsubscribeTrace()
     this.unsubscribeController()
     this.unsubscribeCoordinator()
     this.unsubscribeExplorer()
@@ -102,6 +126,7 @@ class WebUiGatewayImpl implements WebUiGateway {
       // channel fail/close 与 for await 结束走同一个断开收敛路径。
     }
     if (this.channel === channel) {
+      this.traceSession?.close()
       this.channel = null
       this.coordinator.notifyRendererDisconnected("browser-close")
     }
@@ -109,16 +134,26 @@ class WebUiGatewayImpl implements WebUiGateway {
 
   private async handleClientMessage(message: WebUiClientMessage): Promise<void> {
     switch (message.type) {
+      case "trace.load":
+        void this.traceSession?.load(message).catch(() => {})
+        return
       case "handoff.ready":
         this.coordinator.requestReady()
         return
       case "handoff.return":
+        if (this.controller.getSnapshot().git.busy) return
         this.coordinator.requestReturn()
         return
       case "handoff.exit":
+        if (this.controller.getSnapshot().git.busy) return
         this.coordinator.requestExit()
         return
       case "interactive.intent":
+        // Git 写入可持续数秒；继续消费后续帧，才能在到达时拒绝写入期间的新任务。
+        if (message.intent.type === "git.commit" || message.intent.type === "git.push") {
+          void this.handleIntent(message).catch(() => {})
+          return
+        }
         await this.handleIntent(message)
         return
       case "workspace.intent":
@@ -134,6 +169,21 @@ class WebUiGatewayImpl implements WebUiGateway {
       await this.send({ type: "handoff.state", state: this.coordinator.getSnapshot() })
       return
     }
+    const cached = this.outcomeCache.get(`interactive:${requestId}`)
+    if (cached !== undefined) {
+      await this.sendOutcome(requestId, "interactive", cached as IntentOutcome)
+      return
+    }
+    const inFlight = this.inFlight.get(requestId)
+    if (inFlight) {
+      await this.sendOutcome(requestId,"interactive",await inFlight)
+      return
+    }
+    if ((intent.type === "git.commit" || intent.type === "git.push") && revision !== this.revision) {
+      const outcome: IntentOutcome = {status:"rejected",code:"invalid-argument",message:"界面状态已更新，请检查并重新提交。"}
+      await this.sendOutcome(requestId,"interactive",outcome)
+      return
+    }
     // revision 门禁：Browser 视图必须已覆盖最近一次 replace（>=1），且不超前于网关发布序列。
     if (revision < BASE_REVISION || revision > this.revision) {
       await this.sendOutcome(requestId, "interactive", {
@@ -143,25 +193,13 @@ class WebUiGatewayImpl implements WebUiGateway {
       })
       return
     }
-    // 重放去重：同一 requestId 幂等返回已缓存的 outcome，避免传输重试造成重复执行。
-    // （消费循环串行处理帧，同 requestId 不可能并发在飞，无需 in-flight 去重。）
-    const cached = this.outcomeCache.get(`interactive:${requestId}`)
-    if (cached !== undefined) {
-      await this.sendOutcome(requestId, "interactive", cached as IntentOutcome)
-      return
-    }
-    let outcome: IntentOutcome
-    try {
-      outcome = await this.controller.dispatch(intent)
-      outcome = await this.fulfillSideQuestion(outcome)
-    } catch (error) {
-      // dispatch 设计上返回 IntentOutcome，但远端异常仍需收敛为可回传的 rejected。
-      outcome = {
-        status: "rejected",
-        code: "agent-error",
-        message: error instanceof Error ? error.message : String(error),
-      }
-    }
+    const pending = (async (): Promise<IntentOutcome> => {
+      try { return await this.fulfillSideQuestion(await this.controller.dispatch(intent)) }
+      catch { return {status:"rejected",code:"agent-error",message:"操作失败，请刷新后检查当前状态。"} }
+    })()
+    this.inFlight.set(requestId,pending)
+    const outcome = await pending
+    this.inFlight.delete(requestId)
     this.cacheOutcome(requestId, "interactive", outcome)
     await this.sendOutcome(requestId, "interactive", outcome)
   }
@@ -263,6 +301,7 @@ class WebUiGatewayImpl implements WebUiGateway {
     if (this.channel === null) return
     void this.send({ type: "handoff.state", state })
     if (state.phase === "returning-tui" || state.phase === "tui-active") {
+      this.traceSession?.close()
       const channel = this.channel
       this.channel = null
       void channel.close(1000, "handoff-converged")
@@ -277,6 +316,20 @@ class WebUiGatewayImpl implements WebUiGateway {
       return
     }
     await this.send({ type: "intent.outcome", requestId, domain, outcome: outcome as WorkspaceOutcome })
+  }
+
+  /** 单连接顺序发布；旧连接队列在执行时检查身份，不借当前 send 路由到新连接。 */
+  private onTraceSpan(span: TraceSpanEvent): void {
+    const channel = this.channel
+    if (!channel) return
+    const message = { type: "trace.live" as const, revision: ++this.traceRevision, span }
+    if (!parseServerFrame(JSON.stringify(message))) {
+      this.diagnostics?.warn("logging.dropped", { debug_count: 0, info_count: 0, warn_count: 0, error_count: 0, invalid_count: 1, oversize_count: 0, reason: "contract_violation" })
+      return
+    }
+    this.traceSending = this.traceSending.then(async () => {
+      if (this.channel === channel) await channel.send(message)
+    }).catch(() => {})
   }
 
   private async send(message: WebUiServerMessage): Promise<void> {
