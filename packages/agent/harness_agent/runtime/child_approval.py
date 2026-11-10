@@ -96,7 +96,13 @@ class ChildHitlMiddleware(AgentMiddleware):
         effective_mode = (
             "plan" if plan_constraint_active(context) else current_mode
         )
-        decision = evaluate_permission(tool_name, tool_args, effective_mode, rules)
+        decision = evaluate_permission(
+            tool_name,
+            tool_args,
+            effective_mode,
+            rules,
+            call_id=str(tool_call.get("id") or "") or None,
+        )
         if decision == "deny":
             return self._reject(tool_call, f"权限规则拒绝 {tool_name}：该操作已被 deny 规则禁止，不可覆盖。")
 

@@ -359,14 +359,20 @@ describe("WebApp", () => {
   })
 })
 
- test("顶栏可重新打开文件面板；会话标题显示真实状态", () => {
+ test("顶栏可重新打开文件面板；对话页签与就绪状态同一行，不显示会话标题", () => {
   const { adapter, handle } = mountWebApp(true, makeSnapshot())
   try {
     const toggle = handle.container.querySelector<HTMLButtonElement>('[aria-label="展开右侧面板"]')!
     expect(toggle).not.toBeNull()
     act(() => toggle.click())
     expect(adapter.intentLog).toContainEqual({ type: "dock-open", panel: "code" })
-    expect(handle.container.querySelector(".conversation-heading")?.textContent).toContain("新对话")
+    const toolbar = handle.container.querySelector(".workbench-view-toolbar")
+    expect(toolbar?.textContent).toContain("对话")
+    expect(toolbar?.textContent).toContain("就绪")
+    expect(toolbar?.querySelector('[aria-label="查看文件变更"]')).not.toBeNull()
+    expect(handle.container.querySelector(".conversation-heading")).toBeNull()
+    expect(handle.container.querySelector(".conversation-column h1")).toBeNull()
+    expect(handle.container.textContent).not.toContain("本地工作区")
   } finally { handle.unmount() }
 })
 

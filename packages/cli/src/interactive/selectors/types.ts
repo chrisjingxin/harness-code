@@ -50,6 +50,7 @@ export type ConversationView = {
   readonly timeline: readonly TimelineItem[]
   readonly runProgress: InteractiveSnapshot["runProgress"]
   readonly lastRun: RunSummary | null
+  readonly runSummaries: Record<string, RunSummary>
   readonly childTimelineExecutionId: string | null
   readonly goal: InteractiveSnapshot["goal"]
   readonly goalPending: InteractiveSnapshot["goalPending"]

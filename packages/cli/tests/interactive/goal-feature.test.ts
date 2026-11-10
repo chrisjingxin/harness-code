@@ -114,6 +114,7 @@ test("Goal continuation 沿用当前审批模式，不会自行选择更宽档�
     initialThreadId: "thread-goal",
     openThreadImpl: async threadId => ({
       thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+      run_summaries: [],
       messages: [],
       plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
       goal: { ...goalProjection(), status: "paused" },
@@ -171,6 +172,7 @@ test("Thread 恢复 Goal projection 但不会自动启动 Run", async () => {
     initialThreadId: "thread-goal",
     openThreadImpl: async threadId => ({
       thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+      run_summaries: [],
       messages: [],
       plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
       goal: goalProjection(),
@@ -190,6 +192,7 @@ test("Thread 恢复 ready/reviewing proposal 时续接审核 Run，不重复显�
       initialThreadId: `thread-${status}`,
       openThreadImpl: async threadId => ({
         thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+        run_summaries: [],
         messages: [],
         plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
         goal: null,
@@ -215,6 +218,7 @@ test("/goal edit 发起同目标修订，支持弹窗修改，pause/resume/clear
     initialThreadId: "thread-goal",
     openThreadImpl: async threadId => ({
       thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+      run_summaries: [],
       messages: [],
       plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
       goal: goalProjection(),
@@ -342,6 +346,7 @@ test("执行中空参 /goal 返回 inspect-overlay，不进入 GoalDock", async 
     initialThreadId: "thread-goal",
     openThreadImpl: async threadId => ({
       thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+      run_summaries: [],
       messages: [],
       plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
       goal: goalProjection(),
@@ -379,6 +384,7 @@ test("执行中 /goal pause 排队，不启动第二 Run、不取消当前 Run",
     initialThreadId: "thread-goal",
     openThreadImpl: async threadId => ({
       thread: { thread_id: threadId, created_at_ms: 1, updated_at_ms: 2, first_message: "", latest_message: "", message_count: 0, title: null },
+      run_summaries: [],
       messages: [],
       plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md", plan_display_path: `~/.harness/plans/${threadId}.md` },
       goal: goalProjection(),

@@ -394,6 +394,7 @@ body.trace-resizing-v, body.trace-resizing-v * {
   color: var(--text);
 }
 
+/* 工作模式与审批模式是同一类标签，共用实心胶囊，不跟彩色方块节点徽章抢色。 */
 .trace-mode-chip {
   display: inline-flex;
   gap: 4px;
@@ -403,27 +404,9 @@ body.trace-resizing-v, body.trace-resizing-v * {
   font-size: 10px;
   font-weight: 650;
   line-height: 16px;
-  border: 1px solid var(--line);
-  background: var(--surface-3);
-  color: var(--text-soft);
-}
-
-.trace-mode-chip.kind-mode {
-  background: var(--accent-soft-2);
-  color: var(--accent-hover);
-  border-color: var(--accent-border);
-}
-
-.trace-mode-chip.appr-auto {
-  background: color-mix(in srgb, var(--success) 14%, transparent);
-  color: var(--success-text);
-  border-color: color-mix(in srgb, var(--success) 35%, transparent);
-}
-
-.trace-mode-chip.appr-yolo {
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
-  color: var(--warning-text);
-  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  border: 1px solid var(--text);
+  background: var(--text);
+  color: var(--bg);
 }
 
 .trace-outcome-chip {

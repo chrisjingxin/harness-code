@@ -40,6 +40,8 @@ def trace_monitor(
     session_id: str | Callable[..., str],
     run_id: str | Callable[..., str],
     log_dir: Path | str | Callable[..., Path | str],
+    capture: str | Callable[..., str] = "full",
+    retention_days: int | Callable[..., int] = 14,
     manual: bool = False,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """建立或复用 Trace；manual=True 时由调用方在 Run 清理后显式关链。"""
@@ -54,6 +56,8 @@ def trace_monitor(
                     session_id=_resolve(session_id, *args, **kwargs),
                     run_id=_resolve(run_id, *args, **kwargs),
                     log_dir=_resolve(log_dir, *args, **kwargs),
+                    capture=_resolve(capture, *args, **kwargs),
+                    retention_days=_resolve(retention_days, *args, **kwargs),
                 )
                 context = recorder.start_trace()
                 return context, _bind_trace(context)
@@ -167,6 +171,8 @@ def func_monitor(
     | Callable[[FunctionCall], Mapping[str, object]]
     | None = None,
     idempotency_key: str | Callable[[FunctionCall], str] | None = None,
+    enabled: Callable[[], bool] | None = None,
+    manual: bool = False,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """把普通或异步函数记录为 Span，无活跃 Trace 时完全透传业务。"""
 
@@ -177,6 +183,8 @@ def func_monitor(
                 return None, None, None, None
             call = FunctionCall(function=function, args=args, kwargs=kwargs)
             try:
+                if enabled is not None and not enabled():
+                    return None, None, None, None
                 key = (
                     idempotency_key(call)
                     if callable(idempotency_key)
@@ -218,6 +226,9 @@ def func_monitor(
             finally:
                 _reset_span(token)
             try:
+                if manual and error is None:
+                    context.recorder.annotate_span(span, final_attributes or {})
+                    return
                 context.recorder.end_span(
                     span,
                     TraceStatus.SUCCESS if error is None else _error_status(error),

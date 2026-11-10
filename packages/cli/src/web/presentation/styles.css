@@ -1657,7 +1657,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --workspace-gap: 16px;
   /* 贴边布局：侧栏/Dock 贴紧窗口左右缘与顶栏下缘并延伸到底，容器外边距归零；
      柔和感由中栏内容块的上下呼吸内边距与浅绿选中态表达。 */
-  --conversation-padding-block-start: 16px;
+  --conversation-padding-block-start: 0px;
   --conversation-padding-block-end: 20px;
   --dock-width: 340px;
   /* Dock 默认宽度：内容列在 Dock 关闭态按它预留（拖宽的宽度只在 Dock 打开时生效）。 */
@@ -1778,7 +1778,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .timeline { padding: 0 0 14px; }
 .timeline-header { display: none; }
 .timeline-message { gap: 4px; margin-bottom: 14px; }
-/* author 行：avatar 与角色名/时间同一行，内容与其文本起点对齐。 */
+/* author 行只留头像和角色名；时间与复制放在正文下方。 */
 .message-head { min-height: 20px; display: flex; align-items: center; gap: 10px; padding-inline-start: 0; }
 .message-avatar {
   width: 24px;
@@ -1793,10 +1793,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-avatar svg { width: 14px; height: 14px; }
 .avatar-user,
 .avatar-assistant { background: var(--surface-2); color: var(--text-soft); }
-.message-author-group { min-width: 0; display: inline-flex; align-items: baseline; gap: 8px; }
 .message-author { color: var(--text-soft); font-size: 12px; font-weight: 650; letter-spacing: 0; }
+.message-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.message-usage { margin-left: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .message-time { color: var(--muted); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.message-body { display: block; width: 100%; padding: 2px 0 0 34px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.message-copy { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--subtle); cursor: pointer; }
+.message-copy:hover { background: var(--surface-2); color: var(--text); }
+.message-copy.copied { color: var(--accent); }
+.message-copy-icon { width: 14px; height: 14px; }
+.message-body { display: block; width: 100%; padding: 2px 0 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+/* 用户气泡与时间、复制按钮作为一组靠右；正文内部保持自然阅读方向。 */
+.message-user .message-body { display: flex; flex-direction: column; align-items: flex-end; gap: 0; }
+.message-user .message-content { max-width: 100%; flex: 0 0 auto; }
+.message-user .message-footer { justify-content: flex-end; margin-top: 4px; }
+.timeline-run-time,
+.timeline-run-process > summary { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+.run-status-live:has(.timeline-run) { margin-top: 0; padding-top: 0; }
+.run-status-live .timeline-run .run-progress { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+.timeline-run-process > summary { cursor: pointer; }
+.timeline-run-process .message-footer,
+.timeline-run-process-live .message-footer,
+.timeline-run[data-running="true"] .message-assistant .message-footer { display: none; }
 .message-user .message-content,
 .message-assistant .message-content { border: 0; box-shadow: none; }
 /* 用户消息是纯文本 div：与 AI markdown 正文同字号行高（14px/1.7），不再继承基础 15px/1.6（2026-08-17 用户确认对齐方向）。 */
@@ -1806,7 +1823,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* Agent 回复与其连续工具调用在时间线上成组；扁平流下只靠间距与缩进表达，不是气泡。 */
 .timeline-agent-group { width: 100%; margin: 0 0 14px; }
 .timeline-agent-group > .timeline-message { margin: 0; }
-/* 工具、推理和待审批卡与内容文本起点（34px）对齐。 */
+/* 工具、推理和待审批卡保留次级内容缩进。 */
 .timeline-tool,
 .reasoning,
 .timeline-interaction,
@@ -1838,10 +1855,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--surface);
   box-shadow: none;
 }
-.composer-tabs { display: flex; align-items: center; gap: 18px; height: 38px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-.composer-tab { position: relative; color: var(--muted); font-size: 12px; line-height: 38px; }
-.composer-tab.is-active { color: var(--accent-hover); font-weight: 650; }
-.composer-tab.is-active::after { content: ""; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
 .composer-textarea { min-height: 52px; padding: 12px 16px 6px; font-size: 14px; }
 /* 聚焦反馈给整卡：全局 textarea:focus-visible 绿框包在全宽 textarea 上会渲染成 tab 下/输入区下两条错位绿线（2026-08-17 用户截图反馈）。 */
 .composer-textarea:focus-visible { outline: 0; }
@@ -1946,13 +1959,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: flex;
   align-items: stretch;
   gap: 0;
-  min-height: 54px;
+  min-height: 36px;
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
 .context-dock-tabs { min-width: 0; flex: 1 1 auto; display: flex; align-items: stretch; gap: 17px; width: auto; padding: 0; border-bottom: 0; overflow-x: auto; }
-.dock-tab { min-height: 54px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; border-bottom: 2px solid transparent; border-radius: 0; font-size: 12px; font-weight: 500; }
+.dock-tab { min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; border-bottom: 2px solid transparent; border-radius: 0; font-size: 12px; font-weight: 500; }
 .dock-tab.is-selected { border-bottom-color: var(--accent); background: transparent; color: var(--accent); font-weight: 500; }
 .panel-close { position: static; align-self: center; flex: 0 0 auto; margin-left: 8px; }
 .context-dock-body { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; padding: 12px 14px 14px; overflow: auto; }
@@ -1997,8 +2010,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 
 /* HC-190：会话独占左栏，文件树与预览共享右侧工作区。 */
-.thread-panel-header { flex: 0 0 auto; padding: 14px 12px 8px; }
-.thread-panel-header .new-thread-button { min-height: 36px; padding: 8px 10px; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text); }
+.thread-panel-header { flex: 0 0 auto; box-sizing: border-box; min-height: 36px; padding: 0 12px; }
+.thread-panel-header .new-thread-button { min-height: 34px; padding: 4px 10px; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text); }
 .thread-panel-header .new-thread-button svg { width: 15px; height: 15px; color: var(--text-soft); }
 .sidebar-search { min-height: 32px; gap: 8px; border: 0; border-radius: 6px; background: var(--sidebar-search-bg); }
 .sidebar-search input { font-size: 12px; }
@@ -2010,10 +2023,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .context-dock-code-scroll > .file-explorer { min-width: 0; min-height: 0; overflow: hidden; }
 
 /* HC-190 原稿复核：品牌、工作区定位与周边面板，消息/工具组件保持既有布局。 */
-.conversation-heading { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 14px; }
-.conversation-heading-copy { min-width: 0; }
-.conversation-heading h1 { margin: 0; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-heading-copy > span { font-size: 11px; color: var(--muted); }
 .conversation-heading-actions { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
 .conversation-run-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-soft); }
 .context-dock-code-scroll > .file-explorer { padding: 8px 12px 12px; }
@@ -2023,7 +2032,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .context-dock-code-scroll .file-row { min-height: 28px; font-size: 11px; border-radius: 5px; }
 @media (max-width: 900px) {
   .topbar-project { display: none; }
-  .conversation-heading { padding-inline: 0; }
 }
 
 /* HC-190：Git 变更文件、Diff 与提交；所有颜色引用独立主题语义。 */

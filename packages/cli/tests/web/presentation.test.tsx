@@ -24,6 +24,7 @@ function snapshot(overrides: Partial<InteractiveSnapshot> = {}): InteractiveSnap
     interaction: null,
     confirmation: null,
     lastRun: null,
+    runSummaries: {},
     runtime: {
       workspace: "/workspace",
       cliVersion: "0.1.0",

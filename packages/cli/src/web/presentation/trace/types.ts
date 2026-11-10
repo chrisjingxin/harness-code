@@ -8,6 +8,17 @@ export type TraceTreeNode = {
   readonly children: readonly TraceTreeNode[]
 }
 
+/** 主 Run 根节点承载服务端冻结的总耗时，不能用采集跨度代替。 */
+export function isRunRoot(span: TraceSpanEvent): boolean {
+  return span.name === "run.root" || (span.type?.toUpperCase() === "ROOT" && span.name === "run")
+}
+
+/** 旧日志缺少权威值时返回未知，不从子节点或墙钟包络猜测。 */
+export function runDurationMs(span: TraceSpanEvent): number | null {
+  const value = span.metadata?.run_duration_ms
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 /**
  * 按 parent_span_id 建树：parent="0"/自环/父不在当前集合时挂根；子节点与根均按
  * startTime 升序（对齐 trace_viewer.py TraceGroup.build_tree）。
@@ -46,6 +57,10 @@ export function simplifyTree(nodes: readonly TraceTreeNode[]): readonly TraceTre
   const out: TraceTreeNode[] = []
   for (const node of nodes ?? []) {
     const kids = simplifyTree(node.children)
+    if (node.span.raw.schema_version === 2) {
+      out.push({ ...node, children: kids })
+      continue
+    }
     if (isNoiseNode(node)) {
       out.push(...kids)
       continue
@@ -77,6 +92,8 @@ export function ganttLanes(nodes: readonly TraceTreeNode[]): ReadonlyMap<string,
   const laneOf = (node: TraceTreeNode): number | null => {
     const type = String(node.span.type ?? "").toUpperCase()
     const name = node.span.name ?? ""
+    if (node.span.raw.schema_version === 2 && type === "ROOT") return 0
+    if (node.span.raw.schema_version === 2 && type === "INTERACTION") return null
     if (type === "TOOL" || isToolsNode(node)) return 2
     if (type === "LLM" || name === "model" || isModelShell(node)) return 1
     if (name === "run.accept" || type === "INTERACTION") return 0
@@ -124,6 +141,12 @@ export function buildTree(spans: readonly TraceSpanEvent[]): readonly TraceTreeN
   const sortSpan = (a: TraceSpanEvent, b: TraceSpanEvent) => a.startTime - b.startTime
   const build = (span: TraceSpanEvent): TraceTreeNode => {
     const kids = (childrenOf.get(span.spanId) ?? []).sort(sortSpan).map(build)
+    const persists = kids.filter(child => child.span.name === "db.persist")
+    if (span.name === "step" && persists.length > 1) {
+      const first = persists[0]!.span
+      const group: TraceTreeNode = { span: { ...first, spanId: `${span.spanId}:db-group`, name: `数据库事务（${persists.length}）`, metadata: { transactions: persists.length }, raw: { schema_version: 2 }, durationMs: persists.reduce((sum, child) => sum + (child.span.durationMs ?? 0), 0) }, children: persists }
+      return { span, children: [...kids.filter(child => child.span.name !== "db.persist"), group].sort((a, b) => a.span.startTime - b.span.startTime) }
+    }
     return { span, children: kids }
   }
   return roots.sort(sortSpan).map(build)

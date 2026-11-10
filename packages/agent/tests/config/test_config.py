@@ -466,7 +466,33 @@ def test_execution_defaults_to_local_and_redacts_security_summary(tmp_path: Path
         "ui": "default",
         "diagnostics": "default",
         "goal": "default",
+        "trace": "default",
     }
+
+
+def test_trace_settings_reject_illegal_capture_and_keep_valid_values(tmp_path: Path):
+    """[trace] 非法档位失败；合法值进入配置，默认是 full / 14 天。"""
+    defaults = load_config(workspace=tmp_path, home=tmp_path / "home", environ={})
+    assert defaults.trace.capture == "full"
+    assert defaults.trace.retention_days == 14
+
+    invalid = tmp_path / "invalid-trace.toml"
+    invalid.write_text(
+        '[config]\nversion = 1\n\n[trace]\ncapture = "verbose"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="trace.capture"):
+        load_config(workspace=tmp_path, home=tmp_path / "home", config_path=invalid, environ={})
+
+    valid = tmp_path / "valid-trace.toml"
+    valid.write_text(
+        '[config]\nversion = 1\n\n[trace]\ncapture = "meta"\nretention_days = 7\n',
+        encoding="utf-8",
+    )
+    config = load_config(workspace=tmp_path, home=tmp_path / "home", config_path=valid, environ={})
+    assert config.trace.capture == "meta"
+    assert config.trace.retention_days == 7
+    assert config.redacted()["trace"] == {"capture": "meta", "retention_days": 7}
 
 
 def test_agent_engine_pool_configuration_is_parsed_and_rejects_invalid_values(tmp_path: Path):

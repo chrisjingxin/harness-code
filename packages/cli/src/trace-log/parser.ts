@@ -34,8 +34,8 @@ function extractSessionJsonl(text: string): readonly Record<string, unknown>[] {
       const parsed: unknown = JSON.parse(trimmed)
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue
       const record = parsed as Record<string, unknown>
-      if (record.schema_version !== 1) continue
-      if (!["trace.start", "trace.end", "span.start", "span.end"].includes(String(record.event))) continue
+      if (record.schema_version !== 2) continue
+      if (!["trace.start", "trace.end", "span.start", "span.end", "payload"].includes(String(record.event))) continue
       results.push(record)
     } catch {
       // 追加写入中的半行或畸形条目等待下次完整读取。
@@ -73,7 +73,7 @@ function normalizeSpan(traceId: string, spanId: string, json: Record<string, unk
   const endTime = endValue ?? null
   const durationMs = typeof json.duration_ms === "number" && Number.isFinite(json.duration_ms)
     ? json.duration_ms
-    : hasEnd
+    : json.schema_version === 2 ? null : hasEnd
       ? Math.max(0, endTime! - startTime)
       : null
   const parentSpanId = typeof json.parent_span_id === "string"
@@ -130,6 +130,9 @@ export function extractThreadId(json: Record<string, unknown>, metadata: Record<
 
 /** 跨文件共享 start/end 缓冲，不保留整份日志文本；同键按内网既有规则合并。 */
 export class TraceLogParser {
+  /** 工作区 v2 读取禁用 marker；内网 SDK 来源保留原解析方式。 */
+  constructor(private readonly includeMarkers = true) {}
+  private readonly payloads = new Map<string, Record<string, unknown>>()
   private readonly starts = new Map<string, Record<string, unknown>>()
   private readonly ends = new Map<string, Record<string, unknown>>()
   private readonly keys = new Set<string>()
@@ -139,7 +142,13 @@ export class TraceLogParser {
 
   /** 接收一份完整日志；同一物理行内的多个 marker 都会解析，畸形记录跳过。 */
   pushText(text: string): void {
-    for (const json of extractRecords(text)) {
+    for (const json of this.includeMarkers ? extractRecords(text) : extractSessionJsonl(text)) {
+      if (json.event === "payload" && typeof json.payload_id === "string" && typeof json.trace_id === "string") {
+        const entries = this.payloads.get(json.trace_id) ?? {}
+        Object.defineProperty(entries, json.payload_id, { value: { bytes: json.bytes, kind: json.kind, body: json.body }, enumerable: true, configurable: true })
+        this.payloads.set(json.trace_id, entries)
+        continue
+      }
       const spanId = typeof json.span_id === "string" ? json.span_id : undefined
       if (!spanId) continue
       const traceId = typeof json.trace_id === "string" ? json.trace_id : "unknown-trace"
@@ -160,7 +169,7 @@ export class TraceLogParser {
       // 父子关系以 start 日志为准（对齐 Tailer 单批逻辑与 trace_viewer._merge_trace_method_entries）。
       const startParent = startJson && typeof startJson.parent_span_id === "string" ? startJson.parent_span_id : undefined
       const endParent = typeof endJson.parent_span_id === "string" ? endJson.parent_span_id : undefined
-      mergedJson.parent_span_id = startParent ?? endParent ?? "0"
+      mergedJson.parent_span_id = endJson.schema_version === 2 ? endParent ?? "0" : startParent ?? endParent ?? "0"
       const startMeta = startJson ? recordValue(startJson.metadata) ?? recordValue(startJson.attributes) : undefined
       const endMeta = recordValue(endJson.metadata) ?? recordValue(endJson.attributes)
       if (startMeta || endMeta) {
@@ -176,7 +185,21 @@ export class TraceLogParser {
       const [traceId, spanId] = JSON.parse(key) as [string, string]
       spans.push(normalizeSpan(traceId, spanId, startJson))
     }
-    return spans
+    return spans.map(span => {
+      if (span.raw.schema_version !== 2) return span
+      // 每个节点只携带自己的引用，避免经网关逐 span 重复发送整份会话正文。
+      const available = this.payloads.get(span.traceId) ?? {}
+      const referenced: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(span.metadata ?? {})) {
+        const ids = key.endsWith("_refs") && Array.isArray(value) ? value : key.endsWith("_ref") ? [value] : []
+        for (const id of ids) {
+          if (typeof id === "string" && Object.hasOwn(available, id)) {
+            Object.defineProperty(referenced, id, { value: available[id], enumerable: true, configurable: true })
+          }
+        }
+      }
+      return { ...span, raw: { ...span.raw, payloads: referenced } }
+    })
   }
 }
 

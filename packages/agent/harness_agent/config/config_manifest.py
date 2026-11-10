@@ -58,6 +58,7 @@ class ConfigManifest:
         "compose": ConfigSection("compose", "implemented", ACTIVE_TOML_SOURCES),
         "ui": ConfigSection("ui", "implemented", ACTIVE_TOML_SOURCES),
         "diagnostics": ConfigSection("diagnostics", "implemented", ACTIVE_TOML_SOURCES),
+        "trace": ConfigSection("trace", "implemented", ACTIVE_TOML_SOURCES),
         "skills": ConfigSection("skills", "planned", frozenset()),
         "agents": ConfigSection("agents", "planned", frozenset()),
         "mcp": ConfigSection("mcp", "implemented", ACTIVE_TOML_SOURCES),

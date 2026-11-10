@@ -8,7 +8,7 @@ import type { TraceViewState } from "./view-state"
 import { GanttChart } from "./gantt"
 import { TraceDetail } from "./trace-detail"
 import { TraceTree } from "./trace-tree"
-import { buildTree, extractRunModes, type TraceTreeNode, type TraceUserMessages } from "./types"
+import { buildTree, extractRunModes, extractUserMessage, type TraceTreeNode, type TraceUserMessages } from "./types"
 
 /** 甘特区请求高度；可视高度由 CSS 按可用空间约束，三条泳道始终完整。 */
 const INITIAL_GANTT_HEIGHT = 96
@@ -45,7 +45,11 @@ function ThreadTraceView(props: {
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [ganttHeight, setGanttHeight] = useState(INITIAL_GANTT_HEIGHT)
   const [detailWidth, setDetailWidth] = useState(INITIAL_DETAIL_WIDTH)
-  const allSpans = state.spans
+  const allSpans = useMemo(() => state.spans.map(span => {
+    if (span.raw.schema_version !== 2 || span.type !== "ROOT") return span
+    const input = extractUserMessage([span], props.userMessages)
+    return input ? { ...span, metadata: { ...span.metadata, user_input: input } } : span
+  }), [state.spans, props.userMessages])
   const hasAnyTrace = state.hasAnyTrace
   // spanKey → 完整子树节点索引（simple 详情需要 children 提取模型/工具；对齐原型 selectNode(node)）。
   const nodeIndex = useMemo(() => {

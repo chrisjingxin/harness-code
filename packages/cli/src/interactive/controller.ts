@@ -714,6 +714,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       interaction: this.interactionFeature.interactionDto(this.interactionFeature.pendingInteraction, this.clock),
       confirmation: this.confirmation,
       lastRun: this.state.lastRun ?? null,
+      runSummaries: this.state.runSummaries,
       runtime: { ...this.baseRuntime, approvalMode: this.runFeature.currentApprovalMode(this.baseRuntime.approvalMode), approvalModeRevision: this.runFeature.approvalModeRevision, modelProfileId: this.modelFeature.requestedModelProfileId ?? undefined },
       connection: this.connection,
       catalogs: { threads: publicCatalog(this.catalogFeature.state.threads), models: publicCatalog(this.catalogFeature.state.models), skills: publicCatalog(this.catalogFeature.state.skills), mcp: publicCatalog(this.catalogFeature.state.mcp), agents: publicCatalog(this.catalogFeature.state.agents) },

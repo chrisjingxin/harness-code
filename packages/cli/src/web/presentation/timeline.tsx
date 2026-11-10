@@ -19,7 +19,6 @@ import {
   Globe,
   ListTodo,
   Loader2,
-  MessageCircle,
   MessageCircleQuestion,
   Search,
   Sparkles,
@@ -29,7 +28,9 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import {
+  createContext,
   memo,
+  useContext,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -74,6 +75,7 @@ import {
 import type {
   ComposeProjection,
   ConversationMessage,
+  RunSummary,
   GoalEvaluationCard,
   InteractionCard,
   ReasoningCard,
@@ -113,7 +115,7 @@ export function Timeline({
   // home/idle 即「就绪」：就绪即沉默，底部状态区留白；其余活动标签（失败/取消/压缩等瞬态）照常展示。
   const idleActivity = snapshot.interactive.activity.kind === "home" || snapshot.interactive.activity.kind === "idle"
   const baseElapsedMs = snapshot.interactive.runProgress?.elapsedMs
-  const elapsedMs = useLiveElapsed(Boolean(activeRun), baseElapsedMs)
+  const elapsedMs = useLiveElapsed(activeRun?.runId ?? null, baseElapsedMs)
 
   /**
    * 真正的滚动容器是父级 .timeline-scroll（overflow-y: auto）；.timeline 是不滚动的内容层。
@@ -198,7 +200,7 @@ export function Timeline({
 
   const visibleItems = timeline.filter(item => {
     if (isPendingLive(item, pendingRequestId)) return false
-    if (item.type === "reasoning" && !item.reasoning.active) return false
+    if (item.type === "reasoning" && !item.reasoning.active && activeRun?.runId === item.reasoning.runId) return false
     if (item.type === "message" && item.message.role === "assistant" && !item.message.streaming && !item.message.content.trim()) {
       return false
     }
@@ -248,9 +250,9 @@ export function Timeline({
       stage: compose.currentStage,
       taskTitle: null,
       phaseLabel,
-      elapsedLabel: formatElapsed(elapsedMs),
+      elapsedLabel: formatLiveElapsed(elapsedMs),
     })} · 点停止取消`
-    : `${phaseLabel} · 已运行 ${formatElapsed(elapsedMs)} · 点停止取消`
+    : `已处理 ${formatLiveElapsed(elapsedMs)}`
 
   // Compose 分段器会把无 scope 的 Build 条目拆成多个 flat segment；先恢复连续 flat 条目，
   // 再交给 Agent 分组渲染，保证 Build 与 Compose 两条路径都能共享同一套气泡结构。
@@ -264,6 +266,13 @@ export function Timeline({
         <TimelineGroup
           key={timelineItemKey(first)}
           items={items}
+          run={!compose && !snapshot.interactive.childTimelineExecutionId && first.type !== "interaction" && first.type !== "compose-summary" && first.type !== "goal-evaluation" && !(first.type === "message" && first.message.role !== "assistant") ? (() => {
+            const id = first.type === "message" ? first.message.runId : first.type === "tool" ? first.tool.runId : first.reasoning.runId
+            if (!id || items.some(item => item.type === "message" && item.message.role === "assistant" && !item.message.runId)) return undefined
+            const active = activeRun?.runId === id
+            const summary = snapshot.interactive.runSummaries[id]
+            return { active, elapsed: active ? elapsedMs : summary?.durationMs, outcome: summary?.outcome ?? "completed", usage: summary?.usage }
+          })() : undefined}
           expandedTools={snapshot.expandedTools}
           onToggleTool={handleToggleTool}
           onOpenChildTimeline={handleOpenChildTimeline}
@@ -331,17 +340,23 @@ export function Timeline({
       )}
       <div className="live-interaction-slot" data-pending-request-id={pendingRequestId ?? undefined} />
       <div className="run-status-live" aria-live="polite">
-        {activeRun ? (
+        {activeRun && (compose || !visibleItems.some(item =>
+          (item.type === "message" && item.message.role === "assistant" && item.message.runId === activeRun.runId)
+          || (item.type === "tool" && item.tool.runId === activeRun.runId)
+          || (item.type === "reasoning" && item.reasoning.runId === activeRun.runId))) ? (
+          <div className={compose ? undefined : "timeline-agent-group timeline-run"}>
+          {compose ? null : <AgentGroupHeader />}
           <div
             className="run-progress"
             role="status"
             aria-live="polite"
             data-phase={snapshot.interactive.runProgress?.phase ?? "preparing"}
           >
-            <Loader2 aria-hidden="true" focusable="false" className="run-progress-spinner spinning" />
+            {compose ? <Loader2 aria-hidden="true" focusable="false" className="run-progress-spinner spinning" /> : null}
             <span>{liveLine}</span>
           </div>
-        ) : idleActivity ? null : activityLabel(snapshot.interactive.activity.kind)}
+          </div>
+        ) : idleActivity || snapshot.interactive.activity.kind === "completed" || activeRun ? null : activityLabel(snapshot.interactive.activity.kind)}
       </div>
       {showScrollButton ? (
         <button
@@ -416,14 +431,22 @@ function ActivityGroup({
   )
 }
 
+/** 运行中的计时只显示已经走完的整数秒，终态仍使用实际耗时格式。 */
+function formatLiveElapsed(durationMs: number): string {
+  return `${Number.isFinite(durationMs) ? Math.floor(Math.max(0, durationMs) / 1000) : 0}s`
+}
+
 /** 以最近一次 Host elapsed_ms 为基准连续更新活动时长；无 active Run 时停止计时。 */
-function useLiveElapsed(active: boolean, baseElapsedMs: number | undefined): number {
+function useLiveElapsed(active: string | null, baseElapsedMs: number | undefined): number {
   const [elapsedMs, setElapsedMs] = useState(baseElapsedMs ?? 0)
+  const anchor = useRef<{ runId: string; startedAt: number } | null>(null)
   useEffect(() => {
     const base = Math.max(0, baseElapsedMs ?? 0)
-    setElapsedMs(base)
-    if (!active) return
-    const startedAt = Date.now() - base
+    if (!active) { anchor.current = null; return }
+    const candidate = Date.now() - base
+    const startedAt = anchor.current?.runId === active ? Math.min(anchor.current.startedAt, candidate) : candidate
+    anchor.current = { runId: active, startedAt }
+    setElapsedMs(Math.max(0, Date.now() - startedAt))
     const timer = window.setInterval(() => setElapsedMs(Math.max(0, Date.now() - startedAt)), 1_000)
     return () => window.clearInterval(timer)
   }, [active, baseElapsedMs])
@@ -479,7 +502,10 @@ function groupTimelineItems(items: TimelineItem[]): TimelineItem[][] {
       const next = items[index + 1]
       if (!next) break
       if (isAssistantMessage(next)) {
-        if (hasAssistant) break
+        if (hasAssistant) {
+          const firstRun = item.type === "message" ? item.message.runId : item.type === "tool" ? item.tool.runId : item.type === "reasoning" ? item.reasoning.runId : undefined
+          if (!firstRun || next.message.runId !== firstRun) break
+        }
         hasAssistant = true
       } else if (!isAgentContinuation(next)) {
         break
@@ -500,19 +526,52 @@ function isAgentContinuation(item: TimelineItem): boolean {
   return item.type === "reasoning" || item.type === "tool"
 }
 
+type RunDisplay = { active: boolean; elapsed?: number; outcome: string; usage?: RunSummary["usage"] }
+
+const unknownUsage = { inputTokens: null, outputTokens: null, inputComplete: false, outputComplete: false }
+const RunUsageContext = createContext<RunSummary["usage"]>(undefined)
+
+/** 格式化一轮的已知小计，明确标出未知和不完整值。 */
+function UsageLabel({ usage }: { usage: RunSummary["usage"] }): ReactElement {
+  const count = (value: number | null | undefined, complete?: boolean): string => value == null ? "未知" : `${complete ? "" : "≥"}${value.toLocaleString("en-US")}${complete ? "" : "（统计不完整）"}`
+  return <span className="message-usage">输入 {count(usage?.inputTokens, usage?.inputComplete)} · 输出 {count(usage?.outputTokens, usage?.outputComplete)} Token</span>
+}
+
+/** Build 的一轮只显示一个标题与总计时，完成后将过程收进原生可访问折叠区。 */
+function RunTimelineGroup({ items, run, expandedTools, onToggleTool, onOpenChildTimeline, liveKey }: {
+  items: TimelineItem[]; run: RunDisplay; expandedTools: ReadonlySet<string>
+  onToggleTool: (runId: string, toolId: string) => void
+  onOpenChildTimeline?: (executionId: string) => void; liveKey: string | null
+}): ReactElement {
+  const finalIndex = items.findLastIndex(isAssistantMessage)
+  const final = finalIndex >= 0 ? items[finalIndex] : undefined
+  const process = items.filter((_, index) => index !== finalIndex)
+  const renderItem = (item: TimelineItem) => <TimelineRow key={timelineItemKey(item)} item={item} expandedTools={expandedTools} onToggleTool={onToggleTool} onOpenChildTimeline={onOpenChildTimeline} liveKey={liveKey} grouped />
+  const label = `${run.active ? "已处理" : run.outcome === "completed" ? "已完成" : run.outcome === "cancelled" ? "已取消" : "执行失败"}${run.elapsed === undefined ? "" : ` ${(run.active ? formatLiveElapsed(run.elapsed) : formatElapsed(run.elapsed))}`}`
+  return <div className="timeline-agent-group timeline-run" data-running={run.active}>
+    <AgentGroupHeader />
+    {run.active ? <><div className="timeline-run-time" role="status">{label}</div><div className="timeline-run-process-live">{process.map(renderItem)}</div></>
+      : <details className="timeline-run-process"><summary>{label}</summary>{process.map(renderItem)}</details>}
+    {final ? <div className="timeline-run-final"><RunUsageContext.Provider value={run.active ? undefined : run.usage ?? unknownUsage}>{renderItem(final)}</RunUsageContext.Provider></div> : !run.active ? <UsageLabel usage={run.usage} /> : null}
+  </div>
+}
+
 function TimelineGroup({
   items,
   expandedTools,
   onToggleTool,
   onOpenChildTimeline,
   liveKey,
+  run,
 }: {
+  run?: RunDisplay
   items: TimelineItem[]
   expandedTools: ReadonlySet<string>
   onToggleTool: (runId: string, toolId: string) => void
   onOpenChildTimeline?: (executionId: string) => void
   liveKey: string | null
 }): ReactElement {
+  if (run) return <RunTimelineGroup items={items} run={run} expandedTools={expandedTools} onToggleTool={onToggleTool} onOpenChildTimeline={onOpenChildTimeline} liveKey={liveKey} />
   const assistantIndex = items.findIndex(isAssistantMessage)
   const reasoningItems = items.filter((item): item is Extract<TimelineItem, { type: "reasoning" }> => item.type === "reasoning")
   if (assistantIndex < 0) {
@@ -551,7 +610,7 @@ function TimelineGroup({
 
   return (
     <div className="timeline-agent-group" data-tool-grouped="true">
-      <AgentGroupHeader message={assistant.message} />
+      <AgentGroupHeader />
       {items.map(item => {
         if (item.type === "reasoning") {
           return <ReasoningRow key={timelineItemKey(item)} reasoning={item.reasoning} />
@@ -640,22 +699,19 @@ function TimelineRowImpl({
   )
 }
 
-function AgentGroupHeader({ message }: { message?: ConversationMessage }): ReactElement {
+function AgentGroupHeader(): ReactElement {
   return (
     <div className="timeline-agent-group-header agent-message-card">
-      <AgentMessageHeader timestampMs={message?.createdAtMs} />
+      <AgentMessageHeader />
     </div>
   )
 }
 
-function AgentMessageHeader({ timestampMs }: { timestampMs?: number }): ReactElement {
+function AgentMessageHeader(): ReactElement {
   return (
     <div className="message-head">
       <span className="message-avatar avatar-assistant" aria-hidden="true"><Sparkles size={16} strokeWidth={1.8} /></span>
-      <span className="message-author-group">
-        <span className="message-author">Agent</span>
-        <MessageTimestamp timestampMs={timestampMs} />
-      </span>
+      <span className="message-author">Agent</span>
     </div>
   )
 }
@@ -774,7 +830,7 @@ function StreamingAssistantBubble({
 }): ReactElement {
   return (
     <div className="timeline-message message-assistant agent-message-card" data-streaming="true">
-      {showHeader ? <AgentMessageHeader timestampMs={message.createdAtMs} /> : null}
+      {showHeader ? <AgentMessageHeader /> : null}
       <div className="message-body">
         <div className="message-content">
           {message.content.length > 0 ? <Markdown text={message.content} /> : null}
@@ -785,7 +841,7 @@ function StreamingAssistantBubble({
   )
 }
 
-/** 用户、Assistant（已结束）和系统消息；统一左对齐阅读流，角色由 avatar 标识。 */
+/** 用户、Assistant（已结束）和系统消息。用户只显示问题本身；Agent 仍用头像和名称。 */
 function MessageBubbleImpl({
   message,
   showHeader,
@@ -796,11 +852,12 @@ function MessageBubbleImpl({
   if (message.role === "assistant") {
     return (
       <div className="timeline-message message-assistant agent-message-card" data-streaming={message.streaming ? "true" : undefined}>
-        {showHeader ? <AgentMessageHeader timestampMs={message.createdAtMs} /> : null}
+        {showHeader ? <AgentMessageHeader /> : null}
         <div className="message-body">
           <div className="message-content">
             {message.content.length > 0 ? <Markdown text={message.content} /> : null}
           </div>
+          <MessageFooter content={message.content} timestampMs={message.createdAtMs} />
         </div>
       </div>
     )
@@ -814,18 +871,42 @@ function MessageBubbleImpl({
   }
   return (
     <div className="timeline-message message-user user-message-card">
-      <div className="message-head">
-        <span className="message-avatar avatar-user" aria-hidden="true"><MessageCircle size={16} strokeWidth={1.8} /></span>
-        <span className="message-author-group">
-          <span className="message-author">用户</span>
-          <MessageTimestamp timestampMs={message.createdAtMs} />
-        </span>
-      </div>
       <div className="message-body">
         <div className="message-content">
           {message.content}
         </div>
+        <MessageFooter content={message.content} timestampMs={message.createdAtMs} />
       </div>
+    </div>
+  )
+}
+
+/** 正文下方的时间与复制：时间在左，复制按钮在右。 */
+function MessageFooter({ content, timestampMs }: { content: string; timestampMs?: number }): ReactElement {
+  const usage = useContext(RunUsageContext)
+  const [copied, setCopied] = useState(false)
+  const copyMessage = (): void => {
+    const write = navigator.clipboard?.writeText(content) ?? Promise.resolve()
+    void write.then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    }).catch(() => {})
+  }
+  return (
+    <div className="message-footer">
+      <MessageTimestamp timestampMs={timestampMs} />
+      <button
+        type="button"
+        className={copied ? "message-copy copied" : "message-copy"}
+        aria-label="复制消息"
+        title="复制消息"
+        onClick={copyMessage}
+      >
+        {copied
+          ? <Check aria-hidden="true" focusable="false" className="message-copy-icon" />
+          : <Copy aria-hidden="true" focusable="false" className="message-copy-icon" />}
+      </button>
+      {usage ? <UsageLabel usage={usage} /> : null}
     </div>
   )
 }

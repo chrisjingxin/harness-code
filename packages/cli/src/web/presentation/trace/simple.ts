@@ -187,7 +187,7 @@ function firstTokenOf(node: TraceTreeNode): number | null {
 /** 节点耗时：node 自身 durationMs，缺失时回退子树内首个有耗时的 span（LLM/TOOL 只有 start 日志时兜底）。 */
 function nodeDurationMs(node: TraceTreeNode): number | null {
   const own = node.span.durationMs
-  if (own != null) return own
+  if (own != null || node.span.raw.schema_version === 2) return own
   for (const child of node.children) {
     const hit = nodeDurationMs(child)
     if (hit != null) return hit

@@ -31,7 +31,7 @@ from harness_agent.runtime.execution_stream import (
     execute as execute_stream,
 )
 from harness_agent.diagnostic_log.runtime import DiagnosticLog, ensure_log
-from harness_agent.tracing import FunctionCall, func_monitor
+from harness_agent.tracing import current_trace
 from harness_agent.runtime.provider_retry import (
     is_provider_error,
     is_provider_rate_limited,
@@ -332,26 +332,6 @@ class ManagedAgentResult:
     warning: str = ""
 
 
-def _runtime_acquire_attributes(call: FunctionCall) -> dict[str, object]:
-    """只投影 runtime 来源、排队与构建耗时，不记录资源内部状态。"""
-    if call.error is not None:
-        return {"outcome": "cancelled" if isinstance(call.error, asyncio.CancelledError) else "failed"}
-    runtime = call.result
-    return {
-        "source": getattr(runtime, "acquire_source", "reused"),
-        "queue_ms": max(0, int(getattr(runtime, "queue_ms", 0))),
-        "build_ms": max(0, int(getattr(runtime, "build_ms", 0))),
-        "outcome": "acquired",
-    }
-
-
-def _runtime_release_attributes(call: FunctionCall) -> dict[str, object]:
-    """记录真实 release 结果；未获取 runtime 时不会调用此 Span。"""
-    if call.error is None:
-        return {"outcome": "released"}
-    return {"outcome": "cancelled" if isinstance(call.error, asyncio.CancelledError) else "failed"}
-
-
 class ManagedAgentExecutor:
     """统一拥有 Agent runtime、shared stream 与 Interaction resume loop。"""
 
@@ -365,10 +345,6 @@ class ManagedAgentExecutor:
         self._clock = clock
         self._sleep = sleep
 
-    @func_monitor(
-        name="run.execute",
-        idempotency_key=lambda call: f"run.execute:{call.args[1].idempotency_key}",
-    )
     async def execute(
         self,
         request: ManagedAgentRequest,
@@ -387,12 +363,17 @@ class ManagedAgentExecutor:
                     request.timing.begin_active() if request.timing is not None else None
                 )
                 try:
-                    observed_acquire = func_monitor(
-                        name="runtime.acquire",
-                        attributes=_runtime_acquire_attributes,
-                        idempotency_key=f"runtime.acquire:{request.idempotency_key}",
-                    )(request.runtime_provider)
-                    runtime = await observed_acquire()
+                    runtime = await request.runtime_provider()
+                    trace = current_trace()
+                    if trace is not None:
+                        try:
+                            trace.recorder.annotate_root({
+                                "source": getattr(runtime, "acquire_source", "reused"),
+                                "queue_ms": max(0, int(getattr(runtime, "queue_ms", 0))),
+                                "build_ms": max(0, int(getattr(runtime, "build_ms", 0))),
+                            })
+                        except Exception:
+                            logger.warning("运行时 trace 采集失败", exc_info=True)
                 except BaseException as exc:
                     request.diagnostic_log.error(
                         "runtime.acquire.failed",
@@ -430,12 +411,7 @@ class ManagedAgentExecutor:
             if runtime is not None:
                 release_started = self._clock()
                 try:
-                    observed_release = func_monitor(
-                        name="runtime.release",
-                        attributes=_runtime_release_attributes,
-                        idempotency_key=f"runtime.release:{request.idempotency_key}",
-                    )(runtime.release)
-                    await observed_release()
+                    await runtime.release()
                 except asyncio.CancelledError:
                     # 保持 Task cancellation 语义；Coordinator 会将它收敛为唯一
                     # cancelled terminal，不能当作普通清理诊断吞掉。

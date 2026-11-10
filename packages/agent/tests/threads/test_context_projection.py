@@ -95,7 +95,7 @@ async def test_context_project_trace_records_checkpoint_match_and_message_count(
         for event in events
         if event["event"] == "span.end" and event["name"] == "context.project"
     ]
-    assert [event["attributes"] for event in ends] == [
+    assert [{key: event["attributes"][key] for key in ("matched", "count")} for event in ends] == [
         {"matched": False, "count": 1},
         {"matched": True, "count": 1},
     ]

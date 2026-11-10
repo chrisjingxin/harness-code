@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any, Literal, Protocol
 
 from harness_agent.runtime.provider_retry import is_provider_transient
+from harness_agent.runtime.run_usage import RunUsage, UsageCallback, current_run_usage
 from harness_agent.tracing import current_trace
 
 # 单条工具 payload 的 1 MiB wire 上限；与 schema x-harness / host 同步。
@@ -61,6 +62,7 @@ class StreamSession:
     """
 
     run_id: str
+    usage_collector: RunUsage = field(default_factory=RunUsage)
     started_at: float = field(default_factory=time.monotonic)
     usage: dict[str, int] = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
@@ -90,7 +92,7 @@ class StreamSession:
         """复制一次 provider attempt 的内存状态，供失败回滚使用。"""
         return {
             item.name: deepcopy(getattr(self, item.name))
-            for item in fields(self)
+            for item in fields(self) if item.name != "usage_collector"
         }
 
     def restore(self, snapshot: Mapping[str, object]) -> None:
@@ -100,12 +102,17 @@ class StreamSession:
         只能原地清空再写入，否则失败重试后统计会被拆到两个字典里。
         """
         for item in fields(self):
+            # 请求用量是已发生的事实，provider 输出回滚不能抹去重试的消耗。
+            if item.name == "usage_collector":
+                continue
             value = deepcopy(snapshot[item.name])
             if item.name == "usage" and isinstance(self.usage, dict) and isinstance(value, dict):
                 self.usage.clear()
                 self.usage.update(value)
             else:
                 setattr(self, item.name, value)
+        self.usage.clear()
+        self.usage.update(self.usage_collector.numeric_totals())
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +238,13 @@ async def execute(
         metadata["harness_execution_id"] = expected_execution_id
         stream_config["metadata"] = metadata
     trace_context = current_trace()
+    raw = stream_config.get("callbacks")
+    callbacks = list(raw) if isinstance(raw, (list, tuple)) else ([raw] if raw is not None else [])
+    root_usage = current_run_usage.get()
+    for collector, counts in ((session.usage_collector, session.usage), (root_usage, None)):
+        if collector is not None and not any(isinstance(callback, UsageCallback) and callback.usage is collector for callback in callbacks):
+            callbacks.append(UsageCallback(collector, counts))
+    stream_config["callbacks"] = callbacks
     if trace_context is not None:
         raw_callbacks = stream_config.get("callbacks")
         if raw_callbacks is None:
@@ -751,7 +765,6 @@ def translate_stream_event(
     chunk = data[0]
     if type(chunk).__name__ in {"AIMessage", "AIMessageChunk"}:
         ensure_model_round_for_assistant(session)
-    update_usage(session, getattr(chunk, "usage_metadata", None), chunk=chunk)
     events: list[ExecutionSignal] = []
     content = message_text(chunk)
     if content and type(chunk).__name__ != "ToolMessage":
@@ -1068,62 +1081,6 @@ def finish_model_round(session: StreamSession) -> None:
     session.last_captured_message = None
 
 
-def _extract_cached_tokens(usage: Mapping[str, Any], chunk: Any = None) -> int:
-    """提取 cached_tokens，兼容 LangChain usage_metadata、OpenAI prompt_tokens_details 及 response_metadata。"""
-    if "cached_tokens" in usage:
-        val = usage.get("cached_tokens")
-        if val is not None:
-            return int(val or 0)
-    input_details = usage.get("input_token_details")
-    if isinstance(input_details, Mapping):
-        cache_read = input_details.get("cache_read") or input_details.get("cached_tokens")
-        if cache_read is not None:
-            return int(cache_read or 0)
-    prompt_details = usage.get("prompt_tokens_details")
-    if isinstance(prompt_details, Mapping):
-        cached = prompt_details.get("cached_tokens")
-        if cached is not None:
-            return int(cached or 0)
-    if chunk is not None:
-        response_meta = getattr(chunk, "response_metadata", None)
-        if isinstance(response_meta, Mapping):
-            token_usage = response_meta.get("token_usage") or response_meta.get("usage")
-            if isinstance(token_usage, Mapping):
-                p_details = token_usage.get("prompt_tokens_details")
-                if isinstance(p_details, Mapping) and "cached_tokens" in p_details:
-                    return int(p_details.get("cached_tokens", 0) or 0)
-                if "cached_tokens" in token_usage:
-                    return int(token_usage.get("cached_tokens", 0) or 0)
-    return 0
-
-
-def update_usage(session: StreamSession, usage: Any, chunk: Any = None) -> None:
-    """合并流式 usage，并提取 prefix cache 统计。
-
-    流式 usage 本应是累计值，但个别 provider 分片只报当前回合的部分计数，
-    所以取 max：宁可少记也不能让后面的分片把已经统计到的值拉低。
-    """
-    if not isinstance(usage, Mapping) and chunk is not None:
-        response_meta = getattr(chunk, "response_metadata", None)
-        if isinstance(response_meta, Mapping):
-            token_usage = response_meta.get("token_usage") or response_meta.get("usage")
-            if isinstance(token_usage, Mapping):
-                usage = token_usage
-    if not isinstance(usage, Mapping):
-        return
-    session.usage["input_tokens"] = max(
-        session.usage.get("input_tokens", 0),
-        int(usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0),
-    )
-    session.usage["output_tokens"] = max(
-        session.usage.get("output_tokens", 0),
-        int(usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0),
-    )
-    cached_tokens = _extract_cached_tokens(usage, chunk)
-    if cached_tokens > 0:
-        session.usage["cached_tokens"] = max(
-            session.usage.get("cached_tokens", 0), cached_tokens
-        )
 
 
 def truncate_text(value: str) -> tuple[str, bool, int]:

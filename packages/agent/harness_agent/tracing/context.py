@@ -27,10 +27,10 @@ def current_span() -> SpanHandle | None:
 
 
 @contextmanager
-def use_trace(context: TraceContext) -> Iterator[TraceContext]:
+def use_trace(context: TraceContext, *, parent: SpanHandle | None = None) -> Iterator[TraceContext]:
     """显式绑定 Trace；用于不能依赖隐式 ContextVar 继承的调用边界。"""
     token = _CURRENT_TRACE.set(context)
-    span_token = _CURRENT_SPAN.set(None)
+    span_token = _CURRENT_SPAN.set(parent)
     try:
         yield context
     finally:

@@ -3714,15 +3714,15 @@ def _persist_ends(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         event
         for event in events
-        if event["event"] == "span.end" and event["name"] == "thread.persist"
+        if event["event"] == "span.end" and event["name"] == "db.persist"
     ]
 
 
 @pytest.mark.asyncio
-async def test_thread_persist_records_real_transactions_and_suppresses_replays(
+async def test_thread_persist_records_each_transaction_including_replays(
     tmp_path: Path,
 ) -> None:
-    """单条、批量、Run 与 Context 各只记录一个事务 Span，重放不重复开 Span。"""
+    """每次真实事务记录一次，业务幂等重放不隐藏事务的成本。"""
     project = tmp_path / "project-persist-trace"
     project.mkdir()
     store = await ThreadPersistence.open(project=project, home=tmp_path / "home-persist-trace")
@@ -3778,37 +3778,22 @@ async def test_thread_persist_records_real_transactions_and_suppresses_replays(
     ends = _persist_ends(events)
     assert [event["attributes"]["operation"] for event in ends] == [
         "accept_run",
-        "transcript",
+        "accept_run",
+        "transcript_batch",
         "transcript_batch",
         "run_complete",
+        "run_complete",
+        "context_commit",
         "context_commit",
     ]
-    assert ends[0]["attributes"] == {
-        "operation": "accept_run",
-        "outcome": "committed",
-        "created": True,
-    }
-    assert ends[1]["attributes"] == {
-        "operation": "transcript",
-        "outcome": "committed",
-        "count": 1,
-        "seq": 2,
-    }
-    assert ends[2]["attributes"] == {
-        "operation": "transcript_batch",
-        "outcome": "committed",
-        "count": 2,
-        "seq": 4,
-    }
-    assert ends[3]["attributes"] == {"operation": "run_complete", "outcome": "committed"}
-    assert ends[4]["attributes"] == {
-        "operation": "context_commit",
-        "outcome": "committed",
-        "count": 0,
-        "seq": 4,
-    }
+    assert ends[0]["attributes"]["outcome"] == "committed"
+    assert ends[1]["attributes"]["outcome"] == "duplicate"
+    assert ends[2]["attributes"]["record_ids"] == ["assistant-once"]
+    assert ends[3]["attributes"]["seq_from"] == 3
+    assert ends[3]["attributes"]["seq_to"] == 4
+    assert ends[6]["attributes"]["seq_to"] == 4
     assert all(event["kind"] == "DB" for event in ends)
-    assert all(event.get("idempotency_key") for event in ends)
+    assert all(event["attributes"]["lock_wait_ms"] >= 0 for event in ends)
     assert "secret-user" not in repr(events)
     assert "secret-assistant" not in repr(events)
     assert "secret-batch" not in repr(events)
@@ -3854,8 +3839,10 @@ async def test_thread_persist_failure_has_no_committed_sequence_or_body(
     events = _trace_events(tmp_path / "trace-persist-failure")
     end = next(event for event in _persist_ends(events) if event["attributes"]["operation"] == "transcript_batch")
     assert end["status"] == "FAILED"
-    assert end["attributes"] == {"operation": "transcript_batch", "outcome": "failed"}
-    assert "seq" not in end["attributes"]
+    assert end["attributes"]["outcome"] == "failed"
+    assert end["attributes"]["lock_wait_ms"] >= 0
+    assert "seq_from" not in end["attributes"]
+    assert "seq_to" not in end["attributes"]
     assert "CANARY_TRANSCRIPT_ROLLBACK" not in repr(events)
     assert len(await store.load_transcript("thread-persist-failure")) == 1
     await store.close()

@@ -226,9 +226,6 @@ export function Composer(props: {
           />
         ) : null}
         <div className="composer-box">
-          <div className="composer-tabs" aria-hidden="true">
-            <span className="composer-tab is-active">聊天</span>
-          </div>
           <textarea
             ref={textareaRef}
             className="composer-textarea"
