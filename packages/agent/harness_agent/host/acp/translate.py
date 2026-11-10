@@ -41,6 +41,7 @@ from acp.schema import (
     ToolCallProgress,
     ToolCallStart,
     ToolKind,
+    UsageUpdate,
 )
 
 from harness_agent.host.acp.tool_display import (
@@ -51,7 +52,14 @@ from harness_agent.host.acp.tool_display import (
 )
 from harness_agent.host.acp.ext import parent_meta
 
-Update = AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
+Update = (
+    AgentMessageChunk
+    | AgentThoughtChunk
+    | ToolCallStart
+    | ToolCallProgress
+    | AgentPlanUpdate
+    | UsageUpdate
+)
 """本模块会产出的 ACP `session/update` 联合类型。"""
 
 MAX_OUTPUT_CHARS: Final = 64 * 1024
@@ -77,7 +85,6 @@ _IGNORED_EVENT_TYPES: Final = frozenset(
         "run.started",
         "run.progress",
         "skill.loaded",
-        "context.updated",
         "interaction.resolved",
     }
 )
@@ -88,6 +95,17 @@ _IGNORED_EVENT_PREFIXES: Final = ("compose.", "goal.")
 
 _COMPOSE_ACTIVE: Final = frozenset({"active", "waiting_user", "verifying"})
 """Compose 还在跑时不发 Goal 计划，避免两套计划叠在同一张 ACP 计划上。"""
+
+_COMPOSE_LABELS: Final = {
+    "requirement": "需求",
+    "grill": "需求",
+    "task": "需求",
+    "spec": "规格",
+    "plan": "计划",
+    "implement": "实现",
+    "review": "检视",
+}
+"""阶段 id 到界面上的中文短名。客户端再按这些名字还原阶段条。"""
 
 TERMINAL_EVENT_TYPES: Final = frozenset({"run.completed", "run.cancelled", "run.failed"})
 """Run 终态事件类型。"""
@@ -207,6 +225,7 @@ class RunTranslator:
         self._child_outputs: dict[str, str] = {}
         self._compose_active = False
         self._goal_texts: dict[str, str] = {}
+        self._last_usage: tuple[int, int] | None = None
 
     def feed(self, event: Mapping[str, object]) -> TranslateResult:
         """处理一条 v3 事件记录；终态之后到达的事件一律丢弃。"""
@@ -225,6 +244,14 @@ class RunTranslator:
                 acp_tool_call_id(self._run_id, str(payload.get("tool_call_id") or "")),
                 payload.get("child_agent_id") if isinstance(payload.get("child_agent_id"), str) else None,
             )
+        # Compose 进度可能带 parent_execution_id。先翻译，否则会被当成子事件丢掉，阶段条出不来。
+        if event_type == "compose.progress":
+            data = payload if isinstance(payload, Mapping) else {}
+            self._compose_active = data.get("status") in _COMPOSE_ACTIVE
+            return TranslateResult(self._compose_plan(data))
+        if event_type == "compose.summary":
+            data = payload if isinstance(payload, Mapping) else {}
+            return TranslateResult(self._compose_summary(data))
         # 子 agent（inline child）的事件与父级共用一条流，只按 parent_execution_id 区分。
         if event.get("parent_execution_id") is not None:
             return self._feed_child(event)
@@ -245,9 +272,8 @@ class RunTranslator:
             return TranslateResult(self._tool_completed(data))
         if event_type in TERMINAL_EVENT_TYPES:
             return TranslateResult([], self._set_terminal(event_type, data))
-        if event_type == "compose.progress":
-            self._compose_active = data.get("status") in _COMPOSE_ACTIVE
-            return TranslateResult()
+        if event_type == "context.updated":
+            return TranslateResult(self._usage_update(data))
         if event_type == "goal.changed":
             return TranslateResult(self._goal_changed(data))
         if event_type == "goal.evaluation":
@@ -256,6 +282,63 @@ class RunTranslator:
             return TranslateResult()
         self.ignored_types.add(event_type)
         return TranslateResult()
+
+    def _compose_plan(self, data: Mapping[str, object]) -> list[Update]:
+        """把 compose.progress.stages 收成一张 ACP 计划。没有 stages 时不发计划。"""
+        stages = data.get("stages")
+        if not isinstance(stages, list):
+            return []
+        entries: list[PlanEntry] = []
+        for stage in stages:
+            if not isinstance(stage, Mapping):
+                continue
+            stage_id = stage.get("id")
+            if not isinstance(stage_id, str) or not stage_id:
+                continue
+            label = _COMPOSE_LABELS.get(stage_id, stage_id)
+            state = stage.get("state")
+            if state == "failed":
+                content = f"{label}（失败）"
+                status = "completed"
+            elif state == "current":
+                content = label
+                status = "in_progress"
+            elif state in {"confirmed", "skipped"}:
+                content = label
+                status = "completed"
+            else:
+                content = label
+                status = "pending"
+            entries.append(PlanEntry(content=content, priority="medium", status=status))
+        if not entries:
+            return []
+        return [AgentPlanUpdate(session_update="plan", entries=entries)]
+
+    def _compose_summary(self, data: Mapping[str, object]) -> list[Update]:
+        """Compose 收尾正文单独一条消息，messageId 固定，方便客户端替换而不是叠段。"""
+        text = data.get("text")
+        if not isinstance(text, str) or not text:
+            return []
+        return [
+            AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=text_block(text),
+                message_id=f"{self._run_id}:compose-summary",
+            )
+        ]
+
+    def _usage_update(self, data: Mapping[str, object]) -> list[Update]:
+        """context.updated 里两个整数都在、且和上次不同，才发 usage_update。"""
+        used = data.get("estimated_tokens")
+        size = data.get("context_window_tokens")
+        if not _nonneg_int(used) or not _nonneg_int(size):
+            return []
+        assert isinstance(used, int) and isinstance(size, int)
+        pair = (used, size)
+        if pair == self._last_usage:
+            return []
+        self._last_usage = pair
+        return [UsageUpdate(session_update="usage_update", used=used, size=size)]
 
     def _goal_changed(self, data: Mapping[str, object]) -> list[Update]:
         """Goal 变了就整表替换 ACP 计划。Compose 进行中只记住条文，不发计划。"""
@@ -816,6 +899,11 @@ def bounded_raw_input(value: object) -> object:
     except (TypeError, ValueError):
         return UNSET
     return value if size <= _MAX_RAW_INPUT_BYTES else UNSET
+
+
+def _nonneg_int(value: object) -> bool:
+    """bool 是 int 的子类，不能把它当成 token 数。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _is_absolute(path: str) -> bool:

@@ -187,7 +187,7 @@ async def test_multi_block_prompt_keeps_raw_invocation_equal_to_message(tmp_path
         assert prompt_response(response).stop_reason == "end_turn", response
     rendered = _rendered(agent)
     assert "Audit the requested files." in rendered
-    assert "@/note.txt" in rendered
+    assert "@file:///note.txt" in rendered
 
 
 async def test_escaped_unknown_and_skill_slash_are_plain_text(tmp_path: Path) -> None:

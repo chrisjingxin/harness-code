@@ -66,10 +66,11 @@ async def test_initialize_advertises_minimal_honest_capabilities(tmp_path: Path)
         assert capabilities["promptCapabilities"] == {
             "image": False,
             "audio": False,
-            "embeddedContext": False,
+            "embeddedContext": True,
         }
-        assert capabilities["mcpCapabilities"] == {"http": False, "sse": False, "acp": False}
+        assert capabilities["mcpCapabilities"] == {"http": True, "sse": False, "acp": False}
         assert capabilities["sessionCapabilities"]["list"] == {}
+        assert capabilities["sessionCapabilities"]["additionalDirectories"] == {}
         assert result["agentInfo"]["name"] == "harness-code"
         assert result["agentInfo"]["version"]
         assert result["authMethods"] == []
@@ -142,27 +143,30 @@ async def test_new_session_accepts_symlink_to_workspace(tmp_path: Path) -> None:
         assert "result" in response, response
 
 
-async def test_mcp_servers_are_ignored_with_a_count_only(
+async def test_untrustable_directory_rejects_the_whole_new_session(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """S1 忽略 mcpServers，只在 stderr 记个数，绝不回显 command/env。"""
+    """附加目录不合格时整单拒绝，密钥不能出现在 stderr。"""
     async with InProcessAcp(make_host(tmp_path, echo=True)) as acp:
         await _initialize(acp.client)
+        missing = tmp_path / "missing-dir"
         response = await acp.client.request(
             2,
             "session/new",
             {
                 "cwd": str(acp.host.workspace),
                 "mcpServers": [
-                    {"type": "stdio", "name": "x", "command": "secret-cmd", "args": [], "env": []}
+                    {"name": "x", "command": "secret-cmd", "args": [], "env": []}
                 ],
-                "additionalDirectories": ["/tmp/outside"],
+                "additionalDirectories": [str(missing)],
             },
         )
-        assert "result" in response
+        error = response["error"]
+        assert error["code"] == -32602
+        assert error["data"]["code"] == "INVALID_ADDITIONAL_DIRECTORY"
+        assert error["data"]["path"] == str(missing)
+        assert acp.server._sessions == {}
     captured = capsys.readouterr()
-    assert "ignoring 1 mcpServers" in captured.err
-    assert "ignoring 1 additionalDirectories" in captured.err
     assert "secret-cmd" not in captured.err
 
 

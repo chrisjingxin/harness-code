@@ -36,6 +36,7 @@ import sys
 import time
 import uuid
 from collections.abc import Coroutine, Mapping, Sequence
+from urllib.parse import unquote, urlparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -45,6 +46,7 @@ from acp.helpers import SessionUpdate
 from acp.schema import (
     AgentCapabilities,
     AvailableCommandsUpdate,
+    ConfigOptionUpdate,
     CurrentModeUpdate,
     Implementation,
     CloseSessionResponse,
@@ -56,12 +58,16 @@ from acp.schema import (
     PromptCapabilities,
     PromptResponse,
     ResumeSessionResponse,
+    SessionAdditionalDirectoriesCapabilities,
     SessionCapabilities,
     SessionCloseCapabilities,
+    SessionConfigOptionSelect,
     SessionListCapabilities,
     SessionResumeCapabilities,
+    SetSessionConfigOptionResponse,
     SetSessionModeResponse,
     ToolCallUpdate,
+    Usage,
 )
 
 from harness_agent import __version__
@@ -69,6 +75,20 @@ from harness_agent.diagnostic_log.runtime import ensure_log
 from harness_agent.extensions.plugin_skills import SkillError
 from harness_agent.extensions.skills import SkillError as CatalogSkillError
 from harness_agent.host.acp.commands import CommandIndex
+from harness_agent.host.acp.config import (
+    MODEL_CONFIG_ID,
+    WORKFLOW_CONFIG_ID,
+    build_config_options,
+    option_values,
+)
+from harness_agent.host.acp.inline import (
+    MAX_SINGLE_FILE_BYTES,
+    InlineBudget,
+    InlinePiece,
+    join_model_message,
+    piece_for_bytes,
+    placeholder,
+)
 from harness_agent.host.acp.ext import (
     Negotiation,
     agent_capabilities_meta,
@@ -158,6 +178,9 @@ class _Session:
     run: _ActiveRun | None = None
     # 切到 plan 之前的模式。批准计划后 Host 用它切回去。
     mode_before_plan: ApprovalModeName | None = None
+    # 下一轮 prompt 才读这两项。运行中改配置不回头改已经受理的 Run。
+    model_id: str | None = None
+    workflow: str = "build"
 
 
 @dataclass(slots=True)
@@ -224,11 +247,17 @@ def to_request_error(
                 {"code": "THREAD_NOT_FOUND", "retryable": False},
             )
         if exc.code == -32602:
-            return RequestError(
-                -32602,
-                exc.message,
-                {"code": "INVALID_PARAMS", "message": _truncate(exc.message), "retryable": False},
-            )
+            message = exc.message or ""
+            # 已经是稳定大写码的参数错误原样对外；普通文案仍收成 INVALID_PARAMS。
+            code = message if _UPPERCASE_CODE.match(message) else "INVALID_PARAMS"
+            data: dict[str, object] = {
+                "code": code,
+                "message": _truncate(message),
+                "retryable": False,
+            }
+            if isinstance(exc.data, Mapping) and "path" in exc.data:
+                data["path"] = exc.data["path"]
+            return RequestError(-32602, message, data)
         message = exc.message or ""
         if _UPPERCASE_CODE.match(message):
             code = message
@@ -381,6 +410,7 @@ class AcpServer:
                 "run.cancel",
                 "threads.read",
                 "run.approval_mode",
+                "models.select",
             ),
             interaction_handles=tuple(handles),
             role="owner",
@@ -415,13 +445,14 @@ class AcpServer:
             agent_capabilities=AgentCapabilities(
                 load_session=True,
                 prompt_capabilities=PromptCapabilities(
-                    image=False, audio=False, embedded_context=False
+                    image=False, audio=False, embedded_context=True
                 ),
-                mcp_capabilities=McpCapabilities(http=False, sse=False, acp=False),
+                mcp_capabilities=McpCapabilities(http=True, sse=False, acp=False),
                 session_capabilities=SessionCapabilities(
                     list=SessionListCapabilities(),
                     resume=SessionResumeCapabilities(),
                     close=SessionCloseCapabilities(),
+                    additional_directories=SessionAdditionalDirectoriesCapabilities(),
                 ),
                 field_meta=agent_capabilities_meta(self._ext),
             ),
@@ -442,9 +473,9 @@ class AcpServer:
     ) -> NewSessionResponse:
         """建立会话：校验 cwd 是本进程绑定的工作区，生成 sessionId。
 
-        异常：`-32600` 未 initialize；`-32602` + `WORKSPACE_MISMATCH` cwd 不匹配。
-        `mcpServers` / `additionalDirectories` 在 S1 只记个数到 stderr（可能含密钥，
-        绝不回显），会话照常创建。
+        异常：`-32600` 未 initialize；`-32602` + `WORKSPACE_MISMATCH` cwd 不匹配；
+              `-32602` + `INVALID_ADDITIONAL_DIRECTORY` 附加目录整单拒绝。
+        会话 MCP 里跳过的项只记诊断，不让建会话失败，也不把命令或环境变量写进日志。
         """
         started = time.monotonic()
         await self._ready()
@@ -456,17 +487,18 @@ class AcpServer:
                 "WORKSPACE_MISMATCH",
                 {"code": "WORKSPACE_MISMATCH", "expected": str(workspace)},
             )
-        _report_ignored("mcpServers", mcp_servers)
-        _report_ignored("additionalDirectories", additional_directories)
         session_id = str(uuid.uuid4())
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
         mode = _session_mode(self._snapshot, plan=self._forms)
-        self._sessions[session_id] = _Session(session_id=session_id, approval_mode=mode)
+        session = _Session(session_id=session_id, approval_mode=mode)
+        self._sessions[session_id] = session
         self._log_request("session/new", started)
         # 命令列表在响应之后到达：SDK 先把响应入队，后台任务才开始跑。
         self._spawn(self._push_commands(session_id))
         return NewSessionResponse(
             session_id=session_id,
             modes=mode_state(mode, plan=self._forms),
+            config_options=await self._config_options(session),
         )
 
     async def load_session(
@@ -499,14 +531,16 @@ class AcpServer:
                 "WORKSPACE_MISMATCH",
                 {"code": "WORKSPACE_MISMATCH", "expected": str(self._host.workspace)},
             )
-        _report_ignored("mcpServers", mcp_servers)
-        _report_ignored("additionalDirectories", additional_directories)
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
         session = await self._prepare_thread_session(
             connection, session_id, "session/load", started, replay=True
         )
         self._log_request("session/load", started)
         self._spawn(self._push_commands(session_id))
-        return LoadSessionResponse(modes=mode_state(session.approval_mode, plan=self._forms))
+        return LoadSessionResponse(
+            modes=mode_state(session.approval_mode, plan=self._forms),
+            config_options=await self._config_options(session),
+        )
 
     async def resume_session(
         self,
@@ -536,21 +570,24 @@ class AcpServer:
                 "WORKSPACE_MISMATCH",
                 {"code": "WORKSPACE_MISMATCH", "expected": str(self._host.workspace)},
             )
-        _report_ignored("mcpServers", mcp_servers)
-        _report_ignored("additionalDirectories", additional_directories)
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
         existing = self._sessions.get(session_id)
         if existing is not None and not existing.busy:
             self._log_request("session/resume", started)
             self._spawn(self._push_commands(session_id))
             return ResumeSessionResponse(
-                modes=mode_state(existing.approval_mode, plan=self._forms)
+                modes=mode_state(existing.approval_mode, plan=self._forms),
+                config_options=await self._config_options(existing),
             )
         session = await self._prepare_thread_session(
             connection, session_id, "session/resume", started, replay=False
         )
         self._log_request("session/resume", started)
         self._spawn(self._push_commands(session_id))
-        return ResumeSessionResponse(modes=mode_state(session.approval_mode, plan=self._forms))
+        return ResumeSessionResponse(
+            modes=mode_state(session.approval_mode, plan=self._forms),
+            config_options=await self._config_options(session),
+        )
 
     async def close_session(
         self, session_id: str, **kwargs: object
@@ -577,6 +614,7 @@ class AcpServer:
             self._elicitation.cancel_session(session_id)
         self._host.unwatch_thread(connection, session_id)
         self._sessions.pop(session_id, None)
+        await self._drop_session_resources(session_id)
         return CloseSessionResponse()
 
     async def _prepare_thread_session(
@@ -698,8 +736,7 @@ class AcpServer:
         session = self._sessions.get(session_id)
         if connection is None or session is None:
             raise RequestError.resource_not_found(session_id)
-        # 下面这段（含内容转换）必须在一个同步段内完成，中间不能 await：
-        # 否则两个并发 prompt 可能都通过 busy 检查，双双进入 start_run。
+        # busy 必须在第一个 await 之前置位，否则两个 prompt 会同时通过检查。
         if self._closing:
             raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
         if session.busy:
@@ -708,11 +745,16 @@ class AcpServer:
                 "THREAD_BUSY",
                 {"code": "THREAD_BUSY", "retryable": True},
             )
-        text = prompt_text(prompt)
+        # 先占住会话再读文件：读盘会让出，不能让第二个 prompt 也通过 busy 检查。
         session.busy = True
-        # 上一轮的迟到 cancel 不能误伤这一轮。
         session.cancel_requested = False
         self._begin_request()
+        try:
+            text, model_message = await self._prepare_prompt(prompt)
+        except BaseException:
+            session.busy = False
+            self._finish_request()
+            raise
         run_id = str(uuid.uuid4())
         # 本次 Run 提交给 Host 的模式；若用户在准备阶段改了模式，`on_accepted` 会补发。
         effective_mode = session.approval_mode
@@ -740,13 +782,19 @@ class AcpServer:
                     )
 
         try:
+            workflow = session.workflow if session.workflow == "compose" else "build"
             await self._host.start_run(
                 connection,
                 StartRunRequest(
                     thread_id=session_id,
                     run_id=run_id,
-                    mode="build",
-                    input=UserRunInput(text, requested_skill=self._commands.match(text)),
+                    mode=workflow,
+                    input=UserRunInput(
+                        text,
+                        requested_skill=self._commands.match(text),
+                        model_message=None if model_message == text else model_message,
+                    ),
+                    requested_primary_profile=session.model_id,
                     requested_approval_mode=session.approval_mode,
                     pre_plan_mode=(
                         session.mode_before_plan if session.approval_mode == "plan" else None
@@ -836,6 +884,67 @@ class AcpServer:
         self._log_request("session/set_mode", started)
         return SetSessionModeResponse()
 
+    async def set_config_option(
+        self,
+        config_id: str,
+        session_id: str,
+        value: str | bool,
+        **kwargs: object,
+    ) -> SetSessionConfigOptionResponse:
+        """改模型或工作流。只影响下一轮 prompt，不改已经在跑的 Run。
+
+        未知 id 回 `UNKNOWN_CONFIG_OPTION`，值不在可选项里回 `INVALID_CONFIG_VALUE`。
+        成功时既推 `config_option_update`，也在响应里带回整套选项。
+        """
+        await self._ready()
+        if self._closing:
+            raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise RequestError.resource_not_found(session_id)
+        if not isinstance(value, str):
+            raise RequestError(
+                -32602,
+                "INVALID_CONFIG_VALUE",
+                {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+            )
+        options = await self._config_options(session)
+        if config_id == MODEL_CONFIG_ID:
+            model = next((item for item in options if item.id == MODEL_CONFIG_ID), None)
+            if model is None:
+                raise RequestError(
+                    -32602,
+                    "UNKNOWN_CONFIG_OPTION",
+                    {"code": "UNKNOWN_CONFIG_OPTION", "retryable": False},
+                )
+            if value not in option_values(model):
+                raise RequestError(
+                    -32602,
+                    "INVALID_CONFIG_VALUE",
+                    {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+                )
+            session.model_id = value
+        elif config_id == WORKFLOW_CONFIG_ID:
+            if value not in {"build", "compose"}:
+                raise RequestError(
+                    -32602,
+                    "INVALID_CONFIG_VALUE",
+                    {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+                )
+            session.workflow = value
+        else:
+            raise RequestError(
+                -32602,
+                "UNKNOWN_CONFIG_OPTION",
+                {"code": "UNKNOWN_CONFIG_OPTION", "retryable": False},
+            )
+        updated = await self._config_options(session)
+        await self._send(
+            session_id,
+            ConfigOptionUpdate(session_update="config_option_update", config_options=updated),
+        )
+        return SetSessionConfigOptionResponse(config_options=updated)
+
     async def cancel(self, session_id: str, **kwargs: object) -> None:
         """取消该会话当前 Run 与挂起的审批；未知会话或已结束的 Run 静默忽略。
 
@@ -879,10 +988,11 @@ class AcpServer:
     async def aclose(self) -> None:
         """关闭连接、停掉权限任务与发送泵，并兜底失败仍悬挂的 Run Future。
 
-        顺序不能反：先 `close_connection` 让 Host 把挂起的交互 fail-closed，
-        再取消权限任务（它们的 `fail_interaction` 此时返回 False，什么也不做），
-        最后才停泵。
+        顺序不能反：先放掉每个会话的额外目录和 MCP，再 `close_connection`
+        让 Host 把挂起的交互 fail-closed，然后取消权限任务，最后才停泵。
         """
+        for session_id in list(self._sessions):
+            await self._drop_session_resources(session_id)
         connection = self._connection
         self._connection = None
         if connection is not None:
@@ -1234,17 +1344,136 @@ class AcpServer:
         except (ConnectionError, BrokenPipeError, RuntimeError):
             self._outbound_broken = True
 
+    # —— 内部：会话资源、配置与 prompt 正文 ——
+
+    async def _apply_session_resources(
+        self,
+        session_id: str,
+        directories: Sequence[object] | None,
+        servers: Sequence[object] | None,
+    ) -> None:
+        """先登记附加目录，再登记会话 MCP。MCP 失败时把刚登记的目录撤掉。
+
+        目录校验失败时会话还没放进表里，调用方不会留下半个会话。
+        """
+        try:
+            self._host.set_session_roots(session_id, list(directories or []))
+        except RpcError as exc:
+            raise to_request_error(exc, startup_error=None) from exc
+        try:
+            await self._host.set_session_mcp(session_id, _mcp_mappings(servers))
+        except Exception:
+            self._host.set_session_roots(session_id, [])
+            raise
+
+    async def _drop_session_resources(self, session_id: str) -> None:
+        """关闭或断线时撤销这个线程名下的会话目录和会话 MCP。重复调用无副作用。"""
+        self._host.set_session_roots(session_id, [])
+        await self._host.set_session_mcp(session_id, [])
+
+    async def _config_options(self, session: _Session) -> list[SessionConfigOptionSelect]:
+        """读模型目录拼配置项。目录读失败就只留下工作流，不让建会话失败。"""
+        profiles: list[Mapping[str, object]] = []
+        last: str | None = None
+        connection = self._connection
+        if connection is not None:
+            try:
+                listed = await self._host.list_models(connection, session.session_id)
+            except RpcError:
+                listed = {}
+            raw = listed.get("profiles") if isinstance(listed, Mapping) else None
+            if isinstance(raw, list):
+                profiles = [item for item in raw if isinstance(item, Mapping)]
+            selection = listed.get("thread_selection") if isinstance(listed, Mapping) else None
+            if isinstance(selection, Mapping) and isinstance(selection.get("primary_profile"), str):
+                last = selection["primary_profile"]
+        return build_config_options(
+            profiles,
+            selected_model=session.model_id,
+            last_profile=last,
+            workflow=session.workflow,
+        )
+
+    async def _prepare_prompt(self, prompt: Sequence[object]) -> tuple[str, str]:
+        """把内容块收成（记录原文, 给模型的正文）。
+
+        记录里只有用户文本和 `@路径`。授权根内的文件内容只出现在模型正文前面。
+        图片、音频和二进制嵌入资源仍然拒绝。
+        """
+        parts: list[str] = []
+        pieces: list[str] = []
+        budget = InlineBudget()
+        for block in prompt:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                parts.append(str(getattr(block, "text", "")))
+                continue
+            if block_type == "resource_link":
+                mention, piece = await self._inline_link(str(getattr(block, "uri", "")), budget)
+            elif block_type == "resource":
+                mention, piece = self._inline_embedded(block, budget)
+            else:
+                raise RequestError(
+                    -32602,
+                    "UNSUPPORTED_CONTENT_BLOCK",
+                    {"code": "UNSUPPORTED_CONTENT_BLOCK", "type": block_type},
+                )
+            parts.append(mention)
+            if piece:
+                pieces.append(piece)
+        text = "\n".join(parts)
+        if not text.strip():
+            raise RequestError(
+                -32602,
+                "EMPTY_PROMPT",
+                {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
+            )
+        return text, join_model_message(pieces, text)
+
+    async def _inline_link(self, uri: str, budget: InlineBudget) -> tuple[str, str | None]:
+        """根内文件读入内联块；其它链接保持 `@uri`，不读盘。"""
+        path = _file_uri_path(uri)
+        if path is None:
+            return f"@{uri}", None
+        authorized = self._host.authorize_existing_file(path)
+        if authorized is None:
+            return f"@{uri}", None
+        try:
+            piece = await asyncio.to_thread(_piece_from_file, authorized, budget)
+        except OSError:
+            return f"@{uri}", None
+        return f"@{authorized}", piece.text
+
+    def _inline_embedded(self, block: object, budget: InlineBudget) -> tuple[str, str | None]:
+        """嵌入的文本按同样预算格式化。二进制嵌入没有文本可内联，直接拒绝。"""
+        resource = getattr(block, "resource", None)
+        uri = str(getattr(resource, "uri", "") or "")
+        text = getattr(resource, "text", None)
+        blob = getattr(resource, "blob", None)
+        if isinstance(blob, str) or not isinstance(text, str):
+            raise RequestError(
+                -32602,
+                "UNSUPPORTED_CONTENT_BLOCK",
+                {"code": "UNSUPPORTED_CONTENT_BLOCK", "type": "resource"},
+            )
+        label = _file_uri_path(uri) or uri or "resource"
+        piece = piece_for_bytes(label, text.encode("utf-8"), budget)
+        return f"@{uri or label}", piece.text
+
     # —— 内部：Run 与响应 ——
 
     def _prompt_response(self, outcome: RunOutcome, session: _Session) -> PromptResponse:
         """把 Run 终态映射成 ACP 响应；失败时抛 `RequestError`。"""
         if outcome.kind == "completed":
+            usage = _prompt_usage(outcome.summary)
             if self._ext.run_summary and outcome.summary:
-                # 只有声明了 runSummary 的客户端才拿得到运行摘要。
+                # 只有声明了 runSummary 的客户端才拿得到运行摘要。标准 usage 始终带上。
                 return PromptResponse(
-                    stop_reason="end_turn", field_meta=run_meta(outcome.summary)
+                    stop_reason="end_turn",
+                    usage=usage,
+                    field_meta=run_meta(outcome.summary),
                 )
-            return PromptResponse(stop_reason="end_turn")
+            return PromptResponse(stop_reason="end_turn", usage=usage)
         if outcome.kind == "cancelled" or session.cancel_requested:
             # ACP 约定：取消期间出现的错误一律按 cancelled 返回。
             return PromptResponse(stop_reason="cancelled")
@@ -1407,6 +1636,108 @@ def _session_mode(snapshot: HostSnapshot | None, *, plan: bool = False) -> Appro
     """取会话的初始审批模式。没声明表单时 `plan` 退回 `default`。"""
     raw = snapshot.default_approval_mode if snapshot is not None else None
     return default_mode(raw, plan=plan)
+
+
+def _prompt_usage(summary: Mapping[str, object] | None) -> Usage | None:
+    """把 `run.completed` 的 usage 收成 ACP `Usage`。没有 usage 对象时不编造。
+
+    缺整数或布尔值都按 0。缓存命中依次看 cached_read_tokens、cached_tokens、
+    cached_input_tokens，只有非负整数才带上。
+    """
+    if not isinstance(summary, Mapping):
+        return None
+    usage = summary.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+
+    def as_int(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return 0
+        return value
+
+    input_tokens = as_int(usage.get("input_tokens"))
+    output_tokens = as_int(usage.get("output_tokens"))
+    cached: int | None = None
+    for key in ("cached_read_tokens", "cached_tokens", "cached_input_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            cached = value
+            break
+    return Usage(
+        total_tokens=input_tokens + output_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_read_tokens=cached,
+    )
+
+
+def _file_uri_path(uri: str) -> str | None:
+    """`file://` 取出路径；`file://localhost/tmp/a` 得到 `/tmp/a`。其它 scheme 返回 None。"""
+    parsed = urlparse(uri)
+    if parsed.scheme != "file" or not parsed.path:
+        return None
+    return unquote(parsed.path)
+
+
+def _piece_from_file(path: str, budget: InlineBudget) -> InlinePiece:
+    """先看大小。达到单文件上限就不再把正文读进内存。"""
+    file = Path(path)
+    size = file.stat().st_size
+    if size >= MAX_SINGLE_FILE_BYTES:
+        return InlinePiece(path, placeholder(path, size), False)
+    return piece_for_bytes(path, file.read_bytes(), budget)
+
+
+def _mcp_mappings(servers: Sequence[object] | None) -> list[Mapping[str, object]]:
+    """把 SDK 的 MCP 模型收成 Host 认识的普通映射。命令和请求头留在映射里，诊断由 Host 去掉。"""
+    mapped: list[Mapping[str, object]] = []
+    for item in servers or []:
+        if isinstance(item, Mapping):
+            entry = dict(item)
+            if not isinstance(entry.get("transport"), str) and isinstance(entry.get("type"), str):
+                entry["transport"] = entry["type"]
+            mapped.append(entry)
+            continue
+        name = getattr(item, "name", "")
+        if hasattr(item, "command"):
+            mapped.append(
+                {
+                    "name": name,
+                    "transport": "stdio",
+                    "command": getattr(item, "command", "") or "",
+                    "args": list(getattr(item, "args", ()) or ()),
+                    "env": _pair_dict(getattr(item, "env", ()) or ()),
+                }
+            )
+            continue
+        if hasattr(item, "server_id"):
+            mapped.append({"name": name, "transport": "acp"})
+            continue
+        transport = "sse" if "Sse" in type(item).__name__ else "http"
+        mapped.append(
+            {
+                "name": name,
+                "transport": transport,
+                "url": getattr(item, "url", "") or "",
+                "headers": _pair_dict(getattr(item, "headers", ()) or ()),
+            }
+        )
+    return mapped
+
+
+def _pair_dict(entries: object) -> dict[str, str]:
+    """把 `{name, value}` 列表收成字典。缺字段的项跳过。"""
+    result: dict[str, str] = {}
+    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence):
+        return result
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            key, value = entry.get("name"), entry.get("value")
+        else:
+            key, value = getattr(entry, "name", None), getattr(entry, "value", None)
+        if isinstance(key, str) and isinstance(value, str):
+            result[key] = value
+    return result
 
 
 def _report_ignored(name: str, values: Sequence[object] | None) -> None:

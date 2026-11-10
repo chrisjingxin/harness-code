@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
@@ -398,6 +399,19 @@ class WorkspaceRootRegistry:
                         )
                         root = self._extra[root.root_id]
         return root
+
+    def revoke_session_roots(self, root_ids: Sequence[str]) -> None:
+        """只删除本表里 scope 为 session 的额外根；其它作用域原样保留。
+
+        只读视图不能改表。未知 id 与非 session 根直接跳过，重复调用没有副作用。
+        """
+        if self._is_readonly():
+            raise DirectoryNotTrustable("只读 registry 不能撤销额外根")
+        with self._lock:
+            for root_id in root_ids:
+                root = self._extra.get(root_id)
+                if root is not None and root.scope == "session":
+                    del self._extra[root_id]
 
     def consume_once(self, directory: str | Path, *, run_id: str) -> None:
         """消费 once 授权，使同目录下一次访问再次询问。"""

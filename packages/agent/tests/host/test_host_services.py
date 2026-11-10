@@ -1490,6 +1490,10 @@ _SERVICE_METHODS = (
     "cancel_run",
     "set_approval_mode",
     "list_threads",
+    "list_models",
+    "set_session_roots",
+    "set_session_mcp",
+    "authorize_existing_file",
 )
 
 _FORBIDDEN_SERVICE_CALLS = frozenset(

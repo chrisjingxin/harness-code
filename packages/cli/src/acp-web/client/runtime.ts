@@ -5,7 +5,8 @@
  * 【这是做什么的？】控制器的 `baseRuntime` / `commandRegistry` 在构造时就
  * 固定，所以网关握手完就要把"这一页能用哪些功能"一次性钉死：
  * `capabilities` 只列真正通过 ACP 支持的能力（`run.cancel`、
- * `threads.read`、`run.approval_mode`），Skill/模型/配置等入口因此隐藏。
+ * `threads.read`、`run.approval_mode`、`models.read`、`models.select`）。
+ * 模型下拉靠后两项才出现；Skill 和配置入口仍然隐藏。
  *
  * 【Q4：自建 CommandRegistry】`createCommandRegistry` 给插件命令挂
  * `skills.read` 要求，但 ACP 没有 Skill 目录（GAP-13）。本文件在
@@ -51,6 +52,8 @@ export function createAcpRuntime(boot: AcpBootInfo, options?: { cliVersion?: str
   const capabilities: string[] = [Capability.RUN_CANCEL]
   if (boot.canListSessions && boot.canLoadSession) capabilities.push(Capability.THREADS_READ)
   if (boot.modes) capabilities.push(Capability.RUN_APPROVAL_MODE)
+  // 模型下拉和切换分别看 models.read / models.select。目录本身来自 configOptions。
+  capabilities.push(Capability.MODELS_READ, Capability.MODELS_SELECT)
   const currentMode = boot.modes?.currentModeId
   const agentCommands = synthesizeAgentCommands(boot.commands)
   return {

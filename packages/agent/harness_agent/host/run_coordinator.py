@@ -312,6 +312,8 @@ class UserRunInput:
     kind: ClassVar[Literal["user"]] = "user"
     message: str
     requested_skill: RequestedSkill | None = None
+    # 给模型看的正文。Transcript 与标题仍用 `message`，避免把内联文件写进历史。
+    model_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,7 +367,7 @@ class StartRun:
 
     @property
     def message(self) -> str:
-        """返回执行器输入；内部 Goal input 不伪装成用户 Transcript。"""
+        """返回写入 Transcript 的原文；内部 Goal input 不伪装成用户消息。"""
         if isinstance(self.input, UserRunInput):
             return self.input.message
         if isinstance(self.input, GoalProposalRunInput):
@@ -380,11 +382,22 @@ class StartRun:
         """只有普通用户 input 可以显式请求 Skill。"""
         return self.input.requested_skill if isinstance(self.input, UserRunInput) else None
 
+    @property
+    def model_message(self) -> str:
+        """模型实际看到的正文。没单独提供时与 Transcript 原文相同。"""
+        if isinstance(self.input, UserRunInput) and self.input.model_message is not None:
+            return self.input.model_message
+        return self.message
+
     def fingerprint(self) -> tuple[object, ...]:
         """返回幂等判断所需的请求指纹；工作模式冻结在 Run 身份内。"""
         skill = self.requested_skill
         if isinstance(self.input, UserRunInput):
-            input_fingerprint: tuple[object, ...] = ("user", self.input.message)
+            input_fingerprint: tuple[object, ...] = (
+                "user",
+                self.input.message,
+                self.input.model_message,
+            )
         elif isinstance(self.input, GoalProposalRunInput):
             input_fingerprint = ("goal_proposal", self.input.request_id)
         else:
@@ -662,9 +675,9 @@ class RunState:
     pending_interactions: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        """默认使用受理请求中的原始消息。"""
+        """模型输入默认取受理请求；有内联正文时用它，Transcript 仍是原文。"""
         if not self.message:
-            self.message = self.start.message
+            self.message = self.start.model_message
         if self.timing is None:
             self.timing = RunTimingLedger(started_at=self.started_at)
         self.diagnostic_log = ensure_log(self.diagnostic_log)

@@ -331,9 +331,7 @@ describe("AcpAgentGateway：失败收敛", () => {
   })
 
   test.each([
-    [{ mode: "compose" }, "GAP-04"],
     [{ input: { kind: "goal" } }, "GAP-03"],
-    [{ modelSelection: { primary_profile: "p1" } }, "GAP-08"],
     [{ input: { kind: "user", message: "x", requested_skill: { skill_id: "s", name: "s" } } }, "GAP-28"],
   ])("门禁：%o → ACP_NOT_SUPPORTED %s", async (over, gap) => {
     const agent = new FakeAgent()
@@ -342,6 +340,71 @@ describe("AcpAgentGateway：失败收敛", () => {
     const error = await run.accepted.catch((e: unknown) => e) as AgentGatewayError
     expect(error.code).toBe("ACP_NOT_SUPPORTED")
     expect(error.message).toContain(gap)
+  })
+
+  test("Compose 与模型选择改走 session/set_config_option，起步帧带上模型", async () => {
+    const agent = new FakeAgent({
+      onNewSession: () => ({
+        sessionId: "s-config",
+        modes: { currentModeId: "auto", availableModes: [{ id: "auto", name: "自动", description: null }] },
+        configOptions: [{
+          id: "model",
+          name: "模型",
+          type: "select",
+          currentValue: "fast",
+          options: [
+            { value: "fast", name: "fake-model", description: "fast" },
+            { value: "slow", name: "slow-model", description: "slow" },
+          ],
+        }, {
+          id: "workflow",
+          name: "工作方式",
+          type: "select",
+          currentValue: "build",
+          options: [
+            { value: "build", name: "直接执行" },
+            { value: "compose", name: "分阶段协作" },
+          ],
+        }],
+      }),
+    })
+    const { gateway } = await connect(agent)
+    const listed = await gateway.listModels()
+    expect(listed.profiles.map(profile => profile.id)).toEqual(["fast", "slow"])
+    expect(listed.profiles[0]).toMatchObject({ model: "fake-model", provider_label: "fast", is_default: true })
+    expect(listed.thread_selection).toEqual({ primary_profile: "fast" })
+
+    const run = gateway.startRun(userInput({
+      mode: "compose",
+      modelSelection: { primary_profile: "slow" },
+    }))
+    const events = await collect(run.events)
+    const sets = agent.requests.filter(request => request.method === "session/set_config_option")
+    expect(sets.map(request => request.params)).toEqual([
+      expect.objectContaining({ configId: "workflow", value: "compose" }),
+      expect.objectContaining({ configId: "model", value: "slow" }),
+    ])
+    expect(events[0]).toMatchObject({
+      type: "run.started",
+      payload: {
+        mode: "compose",
+        primary_model: { profile: { id: "slow", model: "slow-model", provider_label: "slow" } },
+      },
+    })
+  })
+
+  test("@文件 另发 file 链接；带行号的提及仍只留在原文", async () => {
+    const agent = new FakeAgent()
+    const { gateway } = await connect(agent)
+    const run = gateway.startRun(userInput({ input: { kind: "user", message: "@note.txt 解释一下 @note.txt:10-12" } }))
+    await run.completion
+    const prompt = agent.requests.find(request => request.method === "session/prompt")!.params as {
+      prompt: Array<{ type: string; text?: string; uri?: string; name?: string }>
+    }
+    expect(prompt.prompt).toEqual([
+      { type: "text", text: "@note.txt 解释一下 @note.txt:10-12" },
+      { type: "resource_link", name: "note.txt", uri: "file:///tmp/ws/note.txt" },
+    ])
   })
 
   test("同一会话活动 Run 中再 startRun → THREAD_BUSY", async () => {

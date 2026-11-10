@@ -159,6 +159,11 @@ export class FakeAgent {
     return { stopReason: "end_turn" }
   }
 
+  async setSessionConfigOption(params: Record<string, unknown>): Promise<unknown> {
+    this.requests.push({ method: "session/set_config_option", params })
+    return { configOptions: [] }
+  }
+
   async cancel(params: Record<string, unknown>): Promise<void> {
     this.requests.push({ method: "session/cancel", params })
     this.hooks.onCancel?.(this, (params as { sessionId: string }).sessionId)

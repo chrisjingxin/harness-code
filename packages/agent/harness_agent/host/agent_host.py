@@ -577,6 +577,12 @@ class AgentHost:
         self._mcp_snapshot: McpConfigSnapshot | None = None
         self._mcp_connect_task: asyncio.Task[None] | None = None
         self._mcp_state_lock = asyncio.Lock()
+        # 会话级额外目录与 MCP 只活在这条连接的线程上：关闭会话就撤销。
+        # 根 id 只记录本线程新登记的 session 根，不认领启动时已有的 project/user 根。
+        self._session_root_ids: dict[str, tuple[str, ...]] = {}
+        self._session_mcp_servers: dict[str, tuple[McpServerConfig, ...]] = {}
+        self._session_mcp_digest: dict[str, str] = {}
+        self._session_mcp_refs: dict[str, int] = {}
         # execution.py 会加载 deepagents；保持其惰性导入，避免拖慢 initialize
         # 前的 sidecar 启动路径。资源池在第一次默认构图时建立。
         self._workspace_execution_resources: Any | None = None
@@ -1284,6 +1290,108 @@ class AgentHost:
                 # 已经就绪的资源回滚成「未就绪」。
                 await self._ensure_code_index_manager().start()
         return self._host_snapshot()
+
+    def set_session_roots(self, thread_id: str, directories: Sequence[str]) -> None:
+        """替换这个线程的会话级额外目录。校验失败不改已有登记。"""
+        from harness_agent.policy.workspace_roots import (
+            DirectoryNotTrustable,
+            normalize_host_path,
+        )
+
+        registry = self._workspace_root_registry
+        checked: list[Path] = []
+        try:
+            for raw in directories:
+                if not isinstance(raw, str) or not raw:
+                    raise RpcError(
+                        -32602,
+                        "INVALID_ADDITIONAL_DIRECTORY",
+                        {"path": raw if isinstance(raw, str) else ""},
+                    )
+                try:
+                    path = normalize_host_path(raw)
+                except (ValueError, OSError) as exc:
+                    raise RpcError(
+                        -32602, "INVALID_ADDITIONAL_DIRECTORY", {"path": raw}
+                    ) from exc
+                if not path.is_dir():
+                    raise RpcError(-32602, "INVALID_ADDITIONAL_DIRECTORY", {"path": raw})
+                try:
+                    registry.trust_candidate(str(path))
+                except (DirectoryNotTrustable, ValueError) as exc:
+                    raise RpcError(
+                        -32602, "INVALID_ADDITIONAL_DIRECTORY", {"path": raw}
+                    ) from exc
+                checked.append(path)
+        except RpcError:
+            self._diagnostic_log.info(
+                "acp.session.directories",
+                {"count": len(directories), "result": "rejected"},
+            )
+            raise
+        previous = self._session_root_ids.get(thread_id, ())
+        registry.revoke_session_roots(previous)
+        known = {root.root_id for root in registry.roots()}
+        owned: list[str] = []
+        for path in checked:
+            root = registry.trust(path, "session", persist=False)
+            # 落在已有 project/user 根里时 trust 返回那条旧根，不能在关闭会话时把它删掉。
+            if root.scope == "session" and root.root_id not in known:
+                owned.append(root.root_id)
+                known.add(root.root_id)
+        if owned:
+            self._session_root_ids[thread_id] = tuple(owned)
+        else:
+            self._session_root_ids.pop(thread_id, None)
+        self._diagnostic_log.info(
+            "acp.session.directories",
+            {"count": len(directories), "result": "accepted"},
+        )
+
+    async def set_session_mcp(
+        self, thread_id: str, servers: Sequence[Mapping[str, object]]
+    ) -> None:
+        """替换这个线程的会话 MCP，并只为新增的合并快照建侧路连接。"""
+        await self._ensure_mcp_connected()
+        async with self._mcp_state_lock:
+            accepted, rejected = self._partition_session_mcp_unlocked(servers)
+            for item in rejected:
+                self._diagnostic_log.info("acp.session.mcp_rejected", item)
+            previous = self._session_mcp_digest.get(thread_id)
+            snapshot: McpConfigSnapshot | None
+            if not accepted:
+                self._session_mcp_servers.pop(thread_id, None)
+                self._session_mcp_digest.pop(thread_id, None)
+                snapshot = None
+                new_digest: str | None = None
+            else:
+                self._session_mcp_servers[thread_id] = accepted
+                snapshot = self._merged_session_snapshot_unlocked(thread_id)
+                new_digest = snapshot.digest
+                if new_digest == previous:
+                    return
+                self._session_mcp_digest[thread_id] = new_digest
+                self._session_mcp_refs[new_digest] = self._session_mcp_refs.get(new_digest, 0) + 1
+            if previous and previous != new_digest:
+                await self._release_session_mcp_digest_unlocked(previous)
+            manager = self._mcp_manager
+            if (
+                snapshot is not None
+                and manager is not None
+                and new_digest is not None
+                and not self._digest_is_global_unlocked(new_digest)
+            ):
+                await manager.ensure_side_runtime(snapshot)
+
+    def authorize_existing_file(self, raw: str) -> str | None:
+        """已授权根内的现有文件返回绝对路径；其余返回 None，不抛异常。"""
+        resolved = self.resolve_display_path(raw, tool_name="read_file")
+        if resolved is None:
+            return None
+        path = Path(resolved)
+        if not path.is_file():
+            return None
+        return str(path)
 
     def resolve_display_path(self, raw: object, *, tool_name: str) -> str | None:
         """端口实现：按 validate_direct_path 语义解析为绝对路径字符串，失败 None。"""
@@ -2415,9 +2523,26 @@ class AgentHost:
         }
 
     async def _handle_models_list(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """返回 `/model` 可安全展示的 Profile 目录与可选 Thread 绑定摘要。"""
-        self._require_models_capability()
+        """v3 薄壳：解析参数后交给 `list_models`。"""
         parsed = ModelsListParams.model_validate(params)
+        return await self.list_models(self._current_connection(), parsed.thread_id)
+
+    async def list_models(
+        self, connection: ProtocolConnection, thread_id: str | None = None
+    ) -> dict[str, object]:
+        """返回 `/model` 可安全展示的 Profile 目录与可选 Thread 绑定摘要。
+
+        能力看传入的连接，不读环境里的当前连接：ACP 没有那条 ContextVar。
+        `models.read` 与 `models.select` 都能列目录；回声模式没有真实目录。
+        """
+        capabilities = connection.enabled_capabilities
+        if (
+            CAPABILITY["MODELS_READ"] not in capabilities
+            and CAPABILITY["MODELS_SELECT"] not in capabilities
+        ):
+            raise RpcError(-32002, "MODELS_CAPABILITY_REQUIRED")
+        if self._allow_echo:
+            raise RpcError(-32002, "MODELS_UNAVAILABLE_IN_ECHO_MODE")
         self._load_config()
         config = self._config
         if config is None or config.model_catalog is None:
@@ -2428,11 +2553,9 @@ class AgentHost:
                 for _, profile in sorted(config.model_catalog.profiles.items())
             ]
         }
-        if parsed.thread_id is not None:
-            persisted = await (await self._ensure_thread_persistence()).load_run_state(
-                parsed.thread_id
-            )
-            if CAPABILITY["MODELS_SELECT"] in self._connection_capabilities():
+        if thread_id is not None:
+            persisted = await (await self._ensure_thread_persistence()).load_run_state(thread_id)
+            if CAPABILITY["MODELS_SELECT"] in capabilities:
                 latest = persisted.latest_run
                 if latest is not None:
                     result["thread_selection"] = latest.requested_selection.to_record()
@@ -3446,6 +3569,94 @@ class AgentHost:
             (*config_snapshot.servers, *plugin_servers),
             config_snapshot.revision,
         )
+
+    def _partition_session_mcp_unlocked(
+        self, servers: Sequence[Mapping[str, object]]
+    ) -> tuple[tuple[McpServerConfig, ...], list[dict[str, object]]]:
+        """拆出可接受的会话 MCP。诊断只留名字、传输、原因和个数。"""
+        from harness_agent.extensions.mcp import McpConfigError
+
+        base = self._mcp_snapshot or build_mcp_snapshot([], "missing")
+        taken = {item.name for item in self._combine_mcp_snapshot(base).servers}
+        accepted: list[McpServerConfig] = []
+        rejected: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for raw in servers:
+            name = raw.get("name") if isinstance(raw, Mapping) else None
+            transport = raw.get("transport") if isinstance(raw, Mapping) else None
+            name_text = name.strip() if isinstance(name, str) else ""
+            transport_text = transport if isinstance(transport, str) else ""
+
+            def reject(reason: str) -> None:
+                rejected.append(
+                    {
+                        "name": name_text,
+                        "transport": transport_text,
+                        "reason": reason,
+                        "count": 1,
+                    }
+                )
+
+            if not isinstance(raw, Mapping):
+                reject("invalid")
+                continue
+            if transport_text in {"sse", "acp"} or name_text in taken or name_text in seen:
+                reject("transport" if transport_text in {"sse", "acp"} else "name_collision")
+                continue
+            try:
+                config = replace(McpServerConfig.from_mapping(raw), source="session")
+            except McpConfigError:
+                reject("invalid")
+                continue
+            if config.transport == "sse":
+                reject("transport")
+                continue
+            accepted.append(config)
+            seen.add(config.name)
+        return tuple(accepted), rejected
+
+    def _merged_session_snapshot_unlocked(self, thread_id: str) -> McpConfigSnapshot:
+        """配置与插件优先，再接上这个线程尚未同名的会话服务器。"""
+        base = self._mcp_snapshot or build_mcp_snapshot([], "missing")
+        combined = self._combine_mcp_snapshot(base)
+        names = {item.name for item in combined.servers}
+        extra = [
+            item
+            for item in self._session_mcp_servers.get(thread_id, ())
+            if item.name not in names
+        ]
+        if not extra:
+            return combined
+        return build_mcp_snapshot((*combined.servers, *extra), combined.revision)
+
+    def _digest_is_global_unlocked(self, digest: str) -> bool:
+        """全局当前快照不能被会话释放逻辑关掉。"""
+        if self._mcp_snapshot is not None and self._mcp_snapshot.digest == digest:
+            return True
+        manager = self._mcp_manager
+        return manager is not None and manager.snapshot.digest == digest
+
+    async def _release_session_mcp_digest_unlocked(self, digest: str) -> None:
+        """引用减到 0 才关侧路 runtime；全局 digest 只减计数。"""
+        refs = self._session_mcp_refs.get(digest, 0) - 1
+        if refs > 0:
+            self._session_mcp_refs[digest] = refs
+            return
+        self._session_mcp_refs.pop(digest, None)
+        if self._digest_is_global_unlocked(digest):
+            return
+        manager = self._mcp_manager
+        if manager is not None:
+            await manager.release_side_runtime(digest)
+
+    def _tools_for_snapshot_unlocked(self, snapshot: McpConfigSnapshot) -> tuple[Any, ...]:
+        """当前快照用全局工具；会话合并快照用侧路 runtime 的工具。"""
+        manager = self._mcp_manager
+        if manager is None:
+            return ()
+        if snapshot.digest == manager.snapshot.digest:
+            return tuple(manager.get_tools())
+        return manager.tools_for_digest(snapshot.digest)
 
     @staticmethod
     def _reject_params(params: Mapping[str, Any], allowed: set[str], method: str) -> None:
@@ -4868,8 +5079,8 @@ class AgentHost:
         persistence = persistence or await self._ensure_thread_persistence()
         await self._ensure_mcp_connected()
         async with self._mcp_state_lock:
-            mcp_snapshot = self._mcp_snapshot or build_mcp_snapshot([], "missing")
-            mcp_tools = tuple(self._mcp_manager.get_tools()) if self._mcp_manager else ()
+            mcp_snapshot = self._merged_session_snapshot_unlocked(thread_id)
+            mcp_tools = self._tools_for_snapshot_unlocked(mcp_snapshot)
         execution = (
             replace(config.execution, approval_mode=approval_mode)
             if approval_mode is not None
@@ -5281,8 +5492,18 @@ class AgentHost:
         persistence = await self._ensure_thread_persistence()
         registry = self._require_skills()
         async with self._mcp_state_lock:
-            mcp_snapshot = self._mcp_snapshot or build_mcp_snapshot([], "missing")
-            mcp_tools = tuple(self._mcp_manager.get_tools()) if self._mcp_manager else ()
+            # 子代理沿用父 spec 的合并快照。会话 MCP 在侧路 runtime 上，不读全局当前工具。
+            # 没有该字段的测试替身按「没有会话 MCP」处理，退回全局合并结果。
+            mcp_snapshot = getattr(parent_spec, "mcp_snapshot", None)
+            if mcp_snapshot is None:
+                mcp_snapshot = self._merged_session_snapshot_unlocked("")
+            manager = self._mcp_manager
+            if manager is None:
+                mcp_tools = ()
+            elif mcp_snapshot.digest == manager.snapshot.digest:
+                mcp_tools = tuple(manager.get_tools())
+            else:
+                mcp_tools = manager.tools_for_digest(mcp_snapshot.digest)
             mcp_owner = self._mcp_owner
         pool = self._ensure_agent_engine_pool(config)
         targets: list[DelegationTarget] = []

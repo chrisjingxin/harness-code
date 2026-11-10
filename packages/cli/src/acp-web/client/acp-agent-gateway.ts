@@ -16,7 +16,7 @@
  *   settle 一次：cancel/abandon/onClose 都可能抢先）；
  * - `listThreads`/`openThread`：session/list 合成 ThreadSummary（GAP-36
  *   固定值）、session/load 回放进 ReplayBuffer；
- * - 27 个不支持方法统一 `AgentGatewayError("ACP_NOT_SUPPORTED", GAP-xx)`；
+ * - 26 个不支持方法统一 `AgentGatewayError("ACP_NOT_SUPPORTED", GAP-xx)`；
  * - `onClose`：SDK closed 与 ws-stream closed 合并成一次 handleClosed，
  *   挂起交互按 cancelled 收敛，活动 Run 的 events 失败、completion 拒绝。
  */
@@ -28,6 +28,8 @@ import type {
   EventEnvelope,
   InteractionRequestEnvelope,
   InteractionResponse,
+  ModelProfile,
+  ModelsListResult,
   RunCancelResult,
   RunSetApprovalModeResult,
   ThreadSummary,
@@ -48,7 +50,8 @@ import { recognizeForm, toElicitationResponse, toInteractionEnvelope } from "./e
 import { buildInteractionRequest, mapInteractionResponse, type PermissionOutcome } from "./permission"
 import { ReplayBuffer } from "./replay"
 import { createAcpRuntime } from "./runtime"
-import { metaApproval, nameOf, RunTranslator, type AcpSessionUpdate, type PromptOutcome } from "./translate"
+import { parseMentionsFromText } from "../../presentation-shared/mention-parse-policy"
+import { metaApproval, nameOf, RunTranslator, type AcpSessionUpdate, type PromptOutcome, type StartedModel } from "./translate"
 import type { AcpBootInfo } from "./runtime"
 import type { WsCloseInfo } from "./ws-stream"
 
@@ -106,6 +109,8 @@ type SessionState = {
   replay: ReplayBuffer | null
   /** 尚未被任何 Core 线程认领的暖会话。 */
   warm: boolean
+  /** session/new、load 和 config_option_update 带来的配置。模型目录从这里来。 */
+  configOptions: SelectConfig[]
 }
 
 type PendingPermission = {
@@ -128,7 +133,17 @@ function isApprovalMode(value: string): value is ApprovalMode {
   return value === "plan" || value === "default" || value === "auto-edit" || value === "auto" || value === "yolo"
 }
 
-/** 27 个不支持方法 → 缺口编号（GAP）。B8 用它与 AgentGateway 接口做漂移检查。 */
+type SelectChoice = { value: string; name: string; description?: string }
+
+type SelectConfig = {
+  id: string
+  name: string
+  type: "select"
+  currentValue: string
+  options: SelectChoice[]
+}
+
+/** 26 个不支持方法 → 缺口编号（GAP）。B8 用它与 AgentGateway 接口做漂移检查。 */
 export const UNSUPPORTED_METHODS: Record<string, { gap: string; label: string }> = {
   compactContext: { gap: "GAP-07", label: "上下文用量与压缩" },
   configDetails: { gap: "GAP-18", label: "配置查看与修改" },
@@ -146,7 +161,6 @@ export const UNSUPPORTED_METHODS: Record<string, { gap: string; label: string }>
   mcpRemove: { gap: "GAP-15", label: "MCP 运行期管理" },
   codeIndexStatus: { gap: "GAP-17", label: "代码索引" },
   codeIndexApply: { gap: "GAP-17", label: "代码索引" },
-  listModels: { gap: "GAP-08", label: "模型选择与切换" },
   listSkills: { gap: "GAP-13", label: "技能管理" },
   setSkillEnabled: { gap: "GAP-13", label: "技能管理" },
   listAgents: { gap: "GAP-16", label: "子代理 / Team" },
@@ -246,6 +260,7 @@ export class AcpAgentGateway implements AgentGateway {
     const session = await gateway.conn.newSession({ cwd: options.cwd, mcpServers: [] } as never) as {
       sessionId: string
       modes?: { currentModeId: string; availableModes?: Array<{ id: string; name: string; description: string | null }> }
+      configOptions?: unknown
     }
     const warm: SessionState = {
       coreThreadId: null,
@@ -255,6 +270,7 @@ export class AcpAgentGateway implements AgentGateway {
       run: null,
       replay: null,
       warm: true,
+      configOptions: parseConfigOptions(session.configOptions) ?? [],
     }
     gateway.byAcp.set(session.sessionId, warm)
     gateway.warmSession = warm
@@ -324,6 +340,11 @@ export class AcpAgentGateway implements AgentGateway {
         if (isApprovalMode(next)) {
           for (const listener of this.approvalModeListeners) listener(next)
         }
+        return
+      }
+      case "config_option_update": {
+        const parsed = parseConfigOptions((update as { configOptions?: unknown }).configOptions)
+        if (parsed) session.configOptions = parsed
         return
       }
       case "available_commands_update": {
@@ -558,8 +579,6 @@ export class AcpAgentGateway implements AgentGateway {
     const notSupported = (gap: string, label: string) => new AgentGatewayError("ACP_NOT_SUPPORTED", `该功能暂未通过 ACP 提供（${gap}：${label}）`)
     // ① 门禁（任一不满足 → fail 整个 run）
     if (input.input.kind !== "user") return this.failRun(run, notSupported("GAP-03", "目标闭环输入"))
-    if (input.mode !== "build") return this.failRun(run, notSupported("GAP-04", "Compose 工作模式"))
-    if (input.modelSelection?.primary_profile) return this.failRun(run, notSupported("GAP-08", "模型选择与切换"))
     const requestedSkill = (input.input as { requested_skill?: { raw_invocation?: string } }).requested_skill
     if (requestedSkill && !requestedSkill.raw_invocation) return this.failRun(run, notSupported("GAP-28", "武装 Skill"))
     const planMissing = (ids: readonly string[] | null | undefined) => input.approvalMode === "plan" && !ids?.includes("plan")
@@ -582,7 +601,7 @@ export class AcpAgentGateway implements AgentGateway {
     }
     if (!session) {
       try {
-        const created = await this.conn.newSession({ cwd: this.cwd, mcpServers: [] } as never) as { sessionId: string; modes?: { currentModeId?: string; availableModes?: Array<{ id: string }> } }
+        const created = await this.conn.newSession({ cwd: this.cwd, mcpServers: [] } as never) as { sessionId: string; modes?: { currentModeId?: string; availableModes?: Array<{ id: string }> }; configOptions?: unknown }
         session = {
           coreThreadId: run.ref.threadId,
           acpSessionId: created.sessionId,
@@ -591,6 +610,7 @@ export class AcpAgentGateway implements AgentGateway {
           run: null,
           replay: null,
           warm: false,
+          configOptions: parseConfigOptions(created.configOptions) ?? [],
         }
         this.byAcp.set(created.sessionId, session)
         this.byCore.set(run.ref.threadId, session)
@@ -619,16 +639,27 @@ export class AcpAgentGateway implements AgentGateway {
         return this.failRun(run, this.mapError(error, "切换审批模式失败"))
       }
     }
+    const workflow = input.mode === "compose" ? "compose" : "build"
+    if (configCurrent(session, "workflow") !== workflow && !(configCurrent(session, "workflow") === undefined && workflow === "build")) {
+      const applied = await this.applyConfig(session, run, "workflow", workflow)
+      if (!applied) return
+    }
+    const requestedModel = input.modelSelection?.primary_profile
+    if (requestedModel && configCurrent(session, "model") !== requestedModel) {
+      const applied = await this.applyConfig(session, run, "model", requestedModel)
+      if (!applied) return
+    }
     try {
-      // ⑤ 推 run.started，发 prompt
-      run.events.push(run.translator.started())
+      // ⑤ 推 run.started，发 prompt。模型摘要用刚选中的配置，不依赖扩展字段。
+      const modelId = requestedModel ?? configCurrent(session, "model")
+      run.events.push(run.translator.started({ mode: workflow, model: profileFrom(session, modelId) }))
       const promptText = (input.input as { message: string }).message
       const response = await this.conn.prompt({
         sessionId: session.acpSessionId,
-        prompt: [{ type: "text", text: promptText }],
-      } as never) as { stopReason: string; _meta?: unknown }
+        prompt: promptBlocks(this.cwd, promptText),
+      } as never) as PromptOutcome
       // ⑦ 终态
-      const terminal = run.translator.finish(response as PromptOutcome)
+      const terminal = run.translator.finish(response)
       run.events.push(terminal)
       run.events.end()
       run.accepted.resolve()
@@ -751,7 +782,7 @@ export class AcpAgentGateway implements AgentGateway {
     let session = this.byAcp.get(sessionId)
     let fresh = false
     if (!session) {
-      session = { coreThreadId: threadId, acpSessionId: sessionId, currentModeId: null, availableModeIds: null, run: null, replay: null, warm: false }
+      session = { coreThreadId: threadId, acpSessionId: sessionId, currentModeId: null, availableModeIds: null, run: null, replay: null, warm: false, configOptions: [] }
       this.byAcp.set(sessionId, session)
       this.byCore.set(threadId, session)
       fresh = true
@@ -764,8 +795,11 @@ export class AcpAgentGateway implements AgentGateway {
       // 一律 session/load：界面靠返回的 messages 重建时间线，resume 不给历史会清空。
       const response = await this.conn.loadSession({ sessionId, cwd: this.cwd, mcpServers: [] } as never) as {
         modes?: { currentModeId?: string }
+        configOptions?: unknown
       }
       if (response?.modes?.currentModeId) session.currentModeId = response.modes.currentModeId
+      const loaded = parseConfigOptions(response?.configOptions)
+      if (loaded) session.configOptions = loaded
     } catch (error) {
       if (fresh) {
         this.byAcp.delete(sessionId)
@@ -796,7 +830,48 @@ export class AcpAgentGateway implements AgentGateway {
     } as ThreadsOpenResult
   }
 
-  // ---------------- 27 个不支持方法 ----------------
+  // ---------------- 会话配置与仍不支持的方法 ----------------
+
+  async listModels(threadId?: string): Promise<ModelsListResult> {
+    const session = threadId
+      ? (this.byCore.get(threadId) ?? this.byAcp.get(threadId) ?? null)
+      : this.warmSession
+    const option = session?.configOptions.find(item => item.id === "model")
+    if (!option) return { profiles: [] }
+    const profiles: ModelProfile[] = option.options.map(choice => ({
+      id: choice.value,
+      model: choice.name,
+      provider_label: choice.description?.trim() || choice.name,
+      context_window_tokens: 0,
+      capabilities: [],
+      is_default: choice.value === option.currentValue,
+      available: true,
+      source: "config",
+    }))
+    return {
+      profiles,
+      ...(option.currentValue ? { thread_selection: { primary_profile: option.currentValue } } : {}),
+    }
+  }
+
+  /** 把下拉选择写到会话上。失败时这一轮不开始。 */
+  private async applyConfig(session: SessionState, run: RunState, configId: string, value: string): Promise<boolean> {
+    try {
+      const response = await this.conn.setSessionConfigOption({
+        sessionId: session.acpSessionId,
+        configId,
+        value,
+      })
+      const parsed = parseConfigOptions(response?.configOptions)
+      if (parsed && parsed.length > 0) session.configOptions = parsed
+      else writeConfigCurrent(session, configId, value)
+      return true
+    } catch (error) {
+      session.run = null
+      this.failRun(run, this.mapError(error, "切换会话配置失败"))
+      return false
+    }
+  }
 
   async compactContext(): Promise<never> { throw notSupported("compactContext") }
   async configDetails(): Promise<never> { throw notSupported("configDetails") }
@@ -814,7 +889,6 @@ export class AcpAgentGateway implements AgentGateway {
   async mcpRemove(): Promise<never> { throw notSupported("mcpRemove") }
   async codeIndexStatus(): Promise<never> { throw notSupported("codeIndexStatus") }
   async codeIndexApply(): Promise<never> { throw notSupported("codeIndexApply") }
-  async listModels(): Promise<never> { throw notSupported("listModels") }
   async listSkills(): Promise<never> { throw notSupported("listSkills") }
   async setSkillEnabled(): Promise<never> { throw notSupported("setSkillEnabled") }
   async listAgents(): Promise<never> { throw notSupported("listAgents") }
@@ -851,6 +925,100 @@ export class AcpAgentGateway implements AgentGateway {
   get runtime() {
     return createAcpRuntime(this.boot)
   }
+}
+
+function parseConfigOptions(value: unknown): SelectConfig[] | null {
+  if (!Array.isArray(value)) return null
+  const options: SelectConfig[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const raw = item as Record<string, unknown>
+    if (raw.type !== "select" || typeof raw.id !== "string") continue
+    const choices: SelectChoice[] = []
+    if (Array.isArray(raw.options)) {
+      for (const choice of raw.options) {
+        if (!choice || typeof choice !== "object") continue
+        const entry = choice as Record<string, unknown>
+        if (typeof entry.value !== "string" || typeof entry.name !== "string") continue
+        choices.push({
+          value: entry.value,
+          name: entry.name,
+          ...(typeof entry.description === "string" ? { description: entry.description } : {}),
+        })
+      }
+    }
+    options.push({
+      id: raw.id,
+      name: typeof raw.name === "string" ? raw.name : raw.id,
+      type: "select",
+      currentValue: typeof raw.currentValue === "string" ? raw.currentValue : "",
+      options: choices,
+    })
+  }
+  return options
+}
+
+function configCurrent(session: SessionState, id: string): string | undefined {
+  const found = session.configOptions.find(item => item.id === id)
+  return found?.currentValue || undefined
+}
+
+function writeConfigCurrent(session: SessionState, id: string, value: string): void {
+  const found = session.configOptions.find(item => item.id === id)
+  if (found) {
+    found.currentValue = value
+    return
+  }
+  session.configOptions.push({ id, name: id, type: "select", currentValue: value, options: [] })
+}
+
+function profileFrom(session: SessionState, id: string | undefined): StartedModel | undefined {
+  if (!id) return undefined
+  const option = session.configOptions.find(item => item.id === "model")
+  const choice = option?.options.find(item => item.value === id)
+  if (!choice?.name) return undefined
+  const provider = choice.description?.trim() || choice.name
+  if (!provider) return undefined
+  return {
+    id: choice.value,
+    model: choice.name,
+    provider_label: provider,
+    is_default: option?.currentValue === choice.value,
+    available: true,
+    source: "config",
+    context_window_tokens: 0,
+  }
+}
+
+/** 原文留下，整文件 @提及另发一条 file:// 链接。行号切片仍只留在原文里。 */
+function promptBlocks(cwd: string, text: string): Array<{ type: "text"; text: string } | { type: "resource_link"; name: string; uri: string }> {
+  const blocks: Array<{ type: "text"; text: string } | { type: "resource_link"; name: string; uri: string }> = [{ type: "text", text }]
+  const seen = new Set<string>()
+  for (const mention of parseMentionsFromText(text)) {
+    if (mention.lineStart !== undefined) continue
+    const absolute = browserAbsolutePath(cwd, mention.path)
+    if (seen.has(absolute)) continue
+    seen.add(absolute)
+    const name = absolute.slice(absolute.lastIndexOf("/") + 1) || absolute
+    blocks.push({ type: "resource_link", name, uri: browserFileUri(absolute) })
+  }
+  return blocks
+}
+
+/** 浏览器包不能用 node:path。只处理服务端传来的绝对工作区路径。 */
+function browserAbsolutePath(cwd: string, input: string): string {
+  const raw = input.startsWith("/") ? input : `${cwd.replace(/\/+$/, "")}/${input}`
+  const parts: string[] = []
+  for (const part of raw.split("/")) {
+    if (!part || part === ".") continue
+    if (part === "..") parts.pop()
+    else parts.push(part)
+  }
+  return `/${parts.join("/")}`
+}
+
+function browserFileUri(absolute: string): string {
+  return `file://${absolute.split("/").map(part => encodeURIComponent(part)).join("/")}`
 }
 
 /** 关闭文案（设计 §4.8）。 */

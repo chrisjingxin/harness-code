@@ -7,7 +7,7 @@
 - 每个实现项都先写失败的测试。
 - 每节末尾的门槛按 Plan「测试门槛」执行（G1 ACP 套件、G2 Host 套件、G3 测试客户端、G4 项目检查）。
 
-状态：S0、S1 已完成（1.4、1.9 性能项经用户决定暂缓）；S2、S3 用户已确认通过。不进入 S4。
+状态：S0、S1 已完成（1.4、1.9 性能项经用户决定暂缓）；S2、S3 用户已确认通过。S4 已实现，待验收，不进入 S5。
 
 ## 停点 0：摸底（无可见变化）
 
@@ -94,17 +94,17 @@
 4. 输入 `@某文件 解释一下`：第一轮回复直接引用文件内容，没有先调用读文件工具。
 5. 用脚本化 SDK 客户端传 `additionalDirectories` 和 `mcpServers`（测试中验证；浏览器不涉及）。
 
-- [ ] 4.1 服务面：抽取 `list_models`，新增 `set_session_roots`、`set_session_mcp`；`HostServicePort` 一致性测试；G2。
-- [ ] 4.2 新建 `config.py`：`model`/`workflow` 两项的构造；模型目录为空时不出现 `model`；new/load/resume 响应带 `configOptions`；`open_connection` 能力加 `models.select`。
-- [ ] 4.3 `session/set_config_option`：影响下一轮 `requested_primary_profile` / `mode`；Run 中修改只影响下一轮；`UNKNOWN_CONFIG_OPTION`、`INVALID_CONFIG_VALUE`；变化推 `config_option_update`。
-- [ ] 4.4 Compose：`compose.progress` → `plan` 状态映射（含失败）；`compose.summary` → 消息块。
-- [ ] 4.5 用量：`usage_update` 字段齐全才发、相同值不重复；`PromptResponse.usage` 映射。
-- [ ] 4.6 附加目录：绝对/存在/目录/可信四种拒绝；整单拒绝带 `data.path`；`session` 作用域登记；load/resume 替换；close 撤销；诊断不含原始路径。
-- [ ] 4.7 会话 MCP：按 0.9 结论接入；stdio/http 生效；sse 与同名跳过并记诊断；诊断不含 command/env/headers；连接失败不影响会话创建。
-- [ ] 4.8 文件内联：`resource_link` 根内读取、根外保持文本；`resource` text 内联、blob 报错；10 KB/20 KB 预算；Transcript 只记原文；`initialize` 声明 `embeddedContext`。
-- [ ] 4.9 Py/TS 附件块格式漂移测试（对照 `mention-resolver.ts`）。
-- [ ] 4.10 测试客户端：模型与工作模式接 `configOptions`；用量接 `usage_update`；阶段条接 `plan`；`@文件` 发 `resource_link`；各项单测。
-- [ ] 4.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。
+- [x] 4.1 服务面：抽取 `list_models`，新增 `set_session_roots`、`set_session_mcp`；`HostServicePort` 一致性测试；G2。待验收。
+- [x] 4.2 新建 `config.py`：`model`/`workflow` 两项的构造；模型目录为空时不出现 `model`；new/load/resume 响应带 `configOptions`；`open_connection` 能力加 `models.select`。待验收。
+- [x] 4.3 `session/set_config_option`：影响下一轮 `requested_primary_profile` / `mode`；Run 中修改只影响下一轮；`UNKNOWN_CONFIG_OPTION`、`INVALID_CONFIG_VALUE`；变化推 `config_option_update`。待验收。
+- [x] 4.4 Compose：`compose.progress` → `plan` 状态映射（含失败）；`compose.summary` → 消息块。待验收。
+- [x] 4.5 用量：`usage_update` 字段齐全才发、相同值不重复；`PromptResponse.usage` 映射。待验收。
+- [x] 4.6 附加目录：绝对/存在/目录/可信四种拒绝；整单拒绝带 `data.path`；`session` 作用域登记；load/resume 替换；close 撤销；诊断不含原始路径。待验收。
+- [x] 4.7 会话 MCP：按 0.9 结论接入；stdio/http 生效；sse 与同名跳过并记诊断；诊断不含 command/env/headers；连接失败不影响会话创建。待验收。
+- [x] 4.8 文件内联：`resource_link` 根内读取、根外保持文本；`resource` text 内联、blob 报错；10 KB/20 KB 预算；Transcript 只记原文；`initialize` 声明 `embeddedContext`。待验收。
+- [x] 4.9 Py/TS 附件块格式漂移测试（对照 `mention-resolver.ts`）。待验收。
+- [x] 4.10 测试客户端：模型与工作模式接 `configOptions`；用量接 `usage_update`；阶段条接 `plan`；`@文件` 发 `resource_link`；各项单测。待验收。
+- [x] 4.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。待验收。
 
 ## 停点 5：内置命令
 

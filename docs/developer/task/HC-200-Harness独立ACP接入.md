@@ -226,6 +226,36 @@ S0 只读代码并写临时脚本，没有改产品代码和现有测试。八�
 
 **验证（填空题修复之后，2026-11-10）**：G1 `tests/host/acp` 443 通过；G2 `tests/host` 787 通过（既有的 Pydantic 3.14 警告，以及一条 aiosqlite 在事件循环关闭后的线程警告）；G3 `bun test tests/acp-web` 389 通过、15 跳过，`packages/cli` 的 `npm run typecheck` 通过；G4 `project:check` 与 `check:boundaries --self-check` 通过。`thread.approval_mode` 的协议生成是在加字段时检查过的，这次没有重跑生成。
 
+## S4 结果（2026-11-10，待验收）
+
+会话配置和输入已接到 `harness web`。模型下拉、Compose 阶段条、用量和 `@文件` 在真实页面上走通。附加目录和会话 MCP 只在脚本里验证，浏览器不传这两项。产品级验收清单（依赖 HC-197 / HC-196 的项）仍不勾。
+
+| Todo | 结果 | 主要测试 |
+|---|---|---|
+| 4.1 服务面 | `list_models`、`set_session_roots`、`set_session_mcp`、`authorize_existing_file` 从 Host 抽出，不读当前连接上的隐式状态 | `test_session_config_services.py`、`test_host_services.py` |
+| 4.2 配置项 | `model` / `workflow` 两项；目录为空时不给模型项；new/load/resume 带 `configOptions`；握手带 `models.select` | `test_session_config.py` |
+| 4.3 切换 | 切换只影响下一轮；未知项 `UNKNOWN_CONFIG_OPTION`，非法值 `INVALID_CONFIG_VALUE`；变化推 `config_option_update` | `test_session_config.py` |
+| 4.4 Compose | `compose.progress` 变成标准 `plan`（需求/规格/计划/实现/检视，失败标在文案上）；`compose.summary` 变成消息 | `test_translate.py` |
+| 4.5 用量 | 上下文数字齐全且有变化才发 `usage_update`；一轮结束的 `PromptResponse.usage` 单独映射 | `test_translate.py` |
+| 4.6 附加目录 | 不是绝对路径、不存在、不是目录、不可信，整单拒绝并带回提交的路径；会话结束撤销 | `test_session_config_services.py` |
+| 4.7 会话 MCP | stdio/http 进入下一轮合并快照；sse 和重名跳过并记诊断，诊断里没有命令、环境变量和请求头 | `test_session_config_services.py` |
+| 4.8 文件内联 | 工作区内的 `file://` 读入模型输入，记录里只留 `@路径`；根外不读；超限和二进制用同一句占位 | `test_server_lifecycle.py`、`test_server_commands.py` |
+| 4.9 格式对齐 | Python 附件块与页面 `resolveMentions` 的输出一致 | `inline-format.test.ts` |
+| 4.10 测试客户端 | 模型和工作模式走 `configOptions`；用量走 `usage_update`；阶段条走 `plan`；整文件 `@` 额外发 `resource_link` | `acp-agent-gateway.test.ts`、`translate.test.ts` |
+| 4.11 门槛与页面 | 见下方 | G1–G4，Tabbit |
+
+**浏览器**（`bun src/index.ts web --cwd /tmp/hc200-s4-web`，实际目录 `/private/tmp/hc200-s4-web`，Tabbit 任务名 HC-200 S4）。`note.txt` 只有一行 `唯一标记：HC200-S4-CITRUS-8841`。文件树仍是 GAP-11。工作模式芯片是英文 Compose / Build。
+
+第一次打开停在「本地 Agent 暂时不可用」：桥只留一条 WebSocket，有一条连接没被页面关掉，后面的升级都是 409。结束那条子进程后再刷新，页面进入工作台。这次没有改引导代码。
+
+1. 模型下拉里原先选中的是 `grok / grok-4.7`。改成 `hy3` 后发「只回复一个字：好」。运行状态里当前模型是 `hy3 · auto/hy3`。时间线有一句「当前 Thread 已切换到 Hy3 (Magpie) · auto/hy3」；未来新会话的默认模型没改，因为客户端没有协商 `config.write`。回复是「好」，0 次工具调用。
+2. 新建对话，空输入框按 Tab，芯片变成 Compose。发送「用分阶段协作，只做一件事：确认需求是给 note.txt 增加一行 hello」。阶段条先是需求完成、规格进行中，确认规格后变成需求完成、规格完成、计划进行中。页脚从「Compose · 规格」变成「Compose · 计划」。
+3. 同一条 Build 会话连发两轮。运行状态「本轮用量」从 9,547 tokens 变成 9,876 tokens（第二轮附带 98% 缓存命中）。时间线上没有单独的 `context-updated` 行。
+4. 第二轮输入 `@note.txt 解释一下。不要调用任何工具……`。回复直接写出 `HC200-S4-CITRUS-8841`，这一轮对话统计仍是 0 次工具调用，没有「读取文件」卡。
+5. 附加目录和会话 MCP 没有在浏览器里操作。拒绝路径、替换撤销、stdio/http 生效和 sse/重名跳过都在第 4.6、4.7 行的 Host 测试里。
+
+**验证（2026-11-10，浏览器之前）**：G1 `tests/host/acp` 452 通过；G2 `tests/host` 807 通过（Pydantic 3.14 警告、streamable_http 弃用警告，以及既有的 aiosqlite 事件循环关闭警告）；G3 `bun test tests/acp-web` 392 通过、15 跳过，`packages/cli` 的 `bun run typecheck` 通过；G4 `project:check` 与 `check:boundaries --self-check` 通过。浏览器验收没有再改生产代码，这四项没有重跑。
+
 ## 验收结果
 
 - [ ] 通用 acp-runtime 可启动实际 Python Harness ACP 进程，执行沿用内核唯一运行/终态与工具策略。

@@ -23,7 +23,7 @@ AST 测试也能机械检查服务方法体里没有 `_current_connection` 之�
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -159,6 +159,39 @@ class HostServicePort(Protocol):
         self, limit: int, after: tuple[int, str] | None
     ) -> tuple[list[ThreadSummary], bool]:
         """keyset 分页版 `list_threads`：返回 (本页摘要, has_more)；after=None 取第一页。"""
+        raise NotImplementedError
+
+    async def list_models(
+        self, connection: ProtocolConnection, thread_id: str | None = None
+    ) -> dict[str, object]:
+        """返回模型目录。`connection` 必须带 `models.read` 或 `models.select`。
+
+        回声模式抛 `-32002 MODELS_UNAVAILABLE_IN_ECHO_MODE`。目录缺失抛 `-32010`。
+        `thread_id` 有值且连接有 `models.select` 时，附带该线程上次选择与绑定。
+        """
+        raise NotImplementedError
+
+    def set_session_roots(self, thread_id: str, directories: Sequence[str]) -> None:
+        """替换这个线程的会话级额外目录。空列表表示清空。
+
+        先整表校验，任一不可信任就整单拒绝（`-32602 INVALID_ADDITIONAL_DIRECTORY`，
+        `data.path` 是那一项），已有登记不动。通过后再撤销本线程上次自己登记的
+        session 根，并注册新目录。不认领事先已存在的 project/user 根。
+        """
+        raise NotImplementedError
+
+    async def set_session_mcp(
+        self, thread_id: str, servers: Sequence[Mapping[str, object]]
+    ) -> None:
+        """替换这个线程的会话 MCP。空列表表示清空。
+
+        非法项、sse/acp、以及与配置或插件同名的项被跳过并记诊断，不让建会话失败。
+        连接失败同样不抛。不会替换全局当前快照。
+        """
+        raise NotImplementedError
+
+    def authorize_existing_file(self, raw: str) -> str | None:
+        """已授权根内的现有文件返回绝对路径；越界、目录或不存在返回 None。"""
         raise NotImplementedError
 
     async def cancel_run(

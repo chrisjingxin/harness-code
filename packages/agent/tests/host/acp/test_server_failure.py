@@ -276,7 +276,7 @@ async def test_resource_link_becomes_at_path(tmp_path: Path) -> None:
         )
         assert prompt_response(response).stop_reason == "end_turn"
         chunk = first_update("agent_message_chunk", acp.client.frames)
-        assert chunk["content"]["text"] == "@/src/a.py"
+        assert chunk["content"]["text"] == "@file:///src/a.py"
 
 
 async def test_shutdown_rejects_new_prompts(tmp_path: Path) -> None:

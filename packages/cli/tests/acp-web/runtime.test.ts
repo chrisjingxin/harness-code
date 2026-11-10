@@ -22,7 +22,7 @@ const baseBoot: AcpBootInfo = {
 describe("createAcpRuntime", () => {
   test("能力集合：list+load 全开 → threads.read；有 modes → run.approval_mode", () => {
     const runtime = createAcpRuntime(baseBoot)
-    expect(runtime.capabilities).toEqual(["run.cancel", "threads.read", "run.approval_mode"])
+    expect(runtime.capabilities).toEqual(["run.cancel", "threads.read", "run.approval_mode", "models.read", "models.select"])
     expect(runtime.workspace).toBe("/tmp/ws")
     expect(runtime.cliVersion).toBe("9.9.9")
     expect(runtime.modelConfigured).toBe(true)
@@ -31,9 +31,9 @@ describe("createAcpRuntime", () => {
   })
 
   test("无 modes / 无 list：能力收窄", () => {
-    expect(createAcpRuntime({ ...baseBoot, modes: null }).capabilities).toEqual(["run.cancel", "threads.read"])
-    expect(createAcpRuntime({ ...baseBoot, canListSessions: false }).capabilities).toEqual(["run.cancel", "run.approval_mode"])
-    expect(createAcpRuntime({ ...baseBoot, canLoadSession: false }).capabilities).toEqual(["run.cancel", "run.approval_mode"])
+    expect(createAcpRuntime({ ...baseBoot, modes: null }).capabilities).toEqual(["run.cancel", "threads.read", "models.read", "models.select"])
+    expect(createAcpRuntime({ ...baseBoot, canListSessions: false }).capabilities).toEqual(["run.cancel", "run.approval_mode", "models.read", "models.select"])
+    expect(createAcpRuntime({ ...baseBoot, canLoadSession: false }).capabilities).toEqual(["run.cancel", "run.approval_mode", "models.read", "models.select"])
   })
 
   test("approvalMode 取 currentModeId；未知值回退默认", () => {
@@ -42,9 +42,11 @@ describe("createAcpRuntime", () => {
     expect(createAcpRuntime({ ...baseBoot, modes: null }).approvalMode).toBe("auto")
   })
 
-  test("不含 skills.read / models.* / config.*", () => {
-    for (const capability of createAcpRuntime(baseBoot).capabilities ?? []) {
-      expect(capability).not.toMatch(/^(skills|models|mcp|agents|goal|config|context)/)
+  test("不含 skills.read / mcp.* / config.*；模型选择已接入", () => {
+    const capabilities = createAcpRuntime(baseBoot).capabilities ?? []
+    expect(capabilities).toEqual(expect.arrayContaining(["models.read", "models.select"]))
+    for (const capability of capabilities) {
+      expect(capability).not.toMatch(/^(skills|mcp|agents|goal|config|context)/)
     }
   })
 

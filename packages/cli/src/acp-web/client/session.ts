@@ -34,7 +34,7 @@ export async function composeAcpWebSession(options: {
 }): Promise<AcpWebSession> {
   const { gateway, boot } = await AcpAgentGateway.connect(options)
   const runtime = createAcpRuntime(boot)
-  // 不传 resolveMentions（直通）、不传 workspaceGit、不传 initialThreadId（空首页）。
+  // @文件由网关改成 resource_link，不在控制器里读盘。不传 workspaceGit，不传 initialThreadId（空首页）。
   const controller = createInteractiveController({ gateway, baseRuntime: runtime })
   const client = createLocalUiClient({ controller })
   return {
