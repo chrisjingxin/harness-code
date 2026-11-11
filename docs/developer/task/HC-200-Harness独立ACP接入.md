@@ -5,7 +5,7 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: Codex
 priority: P1
-status: 进行中
+status: 待验收
 owner: 张景新
 branch: feat_hc_200_Harness独立ACP接入
 scope: 在独立 Harness Agent 实现内提供 Python ACP 接入适配，复用现有运行/持久化服务，接入通用 Runner 并验证恢复与人工交互；并入原「补齐 ACP 缺口扩展」任务中归属 Agent 侧的 28 个 ACP 缺口、握手缺陷与三项启动性能优化。
@@ -145,7 +145,7 @@ S0 只读代码并写临时脚本，没有改产品代码和现有测试。八�
 - `agent_host.py` 里 `_provide_compose_services` 的 `cleanup_stage_execution` 闭包原本引用了不存在的变量 `persistence`（pyflakes 的未定义名检查发现），一旦被调用必然 `NameError`，已改为取本次 Run 的持久层。
 - 用 `git checkout` 恢复破坏验证用的改动时曾误回滚过一次未提交的 `sessions.py`，已按设计原样重建并重跑 G1，全绿；之后改用编辑恢复。
 
-## S2 结果（2026-11-09 实现，用户已确认查看方式）
+## S2 结果（2026-11-09 实现，用户已验收）
 
 用户按三步案例在 `harness web` 里确认通过：`default` 下修改已有文件时审批卡有左右对比；失败命令在刷新并重新打开同一会话后仍显示命令参数和失败状态；`task` 子代理的工具卡紧挨父任务卡成组，改文件的审批出现在子代理那一组上。
 
@@ -186,7 +186,7 @@ S0 只读代码并写临时脚本，没有改产品代码和现有测试。八�
 4. 回放的工具卡输出文本仍是 Transcript 里的原文，没有区分成功与失败的文案。
 5. 仍未处理（S1 已登记）：`run_coordinator.cancel` 在 Run 处于 `accepted` 状态时不会取消尚未启动的执行器。
 
-## S3 结果（2026-11-10，用户已确认）
+## S3 结果（2026-11-10，用户已验收）
 
 用户按空目录三步案例自己验证：提问后按回答继续、批准计划后下拉回到原模式、拒绝并填写原因后下一句回复体现该原因。三条都通过。
 
@@ -226,9 +226,11 @@ S0 只读代码并写临时脚本，没有改产品代码和现有测试。八�
 
 **验证（填空题修复之后，2026-11-10）**：G1 `tests/host/acp` 443 通过；G2 `tests/host` 787 通过（既有的 Pydantic 3.14 警告，以及一条 aiosqlite 在事件循环关闭后的线程警告）；G3 `bun test tests/acp-web` 389 通过、15 跳过，`packages/cli` 的 `npm run typecheck` 通过；G4 `project:check` 与 `check:boundaries --self-check` 通过。`thread.approval_mode` 的协议生成是在加字段时检查过的，这次没有重跑生成。
 
-## S4 结果（2026-11-10，待验收）
+## S4 结果（2026-11-10 实现，2026-11-11 用户已验收）
 
-会话配置和输入已接到 `harness web`。模型下拉、Compose 阶段条、用量和 `@文件` 在真实页面上走通。附加目录和会话 MCP 只在脚本里验证，浏览器不传这两项。产品级验收清单（依赖 HC-197 / HC-196 的项）仍不勾。
+用户于 2026-11-11 验收停点 4。
+
+会话配置和输入已接到 `harness web`。模型下拉、Compose 阶段条、用量和 `@文件` 在真实页面上走通。附加目录和会话 MCP 只在脚本里验证，浏览器不传这两项。
 
 | Todo | 结果 | 主要测试 |
 |---|---|---|
@@ -256,17 +258,106 @@ S0 只读代码并写临时脚本，没有改产品代码和现有测试。八�
 
 **验证（2026-11-10，浏览器之前）**：G1 `tests/host/acp` 452 通过；G2 `tests/host` 807 通过（Pydantic 3.14 警告、streamable_http 弃用警告，以及既有的 aiosqlite 事件循环关闭警告）；G3 `bun test tests/acp-web` 392 通过、15 跳过，`packages/cli` 的 `bun run typecheck` 通过；G4 `project:check` 与 `check:boundaries --self-check` 通过。浏览器验收没有再改生产代码，这四项没有重跑。
 
+## S5 结果（2026-11-10 实现，2026-11-11 用户已验收）
+
+用户于 2026-11-11 验收停点 5。其中包含后来补上的两处：接受目标后同一轮继续做，历史卡是「审核目标 / 已接受」；「新建对话」不再出现「未知命令：/thread.new」。
+
+内置斜杠命令已接到 `harness web`。菜单、旁注、回退、改名、压缩和目标确认都在真实页面上走过。
+
+| Todo | 结果 | 主要测试 |
+|---|---|---|
+| 5.1 服务面 | 压缩、旁注、回退、重做、回合列表、改名、目标查看/创建/变更、放弃 Compose 都从 Host 服务面走 | `test_host_services.py`、`test_thread_undo_redo.py` |
+| 5.2 命令拦截 | 内置优先于 Plugin，再优先于 Skill；被挤掉的名字记 `acp.command.dropped`，不进菜单。命令不启动模型 Run，也不写入对话记录 | `test_builtin_commands.py` |
+| 5.3 `/compact` | 回复带压缩前后 token，并补发 `usage_update`；线程忙时是可重试的 `THREAD_BUSY` | `test_builtin_commands.py` |
+| 5.4 `/btw` | 旁注不入历史；缺问题是参数错误 | `test_builtin_commands.py`、`acp-agent-gateway.test.ts` |
+| 5.5 `/undo`、`/redo` | 成功带 `historyChanged`。没有可退回合、不是 Git 仓库、没有处于回退中，各自有明确错误 | `test_thread_undo_redo.py`、`test_builtin_commands.py` |
+| 5.6 `/title` | 成功后先推 `session_info_update`，再给「已改名为」；缺标题是参数错误 | `test_builtin_commands.py` |
+| 5.7 `/goal`、`/abandon` | 无参数是查看；`pause` / `resume` / `clear` 带上当前目标编号和版本；创建和 `edit` 走确认卡；不支持表单时不宣告 `/goal` | `test_builtin_commands.py` |
+| 5.8 Skill 命令 | 用户可调用的 Skill 以 `skill:` 加末段进入命令表，调用走普通 Run | `test_builtin_commands.py` |
+| 5.9 `commands` 能力 | 来源字段在 `_meta.harnessCode`；命令响应带 `command`；目录变化后整表重发 | `test_builtin_commands.py` |
+| 5.10 测试客户端 | 握手窗口里的命令表不再被丢掉；`historyChanged` 重新打开会话；旁注用临时样式 | `acp-agent-gateway.test.ts`、`translate.test.ts` |
+| 5.11 门槛与页面 | 见下方 | G1–G4，Tabbit |
+
+**浏览器**（`bun src/index.ts web --cwd /tmp/hc200-s5-web`，实际目录 `/private/tmp/hc200-s5-web`，Tabbit 任务名 HC-200 S5）。横幅有「ACP 过渡版本」。文件树仍是 GAP-11。工作模式芯片是英文 Build。默认审批是 `auto`，改文件不弹审批。
+
+1. 输入 `/`，菜单 15 项：`compact`、`btw`、`undo`、`redo`、`title`、`goal`、`abandon`，以及 8 条 `skill:`（本机已安装的 Skill）。
+2. `/btw 这个项目用什么测试框架` 打开「BTW 临时问答」。答案是看不出测试框架。关掉后正文里没有这句。刷新后重连，历史里也没有。
+3. 先让 Agent 新建未跟踪的 `note.txt`（内容 `HC200-S5-CITRUS-8841`）。`/undo` 记下了回退，但文件还在：检查点是 Git 树，未跟踪文件不在树里。接着改已跟踪的 `seed.txt`。第一次回退没有把内容变回去，因为回合结束时又记了一次快照，把开始时的树盖掉了。改成同一回合只留第一次快照后，再改 `seed.txt` 为 `HC200-S5-SEED-UNDO`：`/undo` 磁盘回到 `HC200-S5-SEED-8841`，`/redo` 回到 `HC200-S5-SEED-UNDO`。时间线有刷新，但「已回退」「已重做」这两句不留在屏幕上：命令回复不进记录，刷新又把整段历史重放出来，被撤掉的那一轮仍然看得到。规格就是这样：截断发生在下一次发送，不发生在回退当时。
+4. `/title 新名字` 后，侧栏标题马上变成「新名字」，正文有「已改名为：新名字」。
+5. `/compact` 显示「已压缩上下文：约 602 → 602 tokens」，时间线有 `context-updated: usage (602/983616 tokens)`。这段历史太短，数字没有下降。运行状态里的「本轮用量」在这之前已经是「0 tokens (新会话)」，因为回退、重做和改名都不是模型回合，会把上一轮用量盖成 0。
+6. `/goal 目标` 出现「审核目标」，按钮有「接受并开始」「驳回并反馈」。接受后第一次 `/goal pause` 显示 `error: GOAL_REVISION_CONFLICT`：暂停没有带上当前目标的编号和版本。补上之后重启页面，同一会话再发 `/goal pause`，正文是「目标已暂停」。
+
+命令表还有一处：`session/new` 返回后紧跟着的命令表，以前会在会话登记前被丢掉，菜单是空的。现在握手窗口里先收下，菜单能出内置命令和 Skill。
+
+手工复测又看到两处（同一天，停点 4/5 案例）：
+
+1. `/goal 保持 seed.txt 为当前这一行` 点了「接受并开始」后直接「已完成」。确认卡收起后被画成「询问 / 已允许」，接受之后也没有启动续跑。现已在同一轮 prompt 里接着跑 `GoalContinuationRunInput`；历史卡标题是「审核目标」，状态是「已接受」。`/goal resume` 带回续跑时同样先回复再接着做。
+2. 「新建对话」反复出现「未知命令：/thread.new」。ACP 命令表整表替换时丢掉了本地的 `thread.new`。替换后仍保留这条，侧栏按钮会清空当前会话。Agent 若占用了名字 `new`，按钮仍按 id `thread.new` 执行。
+
+**验证（2026-11-10）**：G2 `tests/host` 821 通过，里面包含 ACP 宿主用例（Pydantic 3.14 警告、streamable_http 弃用警告，以及既有的 aiosqlite 事件循环关闭警告）。G3 `bun test tests/acp-web` 396 通过、15 跳过；命令表修复后的客户端类型检查已通过，这一轮没有再改 TypeScript。G4 `project:check` 与 `check:boundaries --self-check` 通过。
+
+**复测修复后的验证（2026-11-10）**：`tests/host/acp` 467 通过。`bun test tests/acp-web` 397 通过、15 跳过；全量里「慢客户端」背压用例一次超过堆阈值，单跑通过（该用例写明全量偶发误报）。`packages/cli` 类型检查通过。目标历史卡用例在 `tests/web/presentation/timeline.test.tsx`。G4 `project:check` 与 `check:boundaries --self-check` 通过。
+
+## S6 结果（2026-11-11，用户已验收）
+
+收尾只改文档和官方 SDK 端到端测试，没有改生产代码。缺口表里归 HC-200 的 28 行都已关闭并写了测试名，没有待放弃的行。不进入 S7，不归档。
+
+| Todo | 结果 |
+|---|---|
+| 6.1 两种端到端 | 官方 SDK 0.12.1。有表单、不声明扩展：`test_sdk_client_without_extensions_walks_question_plan_model_cancel_and_resume`。无表单、不声明扩展：`test_sdk_client_without_forms_refuses_plan_and_still_switches_cancels_and_resumes`（计划模式被拒，提问得到不支持，切模型、取消、resume 仍走通） |
+| 6.1a 能力矩阵 | 写入 `docs/developer/architecture/Agent接入架构.md` §4.2 的 Harness 一行和紧随的八列表 |
+| 6.2 缺口表 | `ACP通信.md` 中 GAP-01～10、16、21～24、26～28、30～39 为已关闭 |
+| 6.3 架构文档 | 同文更新了方法表、扩展能力、`elicitation.py` / `config.py` / `inline.py`、UNSTABLE 说明和性能基线 |
+| 6.4 用户文档 | `docs/user/Web界面.md`、`快速开始.md`、`安全与沙箱.md` |
+| 6.5 真实模型 | 见下方。本停点没有新开页面 |
+| 6.6 验收项 | 见下一节 |
+| 6.7 门槛 | 见下方验证 |
+
+**真实模型（与 mock 分开）**
+
+S2、S3 已由用户在 `harness web` 确认，记录在上文。S4（2026-11-10，目录 `/tmp/hc200-s4-web`）用真实模型走过模型切换、Compose 阶段、本轮用量和 `@文件`。S5（同一天，目录 `/tmp/hc200-s5-web`）走过命令菜单、旁注、已跟踪文件的撤销/重做、改名、压缩和 `/goal pause`。
+
+同一天后来修了两处，自动化已通过。用户于 2026-11-11 验收停点 5 时，这两处一并通过：
+
+1. 接受目标后应在同一轮继续做，历史卡是「审核目标 / 已接受」。
+2. 「新建对话」不应再出现「未知命令：/thread.new」。
+
+页面上仍然如此，不算本停点做完：文件树是 GAP-11；审批模式 id 是英文；未跟踪文件不在 `/undo` 的 Git 树里；「本轮用量」是最近一轮模型的 token，不是一条一直跟着上下文大小走的水位。
+
+**验证（2026-11-11）**：G1 `tests/host/acp` 469 通过（比停点 5 多了上面两条端到端；Pydantic 3.14 警告）。本停点没改 Host 方法，也没改测试客户端，G2、G3 没重跑。
+
+性能探针（临时 HOME，不是门槛）：空库 5 轮，`initialize` 中位 1057 ms，`session/list` 中位 44 ms；200 条线程 3 轮，`initialize` 中位 1082 ms，`session/list` 中位 36 ms。冷启动仍高于 0.6 秒。真实线程库和整页打开时间这次没测。
+
+G4：`npm run project:check` 与 `npm run check:boundaries -- --self-check` 通过。
+
+## S7 结果（2026-11-11，用户已验收）
+
+对照代码做了原有功能覆盖核对，没有改生产代码，也没有实现新缺口。
+
+矩阵在 `docs/developer/architecture/ACP通信.md` 的「原有功能覆盖矩阵」。新缺口是 GAP-40 到 GAP-47，状态都是「未开始」。文件树、Git、设置、技能、插件、MCP 管理、代码索引、Trace、输入历史、刷新停任务仍用原来的 GAP-11 到 GAP-20、GAP-25、GAP-29，没有重复编号。
+
+**结论：TUI 现在还不能在功能上被 ACP 链路替代。** 对话本身可以：流式回复、工具卡、取消、审批、提问、计划、目标、切模型、Compose、压缩、旁注、撤销最近一轮、改名、Skill 调用，都已经有标准 ACP 或斜杠命令。还差这些：
+
+- 平台：文件树、Git、输入历史、活进程接管（GAP-11、12、25、20、46）。
+- 管理面：设置、技能、插件、MCP 增删、代码索引、Trace、插件同意（GAP-13 到 19、45），建议继续归 HC-201。
+- 交接：第二个查看者接手同一运行（GAP-47，HC-196）。
+- 只有 Harness 有的操作：选更早回合再撤销、Agent 列表、Team、`/new-work`、直接 shell（GAP-40 到 44）。做不做由你看过清单再定，本任务没有建新任务。
+
+**验证**：本停点只改文档。G1、G2、G3 没重跑。G4：`npm run project:check` 与 `npm run check:boundaries -- --self-check` 通过。`openwiki code --update --print` 本机没有该命令，退出 127，没有安装，也没有手改 `openwiki/`。
+
 ## 验收结果
 
-- [ ] 通用 acp-runtime 可启动实际 Python Harness ACP 进程，执行沿用内核唯一运行/终态与工具策略。
-- [ ] ACP 建会话由 Agent 内部创建 Thread，对外只返回原生标识；平台和 Java 不读取 Harness SQLite/内部类型。
-- [ ] 流式消息、工具、取消、审批/提问经协议接续，换查看用户或关闭窗口不会丢失原执行通道。
-- [ ] 原设备在线时用户 B 接手仍沿用同一 Agent 原生上下文，重启后按宣告能力恢复，历史回放不重复。
-- [ ] Agent 异常、取消、恢复失败和不支持能力明确反馈，不在云端再建一套模型循环兜底。
-- [ ] 不安装或不启动 Harness 时通用平台与其他 ACP 后端仍正常，Python 不进入基础平台安装/检查前置。
-- [ ] 内网 SDK 与配置逻辑保持既有约束；外部环境缺少私有包时记录实际限制，不替换生产 Trace 来源。
-- [ ] 客户端不声明 `_meta.harnessCode` 扩展时（扩展本身保留），每个已实现功能仍能用标准 ACP 完整走通，只少增强显示（官方 SDK 客户端不声明扩展的端到端测试）。
-- [ ] 原有功能覆盖矩阵已写入 ACP通信.md，未覆盖项都已登记进缺口表并有去向，并给出「TUI 能否在功能上被 ACP 链路替代」的结论。
+用户于 2026-11-11 验收本任务。停点 2 至 7 都已验收。下面前三项勾上的是交付边界：行为仍归 HC-197、HC-196，本任务没有把未实现的能力记成已经做到。
+
+- [x] 通用 acp-runtime 可启动实际 Python Harness ACP 进程，执行沿用内核唯一运行/终态与工具策略。等 HC-197。本任务只提供可对接的 `harness acp`。用户已验收这个边界（2026-11-11）。
+- [x] ACP 建会话由 Agent 内部创建 Thread，对外只返回原生标识；平台和 Java 不读取 Harness SQLite/内部类型。`session/new` 的 `sessionId` 就是 Agent 生成的线程 id（`test_server_lifecycle.py`）。本任务没有让平台或 Java 去读 Harness 的库。
+- [x] 流式消息、工具、取消、审批/提问经协议接续，换查看用户或关闭窗口不会丢失原执行通道。协议上的取消和恢复已有测试，但关掉 `harness web` 仍会停掉进程里的运行（GAP-20，等 HC-197）。用户已验收这个边界（2026-11-11）。
+- [x] 原设备在线时用户 B 接手仍沿用同一 Agent 原生上下文，重启后按宣告能力恢复，历史回放不重复。等 HC-196。用户已验收这个边界（2026-11-11）。
+- [x] Agent 异常、取消、恢复失败和不支持能力明确反馈，不在云端再建一套模型循环兜底。`test_server_failure.py`、`test_server_cancel.py`、`test_server_resume_close.py` 的找不到会话和忙、`test_server_modes.py` 的 `UNKNOWN_MODE`。本任务没有加第二套模型循环。
+- [x] 不安装或不启动 Harness 时通用平台与其他 ACP 后端仍正常，Python 不进入基础平台安装/检查前置。桌面安装仍不依赖 Python，见 `docs/user/快速开始.md`。本停点没有把 `packages/agent` 放进新平台安装。
+- [x] 内网 SDK 与配置逻辑保持既有约束；外部环境缺少私有包时记录实际限制，不替换生产 Trace 来源。本停点没有改 Trace 来源，也没有改内网 SDK 选择。缺私有包时的限制仍以既有环境记录为准，这次没有新的私有包环境可测。
+- [x] 客户端不声明 `_meta.harnessCode` 扩展时（扩展本身保留），每个已实现功能仍能用标准 ACP 完整走通，只少增强显示（官方 SDK 客户端不声明扩展的端到端测试）。证据：`test_sdk_client_without_extensions_walks_question_plan_model_cancel_and_resume`。没有表单能力时计划模式和提问按 Spec §8.6 降级，见 `test_sdk_client_without_forms_refuses_plan_and_still_switches_cancels_and_resumes`。
+- [x] 原有功能覆盖矩阵已写入 ACP通信.md，未覆盖项都已登记进缺口表并有去向，并给出「TUI 能否在功能上被 ACP 链路替代」的结论。见「S7 结果」。结论是还不能替代，差平台面板、管理面、交接，以及 GAP-40 到 GAP-44。
 
 ## 验证与后续流程
 

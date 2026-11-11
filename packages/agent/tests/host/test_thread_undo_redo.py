@@ -93,6 +93,33 @@ async def _seed_two_turns(server: Any, workspace: Path, thread_id: str) -> tuple
     return turn_1, turn_2
 
 
+async def test_second_checkpoint_keeps_the_tree_from_run_start(tmp_path: Path) -> None:
+    """同一回合后面再记快照时，必须留下 Run 开始时的树。
+
+    扇出结束还会再记一次。若覆盖成改完后的树，/undo 会还原到改完之后。
+    """
+    workspace = _git_init(tmp_path / "git_project")
+    server, _frames = await _capture_host(tmp_path, workspace)
+    try:
+        store = await server._ensure_thread_persistence()
+        await accept_thread(store, "thread-1", "改文件", run_id="run-1")
+        await server._record_workspace_git_checkpoint("thread-1", "run-1")
+        turn_id = _user_record_id("run-1")
+        before = await store.get_git_checkpoint("thread-1", turn_id)
+        (workspace / "file1.txt").write_text("edited after start\n", encoding="utf-8")
+        await server._record_workspace_git_checkpoint("thread-1", "run-1")
+        after = await store.get_git_checkpoint("thread-1", turn_id)
+        assert after == before
+        shown = subprocess.check_output(
+            ["git", "show", f"{after}:file1.txt"],
+            cwd=workspace,
+            text=True,
+        )
+        assert shown == "initial v1\n"
+    finally:
+        await server.close()
+
+
 async def test_list_turns_uses_user_record_ids_and_omits_null_optional_fields(
     tmp_path: Path,
 ) -> None:

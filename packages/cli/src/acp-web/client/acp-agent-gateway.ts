@@ -111,6 +111,8 @@ type SessionState = {
   warm: boolean
   /** session/new、load 和 config_option_update 带来的配置。模型目录从这里来。 */
   configOptions: SelectConfig[]
+  /** `/btw` 期间把正文接住，不送进时间线。没有旁注时是空的。 */
+  captureText?: (text: string) => void
 }
 
 type PendingPermission = {
@@ -320,12 +322,54 @@ export class AcpAgentGateway implements AgentGateway {
   }
 
   private pendingWarmCommands: AcpBootInfo["commands"] | null = null
+  /** 握手窗口关掉之后，后来的命令表用它整表换掉菜单。 */
+  private commandTableListener: ((commands: AcpBootInfo["commands"]) => void) | null = null
+
+  /** 会话组装完再挂上。握手期间的第一张表已经进了 boot.commands。 */
+  setCommandTableListener(listener: (commands: AcpBootInfo["commands"]) => void): void {
+    this.commandTableListener = listener
+  }
+
+  /** 收下整张命令表。握手窗口里先攒着；窗口关掉之后交给监听者换菜单。 */
+  private rememberCommands(update: AcpSessionUpdate): void {
+    const commands = ((update as { availableCommands?: Array<{
+      name: string
+      description?: string
+      input?: { hint?: string } | null
+      _meta?: { harnessCode?: { requestedSkillId?: unknown; pluginId?: unknown } }
+    }> }).availableCommands ?? []).map(command => {
+      const meta = command._meta?.harnessCode
+      const requestedSkillId = typeof meta?.requestedSkillId === "string" ? meta.requestedSkillId : undefined
+      const pluginId = typeof meta?.pluginId === "string" ? meta.pluginId : undefined
+      return {
+        name: command.name,
+        description: command.description ?? "",
+        hint: command.input?.hint ?? null,
+        ...(requestedSkillId ? { requestedSkillId } : {}),
+        ...(pluginId ? { pluginId } : {}),
+      }
+    })
+    if (this.pendingWarmCommands !== null) {
+      this.pendingWarmCommands = commands
+    } else {
+      // 窗口过后整表替换菜单。boot.commands 保持握手时的那一份。
+      this.log({ event: "commands.late", count: commands.length })
+      this.commandTableListener?.(commands)
+    }
+    this.commandsArrived?.()
+  }
 
   // ---------------- sessionUpdate 路由（同一同步段，F11） ----------------
 
   private onSessionUpdate(sessionId: string, update: AcpSessionUpdate): void {
     const session = this.byAcp.get(sessionId)
     if (!session) {
+      // 命令表和 session/new 的响应贴在同一拍。响应返回前会话还没登记，
+      // 这一帧若当孤儿丢掉，菜单会空等超时，之后也不会再推一次。
+      if (this.pendingWarmCommands !== null && update.sessionUpdate === "available_commands_update") {
+        this.rememberCommands(update)
+        return
+      }
       this.log({ event: "update.orphan", sessionId, kind: update.sessionUpdate })
       return
     }
@@ -348,16 +392,7 @@ export class AcpAgentGateway implements AgentGateway {
         return
       }
       case "available_commands_update": {
-        const commands = ((update as { availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }> }).availableCommands ?? [])
-          .map(command => ({ name: command.name, description: command.description ?? "", hint: command.input?.hint ?? null })) as AcpBootInfo["commands"]
-        if (this.pendingWarmCommands !== null) {
-          // 握手落定窗口内：攒进 pendingWarmCommands，connect 尾部取进 boot.commands。
-          this.pendingWarmCommands = commands
-        } else {
-          // 窗口过后到达的命令更新只记录——页面刷新后才会出现。
-          this.log({ event: "commands.late", count: commands.length })
-        }
-        this.commandsArrived?.()
+        this.rememberCommands(update)
         return
       }
       default:
@@ -365,6 +400,11 @@ export class AcpAgentGateway implements AgentGateway {
     }
     if (session.replay) {
       session.replay.accept(update)
+      return
+    }
+    if (session.captureText && update.sessionUpdate === "agent_message_chunk") {
+      const content = (update as { content?: { type?: string; text?: string } }).content
+      if (content?.type === "text" && typeof content.text === "string") session.captureText(content.text)
       return
     }
     const run = session.run
@@ -537,6 +577,40 @@ export class AcpAgentGateway implements AgentGateway {
     if (!pending) return
     pending.abandoned = true
     pending.settle(CANCELLED)
+  }
+
+  /**
+   * `/btw`：在没有活动 Run 时发一轮 prompt，只把正文拿回来。
+   * 不进时间线，所以刷新后旁注就没了。这个方法不在 AgentGateway 接口上，
+   * TUI 没有它，仍走自己的旁注。
+   */
+  async executeEphemeralPrompt(input: { threadId: string | null; prompt: string }): Promise<string> {
+    const session = this.sessionForEphemeral(input.threadId)
+    if (!session) throw new AgentGatewayError("ACP_NO_SESSION", "没有可用会话")
+    if (session.run) throw new AgentGatewayError("THREAD_BUSY", "该会话已有活动 Run")
+    const chunks: string[] = []
+    session.captureText = text => { chunks.push(text) }
+    try {
+      await this.conn.prompt({
+        sessionId: session.acpSessionId,
+        prompt: promptBlocks(this.cwd, input.prompt),
+      } as never)
+      return chunks.join("")
+    } catch (error) {
+      throw this.mapError(error, "旁注失败")
+    } finally {
+      session.captureText = undefined
+    }
+  }
+
+  /** 有线程 id 就按它找；第一条旁注还没有线程时，用还没被认领的暖会话。 */
+  private sessionForEphemeral(threadId: string | null): SessionState | null {
+    if (threadId) {
+      const found = this.byCore.get(threadId) ?? this.byAcp.get(threadId)
+      if (found) return found
+    }
+    if (this.warmSession && !this.warmSession.coreThreadId) return this.warmSession
+    return null
   }
 
   // ---------------- startRun / cancel / setApprovalMode ----------------

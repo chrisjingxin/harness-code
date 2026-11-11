@@ -241,6 +241,74 @@ class ApprovalAgent:
         return interrupt_id
 
 
+class JourneyAgent:
+    """按用户那句话走提问、计划确认或卡住。官方 SDK 端到端用它，不调用模型。
+
+    提问和计划都做成 LangGraph 的 interrupt，Host 会收成对应的交互。
+    恢复轮只看客户端交回来的结果，回一句让测试能判断走通了哪一步。
+    """
+
+    async def astream(self, stream_input: object = None, **_kwargs: Any) -> AsyncIterator[Any]:
+        """首轮按正文分支；恢复轮按回答、计划决定或「不能提问」的错误收尾。"""
+        resume = getattr(stream_input, "resume", None)
+        if isinstance(resume, Mapping):
+            for value in resume.values():
+                if not isinstance(value, Mapping):
+                    continue
+                if value.get("status") == "error":
+                    yield text(str(value.get("error") or "提问失败"))
+                    return
+                if value.get("status") == "answered":
+                    answers = value.get("answers")
+                    chosen = answers[0] if isinstance(answers, list) and answers else ""
+                    yield text(f"已回答：{chosen}")
+                    return
+                if "decision" in value:
+                    yield text(f"计划{value.get('decision')}")
+                    return
+            yield text("已结束")
+            return
+        rendered = str(stream_input)
+        if "请提问" in rendered:
+            yield _interrupt(
+                {
+                    "type": "ask_user",
+                    "questions": [
+                        {
+                            "question": "用哪种方案？",
+                            "choices": [{"value": "甲"}, {"value": "乙"}],
+                        }
+                    ],
+                },
+                "ask-1",
+            )
+            return
+        if "请出计划" in rendered:
+            yield _interrupt(
+                {
+                    "type": "plan",
+                    "plan_markdown": "先改说明文件",
+                    "has_plan": True,
+                    "revision": 1,
+                    "tool_call_id": "plan-1",
+                    "plan_virtual_path": "/.harness/plan.md",
+                    "plan_display_path": "计划",
+                },
+                "plan-1",
+            )
+            return
+        if "请卡住" in rendered:
+            yield text("开始卡住")
+            await asyncio.Event().wait()
+            return
+        yield text("好")
+
+
+def _interrupt(value: dict[str, Any], interrupt_id: str) -> tuple[str, dict[str, Any]]:
+    """一步：抛出一个 Host 认得的 interrupt。"""
+    return ("updates", {"__interrupt__": [_FakeInterrupt(value, interrupt_id)]})
+
+
 class RawAcpClient:
     """裸行 ACP 客户端：负责发帧、按顺序收集帧。"""
 

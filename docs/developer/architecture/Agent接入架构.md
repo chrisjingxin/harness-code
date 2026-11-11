@@ -124,10 +124,25 @@ Provider 描述是可选的。没有描述的 ACP Agent，也能以「纯标准�
 
 | 家族 | ACP 入口 | 上游已有的标准能力（不完全列举） | 来源 |
 |---|---|---|---|
-| Harness Code（默认 Provider） | `harness acp`（Python，官方 SDK） | 见 [HC-200 Spec](../spec/HC-200-Harness独立ACP接入.md) §5 | 本仓库 |
+| Harness Code（默认 Provider） | `harness acp`（Python，官方 SDK 0.12.1） | 见下方能力矩阵。不声明 `_meta.harnessCode` 时功能仍走标准 ACP，只少增强显示 | 本仓库，2026-11-11 官方 SDK 实测 |
 | Cline | 内置 `cline --acp`（官方 TS SDK） | 会话、`plan`/`act` 模式、切模型、取消、审批 | [cline/docs/usage/acp.mdx](https://github.com/cline/cline/blob/main/docs/usage/acp.mdx) |
 | Pi | 社区适配器 `pi-acp`，有两个实现：一个拉起 `pi --mode rpc` 转接，一个内嵌 pi SDK | 结构化 diff、`configOptions`（模型、思考级别）、`usage_update`、`session/list/load/resume/close`、`/skill:` 命令 | [svkozak/pi-acp](https://github.com/svkozak/pi-acp)、[victor-software-house/pi-acp](https://github.com/victor-software-house/pi-acp) |
 | Qwen Code | 内置 `qwen --acp`（已从实验转稳定） | 会话、审批、`fs/*` 反向请求；上游另有 `acp-bridge` 托管多会话 | [Qwen Code 架构文档](https://qwenlm.github.io/qwen-code-docs/en/developers/architecture/) |
+
+Harness 能力矩阵按 §6 的八列整理。自动化用脚本化模型，不调用真实接口。真实模型的页面记录在 [HC-200 Task](../task/HC-200-Harness独立ACP接入.md) 的 S2～S5，两者分开。
+
+| 测什么 | Harness 实测 |
+|---|---|
+| 握手与能力 | `initialize` 先完成再处理会话请求。宣告读会话、列表、恢复、关闭、附加目录、内嵌上下文、HTTP MCP，以及 `models.select`。不宣告图片、音频、SSE MCP。扩展能力：`approval`、`runSummary`、`sessionSummary`、`subagent`、`goal`、`commands`。`elicitation.form` 是 UNSTABLE 标准能力，不是扩展 |
+| 会话 | `session/new`、`load`、`resume`、`close`、`list`。列表每页 50 条，游标非法回 `INVALID_CURSOR`。`load` 回放历史；同一条连接上的 `resume` 不回放。恢复和关闭需要客户端打开 UNSTABLE |
+| 运行 | 流式正文、思考、工具卡从开始到结束。取消后 `stopReason` 为 `cancelled` |
+| 人工交互 | 审批选项、目录信任、标准 diff。声明 `elicitation.form` 时有提问、计划确认、目标确认和「拒绝并反馈」；批准计划后回到进入前的模式。不声明时不暴露 `plan`（`set_mode` 回 `UNKNOWN_MODE`），提问得到「当前客户端不支持提问」，其余路径仍可切模型、取消、resume |
+| 配置与用量 | `configOptions` 有 `model` 和 `workflow`。切换只影响下一轮。用量走 `usage_update` 和 `PromptResponse.usage`。目录为空时不给模型项 |
+| 内容 | 文件变更带标准 `diff`。`locations` 覆盖已授权的工作区外目录。`resource_link` 在授权根内读入模型输入，记录只留 `@路径`；单文件 10 KB、单轮 20 KB |
+| 命令 | `session/new` 和 `session/load` 之后必发命令表，空表也发。内置命令：`compact`、`btw`、`undo`、`redo`、`title`、`goal`、`abandon`，以及 `skill:` 开头的 Skill。没有表单能力时不宣告 `/goal` |
+| 健壮性 | 畸形帧、超大帧有错误响应且连接继续。stdout 只有 ACP 帧。断开 stdin 后进程退出。官方 SDK 端到端：`test_sdk_client_without_extensions_walks_question_plan_model_cancel_and_resume`（有表单、无扩展）和 `test_sdk_client_without_forms_refuses_plan_and_still_switches_cancels_and_resumes`（无表单、无扩展） |
+
+还没达到、且用户已决定暂缓的性能目标：冷启动到 `initialize` ≤ 0.6 秒，真实线程库上的 `session/list` ≤ 0.1 秒。数字见 [ACP 通信](ACP通信.md) 的性能基线。文件树和 Git 不在这张矩阵里，它们归平台。
 
 这张表只是上游的公开情况。企业魔改版有没有改动 ACP 部分（关掉、加私有字段、换 SDK 版本），接入前必须用 §6 的一致性测试实测，结果记进该家族的 Provider 描述。
 

@@ -43,7 +43,7 @@
 
 import { WorkspaceGitFeature, gitWriteBlockedReason, type GitIntent } from "./features/workspace-git"
 
-import { Capability, type ModelProfile, type ThreadSummary } from "@za38/protocol"
+import { Capability, EventType, type EventEnvelope, type ModelProfile, type ThreadSummary } from "@za38/protocol"
 import { contextCompactNotice, type CommandResult, type CommandRpcMethod, dispatchSlashCommand } from "./command-dispatcher"
 import { builtinCommandCapabilities } from "./commands"
 import { CatalogFeature, CodeIndexFeature, CommandFeature, formatMcpStatusNotice, GoalFeature, InteractionFeature, McpFeature, ModelFeature, PLAN_IMPLEMENT_PROMPT, RunFeature, SkillFeature, ThreadFeature, TimelineFeature, type FeatureContext } from "./features"
@@ -397,12 +397,29 @@ export class InteractiveControllerImpl implements InteractiveController {
       requestedModelProfileId: this.modelFeature.requestedModelProfileId,
       armedSkill: this.skillFeature.armedSkill,
       displayPrompt: message,
-      onEvent: event => this.timelineFeature.processAgentEvent(event, this.featureContext),
+      onEvent: event => this.observeAgentEvent(event),
       onRunFinish: (actualModel?: ModelProfile, context?: Record<string, unknown>) => this.finishRun(actualModel, context),
       onAbandonInteraction: () => this.interactionFeature.abandonPendingInteraction(this.featureContext),
       onAccepted: () => { void this.catalogFeature.refreshThreadCatalog(this.featureContext) },
     })
   }
+  /** 时间线先消化事件。回退或重做结束后重新打开会话，让历史和文件一起回来。 */
+  private observeAgentEvent(event: EventEnvelope): void {
+    this.timelineFeature.processAgentEvent(event, this.featureContext)
+    if (event.type !== EventType.RUN_COMPLETED) return
+    const context = event.payload.context
+    if (!context || typeof context !== "object" || context.historyChanged !== true) return
+    const threadId = this.state.currentThreadId
+    if (!threadId) return
+    void this.threadFeature.openThread(threadId, this.featureContext, {})
+  }
+
+  /** ACP 推来新的整张命令表时换掉斜杠菜单。 */
+  replaceCommandRegistry(registry: import("./commands").CommandRegistry): void {
+    this.commandFeature.replaceRegistry(registry)
+    this.publish()
+  }
+
   /** Run 终态后的统一收尾；有 Goal 工作且功能开启时交给 GoalFeature，否则走计划模式的恢复流程。 */
   private finishRun(
     actualModel?: ModelProfile,
@@ -448,7 +465,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       mode: "build",
       requestedModelProfileId: this.modelFeature.requestedModelProfileId,
       displayPrompt,
-      onEvent: event => this.timelineFeature.processAgentEvent(event, this.featureContext),
+      onEvent: event => this.observeAgentEvent(event),
       onRunFinish: (actualModel, context, outcome) => this.finishRun(
         actualModel,
         context,
@@ -472,7 +489,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       // ThreadPersistence 只会复用既有 binding，不会再次执行。
       runId: continuation.continuation_id,
       requestedModelProfileId: this.modelFeature.requestedModelProfileId,
-      onEvent: event => this.timelineFeature.processAgentEvent(event, this.featureContext),
+      onEvent: event => this.observeAgentEvent(event),
       onRunFinish: (actualModel, context) => this.finishRun(actualModel, context),
       onAbandonInteraction: () => this.interactionFeature.abandonPendingInteraction(this.featureContext),
       onAccepted: () => { void this.catalogFeature.refreshThreadCatalog(this.featureContext) },
@@ -512,7 +529,7 @@ export class InteractiveControllerImpl implements InteractiveController {
       mode: this.state.workMode,
       requestedModelProfileId: this.modelFeature.requestedModelProfileId,
       armedSkill: this.skillFeature.armedSkill,
-      onEvent: event => this.timelineFeature.processAgentEvent(event, this.featureContext),
+      onEvent: event => this.observeAgentEvent(event),
       onRunFinish: (actualModel?: ModelProfile, context?: Record<string, unknown>) => this.finishRun(actualModel, context),
       onAbandonInteraction: () => this.interactionFeature.abandonPendingInteraction(this.featureContext),
       onAccepted: () => { void this.catalogFeature.refreshThreadCatalog(this.featureContext) },
@@ -648,6 +665,38 @@ export class InteractiveControllerImpl implements InteractiveController {
         }
       }
       case "submit-prompt": {
+        const skill = result.requestedSkill
+        const ephemeral = this.gateway as AgentGateway & {
+          executeEphemeralPrompt?: (input: { threadId: string | null; prompt: string }) => Promise<string>
+        }
+        // /btw 不进时间线。只有 ACP 网关有这个方法；TUI 仍走本地旁注。
+        if (
+          skill
+          && (skill.command_name === "btw" || skill.id === "btw")
+          && typeof ephemeral.executeEphemeralPrompt === "function"
+        ) {
+          try {
+            const replyText = await ephemeral.executeEphemeralPrompt({
+              threadId: this.state.currentThreadId,
+              prompt: result.prompt,
+            })
+            return {
+              status: "accepted",
+              effects: [{
+                type: "side-question",
+                question: skill.args ?? "",
+                threadId: this.state.currentThreadId,
+                replyText,
+              }],
+            }
+          } catch (error) {
+            return {
+              status: "rejected",
+              code: "agent-error",
+              message: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }
         const resolved = await this.resolveMentions(this.baseRuntime.workspace, result.prompt)
         return this.runFeature.startRun(resolved.prompt, this.featureContext, {
           mode: this.state.workMode,
@@ -655,7 +704,7 @@ export class InteractiveControllerImpl implements InteractiveController {
           armedSkill: this.skillFeature.armedSkill,
           requestedSkill: result.requestedSkill,
           displayPrompt: result.prompt,
-          onEvent: event => this.timelineFeature.processAgentEvent(event, this.featureContext),
+          onEvent: event => this.observeAgentEvent(event),
           onRunFinish: (actualModel?: ModelProfile, context?: Record<string, unknown>) => this.finishRun(actualModel, context),
           onAbandonInteraction: () => this.interactionFeature.abandonPendingInteraction(this.featureContext),
       onAccepted: () => { void this.catalogFeature.refreshThreadCatalog(this.featureContext) },

@@ -18,7 +18,7 @@ import type {
   ThreadSummary,
 } from "@za38/protocol"
 
-import type { CommandMenuItem, SkillMenuItem } from "./commands"
+import type { CommandMenuItem, CommandRegistry, SkillMenuItem } from "./commands"
 import type { InteractiveRuntime } from "./runtime"
 import type { ComposeProjection, InteractiveActivity, ActiveRun, RunProgress, RunSummary, TimelineItem, WorkItemProjection, WorkItemStatus, WorkMode } from "./state"
 import type { AgentGateway, Clock, IdGenerator, Scheduler } from "./ports"
@@ -274,6 +274,8 @@ export interface InteractiveController {
   dispatch(intent: InteractiveIntent): Promise<IntentOutcome>
   /** 停止接收 intent、使 generation 失效、卸载 Agent listener，但不关闭外层 transport。 */
   close(): Promise<void>
+  /** ACP 命令目录变化后换掉斜杠菜单。TUI 不实现。 */
+  replaceCommandRegistry?(registry: CommandRegistry): void
 }
 
 /** 创建 InteractiveController 的依赖与一次性恢复输入。 */

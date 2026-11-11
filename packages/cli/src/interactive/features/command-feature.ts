@@ -20,8 +20,8 @@ import { runtimeStatusSummary, type InteractiveApprovalMode } from "../runtime"
 import type { FeatureContext } from "./types"
 
 export class CommandFeature {
-  /** Host 已校验的 Plugin Command 与内置命令合一的不可变 Registry。 */
-  private readonly registry: CommandRegistry
+  /** 当前命令表。ACP 目录更新时整表换掉，TUI 构造后不再改。 */
+  private registry: CommandRegistry
 
   constructor(
     agentCommands: readonly AgentCommand[] = [],
@@ -30,9 +30,14 @@ export class CommandFeature {
     this.registry = registry ?? createCommandRegistry(agentCommands)
   }
 
-  /** 暴露当前握手绑定的不可变 Registry，供 Controller 的手输路径复用。 */
+  /** 暴露当前命令表，供 Controller 的手输路径复用。 */
   get commandRegistry(): CommandRegistry {
     return this.registry
+  }
+
+  /** ACP 后来推来的整张命令表换掉菜单。调用方负责随后发布快照。 */
+  replaceRegistry(registry: CommandRegistry): void {
+    this.registry = registry
   }
 
   commandDispatchContext(

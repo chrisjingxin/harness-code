@@ -78,6 +78,29 @@ describe("Timeline", () => {
     }
   })
 
+  test("已接受的目标卡写审核目标，不写成询问已允许", () => {
+    const interactive = makeInteractive({
+      timeline: [
+        interactionItem({ id: "g1", type: "goal", status: "approved", description: "保持 seed.txt" }),
+        interactionItem({ id: "q1", type: "question", status: "answered", question: "选一个" }),
+      ],
+    })
+    const handle = render(
+      <Timeline snapshot={makeSnapshot({ interactive })} dispatch={() => {}} />,
+    )
+    try {
+      const cards = handle.container.querySelectorAll(".interaction-card-type")
+      expect(cards[0]?.textContent).toBe("审核目标")
+      expect(cards[1]?.textContent).toBe("询问")
+      const goal = handle.container.querySelector(".interaction-goal")
+      expect(goal?.textContent).toContain("已接受")
+      expect(goal?.textContent).not.toContain("已允许")
+      expect(goal?.textContent).toContain("保持 seed.txt")
+    } finally {
+      handle.unmount()
+    }
+  })
+
   test("goal-evaluation 使用中文结果与准则清单，不回显 satisfied", () => {
     const interactive = makeInteractive({
       timeline: [{

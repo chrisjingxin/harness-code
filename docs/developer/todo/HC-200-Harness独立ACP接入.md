@@ -7,7 +7,7 @@
 - 每个实现项都先写失败的测试。
 - 每节末尾的门槛按 Plan「测试门槛」执行（G1 ACP 套件、G2 Host 套件、G3 测试客户端、G4 项目检查）。
 
-状态：S0、S1 已完成（1.4、1.9 性能项经用户决定暂缓）；S2、S3 用户已确认通过。S4 已实现，待验收，不进入 S5。
+状态：S0、S1 已完成（1.4、1.9 性能项经用户决定暂缓）；S2 至 S7 用户已验收（2026-11-11）。看板 status 仍是「待验收」：流程里没有「已验收」，改成「已完成」会归档。不归档。
 
 ## 停点 0：摸底（无可见变化）
 
@@ -94,17 +94,17 @@
 4. 输入 `@某文件 解释一下`：第一轮回复直接引用文件内容，没有先调用读文件工具。
 5. 用脚本化 SDK 客户端传 `additionalDirectories` 和 `mcpServers`（测试中验证；浏览器不涉及）。
 
-- [x] 4.1 服务面：抽取 `list_models`，新增 `set_session_roots`、`set_session_mcp`；`HostServicePort` 一致性测试；G2。待验收。
-- [x] 4.2 新建 `config.py`：`model`/`workflow` 两项的构造；模型目录为空时不出现 `model`；new/load/resume 响应带 `configOptions`；`open_connection` 能力加 `models.select`。待验收。
-- [x] 4.3 `session/set_config_option`：影响下一轮 `requested_primary_profile` / `mode`；Run 中修改只影响下一轮；`UNKNOWN_CONFIG_OPTION`、`INVALID_CONFIG_VALUE`；变化推 `config_option_update`。待验收。
-- [x] 4.4 Compose：`compose.progress` → `plan` 状态映射（含失败）；`compose.summary` → 消息块。待验收。
-- [x] 4.5 用量：`usage_update` 字段齐全才发、相同值不重复；`PromptResponse.usage` 映射。待验收。
-- [x] 4.6 附加目录：绝对/存在/目录/可信四种拒绝；整单拒绝带 `data.path`；`session` 作用域登记；load/resume 替换；close 撤销；诊断不含原始路径。待验收。
-- [x] 4.7 会话 MCP：按 0.9 结论接入；stdio/http 生效；sse 与同名跳过并记诊断；诊断不含 command/env/headers；连接失败不影响会话创建。待验收。
-- [x] 4.8 文件内联：`resource_link` 根内读取、根外保持文本；`resource` text 内联、blob 报错；10 KB/20 KB 预算；Transcript 只记原文；`initialize` 声明 `embeddedContext`。待验收。
-- [x] 4.9 Py/TS 附件块格式漂移测试（对照 `mention-resolver.ts`）。待验收。
-- [x] 4.10 测试客户端：模型与工作模式接 `configOptions`；用量接 `usage_update`；阶段条接 `plan`；`@文件` 发 `resource_link`；各项单测。待验收。
-- [x] 4.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。待验收。
+- [x] 4.1 服务面：抽取 `list_models`，新增 `set_session_roots`、`set_session_mcp`；`HostServicePort` 一致性测试；G2。已验收。
+- [x] 4.2 新建 `config.py`：`model`/`workflow` 两项的构造；模型目录为空时不出现 `model`；new/load/resume 响应带 `configOptions`；`open_connection` 能力加 `models.select`。已验收。
+- [x] 4.3 `session/set_config_option`：影响下一轮 `requested_primary_profile` / `mode`；Run 中修改只影响下一轮；`UNKNOWN_CONFIG_OPTION`、`INVALID_CONFIG_VALUE`；变化推 `config_option_update`。已验收。
+- [x] 4.4 Compose：`compose.progress` → `plan` 状态映射（含失败）；`compose.summary` → 消息块。已验收。
+- [x] 4.5 用量：`usage_update` 字段齐全才发、相同值不重复；`PromptResponse.usage` 映射。已验收。
+- [x] 4.6 附加目录：绝对/存在/目录/可信四种拒绝；整单拒绝带 `data.path`；`session` 作用域登记；load/resume 替换；close 撤销；诊断不含原始路径。已验收。
+- [x] 4.7 会话 MCP：按 0.9 结论接入；stdio/http 生效；sse 与同名跳过并记诊断；诊断不含 command/env/headers；连接失败不影响会话创建。已验收。
+- [x] 4.8 文件内联：`resource_link` 根内读取、根外保持文本；`resource` text 内联、blob 报错；10 KB/20 KB 预算；Transcript 只记原文；`initialize` 声明 `embeddedContext`。已验收。
+- [x] 4.9 Py/TS 附件块格式漂移测试（对照 `mention-resolver.ts`）。已验收。
+- [x] 4.10 测试客户端：模型与工作模式接 `configOptions`；用量接 `usage_update`；阶段条接 `plan`；`@文件` 发 `resource_link`；各项单测。已验收。
+- [x] 4.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。已验收。
 
 ## 停点 5：内置命令
 
@@ -116,39 +116,39 @@
 5. `/compact`：显示压缩前后 token 数，用量指示同步下降。
 6. `/goal 目标`：出现 Goal 确认卡；`/goal pause` 等子命令有回复。
 
-- [ ] 5.1 服务面：抽取 `compact_thread`、`side_question`、`undo_thread`、`redo_thread`、`list_turns`、`set_thread_title`、`goal_inspect`、`goal_request`、`goal_mutate`、`compose_abandon`；v3 处理器变薄壳；AST 禁令测试覆盖新方法；每抽一个跑 G2。
-- [ ] 5.2 命令拦截：内置命令表按能力筛选；冲突规则（内置 > Plugin > Skill）与诊断；拦截后不启动 Run、不写 Transcript；结果消息块 id。
-- [ ] 5.3 `/compact`：成功（补发 `usage_update`）、线程忙。
-- [ ] 5.4 `/btw`：成功（`ephemeral`、不入历史）、缺参数。
-- [ ] 5.5 `/undo`、`/redo`：成功（`historyChanged`）、`NOTHING_TO_UNDO`、非 Git 仓库、`THREAD_NOT_IN_REVERTED_STATE`。
-- [ ] 5.6 `/title`：成功（`session_info_update`）、缺参数。
-- [ ] 5.7 `/goal` 的 inspect/创建/`pause|resume|clear`/`edit` 形式与 `/abandon`：成功与失败各一个；不支持表单时 `/goal` 不宣告。
-- [ ] 5.8 Skill 命令：Host 命令快照纳入用户可调用 Skill（按 0.5 结论）；删除 `/skill:` 限制；`skill:x` 调用成功。
-- [ ] 5.9 `commands` 能力：命令来源字段、命令响应 `_meta.harnessCode.command`；catalog 变化后向所有会话重发。
-- [ ] 5.10 测试客户端：命令表整表替换；`historyChanged` 重新 `session/load`；`ephemeral` 旁注样式；声明 `commands`；各项单测。
-- [ ] 5.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。
+- [x] 5.1 服务面：抽取 `compact_thread`、`side_question`、`undo_thread`、`redo_thread`、`list_turns`、`set_thread_title`、`goal_inspect`、`goal_request`、`goal_mutate`、`compose_abandon`；v3 处理器变薄壳；AST 禁令测试覆盖新方法；每抽一个跑 G2。
+- [x] 5.2 命令拦截：内置命令表按能力筛选；冲突规则（内置 > Plugin > Skill）与诊断；拦截后不启动 Run、不写 Transcript；结果消息块 id。
+- [x] 5.3 `/compact`：成功（补发 `usage_update`）、线程忙。
+- [x] 5.4 `/btw`：成功（`ephemeral`、不入历史）、缺参数。
+- [x] 5.5 `/undo`、`/redo`：成功（`historyChanged`）、`NOTHING_TO_UNDO`、非 Git 仓库、`THREAD_NOT_IN_REVERTED_STATE`。
+- [x] 5.6 `/title`：成功（`session_info_update`）、缺参数。
+- [x] 5.7 `/goal` 的 inspect/创建/`pause|resume|clear`/`edit` 形式与 `/abandon`：成功与失败各一个；不支持表单时 `/goal` 不宣告。
+- [x] 5.8 Skill 命令：Host 命令快照纳入用户可调用 Skill（按 0.5 结论）；删除 `/skill:` 限制；`skill:x` 调用成功。
+- [x] 5.9 `commands` 能力：命令来源字段、命令响应 `_meta.harnessCode.command`；catalog 变化后向所有会话重发。
+- [x] 5.10 测试客户端：命令表整表替换；`historyChanged` 重新 `session/load`；`ephemeral` 旁注样式；声明 `commands`；各项单测。
+- [x] 5.11 G1、G2、G3、G4；人工按查看方式操作一遍；证据写入 Task；**停下等待用户确认**。用户已验收（2026-11-11）。
 
 ## 停点 6：收尾
 
 查看方式：`docs/developer/architecture/ACP通信.md` 缺口表；Task 验收项与证据。
 
-- [ ] 6.1 官方 Python SDK 端到端测试两种：不声明扩展、声明 `elicitation.form`；走通新建 → 提问回答 → 计划确认 → 切模型 → 取消 → resume。
-- [ ] 6.1a 按 Agent 接入架构 §6 的测试项整理 Harness 能力矩阵，填入该文 §4.2 表格的 Harness 一行。
-- [ ] 6.2 缺口表 28 行逐行改「已关闭」并附测试证据；未完成的写原因交用户决定。
-- [ ] 6.3 `ACP通信.md`：方法表、扩展能力表、新模块、UNSTABLE 依赖、性能基线实测值。
-- [ ] 6.4 用户文档：`Web界面.md`、`快速开始.md`、`安全与沙箱.md`。
-- [ ] 6.5 真实模型手工冒烟：S1～S5 查看方式逐项操作，记录写入 Task（与 mock 自动化证据分开记）。
-- [ ] 6.6 Task 验收项逐条更新；依赖 HC-197/196 的两项保持未勾选并注明；「去掉扩展仍可完整走通」一项以 6.1 不声明扩展的端到端测试为证据。
-- [ ] 6.7 G1、G2、G3、G4；**停下等待用户确认**。
+- [x] 6.1 官方 Python SDK 端到端测试两种：不声明扩展、声明 `elicitation.form`；走通新建 → 提问回答 → 计划确认 → 切模型 → 取消 → resume。已验收。
+- [x] 6.1a 按 Agent 接入架构 §6 的测试项整理 Harness 能力矩阵，填入该文 §4.2 表格的 Harness 一行。已验收。
+- [x] 6.2 缺口表 28 行逐行改「已关闭」并附测试证据；未完成的写原因交用户决定。已验收。
+- [x] 6.3 `ACP通信.md`：方法表、扩展能力表、新模块、UNSTABLE 依赖、性能基线实测值。已验收。
+- [x] 6.4 用户文档：`Web界面.md`、`快速开始.md`、`安全与沙箱.md`。已验收。
+- [x] 6.5 真实模型手工冒烟：S1～S5 查看方式逐项操作，记录写入 Task（与 mock 自动化证据分开记）。已验收。本停点没有新开页面。两处修复的页面复测已由用户在停点 5 确认（2026-11-11）。
+- [x] 6.6 Task 验收项逐条更新；依赖 HC-197/196 的项当时保持未勾选并注明；「去掉扩展仍可完整走通」一项以 6.1 不声明扩展的端到端测试为证据。已验收。用户于 2026-11-11 把这几项也验收为后续任务的范围。
+- [x] 6.7 G1、G2、G3、G4；**停下等待用户确认**。已验收。G2、G3 本停点无对应改动，未重跑。
 
 ## 停点 7：原有功能覆盖核对
 
 查看方式：`docs/developer/architecture/ACP通信.md` 的「原有功能覆盖矩阵」一节和缺口表新增行。
 
-- [ ] 7.1 从代码列出 TUI 斜杠命令与快捷键。
-- [ ] 7.2 从代码列出 TUI 与旧 `/web` 的界面操作（对话、侧栏、设置、Trace、文件/Git、弹窗）。
-- [ ] 7.3 列出 v3 方法与通知、交互类型、Run 模式、影响会话行为的命令行参数与配置项。
-- [ ] 7.4 逐项判定覆盖状态：已覆盖附证据；未覆盖按 Agent 接入架构 §3 的顺序（标准 → 协议兼容 → 上移到平台 → Harness 扩展或斜杠命令 → 不支持）给出去向并标明所属层。
-- [ ] 7.5 写入覆盖矩阵；未覆盖项登记为缺口表新行；需要新任务的只列建议。
-- [ ] 7.6 写出结论：TUI 能否在功能上被 ACP 链路替代、还差哪几项；Task 对应验收项更新。
-- [ ] 7.7 G4；`openwiki code --update --print`；Task 状态改「待验收」；**停下等待用户确认**。
+- [x] 7.1 从代码列出 TUI 斜杠命令与快捷键。已验收。
+- [x] 7.2 从代码列出 TUI 与旧 `/web` 的界面操作（对话、侧栏、设置、Trace、文件/Git、弹窗）。已验收。
+- [x] 7.3 列出 v3 方法与通知、交互类型、Run 模式、影响会话行为的命令行参数与配置项。已验收。
+- [x] 7.4 逐项判定覆盖状态：已覆盖附证据；未覆盖按 Agent 接入架构 §3 的顺序（标准 → 协议兼容 → 上移到平台 → Harness 扩展或斜杠命令 → 不支持）给出去向并标明所属层。已验收。
+- [x] 7.5 写入覆盖矩阵；未覆盖项登记为缺口表新行；需要新任务的只列建议。已验收。
+- [x] 7.6 写出结论：TUI 能否在功能上被 ACP 链路替代、还差哪几项；Task 对应验收项更新。已验收。
+- [x] 7.7 G4；`openwiki code --update --print`；Task 状态改「待验收」；**停下等待用户确认**。已验收。G4 通过。OpenWiki 命令不存在（127），未安装、未手改生成页。

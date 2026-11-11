@@ -49,7 +49,7 @@ describe("AcpAgentGateway：握手", () => {
     const params = init.params as Record<string, unknown>
     expect(params.protocolVersion).toBe(1)
     expect((params.clientCapabilities as { _meta: { harnessCode: { version: number; capabilities: string[] } } })._meta.harnessCode)
-      .toEqual({ version: 1, capabilities: ["approval", "runSummary", "sessionSummary", "subagent", "goal"] })
+      .toEqual({ version: 1, capabilities: ["approval", "runSummary", "sessionSummary", "subagent", "goal", "commands"] })
     expect((params.clientCapabilities as { elicitation?: { form?: unknown } }).elicitation).toEqual({ form: {} })
     expect(boot.cwd).toBe("/tmp/ws")
     expect(boot.canLoadSession).toBe(true)
@@ -83,6 +83,16 @@ describe("AcpAgentGateway：暖会话与命令", () => {
     const { boot } = await connect(agent, { commandsTimeoutMs: 500 })
     expect(agent.requests.filter(r => r.method === "session/new")).toHaveLength(1)
     expect(boot.commands).toEqual([{ name: "review", description: "评审", hint: "<文件>" }])
+  })
+
+  test("响应后同一拍到达的命令表不会因为会话还没登记而被丢掉", async () => {
+    const agent = new FakeAgent({
+      afterNewSession: async (a, sessionId) => {
+        await a.update(sessionId, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "compact", description: "压缩", input: null }] })
+      },
+    })
+    const { boot } = await connect(agent, { commandsTimeoutMs: 200 })
+    expect(boot.commands).toEqual([{ name: "compact", description: "压缩", hint: null }])
   })
 
   test("第一条命令更新一到就继续，不再等固定窗口", async () => {
@@ -151,6 +161,32 @@ describe("AcpAgentGateway：暖会话与命令", () => {
       console.warn = original
     }
     expect(warnings).toHaveLength(1)
+  })
+
+  test("窗口之后的命令表交给监听者，旁注只收回正文", async () => {
+    const agent = new FakeAgent({
+      afterNewSession: async (a, sessionId) => {
+        await a.update(sessionId, { sessionUpdate: "available_commands_update", availableCommands: [] })
+      },
+      onPrompt: async (a, sessionId) => {
+        await a.update(sessionId, {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "旁注答案" },
+        })
+        return { stopReason: "end_turn" }
+      },
+    })
+    const { gateway } = await connect(agent, { commandsTimeoutMs: 500 })
+    const seen: Array<{ name: string }> = []
+    gateway.setCommandTableListener(commands => seen.push(...commands))
+    await agent.update("fake-session-1", {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [{ name: "navel", description: "脐橙", input: null, _meta: { harnessCode: { requestedSkillId: "project/navel" } } }],
+    })
+    expect(seen).toEqual([{ name: "navel", description: "脐橙", hint: null, requestedSkillId: "project/navel" }])
+    const reply = await gateway.executeEphemeralPrompt({ threadId: null, prompt: "/btw 问题" })
+    expect(reply).toBe("旁注答案")
+    expect(agent.requests.filter(request => request.method === "session/prompt")).toHaveLength(1)
   })
 })
 

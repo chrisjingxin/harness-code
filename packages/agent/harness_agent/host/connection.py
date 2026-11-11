@@ -86,6 +86,8 @@ class ProtocolConnection:
     command_bindings: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    # 只有 ACP 连接打开。Skill 目录变了才给它发 `commands.catalog`，v3 客户端不收这帧。
+    watch_command_catalog: bool = False
     closed: bool = False
 
 

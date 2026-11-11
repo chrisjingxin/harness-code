@@ -154,6 +154,15 @@ describe("RunTranslator：终态映射", () => {
     expect(final).toMatchObject({ type: "run.completed", payload: { usage: { input_tokens: 3, output_tokens: 5 }, duration_ms: 42, finish_reason: "end_turn", context: { a: 1 } } })
   })
 
+  test("command.historyChanged 合并进 run.completed 的 context", () => {
+    const t = new RunTranslator(opts)
+    const final = t.finish({
+      stopReason: "end_turn",
+      _meta: { harnessCode: { command: { name: "undo", historyChanged: true }, run: { context: { a: 1 } } } },
+    })
+    expect(final).toMatchObject({ type: "run.completed", payload: { context: { a: 1, historyChanged: true } } })
+  })
+
   test("PromptResponse.usage 优先于扩展里的 run.usage", () => {
     const t = new RunTranslator(opts)
     const final = t.finish({

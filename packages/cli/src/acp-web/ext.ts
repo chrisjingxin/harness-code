@@ -23,11 +23,13 @@ export const CAP_SESSION_SUMMARY = "sessionSummary"
 
 /** 子代理扩展能力名；与 Python `harness_agent.host.acp.ext.CAP_SUBAGENT` 同名同步。 */
 export const CAP_SUBAGENT = "subagent"
-/** 目标确认之后的计划条目；与 Python `CAP_GOAL` 同名同步。`/goal` 命令本身还没广告。 */
+/** 目标确认之后的计划条目；与 Python `CAP_GOAL` 同名同步。 */
 export const CAP_GOAL = "goal"
+/** 命令来源与内置命令结果；与 Python `CAP_COMMANDS` 同名同步。 */
+export const CAP_COMMANDS = "commands"
 /** 桥产生的唯一帧类型：子进程退出通知（不经过 Python）。 */
 export const BRIDGE_EXIT_METHOD = `${EXT_METHOD_PREFIX}bridge/exit`
-export const CLIENT_EXTENSION_DECLARATION = { version: EXT_VERSION, capabilities: [CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL] } as const
+export const CLIENT_EXTENSION_DECLARATION = { version: EXT_VERSION, capabilities: [CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS] } as const
 
 /**
  * `SessionInfo._meta.harnessCode.summary`（服务端 §12.2）：会话列表摘要，

@@ -1494,6 +1494,16 @@ _SERVICE_METHODS = (
     "set_session_roots",
     "set_session_mcp",
     "authorize_existing_file",
+    "compact_thread",
+    "side_question",
+    "list_turns",
+    "undo_thread",
+    "redo_thread",
+    "set_thread_title",
+    "goal_inspect",
+    "goal_request",
+    "goal_mutate",
+    "compose_abandon",
 )
 
 _FORBIDDEN_SERVICE_CALLS = frozenset(

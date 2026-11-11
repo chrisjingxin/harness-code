@@ -19,12 +19,17 @@ from typing import Any, cast
 
 import pytest
 from acp import spawn_agent_process
+from acp.exceptions import RequestError
 from acp.schema import (
+    AcceptElicitationResponse,
     AgentMessageChunk,
     AllowedOutcome,
     AvailableCommandsUpdate,
     ClientCapabilities,
+    CurrentModeUpdate,
     DeniedOutcome,
+    ElicitationCapabilities,
+    ElicitationFormCapabilities,
     PromptResponse,
     RequestPermissionResponse,
     TextContentBlock,
@@ -67,6 +72,7 @@ class _RecordingClient:
         """`policy=None` 时一律回 cancelled（S1 的默认行为）。"""
         self.updates: list[Any] = []
         self.permission_requests: list[tuple[str, Any, list[Any]]] = []
+        self.forms: list[tuple[str, Any]] = []
         self._policy = policy
 
     async def session_update(self, session_id: str, update: Any, **_kwargs: Any) -> None:
@@ -91,6 +97,21 @@ class _RecordingClient:
     ) -> Any:
         """S1 不使用客户端文件系统能力。"""
         raise AssertionError("agent must not write files through the client")
+
+    async def create_elicitation(self, message: str, mode: Any, **_kwargs: Any) -> AcceptElicitationResponse:
+        """按表单字段回答：提问选「甲」，计划选批准。测的是协议，不是表单渲染。"""
+        self.forms.append((message, mode))
+        names = set(_form_properties(mode))
+        if "decision" in names:
+            content = {"decision": "approved", "feedback": ""}
+        elif "q_0" in names:
+            content = {"q_0": "甲"}
+        else:
+            raise AssertionError(f"unexpected form fields: {sorted(names)}")
+        return AcceptElicitationResponse(action="accept", content=content)
+
+    async def complete_elicitation(self, _elicitation_id: str, **_kwargs: Any) -> None:
+        """表单结束通知。这条链路不靠它判断结果。"""
 
     def on_connect(self, _conn: object) -> None:
         """SDK 建立连接时回调；这里不需要额外状态。"""
@@ -121,8 +142,13 @@ async def _scenario_session(
     client: _RecordingClient,
     *,
     capabilities: ClientCapabilities | None = None,
+    unstable: bool = False,
 ) -> AsyncIterator[tuple[Any, Any, str, Path]]:
-    """起场景子进程 → 握手 → 建会话；退出时断言进程以 0 退出。"""
+    """起场景子进程 → 握手 → 建会话；退出时断言进程以 0 退出。
+
+    `unstable=True` 才接收 `elicitation/create`。官方 SDK 默认把这个方法当成
+    未稳定协议，不打开时直接回 method not found，表单到不了测试客户端。
+    """
     home = tmp_path / "home"
     workspace = tmp_path / "ws"
     home.mkdir(exist_ok=True)
@@ -133,6 +159,7 @@ async def _scenario_session(
         str(SCRIPT),
         env=_scenario_env(home, scenario, workspace),
         cwd=str(workspace),
+        use_unstable_protocol=unstable,
     ) as (connection, process):
         await connection.initialize(
             protocol_version=1, client_capabilities=capabilities
@@ -165,15 +192,42 @@ def _statuses(client: _RecordingClient, card_id: str) -> list[str]:
     ]
 
 
-def _all_frame_text(client: _RecordingClient) -> str:
-    """把所有出站帧（update 与权限请求）序列化成一段文本，用于搜索扩展字样。"""
-    dumped = [
+def _form_properties(mode: Any) -> dict[str, Any]:
+    """取出表单 schema 的字段表。模式对象和包一层的 root 都认。"""
+    schema = getattr(mode, "requested_schema", None)
+    if schema is None:
+        schema = getattr(getattr(mode, "root", None), "requested_schema", None)
+    properties = getattr(schema, "properties", None)
+    return properties if isinstance(properties, dict) else {}
+
+
+def _model_option(options: list[Any]) -> Any:
+    """从配置项列表里取出 model。"""
+    return next(item for item in options if item.id == "model")
+
+
+def _all_frame_text(client: _RecordingClient, *extra: Any) -> str:
+    """把客户端看到的更新、权限、表单和额外响应序列化，用来确认没有扩展字段。"""
+    dumped: list[Any] = [
         update.model_dump(mode="json", by_alias=True) for update in client.updates
-    ] + [
+    ]
+    dumped.extend(
         tool_call.model_dump(mode="json", by_alias=True)
         for _session_id, tool_call, _options in client.permission_requests
-    ]
-    return json.dumps(dumped, ensure_ascii=False)
+    )
+    dumped.extend(
+        {
+            "message": message,
+            "mode": mode.model_dump(mode="json", by_alias=True)
+            if hasattr(mode, "model_dump")
+            else str(mode),
+        }
+        for message, mode in client.forms
+    )
+    for item in extra:
+        if hasattr(item, "model_dump"):
+            dumped.append(item.model_dump(mode="json", by_alias=True))
+    return json.dumps(dumped, ensure_ascii=False, default=str)
 
 
 
@@ -539,3 +593,121 @@ async def test_sdk_client_negotiates_extension(tmp_path: Path) -> None:
     assert response.field_meta is not None
     run_summary = response.field_meta["harnessCode"]["run"]
     assert isinstance(run_summary.get("duration_ms"), int)
+
+
+def _form_capabilities() -> ClientCapabilities:
+    """只声明会画表单，不声明 `_meta.harnessCode`。"""
+    return ClientCapabilities(
+        elicitation=ElicitationCapabilities(form=ElicitationFormCapabilities())
+    )
+
+
+async def _prompt(connection: Any, session_id: str, content: str) -> PromptResponse:
+    """发一轮用户文本。"""
+    return await connection.prompt(
+        session_id=session_id,
+        prompt=[TextContentBlock(type="text", text=content)],
+    )
+
+
+async def test_sdk_client_without_extensions_walks_question_plan_model_cancel_and_resume(
+    tmp_path: Path,
+) -> None:
+    """不声明扩展、但声明 elicitation.form：提问、计划、切模型、取消、resume 都能走完。
+
+    出站帧里不能出现 harnessCode。扩展只加显示，不参与这条必需流程。
+    """
+    client = _RecordingClient()
+    async with _scenario_session(
+        "journey",
+        tmp_path,
+        client,
+        capabilities=_form_capabilities(),
+        unstable=True,
+    ) as (connection, session, _ws, workspace):
+        mode_ids = [mode.id for mode in session.modes.available_modes]
+        assert "plan" in mode_ids
+        mode_before_plan = session.modes.current_mode_id
+        asked = await _prompt(connection, session.session_id, "请提问")
+        assert asked.stop_reason == "end_turn"
+        assert client.forms, "提问必须走出表单"
+        await connection.set_session_mode(mode_id="plan", session_id=session.session_id)
+        planned = await _prompt(connection, session.session_id, "请出计划")
+        assert planned.stop_reason == "end_turn"
+        changed = await connection.set_config_option(
+            config_id="model", session_id=session.session_id, value="slow"
+        )
+        assert _model_option(changed.config_options).current_value == "slow"
+        blocking = asyncio.create_task(_prompt(connection, session.session_id, "请卡住"))
+        for _ in range(600):
+            if "开始卡住" in _texts(client):
+                break
+            await asyncio.sleep(0.01)
+        assert "开始卡住" in _texts(client)
+        await connection.cancel(session_id=session.session_id)
+        cancelled = await asyncio.wait_for(blocking, timeout=20)
+        assert cancelled.stop_reason == "cancelled"
+        before_resume = len(client.updates)
+        resumed = await connection.resume_session(cwd=str(workspace), session_id=session.session_id)
+    assert "已回答：甲" in _texts(client)
+    assert "计划approved" in _texts(client)
+    mode_updates = [
+        mode.current_mode_id for mode in client.updates if isinstance(mode, CurrentModeUpdate)
+    ]
+    assert mode_updates[-1] == mode_before_plan
+    profiles = (workspace / "run-profiles.txt").read_text(encoding="utf-8").splitlines()
+    assert profiles[-1] == "slow"
+    assert resumed.modes is not None
+    replay = client.updates[before_resume:]
+    assert replay
+    assert all(isinstance(update, AvailableCommandsUpdate) for update in replay)
+    assert "harnessCode" not in _all_frame_text(client, session, asked, planned, changed, cancelled, resumed)
+
+
+async def test_sdk_client_without_forms_refuses_plan_and_still_switches_cancels_and_resumes(
+    tmp_path: Path,
+) -> None:
+    """什么能力都不声明：提问不会挂起，计划模式被拒绝，切模型、取消、resume 仍能走完。
+
+    没声明 elicitation.form 时不提供计划模式，提问也不会交给用户填。
+    这两步按「明确拒绝」走完，而不是停在一张出不来的表单上。
+    """
+    client = _RecordingClient()
+    async with _scenario_session("journey", tmp_path, client) as (
+        connection,
+        session,
+        _ws,
+        workspace,
+    ):
+        mode_ids = [mode.id for mode in session.modes.available_modes]
+        assert "plan" not in mode_ids
+        asked = await _prompt(connection, session.session_id, "请提问")
+        assert asked.stop_reason == "end_turn"
+        assert client.forms == []
+        with pytest.raises(RequestError) as raised:
+            await connection.set_session_mode(mode_id="plan", session_id=session.session_id)
+        assert raised.value.data["code"] == "UNKNOWN_MODE"
+        changed = await connection.set_config_option(
+            config_id="model", session_id=session.session_id, value="slow"
+        )
+        assert _model_option(changed.config_options).current_value == "slow"
+        blocking = asyncio.create_task(_prompt(connection, session.session_id, "请卡住"))
+        for _ in range(600):
+            if "开始卡住" in _texts(client):
+                break
+            await asyncio.sleep(0.01)
+        assert "开始卡住" in _texts(client)
+        await connection.cancel(session_id=session.session_id)
+        cancelled = await asyncio.wait_for(blocking, timeout=20)
+        assert cancelled.stop_reason == "cancelled"
+        before_resume = len(client.updates)
+        resumed = await connection.resume_session(cwd=str(workspace), session_id=session.session_id)
+    assert any("当前客户端不支持提问" in text for text in _texts(client))
+    profiles = (workspace / "run-profiles.txt").read_text(encoding="utf-8").splitlines()
+    assert profiles[-1] == "slow"
+    assert resumed.modes is not None
+    assert "plan" not in [mode.id for mode in resumed.modes.available_modes]
+    replay = client.updates[before_resume:]
+    assert replay
+    assert all(isinstance(update, AvailableCommandsUpdate) for update in replay)
+    assert "harnessCode" not in _all_frame_text(client, session, asked, changed, cancelled, resumed)

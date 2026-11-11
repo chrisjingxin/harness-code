@@ -11,6 +11,7 @@ import { join } from "node:path"
 import {
   BRIDGE_EXIT_METHOD,
   CAP_APPROVAL,
+  CAP_COMMANDS,
   CAP_RUN_SUMMARY,
   CAP_SESSION_SUMMARY,
   CAP_GOAL,
@@ -52,10 +53,11 @@ describe("ACP 扩展常量与 Python ext.py 同值", () => {
 
   test("客户端扩展声明：版本与能力顺序与 Python _CAPABILITY_ORDER 一致", () => {
     expect(CLIENT_EXTENSION_DECLARATION.version).toBe(EXT_VERSION)
-    expect([...CLIENT_EXTENSION_DECLARATION.capabilities]).toEqual([CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL])
+    expect([...CLIENT_EXTENSION_DECLARATION.capabilities]).toEqual([CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS])
     expect(CAP_GOAL).toBe(JSON.parse(pythonConstant("CAP_GOAL").replace(/'/g, '"')))
-    expect(EXT_PY).toContain("_CAPABILITY_ORDER: Final[tuple[str, ...]] = (CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL)")
-    expect(EXT_PY).toContain("KNOWN_CAPABILITIES: Final = frozenset({CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL})")
+    expect(CAP_COMMANDS).toBe(JSON.parse(pythonConstant("CAP_COMMANDS").replace(/'/g, '"')))
+    expect(EXT_PY).toContain("_CAPABILITY_ORDER: Final[tuple[str, ...]] = (CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS)")
+    expect(EXT_PY).toContain("KNOWN_CAPABILITIES: Final = frozenset({CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS})")
   })
 })
 

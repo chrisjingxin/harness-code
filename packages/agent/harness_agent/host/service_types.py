@@ -194,6 +194,90 @@ class HostServicePort(Protocol):
         """已授权根内的现有文件返回绝对路径；越界、目录或不存在返回 None。"""
         raise NotImplementedError
 
+    async def compact_thread(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """空闲时压缩这个线程的上下文。忙则 `-32000 CONTEXT_COMPACTION_RUN_ACTIVE`。"""
+        raise NotImplementedError
+
+    async def side_question(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        question: str,
+        model_profile_id: str | None = None,
+    ) -> dict[str, object]:
+        """只读旁注问答，不写对话记录。缺 `threads.read` 时带 `capability` 的 `CAPABILITY_REQUIRED`。"""
+        raise NotImplementedError
+
+    async def list_turns(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """列出用户回合。缺 `threads.read` 抛 `THREADS_CAPABILITY_REQUIRED`。"""
+        raise NotImplementedError
+
+    async def undo_thread(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        target_turn_id: str,
+        mode: str,
+    ) -> dict[str, object]:
+        """把对话和/或工作区退到指定回合。非 Git 仓库上 `code` 抛 `WORKSPACE_NOT_GIT_REPOSITORY`。"""
+        raise NotImplementedError
+
+    async def redo_thread(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """重做刚才的回退。没在回退状态抛 `THREAD_NOT_IN_REVERTED_STATE`。"""
+        raise NotImplementedError
+
+    async def set_thread_title(
+        self, connection: ProtocolConnection, thread_id: str, title: str
+    ) -> dict[str, object]:
+        """改标题并广播 `thread.summary`。空标题 `-32602`，线程不存在 `-32004`。"""
+        raise NotImplementedError
+
+    async def goal_inspect(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """读取当前目标、排队请求和最近一次判定。不额外要求 Goal 能力，避免打断 v3。"""
+        raise NotImplementedError
+
+    async def goal_request(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        request_id: str,
+        kind: str,
+        input_text: str,
+        expected_goal_id: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
+        """记下创建、替换或修订目标的请求。线程正忙时处置是 `queued`。"""
+        raise NotImplementedError
+
+    async def goal_mutate(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        operation_id: str,
+        action: str,
+        expected_goal_id: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
+        """暂停、恢复、清除或取消排队。`action` 只能是这四个词。"""
+        raise NotImplementedError
+
+    async def compose_abandon(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        """放弃当前 Compose 进度，对话记录保留。不是 Compose 线程则拒绝。"""
+        raise NotImplementedError
+
     async def cancel_run(
         self, connection: ProtocolConnection, thread_id: str, run_id: str
     ) -> CancelResult:

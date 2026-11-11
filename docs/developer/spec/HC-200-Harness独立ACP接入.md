@@ -556,6 +556,7 @@ session/new|load|resume 的 mcpServers
 
 - 命令文本和行为对齐 TUI 现有的同名命令。**S0 核对（2026-11-09，读 `packages/cli`）**：`/compact`、`/btw`、`/redo`、`/title` 与上表一致。`/undo` 在 TUI 里没有参数形式，是打开历史回合选择器、再选 `both`/`conversation`/`code`；ACP 没有选择器，所以 `/undo [both|code|conversation]` 是 ACP 新增的参数形式，目标固定为最近一个未回退的用户回合（TUI 另有别名 `rewind`、`rollback`，ACP 不做）。`/goal` 的子命令除 `pause`、`resume`、`clear` 外还有 `edit [说明]`。TUI 没有 `/compose`，放弃 Compose 的命令是 `/abandon`（TUI 另有 `/new-work <目标>`，不在本任务范围，留给 S7 核对）。
 - `/goal` 只在客户端支持表单时宣告（§8.6）。其余命令总是宣告。
+- 用户接受目标后，同一轮 `session/prompt` 先不返回。确认 Run 的终态里若有 `goal_continuation`，接着启动 `GoalContinuationRunInput`，Run 编号用 `continuation_id`。`/goal resume` 带回续跑时，先回复「目标已恢复」，再在同一轮里启动这次续跑。取消、失败，或变更还在排队，都不再接着跑。
 - `/undo`、`/redo` 之后，通用客户端看到的仍是旧时间线，直到用户重新打开会话；测试客户端收到 `historyChanged` 会自动重新 `session/load`（§17）。ACP 没有「历史已重置」的标准通知，这是有意的取舍。
 
 ### 11.4 命令的扩展字段（GAP-37）

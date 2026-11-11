@@ -2159,14 +2159,21 @@ class AgentHost:
             await self._record_workspace_git_checkpoint(execution.ref.thread_id, execution.ref.run_id)
 
     async def _record_workspace_git_checkpoint(self, thread_id: str, run_id: str) -> None:
-        """将当前工作区树快照记到该 Run 对应的 User Turn。非 Git 仓库直接跳过。"""
+        """把 Run 开始时的工作区树记到对应用户回合。非 Git 仓库直接跳过。
+
+        同一回合只保留第一次。扇出结束时还会再调一次，那时文件已经改完；
+        再覆盖的话，/undo 会还原到改完后的树，等于没有还原。
+        """
         if not self._thread_persistence_enabled() or not self._git_checkpoints.is_git_repository(self._workspace):
             return
         try:
             persistence = await self._ensure_thread_persistence()
+            turn_id = _user_record_id(run_id)
+            if await persistence.get_git_checkpoint(thread_id, turn_id) is not None:
+                return
             tree_oid = self._git_checkpoints.create_tree_snapshot(self._workspace)
             await persistence.record_git_checkpoint(
-                thread_id, _user_record_id(run_id), run_id, tree_oid
+                thread_id, turn_id, run_id, tree_oid
             )
         except Exception:
             logger.warning("Failed to record git checkpoint for thread %s turn %s", thread_id, run_id, exc_info=True)
@@ -2196,12 +2203,22 @@ class AgentHost:
                 asyncio.create_task(self.close_connection(connection))
 
     async def _handle_context_compact(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """在空闲 thread 上按用户命令强制生成结构化摘要，不把能力暴露给模型。"""
-        self._require_context_capability()
+        """v3 薄壳：解析参数后交给 `compact_thread`。"""
         parsed = ContextCompactParams.model_validate(params)
+        return await self.compact_thread(self._current_connection(), parsed.thread_id)
+
+    async def compact_thread(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """在空闲 thread 上按用户命令强制生成结构化摘要，不把能力暴露给模型。
+
+        能力看传入的连接。线程正忙时保持 v3 的 `CONTEXT_COMPACTION_RUN_ACTIVE`，
+        ACP 拦截层再把它说成可重试的 `THREAD_BUSY`。
+        """
+        self._context_ready(connection)
         try:
-            async with self._run_coordinator.idle_thread(parsed.thread_id):
-                return await self._compact_idle_thread(parsed.thread_id)
+            async with self._run_coordinator.idle_thread(thread_id):
+                return await self._compact_idle_thread(thread_id)
         except RunError as exc:
             if exc.code == "THREAD_BUSY":
                 raise RpcError(-32000, "CONTEXT_COMPACTION_RUN_ACTIVE") from exc
@@ -2592,12 +2609,20 @@ class AgentHost:
         return list(threads), has_more
 
     async def _handle_threads_set_title(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """把当前 project 的 thread 标题写成用户给定值。"""
-        self._require_threads_capability()
+        """v3 薄壳：解析参数后交给 `set_thread_title`。"""
         parsed = ThreadsSetTitleParams.model_validate(params)
+        return await self.set_thread_title(
+            self._current_connection(), parsed.thread_id, parsed.title
+        )
+
+    async def set_thread_title(
+        self, connection: ProtocolConnection, thread_id: str, title: str
+    ) -> dict[str, object]:
+        """把当前 project 的 thread 标题写成用户给定值，并广播给正在看的连接。"""
+        self._threads_ready(connection)
         persistence = await self._ensure_thread_persistence()
         try:
-            summary = await persistence.set_user_title(parsed.thread_id, parsed.title)
+            summary = await persistence.set_user_title(thread_id, title)
         except ThreadPersistenceError as exc:
             code = str(exc)
             if code == "TITLE_EMPTY":
@@ -2607,9 +2632,9 @@ class AgentHost:
             raise
         payload = _thread_summary_payload(summary)
         await self._broadcast_thread_summary(
-            parsed.thread_id,
+            thread_id,
             payload,
-            owner_connection_id=self._current_connection().connection_id,
+            owner_connection_id=connection.connection_id,
         )
         return {"thread": payload}
 
@@ -2753,6 +2778,25 @@ class AgentHost:
         for connection, result in zip(targets, results, strict=True):
             if isinstance(result, Exception) and connection is not self._owner_connection:
                 asyncio.create_task(self.close_connection(connection))
+
+    async def _broadcast_command_catalog(self, commands: list[dict[str, object]]) -> None:
+        """Skill / Plugin 目录变了以后，只通知打开了命令目录监听的 ACP 连接。"""
+        message = {
+            "jsonrpc": "2.0",
+            "method": "commands.catalog",
+            "params": {"commands": commands},
+        }
+        targets = [
+            connection
+            for connection in self._connections.values()
+            if not connection.closed and connection.watch_command_catalog
+        ]
+        if not targets:
+            return
+        await asyncio.gather(
+            *(self._send_to(connection, message) for connection in targets),
+            return_exceptions=True,
+        )
 
     async def _broadcast_thread_summary(
         self,
@@ -2931,14 +2975,38 @@ class AgentHost:
         return {"removed": self.unwatch_thread(self._current_connection(), parsed.thread_id)}
 
     async def _handle_threads_side_question(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """执行轻量只读单轮问答（/btw），基于当前 Thread 历史快照，0 工具，不写存储。"""
-        if CAPABILITY["THREADS_READ"] not in self._connection_capabilities():
+        """v3 薄壳：解析参数后交给 `side_question`。"""
+        parsed = ThreadsSideQuestionParams.model_validate(params)
+        return await self.side_question(
+            self._current_connection(),
+            parsed.thread_id,
+            parsed.question,
+            parsed.model_profile_id,
+        )
+
+    async def side_question(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        question: str,
+        model_profile_id: str | None = None,
+    ) -> dict[str, object]:
+        """执行轻量只读单轮问答（/btw），基于当前 Thread 历史快照，0 工具，不写存储。
+
+        缺能力时的错误带 `capability` 字段，和普通的 `THREADS_CAPABILITY_REQUIRED` 不是同一句。
+        """
+        if connection.closed:
+            raise RpcError(-32002, "CONNECTION_CLOSED")
+        if CAPABILITY["THREADS_READ"] not in connection.enabled_capabilities:
             raise RpcError(
                 -32002,
                 "CAPABILITY_REQUIRED",
                 {"code": "CAPABILITY_REQUIRED", "retryable": False, "capability": "threads.read"},
             )
-        parsed = ThreadsSideQuestionParams.model_validate(params)
+        raw: dict[str, object] = {"thread_id": thread_id, "question": question}
+        if model_profile_id is not None:
+            raw["model_profile_id"] = model_profile_id
+        parsed = ThreadsSideQuestionParams.model_validate(raw)
         if self._allow_echo:
             return {
                 "reply_text": f"echo: {parsed.question}",
@@ -3018,9 +3086,16 @@ class AgentHost:
         }
 
     async def _handle_threads_list_turns(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """返回当前 Thread 的所有 User 回合列表及 Git 快照信息。"""
-        self._require_threads_capability()
+        """v3 薄壳：解析参数后交给 `list_turns`。"""
         parsed = ThreadsListTurnsParams.model_validate(params)
+        return await self.list_turns(self._current_connection(), parsed.thread_id)
+
+    async def list_turns(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """返回当前 Thread 的所有 User 回合列表及 Git 快照信息。"""
+        self._threads_ready(connection)
+        parsed = ThreadsListTurnsParams.model_validate({"thread_id": thread_id})
         persistence = await self._ensure_thread_persistence()
         try:
             transcript = await persistence.load_transcript(parsed.thread_id)
@@ -3075,9 +3150,27 @@ class AgentHost:
         return result
 
     async def _handle_threads_undo(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """将当前 Thread 回退到指定历史回合，可选择还原代码、对话或两者。"""
-        self._require_threads_capability()
+        """v3 薄壳：解析参数后交给 `undo_thread`。"""
         parsed = ThreadsUndoParams.model_validate(params)
+        return await self.undo_thread(
+            self._current_connection(),
+            parsed.thread_id,
+            parsed.target_turn_id,
+            parsed.mode,
+        )
+
+    async def undo_thread(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        target_turn_id: str,
+        mode: str,
+    ) -> dict[str, object]:
+        """将当前 Thread 回退到指定历史回合，可选择还原代码、对话或两者。"""
+        self._threads_ready(connection)
+        parsed = ThreadsUndoParams.model_validate(
+            {"thread_id": thread_id, "target_turn_id": target_turn_id, "mode": mode}
+        )
         persistence = await self._ensure_thread_persistence()
 
         try:
@@ -3131,9 +3224,16 @@ class AgentHost:
             raise
 
     async def _handle_threads_redo(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """重做并恢复刚才撤销的历史与代码。"""
-        self._require_threads_capability()
+        """v3 薄壳：解析参数后交给 `redo_thread`。"""
         parsed = ThreadsRedoParams.model_validate(params)
+        return await self.redo_thread(self._current_connection(), parsed.thread_id)
+
+    async def redo_thread(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
+        """重做并恢复刚才撤销的历史与代码。"""
+        self._threads_ready(connection)
+        parsed = ThreadsRedoParams.model_validate({"thread_id": thread_id})
         persistence = await self._ensure_thread_persistence()
 
         try:
@@ -3163,14 +3263,22 @@ class AgentHost:
             raise self.run_error_to_rpc_error(exc) from exc
 
     async def _handle_goal_inspect(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """v3 薄壳：解析参数后交给 `goal_inspect`。"""
+        parsed = GoalInspectParams.model_validate(params)
+        return await self.goal_inspect(self._current_connection(), parsed.thread_id)
+
+    async def goal_inspect(
+        self, connection: ProtocolConnection, thread_id: str
+    ) -> dict[str, object]:
         """读取 Goal 的 current/pending/latest evaluation。
 
         纯只读操作，不需要排他访问，因此不去拿 Coordinator 的空闲 Thread 锁；
-        Run 运行中也可以随时查询。
+        Run 运行中也可以随时查询。不额外查 Goal 能力，否则现有 v3 客户端会被拒绝。
         """
         from harness_agent.goals.models import evaluation_to_wire, goal_to_wire, pending_to_wire
 
-        parsed = GoalInspectParams.model_validate(params)
+        self._reject_closed(connection)
+        parsed = GoalInspectParams.model_validate({"thread_id": thread_id})
         persistence = await self._ensure_thread_persistence()
         try:
             await persistence.open_thread(parsed.thread_id)
@@ -3186,10 +3294,42 @@ class AgentHost:
         }
 
     async def _handle_goal_request(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """v3 薄壳：解析参数后交给 `goal_request`。"""
+        parsed = GoalRequestParams.model_validate(params)
+        return await self.goal_request(
+            self._current_connection(),
+            parsed.thread_id,
+            parsed.request_id,
+            parsed.kind,
+            parsed.input_text,
+            parsed.expected_goal_id,
+            parsed.expected_revision,
+        )
+
+    async def goal_request(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        request_id: str,
+        kind: str,
+        input_text: str,
+        expected_goal_id: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
         """持久化 Goal 意图；空闲返回 ready，运行中保持 queued。"""
         from harness_agent.goals.models import GoalStoreError, pending_to_wire
 
-        parsed = GoalRequestParams.model_validate(params)
+        self._reject_closed(connection)
+        parsed = GoalRequestParams.model_validate(
+            {
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "kind": kind,
+                "input_text": input_text,
+                "expected_goal_id": expected_goal_id,
+                "expected_revision": expected_revision,
+            }
+        )
         persistence = await self._ensure_thread_persistence()
         try:
             result = await persistence.goal_store().request(
@@ -3210,6 +3350,26 @@ class AgentHost:
         }
 
     async def _handle_goal_mutate(self, params: dict[str, Any], _id: str) -> dict[str, object]:
+        """v3 薄壳：解析参数后交给 `goal_mutate`。"""
+        parsed = GoalMutateParams.model_validate(params)
+        return await self.goal_mutate(
+            self._current_connection(),
+            parsed.thread_id,
+            parsed.operation_id,
+            parsed.action.kind,
+            parsed.expected_goal_id,
+            parsed.expected_revision,
+        )
+
+    async def goal_mutate(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        operation_id: str,
+        action: str,
+        expected_goal_id: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
         """应用或排队一条 Goal 生命周期变更。
 
         Thread 空闲时立即生效，运行中则先落库排队。响应里的 goal/pending
@@ -3217,7 +3377,16 @@ class AgentHost:
         """
         from harness_agent.goals.models import GoalStoreError, goal_to_wire, pending_to_wire
 
-        parsed = GoalMutateParams.model_validate(params)
+        self._reject_closed(connection)
+        parsed = GoalMutateParams.model_validate(
+            {
+                "thread_id": thread_id,
+                "operation_id": operation_id,
+                "expected_goal_id": expected_goal_id,
+                "expected_revision": expected_revision,
+                "action": {"kind": action},
+            }
+        )
         persistence = await self._ensure_thread_persistence()
         action = parsed.action.kind
         if action not in {"pause", "resume", "clear", "cancel_pending"}:
@@ -3274,9 +3443,24 @@ class AgentHost:
         return {"progress": projection}
 
     async def _handle_compose_abandon(self, params: dict[str, Any], _id: str) -> dict[str, object]:
-        """废弃当前 Compose 进度，但对话历史保留不动。"""
-        self._require_threads_capability()
+        """v3 薄壳：解析参数后交给 `compose_abandon`。"""
         parsed = ComposeAbandonParams.model_validate(params)
+        return await self.compose_abandon(
+            self._current_connection(), parsed.thread_id, parsed.reason
+        )
+
+    async def compose_abandon(
+        self,
+        connection: ProtocolConnection,
+        thread_id: str,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        """废弃当前 Compose 进度，但对话历史保留不动。"""
+        self._threads_ready(connection)
+        raw: dict[str, object] = {"thread_id": thread_id}
+        if reason is not None:
+            raw["reason"] = reason
+        parsed = ComposeAbandonParams.model_validate(raw)
         persistence = await self._ensure_thread_persistence()
         await self._require_compose_thread(persistence, parsed.thread_id)
         try:
@@ -3394,6 +3578,8 @@ class AgentHost:
                 lambda _profile: True,
                 reason="skill_catalog_changed",
             )
+        # 第一次刷新（握手）不通知：当时还没有会话。之后目录变了才告诉 ACP。
+        await self._broadcast_command_catalog(registry.agent_commands())
         return registry
 
     async def _refresh_skill_catalog(self) -> SkillRegistry:
@@ -6573,7 +6759,13 @@ class AgentHost:
             if tuple(compacted) != projected.messages:
                 raise RuntimeError("COMPRESSION_PROJECTION_COMMIT_MISMATCH")
             await persistence.complete_run(thread_id)
-        return {"compacted": rewritten, "context": update.payload()}
+        payload: dict[str, object] = {"compacted": rewritten, "context": update.payload()}
+        # 假压缩器没有这个数。只有真的记过压缩前 token 才多带两个键，避免改掉旧的精确结果。
+        before_tokens = getattr(typed_service, "_compress_before_tokens", None)
+        if isinstance(before_tokens, int) and not isinstance(before_tokens, bool):
+            payload["before_tokens"] = before_tokens
+            payload["after_tokens"] = typed_result.estimated_tokens
+        return payload
 
     async def _release_run_agent_engine(self, run: RunState) -> None:
         """在 run 的所有终态释放 AgentEngine lease，并触发排空与空闲 TTL 检查。"""
@@ -6664,6 +6856,26 @@ class AgentHost:
         """回声模式没有 Thread 存储；服务方法用它，capability 由调用方自己校验。"""
         if self._allow_echo:
             raise RpcError(-32002, "THREADS_UNAVAILABLE_IN_ECHO_MODE")
+
+    def _reject_closed(self, connection: ProtocolConnection) -> None:
+        """服务方法收到已关闭的连接就拒绝，避免在拆掉的 sender 上继续做事。"""
+        if connection.closed:
+            raise RpcError(-32002, "CONNECTION_CLOSED")
+
+    def _threads_ready(self, connection: ProtocolConnection) -> None:
+        """线程读取能力看传入的连接，不读当前请求上的那条 ContextVar。"""
+        self._reject_closed(connection)
+        if CAPABILITY["THREADS_READ"] not in connection.enabled_capabilities:
+            raise RpcError(-32002, "THREADS_CAPABILITY_REQUIRED")
+        self._require_threads_available()
+
+    def _context_ready(self, connection: ProtocolConnection) -> None:
+        """手动压缩会改写本机记录，只允许协商了 `context.manage` 的连接。"""
+        self._reject_closed(connection)
+        if CAPABILITY["CONTEXT_MANAGE"] not in connection.enabled_capabilities:
+            raise RpcError(-32002, "CONTEXT_CAPABILITY_REQUIRED")
+        if not self._thread_persistence_enabled():
+            raise RpcError(-32002, "CONTEXT_COMPACTION_UNAVAILABLE")
 
     def _require_threads_capability(self) -> None:
         """阻止未协商读取能力的客户端意外读取本地 thread 数据。"""

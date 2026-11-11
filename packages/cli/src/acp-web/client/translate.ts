@@ -259,10 +259,19 @@ export class RunTranslator {
 
   /** `session/prompt` 成功响应 → run.completed。 */
   private completed(outcome: { stopReason: string; _meta?: unknown; usage?: PromptUsage | null }, finishReason: string): EventEnvelope {
-    const run = ((outcome._meta as { harnessCode?: { run?: unknown } } | null)?.harnessCode?.run ?? {}) as {
-      usage?: unknown; duration_ms?: unknown; context?: unknown
-    }
+    const harness = (outcome._meta as {
+      harnessCode?: {
+        run?: { usage?: unknown; duration_ms?: unknown; context?: unknown }
+        command?: { historyChanged?: unknown }
+      }
+    } | null)?.harnessCode
+    const run = harness?.run ?? {}
     const usage = readPromptUsage(outcome.usage) ?? readPromptUsage(run.usage) ?? { input: 0, output: 0 }
+    const context: Record<string, unknown> = run.context && typeof run.context === "object"
+      ? { ...(run.context as Record<string, unknown>) }
+      : {}
+    // /undo 和 /redo 告诉客户端历史变了，控制器据此重新打开会话。
+    if (harness?.command?.historyChanged === true) context.historyChanged = true
     return this.emit("run.completed", {
       usage: {
         input_tokens: usage.input,
@@ -271,7 +280,7 @@ export class RunTranslator {
       },
       duration_ms: typeof run.duration_ms === "number" ? run.duration_ms : this.now() - this.options.startedAtMs,
       finish_reason: finishReason,
-      context: run.context && typeof run.context === "object" ? run.context as Record<string, unknown> : {},
+      context,
     })
   }
 

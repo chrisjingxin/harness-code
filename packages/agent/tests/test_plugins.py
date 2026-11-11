@@ -1365,7 +1365,7 @@ def test_claude_and_portable_commands_become_user_only_command_records(
     )
     commands = registry.agent_commands()
     plugin_ids = {plugin.name: plugin.plugin_id for plugin in catalog.plugins}
-    assert {item["name"] for item in commands} == {
+    assert {item["name"] for item in commands if not str(item["name"]).startswith("skill:")} == {
         f"plugin:{plugin_ids['claude-commands'].replace('/', ':')}:review",
         f"plugin:{plugin_ids['claude-commands'].replace('/', ':')}:summarize",
         f"plugin:{plugin_ids['portable-commands'].replace('/', ':')}:audit",
