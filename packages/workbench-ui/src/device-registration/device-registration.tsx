@@ -1,14 +1,28 @@
 /** 最小设备登记：真实所有者显式选目录/登记/托管；不写导航或完整工作台。 */
 import { useEffect, useState } from "react"
 import type { CollaborationHost, DeviceHost, DeviceState, DeviceSummary, IdentityState } from "@workbench/contracts"
+import "./device-registration.css"
 
-export function DeviceRegistrationPanel({ host, collaboration }: { host: DeviceHost; collaboration: CollaborationHost }) {
+type StandaloneProps = { host: DeviceHost; collaboration: CollaborationHost }
+type DeviceFormProps = {
+  host: DeviceHost
+  workspaceId: string | null
+  device: DeviceState | null
+  devices?: readonly DeviceSummary[]
+  blockedReason?: string
+  onChanged?(): void
+}
+
+/** 正式窗口提供统一身份下的本机状态；基础页仍可独立订阅原宿主。 */
+export function DeviceRegistrationPanel(props: StandaloneProps | DeviceFormProps) {
+  if ("collaboration" in props) return <StandaloneDeviceRegistrationPanel {...props} />
+  return <DeviceForm key={props.workspaceId} {...props} />
+}
+
+function StandaloneDeviceRegistrationPanel({ host, collaboration }: StandaloneProps) {
   const [identity, setIdentity] = useState<IdentityState | null>(null)
   const [device, setDevice] = useState<DeviceState | null>(null)
   const [devices, setDevices] = useState<DeviceSummary[]>([])
-  const [name, setName] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState("")
 
   useEffect(() => {
     let active = true
@@ -29,11 +43,21 @@ export function DeviceRegistrationPanel({ host, collaboration }: { host: DeviceH
     return () => { active = false }
   }, [host, workspaceId, device?.status])
 
+  return <DeviceForm key={workspaceId} host={host} workspaceId={workspaceId} device={device} devices={devices} />
+}
+
+function DeviceForm({ host, workspaceId, device, devices = [], blockedReason, onChanged }: DeviceFormProps) {
+  const [name, setName] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState("")
+  const blocked = busy || !!blockedReason
+
   async function run(action: () => Promise<{ ok: boolean; error?: { message: string } }>) {
     setBusy(true); setMessage("")
     try {
       const result = await action()
-      if (!result.ok && result.error) setMessage(result.error.message)
+      if (result.ok) onChanged?.()
+      else if (result.error) setMessage(result.error.message)
     } catch { setMessage("操作未完成，请重试。") }
     finally { setBusy(false) }
   }
@@ -54,19 +78,22 @@ export function DeviceRegistrationPanel({ host, collaboration }: { host: DeviceH
     <p className="hint">只有明确登记并共享的项目才会被其他成员看到；路径与秘密留在本机。</p>
     <div className="device-row">
       <input aria-label="项目名称" placeholder="项目名称（可选）" value={name} maxLength={80} onChange={event => setName(event.target.value)} />
-      <button className="primary" disabled={busy} onClick={() => { void run(() => host.registerDevice(workspaceId, name)) }}>选择目录并登记</button>
+      <button className="primary wb-button wb-button-primary" disabled={blocked} onClick={() => { void run(() => host.registerDevice(workspaceId, name)) }}>选择目录并登记</button>
     </div>
     <p className="device-state" data-testid="device-state">
-      状态：{device?.status === "running" ? "运行中" : device?.status === "registered" ? "已登记" : device?.status === "stopped" ? "已停止" : "未登记"}
+      状态：{blockedReason ? "未确认" : device?.status === "running" ? "运行中" : device?.status === "registered" ? "已登记" : device?.status === "stopped" ? "已停止" : device?.status === "unavailable" ? "不可用" : "未登记"}
       {device?.projectId ? device.shareEnabled ? " · 已共享" : " · 未共享" : ""}
       {device?.connection === "ready" ? " · 服务已就绪" : device?.connection === "reconciling" ? " · 正在恢复连接" : ""}
     </p>
     <div className="device-actions">
-      <button disabled={busy || !device?.projectId || device.shareEnabled} onClick={() => { void run(() => host.shareProject()) }}>共享项目</button>
-      <button disabled={busy || !device?.shareEnabled} onClick={() => { void run(stopSharing) }}>撤回共享</button>
-      <button disabled={busy || !device?.shareEnabled || device.status === "running"} onClick={() => { void run(() => host.startRunner()) }}>启动本机执行器</button>
-      <button disabled={busy || device?.status !== "running"} onClick={() => { void run(() => host.stopRunner()) }}>停止</button>
+      <button disabled={blocked || !device?.projectId || device.shareEnabled} onClick={() => { void run(() => host.shareProject()) }}>共享项目</button>
+      <button disabled={blocked || !device?.shareEnabled} onClick={() => { void run(stopSharing) }}>撤回共享</button>
+      <button disabled={blocked || !device?.shareEnabled || device.status === "running"} onClick={() => { void run(() => host.startRunner()) }}>启动本机执行器</button>
+      <button disabled={blocked || device?.status !== "running"} onClick={() => { void run(() => host.stopRunner()) }}>停止</button>
     </div>
+    {blockedReason && <div className="device-actions"><p role="status">{blockedReason}</p>
+      {onChanged && <button onClick={onChanged}>重新确认</button>}
+    </div>}
     {device?.message && <p className="error" role="alert">{device.message}</p>}
     {message && <p className="error" role="alert">{message}</p>}
     {devices.length > 0 && <ul className="device-list">

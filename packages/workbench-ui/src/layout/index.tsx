@@ -25,6 +25,8 @@ export type WorkbenchRightSlot = {
   setWidth(widthPx: number): void;
 };
 export type WorkbenchLayoutProps = {
+  /** 正式窗口按平台给原生按钮和拖动区留空间。 */
+  titleBarClassName?: string;
   context: CollaborationContextView | null;
   navigation: ReactNode;
   center: ReactNode;
@@ -204,7 +206,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   };
   return (
     <div className="collaboration-layout" ref={root} onKeyDown={keyDown}>
-      <header className="collaboration-header">
+      <header className={props.titleBarClassName ? `collaboration-header ${props.titleBarClassName}` : "collaboration-header"}>
         <button
           ref={leftButton}
           onClick={() => toggle("left")}

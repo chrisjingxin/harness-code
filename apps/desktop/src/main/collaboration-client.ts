@@ -46,10 +46,11 @@ const messages: Record<CollaborationError["code"], string> = {
   PROJECT_GIT_STALE: "Git 状态已变化，请刷新", PROJECT_READ_FAILED: "项目读取失败",
 }
 class ClientProblem extends Error {
-  constructor(readonly code: CollaborationError["code"]) { super(code) }
+  constructor(readonly code: CollaborationError["code"], readonly rebuildProjection = false) { super(code) }
 }
 interface CallOptions { body?: unknown; inputSchema?: string; query?: Record<string, string>; session?: Session }
 interface StreamHandle { close(): void }
+type StreamConnection = "connecting" | "connected" | "reconnecting" | "stopped"
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
 export class CollaborationClient {
@@ -258,14 +259,16 @@ export class CollaborationClient {
     return result
   }
 
-  /** 重连只携带已应用的连续位置。退出、换账号或关闭订阅会使旧流立即失效。 */
+  /** 网络重连携带已交给调用方的连续位置；调用方负责保留未确认的事件。 */
   subscribeConversation(workspaceId: string, conversationId: string, afterSequence: string,
-                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string }) => void): StreamHandle {
+                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string; rebuildProjection?: boolean }) => void,
+                        onStatus?: (status: StreamConnection) => void): StreamHandle {
     const controller = new AbortController()
     const session = this.#session
     const signal = AbortSignal.any([controller.signal, session.abort.signal])
     const live = () => !signal.aborted && !this.#disposed && session === this.#session
-    const emitProblem = (code: string) => { if (live()) onProblem({ code }) }
+    const emitProblem = (code: string, rebuildProjection = false) => { if (live()) onProblem({ code, ...(rebuildProjection ? { rebuildProjection: true } : {}) }) }
+    const emitStatus = (status: StreamConnection) => { if (live()) onStatus?.(status) }
     let cursor = afterSequence
     let retry = 0
     let lastEvent: string | undefined
@@ -309,6 +312,7 @@ export class CollaborationClient {
           void response.body?.cancel().catch(() => {})
           throw new ClientProblem("INVALID_SERVER_RESPONSE")
         }
+        emitStatus("connected")
         reader = response.body.getReader()
         const decoder = new TextDecoder("utf-8", { fatal: true })
         let pending = ""
@@ -348,7 +352,10 @@ export class CollaborationClient {
                 if (event.sequence === cursor && content === lastEvent) {
                   // 当前连接末尾的相同事件可安全忽略。无法核对的重复必须停止。
                 } else {
-                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) {
+                    // 旧位置的正文无法核对时不能当成相同事件，需要从头重建投影。
+                    throw new ClientProblem("INVALID_SERVER_RESPONSE", BigInt(event.sequence) <= BigInt(cursor))
+                  }
                   onEvent(event)
                   if (!live()) return
                   cursor = event.sequence
@@ -382,8 +389,10 @@ export class CollaborationClient {
       catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
     }
     const run = async () => {
+      emitStatus("connecting")
       if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(conversationId)
         || !/^(0|[1-9][0-9]{0,18})$/.test(cursor) || BigInt(cursor) > 9_223_372_036_854_775_807n) {
+        emitStatus("stopped")
         emitProblem("INVALID_REQUEST")
         return
       }
@@ -392,18 +401,26 @@ export class CollaborationClient {
         catch (failure) {
           if (!live()) return
           const code = failure instanceof ClientProblem ? failure.code : "NETWORK_UNAVAILABLE"
-          emitProblem(code)
-          if (code === "AUTHENTICATION_REQUIRED" && live()) this.#discardSession()
+          if (code === "AUTHENTICATION_REQUIRED") {
+            // 先清除旧 Cookie，再通知窗口；通知可能同步关闭该订阅。
+            this.#discardSession()
+            onProblem({ code })
+            return
+          }
+          if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") emitStatus("stopped")
+          emitProblem(code, failure instanceof ClientProblem && failure.rebuildProjection)
           if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") return
         }
         if (!live()) return
+        // 正常流结束也要立刻显示重连，成功握手时再切回已连接。
+        emitStatus("reconnecting")
         reconnect = true
         const wait = [1000, 2000, 5000][Math.min(retry++, 2)]
         try { await delay(wait, undefined, { signal }) } catch { return }
       }
     }
     void run()
-    return { close: () => controller.abort() }
+    return { close: () => { if (live()) { emitStatus("stopped"); controller.abort() } } }
   }
 
   registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {

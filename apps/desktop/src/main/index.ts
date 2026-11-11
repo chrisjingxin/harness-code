@@ -21,11 +21,12 @@ const supervisor = new RunnerSupervisor()
 let tray: Tray | null = null
 let exiting = false
 let quitAllowed = false
+let quitRequested = false
 
 function openWindow(): void {
   const window = BrowserWindow.getAllWindows()[0]
   if (window) { window.show(); window.focus() }
-  else if (!exiting) createWindow(supervisor)
+  else if (!exiting) createWindow(supervisor, () => { quitRequested = false; quitAllowed = false; exiting = false })
 }
 
 app.setName(__WORKBENCH_UI_PREVIEW__ ? {
@@ -50,9 +51,10 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (__WORKBENCH_UI_PREVIEW__) { app.quit(); return }
-  if (process.platform !== "darwin" && !supervisor.hasChild()) app.quit()
+  if (quitRequested) app.quit()
 })
 app.on("before-quit", event => {
+  quitRequested = true
   if (quitAllowed || !supervisor.hasChild()) return
   event.preventDefault()
   if (exiting) return
@@ -60,11 +62,12 @@ app.on("before-quit", event => {
   void supervisor.stop().then(stopped => {
     if (stopped) {
       quitAllowed = true
-      tray?.destroy()
       app.quit()
       return
     }
     exiting = false
+    quitRequested = false
     dialog.showErrorBox("停止未确认", "本机执行器尚未确认退出。请稍后再试。")
   })
 })
+app.on("will-quit", () => { tray?.destroy() })

@@ -8,7 +8,7 @@ import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { bindCollaborationIpc } from "./collaboration-ipc.js"
 
 /** 创建基础窗口；开发 URL 必须是实际 electron-vite 本机端口，生产只读取本地页面。 */
-export function createWindow(supervisor: RunnerSupervisor): BrowserWindow {
+export function createWindow(supervisor: RunnerSupervisor, onCloseAborted: () => void): BrowserWindow {
   // 构建时固定开发标志，避免预览或生产进程继承开发环境变量后加载网络页面。
   const developmentUrl = import.meta.env.DEV ? process.env.ELECTRON_RENDERER_URL : undefined
   let trustedUrl = new URL("../renderer/index.html", import.meta.url).href
@@ -29,7 +29,7 @@ export function createWindow(supervisor: RunnerSupervisor): BrowserWindow {
   })
   bindDesktopIpc(window, trustedUrl)
   // 预览不挂载身份或设备端口，避免接触现有服务和 Runner。
-  if (!__WORKBENCH_UI_PREVIEW__) bindCollaborationIpc(window, trustedUrl, supervisor)
+  if (!__WORKBENCH_UI_PREVIEW__) bindCollaborationIpc(window, trustedUrl, supervisor, onCloseAborted)
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", event => { event.preventDefault() })
   window.webContents.on("will-frame-navigate", event => { event.preventDefault() })

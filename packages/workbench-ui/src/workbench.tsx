@@ -7,7 +7,6 @@ import type { CollaborationHost, DesktopHost, DeviceHost, ThemeMode, WindowState
 import { BrandMark } from "./common/brand.js"
 import { IdentityPanel } from "./identity/identity-panel.js"
 import { DeviceRegistrationPanel } from "./device-registration/device-registration.js"
-import "./device-registration/device-registration.css"
 import "./workbench.css"
 
 /** 为原生桌面组合的基础内容；窗口状态订阅随组件销毁解除。 */

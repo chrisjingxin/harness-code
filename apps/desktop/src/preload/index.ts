@@ -1,6 +1,8 @@
 /** 隔离桥只转发固定桌面/身份/设备方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
-import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, WindowState } from "@workbench/contracts"
+import type { CollaborationHost, ConversationReadHost, DesktopHost, DeviceHost, DeviceState, IdentityState, WindowState } from "@workbench/contracts"
+import type { ProjectReadHost } from "../project-read-host.js"
+import type { PersonalHost } from "../personal-host.js"
 
 const host: DesktopHost = {
   chooseDirectory: () => ipcRenderer.invoke("workbench:choose-directory"),
@@ -30,6 +32,39 @@ const collaboration: CollaborationHost = {
   },
 }
 contextBridge.exposeInMainWorld("collaboration", collaboration)
+
+const conversations: ConversationReadHost = {
+  listConversations: (workspaceId, cursor) => ipcRenderer.invoke("collaboration:conversations", workspaceId, cursor),
+  getConversation: (workspaceId, conversationId) => ipcRenderer.invoke("collaboration:conversation", workspaceId, conversationId),
+  readHistory: (workspaceId, conversationId, page) => ipcRenderer.invoke("collaboration:history", workspaceId, conversationId, page),
+  subscribeConversation: (workspaceId, conversationId, afterSequence) => ipcRenderer.invoke("collaboration:subscribe-conversation", workspaceId, conversationId, afterSequence),
+  readConversationEvents: (subscriptionId, afterSequence) => ipcRenderer.invoke("collaboration:conversation-events", subscriptionId, afterSequence),
+  unsubscribeConversation: subscriptionId => ipcRenderer.invoke("collaboration:unsubscribe-conversation", subscriptionId),
+}
+contextBridge.exposeInMainWorld("conversations", conversations)
+
+const projects: ProjectReadHost = {
+  readProject: (workspaceId, conversationId, action) => ipcRenderer.invoke("collaboration:project-read", workspaceId, conversationId, action),
+}
+contextBridge.exposeInMainWorld("projects", projects)
+
+let closeListener: (() => Promise<boolean>) | null = null
+ipcRenderer.on("personal:prepare-close", (_event: unknown, request: string) => {
+  void (async () => {
+    let ready = true
+    try { if (closeListener) ready = await closeListener() } catch { ready = false }
+    await ipcRenderer.invoke("personal:close-ready", request, ready)
+  })()
+})
+const personal: PersonalHost = {
+  load: key => ipcRenderer.invoke("personal:load", key),
+  save: (key, revision, value) => ipcRenderer.invoke("personal:save", key, revision, value),
+  onCloseRequested: listener => {
+    closeListener = listener
+    return () => { if (closeListener === listener) closeListener = null }
+  },
+}
+contextBridge.exposeInMainWorld("personal", personal)
 
 const devices: DeviceHost = {
   getState: () => ipcRenderer.invoke("devices:get-state"),

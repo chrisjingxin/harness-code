@@ -1,0 +1,51 @@
+/* 正式窗口的原生标题区、空态与设置，只消费公共主题颜色。 */
+html, body, #root { height: 100%; overflow: hidden; }
+
+.desktop-titlebar {
+  min-height: max(48px, env(titlebar-area-height, 0px));
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.desktop-titlebar-macos { padding-left: 108px; }
+.desktop-titlebar-windows {
+  padding-right: max(180px, calc(100% - env(titlebar-area-width, 100%) - env(titlebar-area-x, 0px) + 12px));
+}
+
+.desktop-navigation { height: 100%; display: flex; flex-direction: column; background: var(--sidebar-bg); }
+.desktop-navigation .collaboration-navigation { flex: 1; }
+.desktop-navigation-note { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 11px; }
+
+.desktop-empty { height: 100%; overflow: auto; padding: 20px; }
+.desktop-empty h1, .desktop-empty h2, .desktop-settings > h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.desktop-empty p { color: var(--muted); font-size: 13px; margin: 8px 0 12px; }
+.desktop-conversation { display: grid; place-content: center; justify-items: center; text-align: center; }
+.desktop-project { background: var(--surface); border-left: 1px solid var(--line); }
+.desktop-project header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.desktop-history { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 12px 20px 16px; }
+.desktop-history-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; color: var(--muted); font-size: 12px; }
+.desktop-project-center { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.desktop-center-tabs { display: flex; flex: 0 0 auto; align-items: stretch; min-height: 38px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.desktop-conversation-tab { display: flex; flex: 0 0 auto; border-bottom: 2px solid transparent; }
+.desktop-conversation-tab[data-selected="true"] { border-bottom-color: var(--accent); }
+.desktop-conversation-tab button { border: 0; background: transparent; color: var(--text); padding: 0 16px; font: inherit; cursor: pointer; }
+.desktop-center-conversation, .desktop-project-center .project-workbench-file-panel { flex: 1 1 auto; min-height: 0; }
+.desktop-center-conversation[hidden] { display: none; }
+.desktop-project-dock { position: relative; height: 100%; min-height: 0; }
+.desktop-project-retry { position: absolute; z-index: 2; right: 48px; top: 12px; }
+
+.desktop-settings { width: min(530px, 100%); }
+.desktop-settings > h2 { padding-right: 32px; margin-bottom: 16px; }
+.desktop-settings .identity-panel, .desktop-settings .device-panel { margin-top: 16px; }
+.desktop-settings .identity-heading h2 { margin: 0; font-size: 15px; }
+.desktop-settings .hint { color: var(--muted); font-size: 13px; }
+.desktop-settings .error, .desktop-empty .error { color: var(--danger); }
+.desktop-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 13px; }
+.desktop-preferences label, .desktop-zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.desktop-preferences select {
+  min-height: var(--control-compact);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 0 8px;
+}
