@@ -196,8 +196,8 @@ async def _run(scenario: str, fds: ProtocolFds, grace: float) -> int:
     """按场景选服务实现；退出码由服务层决定。
 
     `stub*` 用本文件的假 Agent（只测传输层）；`host` / `tools` / `commands` /
-    `approval` / `trust` / `history` 起真实 `AgentHost` + 真实 `run_acp_stdio`
-    （测端到端链路，含 Host 的 Run 生命周期）。
+    `approval` / `trust` / `history` / `journey` 起真实 `AgentHost` + 真实
+    `run_acp_stdio`（测端到端链路，含 Host 的 Run 生命周期）。
     """
     streams = await open_streams(fds)
     if scenario in _HOST_SCENARIOS:
@@ -205,7 +205,9 @@ async def _run(scenario: str, fds: ProtocolFds, grace: float) -> int:
     return await serve_acp_streams(_StubAgent(scenario), streams, grace_seconds=grace)
 
 
-_HOST_SCENARIOS = frozenset({"host", "tools", "commands", "approval", "trust", "diff", "history"})
+_HOST_SCENARIOS = frozenset(
+    {"host", "tools", "commands", "approval", "trust", "diff", "history", "journey"}
+)
 """用真实 Host 跑的场景名；其余走传输层 stub。"""
 
 TRUST_DIRECTORY = "/ext"
@@ -240,6 +242,39 @@ DIFF_UNIFIED = (
 
 HISTORY_THREAD_ID = "history-seed"
 """历史场景预置的线程 id（`session/list` 与 `session/load` 都用它）。"""
+
+
+def _write_journey_models(home: Path) -> None:
+    """写两份不会发起真实请求的模型配置，让会话里出现可切换的 model 项。"""
+    config_dir = home / ".harness"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[config]
+version = 1
+
+[models]
+default_profile = "fast"
+
+[models.profiles.fast]
+provider = "openai-compatible"
+provider_label = "fast"
+model = "fake-model"
+base_url = "http://127.0.0.1:9/v1"
+api_key = "fake-key"
+context_window_tokens = 32000
+
+[models.profiles.slow]
+provider = "openai-compatible"
+provider_label = "slow"
+model = "other-model"
+base_url = "http://127.0.0.1:9/v1"
+api_key = "fake-key"
+context_window_tokens = 32000
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _trust_hook(host_holder: dict[str, Any]) -> Any:
@@ -305,6 +340,9 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
       - `approval`：脚本化 HITL Agent，一次 `execute` 审批（带 `tool_call_id`）；
       - `trust`：同上，但中断前预置目录信任 presentation；
       - `history`：带真实线程存储的 Host，预置一条可回放的历史。
+      - `journey`：注入的脚本 Agent 走提问、计划和卡住；旁边放两份假模型配置。
+        注入图不打开线程库，列模型时若带线程号会去开库，所以这里列目录时不带线程号。
+        每一轮实际传给 Host 的模型名追加到工作区 `run-profiles.txt`。
     """
     from harness_agent.host.acp.stdio import run_acp_stdio
     from harness_agent.host.agent_host import AgentHost
@@ -386,6 +424,29 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
             host._run_coordinator._directory_trust_already_granted = (  # type: ignore[method-assign]
                 lambda _presentation, *, run_id: False
             )
+    elif scenario == "journey":
+        from tests.support.acp_harness import JourneyAgent
+
+        _write_journey_models(home)
+        host = AgentHost(agent=JourneyAgent(), config_home=home, workspace=root)
+        # 注入的 Agent 不打开线程库。列模型时带上线程号会去开库并失败，
+        # 配置项就只剩工作流，后面的切模型没有可选项。目录本身不依赖线程。
+        original_list = host.list_models
+
+        async def list_catalog(connection: Any, thread_id: str | None = None) -> dict[str, object]:
+            return await original_list(connection, None)
+
+        host.list_models = list_catalog  # type: ignore[method-assign]
+        original_start = host.start_run
+        profile_log = root / "run-profiles.txt"
+
+        async def record_profile(connection: Any, request: Any, on_accepted: Any = None) -> Any:
+            profile = getattr(request, "requested_primary_profile", None)
+            with profile_log.open("a", encoding="utf-8") as handle:
+                handle.write(("" if profile is None else str(profile)) + "\n")
+            return await original_start(connection, request, on_accepted=on_accepted)
+
+        host.start_run = record_profile  # type: ignore[method-assign]
     elif scenario == "history":
         from tests.support.thread_fixtures import seed_thread
 

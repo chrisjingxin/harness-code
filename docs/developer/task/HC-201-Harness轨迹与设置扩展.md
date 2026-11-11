@@ -31,8 +31,9 @@ completed_at: -
 
 ## 范围与目标归属
 
-- packages/harness-provider/runtime：专有方法、marker 解码/归属/合并、日志/索引、可中止历史与事件补传。
-- packages/harness-provider/ui：Trace 树、三轨图、详情、简化模式与专有设置视图。
+- packages/providers/harness/runtime：专有方法、marker 解码/归属/合并、日志/索引、可中止历史与事件补传。
+- packages/providers/harness/ui：Trace 树、三轨图、详情、简化模式与专有设置视图。
+- 目录按 [Agent 接入架构](../architecture/Agent接入架构.md) §2.1 的四层组织（2026-11-07 用户确认），包名仍为 harness-provider；另含必需的 descriptor（启动、识别、差异折算）。
 - 通用扩展注册/资源归属与装配接线；acp-runtime 只提供受控 stderr 端口。
 - Java 对扩展事件/附件做通用存取与授权，不解析 SDK marker，不把 Span 类型加入公共 DTO。
 

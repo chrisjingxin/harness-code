@@ -953,7 +953,7 @@ def test_qwen_commands_and_skills_use_canonical_dialects(
     )
 
     commands = registry.agent_commands()
-    assert {item["name"] for item in commands} == {
+    assert {item["name"] for item in commands if not str(item["name"]).startswith("skill:")} == {
         "za38-index",
         "za38-init",
         "za38-sdd",
@@ -1043,7 +1043,11 @@ def test_real_za38_extension_install_ignores_checkout_metadata_and_exposes_four_
         plugin_diagnostics=result.diagnostics,
     )
     assert result.diagnostics == ()
-    assert {item["name"] for item in registry.agent_commands()} == {
+    assert {
+        item["name"]
+        for item in registry.agent_commands()
+        if not str(item["name"]).startswith("skill:")
+    } == {
         "za38-index",
         "za38-init",
         "za38-sdd",

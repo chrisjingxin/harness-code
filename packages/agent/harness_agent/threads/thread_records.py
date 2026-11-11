@@ -53,8 +53,10 @@ class ThreadMessage:
     content: str
     tool_name: str | None = None
     created_at_ms: int | None = None
-    run_id: str | None = None
-    record_id: str | None = None
+    # tool 记录携带的关联信息（2.8）：回放侧用它把工具消息挂回正确卡片。
+    tool_call_id: str | None = None
+    tool_status: str | None = None  # "success"/"error" 原值
+    tool_arguments: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,13 +615,23 @@ def _thread_message_from_transcript(record: TranscriptRecord) -> ThreadMessage |
            and raw_tool_name
         else None
     )
+    # tool 记录的关联 id 与完成状态：旧数据缺省时按缺省 success，
+    # arguments 不在 tool 记录里——由投影方按 tool_call_id 从 assistant 的
+    # tool_calls 补齐（见 open_thread 的预扫描），这里只收结果。
+    tool_call_id = None
+    tool_status = None
+    if record.kind == "tool":
+        raw_id = record.payload.get("tool_call_id")
+        tool_call_id = raw_id if isinstance(raw_id, str) and raw_id else None
+        raw_status = record.payload.get("status")
+        tool_status = raw_status if isinstance(raw_status, str) else "success"
     return ThreadMessage(
         kind=record.kind,
         content=content,
         tool_name=tool_name,
         created_at_ms=record.created_at_ms,
-        run_id=record.run_id,
-        record_id=record.record_id,
+        tool_call_id=tool_call_id,
+        tool_status=tool_status,
     )  # type: ignore[arg-type]
 
 

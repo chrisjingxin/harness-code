@@ -207,6 +207,7 @@ export type WebIntent =
   | { type: "sidebar-width-change"; widthPx: number }
   | { type: "panel-search"; panel: WebPanel; query: string }
   | { type: "thread-select"; threadId: string }
+  | { type: "threads-load-more" }
   | { type: "thread-new" }
   | { type: "thread-refresh" }
   | { type: "model-select"; profileId: string }
@@ -519,6 +520,9 @@ class WebInteractiveAdapterImpl implements WebInteractiveAdapter {
         return
       case "thread-refresh":
         await this.client.submitIntent({ type: "catalog.refresh", catalog: "threads" })
+        return
+      case "threads-load-more":
+        await this.client.submitIntent({ type: "threads-load-more" })
         return
       case "model-select":
         await this.selectModel(intent.profileId)

@@ -15,6 +15,8 @@
     "./theme.css": "./dist/theme.css",
     "./project.css": "./dist/project/project.css",
     "./conversation.css": "./dist/conversation/conversation.css",
+    "./navigation.css": "./dist/navigation/navigation.css",
+    "./layout.css": "./dist/layout/layout.css",
     "./native-theme": {
       "types": "./dist/native-theme.d.ts",
       "import": "./dist/native-theme.js"

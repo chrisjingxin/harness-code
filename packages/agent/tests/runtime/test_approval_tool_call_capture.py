@@ -75,11 +75,11 @@ def test_preflight_records_id_only_when_it_asks() -> None:
     preflight = _preflight()
     executing = _request("execute", {"command": "rm -rf build"}, call_id="call-9")
     assert preflight(executing) is True
-    assert executing.runtime.context.tool_call_ids.lookup("execute", {"command": "rm -rf build"}) == "call-9"
+    assert executing.runtime.context.tool_call_ids.take("execute", {"command": "rm -rf build"}) == "call-9"
 
     readonly = _request("read_file", {"file_path": "/tmp/a.txt"}, call_id="call-10")
     assert preflight(readonly) is False
-    assert readonly.runtime.context.tool_call_ids.lookup("read_file", {"file_path": "/tmp/a.txt"}) is None
+    assert readonly.runtime.context.tool_call_ids.take("read_file", {"file_path": "/tmp/a.txt"}) is None
 
 
 @pytest.mark.parametrize(
@@ -99,7 +99,7 @@ def test_every_hitl_tool_records_its_tool_call_id(name: str, args: dict[str, obj
     preflight = _preflight()
     request = _request(name, dict(args), call_id="call-2")
     assert preflight(request) is True
-    assert request.runtime.context.tool_call_ids.lookup(name, args) == "call-2"
+    assert request.runtime.context.tool_call_ids.take(name, args) == "call-2"
 
 
 def test_missing_context_is_silently_skipped() -> None:
@@ -191,5 +191,5 @@ async def test_real_graph_interrupt_carries_provider_tool_call_id(tmp_path) -> N
     assert len(requests) == 2
     # ActionRequest 本身已经丢掉 id，id 只能来自预检登记。
     assert all("tool_call_id" not in request for request in requests)
-    assert context.tool_call_ids.lookup("execute", {"command": "rm -rf build"}) == "call-1"
-    assert context.tool_call_ids.lookup("web_fetch", {"url": "https://example.com"}) == "call-2"
+    assert context.tool_call_ids.take("execute", {"command": "rm -rf build"}) == "call-1"
+    assert context.tool_call_ids.take("web_fetch", {"url": "https://example.com"}) == "call-2"

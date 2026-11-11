@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.acp_harness import primary_path_resolver
 from harness_agent.host.acp.tool_display import (
     ACP_KIND_BY_TOOL,
     PathLocator,
@@ -114,13 +115,13 @@ class TestPathLocator:
 
     def test_virtual_path_maps_to_workspace_absolute_path(self, tmp_path: Path) -> None:
         """`/src/a.py` 换算成 `<workspace>/src/a.py`。"""
-        locator = PathLocator(tmp_path)
+        locator = PathLocator(primary_path_resolver(tmp_path))
         [location] = locator.locations("read_file", {"file_path": "/src/a.py"})
         assert location.path == str(tmp_path / "src" / "a.py")
 
     def test_absolute_workspace_path_is_kept(self, tmp_path: Path) -> None:
         """已经是工作区内绝对路径时结果仍是它自己。"""
-        locator = PathLocator(tmp_path)
+        locator = PathLocator(primary_path_resolver(tmp_path))
         target = tmp_path / "src" / "b.py"
         [location] = locator.locations("edit_file", {"file_path": str(target)})
         assert Path(location.path) == target
@@ -143,8 +144,8 @@ class TestPathLocator:
         self, tmp_path: Path, name: str, args: dict[str, object]
     ) -> None:
         """越界、缺参数、非直接路径工具一律「不猜」，返回空列表。"""
-        assert PathLocator(tmp_path).locations(name, args) == []
+        assert PathLocator(primary_path_resolver(tmp_path)).locations(name, args) == []
 
     def test_locator_never_raises_on_weird_input(self, tmp_path: Path) -> None:
         """展示逻辑绝不能抛异常打断事件流。"""
-        assert PathLocator(tmp_path).locations("read_file", None) == []
+        assert PathLocator(primary_path_resolver(tmp_path)).locations("read_file", None) == []

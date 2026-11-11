@@ -51,6 +51,9 @@ export function ThreadSection({
         busyReason={busyReason}
         disabled={disabled}
         dispatch={dispatch}
+        hasMore={threads.nextCursor != null}
+        loadingMore={threads.loadingMore}
+        onLoadMore={() => dispatch({ type: "threads-load-more" })}
       />
     </section>
   )
@@ -58,6 +61,9 @@ export function ThreadSection({
 
 function ThreadList({
   items,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   status,
   error,
   currentThreadId,
@@ -76,6 +82,9 @@ function ThreadList({
   busyReason: string | null
   disabled: boolean
   dispatch: (intent: WebIntent) => void
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }): React.ReactElement {
   if (status === "loading" && items.length === 0) {
     return <p className="sidebar-status">正在读取 Thread…</p>
@@ -99,7 +108,16 @@ function ThreadList({
     return <p className="sidebar-status">没有匹配的 Thread</p>
   }
   return (
-    <ul className="sidebar-list" role="list">
+    <ul
+      className="sidebar-list"
+      role="list"
+      onScroll={event => {
+        // 滚到底加载下一页；加载中与末页（无 nextCursor）不重复触发。
+        const el = event.currentTarget
+        if (!hasMore || loadingMore || !onLoadMore) return
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 32) onLoadMore()
+      }}
+    >
       {items.map((item, index) => {
         const isActive = item.thread_id === currentThreadId
         const itemDisabled = disabled || (busy && !isActive)
@@ -121,7 +139,14 @@ function ThreadList({
                 <MessageCircle size={14} strokeWidth={1.5} />
               </span>
               <span className="thread-item-title">{threadDisplayTitle(item)}</span>
-              <span className="thread-item-summary">{threadSubtitle(item, currentThreadId, busy, interaction)}</span>
+              <span className="thread-item-summary">
+                {/* 当前会话忙时优先显示进行态；其余显示条数与最近一句预览（单行省略）。 */}
+                {busy && item.thread_id === currentThreadId
+                  ? threadSubtitle(item, currentThreadId, busy, interaction)
+                  : item.message_count > 0 && item.latest_message
+                    ? `${item.message_count} 条 · ${item.latest_message}`
+                    : threadSubtitle(item, currentThreadId, busy, interaction)}
+              </span>
               <span className="thread-item-meta">{formatUpdated(item.updated_at_ms)}</span>
             </button>
           </li>

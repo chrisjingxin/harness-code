@@ -91,24 +91,49 @@ async def test_available_commands_sent_after_session_new_response(tmp_path: Path
     update_frame = await acp.client.read_frame()
     assert _is_update(update_frame, "available_commands_update")
     commands = update_frame["params"]["update"]["availableCommands"]
-    assert [item["name"] for item in commands] == [name]
-    assert all("/" not in item["name"] for item in commands) or all(
-        not item["name"].startswith("/") for item in commands
-    )
-    assert commands[0]["description"] == "Audit from plugin"
-    assert commands[0]["input"] == {"hint": "要审的文件"}
+    names = [item["name"] for item in commands]
+    assert names[:6] == ["compact", "btw", "undo", "redo", "title", "abandon"]
+    assert "goal" not in names
+    assert all(not item["name"].startswith("/") for item in commands)
+    plugin = next(item for item in commands if item["name"] == name)
+    assert plugin["description"] == "Audit from plugin"
+    assert plugin["input"] == {"hint": "要审的文件"}
 
 
-async def test_no_commands_means_no_update_frame(tmp_path: Path) -> None:
-    """没有命令的 Host 不发这一帧：空列表没有信息量，也不会打乱 S1 的帧序。"""
-    import asyncio
-
+async def test_empty_commands_still_sends_update(tmp_path: Path) -> None:
+    """没有命令也推一帧空表（§11.1 性能优化 1）：客户端靠它判断「表已落定」。"""
     host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
     async with InProcessAcp(host) as acp:
         await _initialize(acp.client)
         await _new_session(acp.client, host.workspace)
-        await asyncio.sleep(0.1)
-    assert not [frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")]
+        update_frame = await acp.client.read_frame()
+    assert _is_update(update_frame, "available_commands_update")
+    names = [item["name"] for item in update_frame["params"]["update"]["availableCommands"]]
+    assert names[:6] == ["compact", "btw", "undo", "redo", "title", "abandon"]
+    assert "goal" not in names
+
+
+async def test_empty_commands_update_after_load(tmp_path: Path) -> None:
+    """session/load 同样在响应后推一次空命令表。"""
+    from tests.support.acp_harness import make_persistent_host
+    from tests.support.thread_fixtures import seed_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    await seed_thread(store, "thread-1", [{"kind": "user", "content": "你好"}])
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        response = await acp.client.request(
+            2,
+            "session/load",
+            {"sessionId": "thread-1", "cwd": str(host.workspace), "mcpServers": []},
+        )
+        assert "result" in response, response
+        update_frame = await acp.client.read_frame()
+    assert _is_update(update_frame, "available_commands_update")
+    names = [item["name"] for item in update_frame["params"]["update"]["availableCommands"]]
+    assert names[:6] == ["compact", "btw", "undo", "redo", "title", "abandon"]
+    assert "goal" not in names
 
 
 async def test_slash_command_completes_requested_skill(tmp_path: Path) -> None:
@@ -167,7 +192,7 @@ async def test_multi_block_prompt_keeps_raw_invocation_equal_to_message(tmp_path
         assert prompt_response(response).stop_reason == "end_turn", response
     rendered = _rendered(agent)
     assert "Audit the requested files." in rendered
-    assert "@/note.txt" in rendered
+    assert "@file:///note.txt" in rendered
 
 
 async def test_escaped_unknown_and_skill_slash_are_plain_text(tmp_path: Path) -> None:
@@ -213,7 +238,7 @@ async def test_bind_commands_called_once_per_connection(
 async def test_bind_failure_degrades_to_plain_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """绑定失败不影响握手：没有命令帧，`/名称` 一律当普通文本。"""
+    """绑定失败不影响握手：菜单只剩内置命令，插件 `/名称` 当普通文本。"""
     agent = ScriptedAgent([text("好")])
     host = make_host(tmp_path, agent=agent)
     name = install_command_plugin(tmp_path / "home", tmp_path)
@@ -228,7 +253,20 @@ async def test_bind_failure_degrades_to_plain_text(
         body = f"/{name} 这些文件"
         response = await _prompt(acp.client, session_id, body)
         assert prompt_response(response).stop_reason == "end_turn", response
-    assert not [frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")]
+    # 绑定失败也要给客户端一个「已落定」信号。插件表丢了，六个内置命令还在。
+    updates = [
+        frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")
+    ]
+    assert updates
+    for frame in updates:
+        assert [item["name"] for item in frame["params"]["update"]["availableCommands"]] == [
+            "compact",
+            "btw",
+            "undo",
+            "redo",
+            "title",
+            "abandon",
+        ]
     rendered = _rendered(agent)
     assert body in rendered
     assert "Audit the requested files." not in rendered
@@ -288,10 +326,15 @@ def test_command_index_table() -> None:
         ]
     )
     available = index.available_commands()
-    assert [item.name for item in available] == ["plugin:a:audit", "plain"]
-    assert available[0].input is not None
-    assert available[0].input.root.hint == "文件"
-    assert available[1].input is None
+    names = [item.name for item in available]
+    assert names[:6] == ["compact", "btw", "undo", "redo", "title", "abandon"]
+    assert names[6:] == ["plugin:a:audit", "plain"]
+    audit = next(item for item in available if item.name == "plugin:a:audit")
+    plain = next(item for item in available if item.name == "plain")
+    assert audit.input is not None
+    assert audit.input.root.hint == "文件"
+    assert plain.input is None
+    assert index.match("/compact") is None
     hit = index.match("/PLUGIN:a:audit 这些")
     assert hit == RequestedSkill(
         skill_id="plugin/a/command/audit",
@@ -307,4 +350,21 @@ def test_command_index_table() -> None:
     )
     for miss in ("//plain", "/nope", "plain", "/", ""):
         assert index.match(miss) is None, miss
-    assert CommandIndex.from_snapshot([]).available_commands() == []
+    assert [item.name for item in CommandIndex.from_snapshot([]).available_commands()] == [
+        "compact",
+        "btw",
+        "undo",
+        "redo",
+        "title",
+        "abandon",
+    ]
+    with_goal = CommandIndex.from_snapshot([], forms=True).available_commands()
+    assert [item.name for item in with_goal] == [
+        "compact",
+        "btw",
+        "undo",
+        "redo",
+        "title",
+        "goal",
+        "abandon",
+    ]

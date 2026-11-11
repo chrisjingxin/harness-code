@@ -103,38 +103,139 @@ async def test_list_returns_workspace_threads_newest_first(tmp_path: Path) -> No
         assert "nextCursor" not in result
 
 
-async def test_list_uses_fixed_limit_200(
+async def test_list_uses_page_size_50(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """服务端固定请求 200 条，不按客户端要求放大或缩小。"""
+    """session/list 第一页固定向持久层要 50 条、游标为 None。"""
     host = await _seeded_host(tmp_path, "thread-1", [{"kind": "user", "content": "你好"}])
-    limits: list[int] = []
-    original = host.list_threads
+    calls: list[tuple[int, Any]] = []
+    original = host.list_threads_page
 
-    async def spy(limit: int) -> Any:
-        limits.append(limit)
-        return await original(limit)
+    async def spy(limit: int, after: Any) -> Any:
+        calls.append((limit, after))
+        return await original(limit, after)
 
-    monkeypatch.setattr(host, "list_threads", spy)
+    monkeypatch.setattr(host, "list_threads_page", spy)
     async with InProcessAcp(host) as acp:
         await _initialize(acp.client)
         await acp.client.request(2, "session/list", {"cwd": str(host.workspace)})
-    assert limits == [200]
+    assert calls == [(50, None)]
 
 
-async def test_list_with_other_cwd_or_any_cursor_is_empty(tmp_path: Path) -> None:
-    """别的工作区或任何 cursor 都回空列表：Host 只有一个工作区，也不分页。"""
+async def test_list_with_other_cwd_returns_empty_before_cursor(tmp_path: Path) -> None:
+    """别的工作区回空列表，且不解析游标（非法游标也不报错）。"""
     host = await _seeded_host(tmp_path, "thread-1", [{"kind": "user", "content": "你好"}])
     async with InProcessAcp(host) as acp:
         await _initialize(acp.client)
         other = await acp.client.request(
             2, "session/list", {"cwd": str(tmp_path / "elsewhere")}
         )
-        cursor = await acp.client.request(
-            3, "session/list", {"cwd": str(host.workspace), "cursor": "page-2"}
+        mismatched = await acp.client.request(
+            3,
+            "session/list",
+            {"cwd": str(tmp_path / "elsewhere"), "cursor": "not-a-cursor"},
         )
         assert other["result"]["sessions"] == []
-        assert cursor["result"]["sessions"] == []
+        assert mismatched["result"]["sessions"] == []
+
+
+def _fake_cursor(payload: str) -> str:
+    """把任意字符串按线上编码（base64url 去填充）伪装成游标。"""
+    import base64
+
+    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+
+async def _seeded_many(tmp_path: Path, count: int) -> Any:
+    """建带存储的 Host 并播种 count 个线程。"""
+    from tests.support.thread_fixtures import accept_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    for index in range(count):
+        await accept_thread(store, f"t-{index:03d}", f"消息 {index}")
+    return host
+
+
+async def _list_page(client: Any, request_id: int, cwd: str, cursor: str | None = None):
+    params: dict[str, Any] = {"cwd": cwd}
+    if cursor is not None:
+        params["cursor"] = cursor
+    return await client.request(request_id, "session/list", params)
+
+
+async def test_list_paginates_120_threads_in_three_pages(tmp_path: Path) -> None:
+    """120 个线程三页 50/50/20：不重不漏，仅中间页带 nextCursor。"""
+    host = await _seeded_many(tmp_path, 120)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        seen: list[str] = []
+        cursor: str | None = None
+        cursors_seen = 0
+        for request_id, expected in ((2, 50), (3, 50), (4, 20)):
+            response = await _list_page(
+                acp.client, request_id, str(host.workspace), cursor
+            )
+            assert "result" in response, response
+            result = response["result"]
+            assert len(result["sessions"]) == expected
+            seen.extend(item["sessionId"] for item in result["sessions"])
+            if expected == 50:
+                assert result.get("nextCursor"), "前两页必须带 nextCursor"
+                cursors_seen += 1
+            else:
+                assert "nextCursor" not in result or result["nextCursor"] is None
+            cursor = result.get("nextCursor")
+        assert cursors_seen == 2
+        assert len(seen) == len(set(seen)) == 120
+
+
+async def test_list_cursor_ties_span_page_boundary(tmp_path: Path) -> None:
+    """同一 updated_at_ms 的 60 个线程跨 50 边界不重不漏（keyset 续页）。"""
+    host = await _seeded_many(tmp_path, 60)
+    store = await host._ensure_thread_persistence()
+    async with store._lock:
+        await store._connection.execute("UPDATE harness_threads SET updated_at_ms = 500")
+        await store._connection.commit()
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        first = await _list_page(acp.client, 2, str(host.workspace))
+        assert len(first["result"]["sessions"]) == 50
+        cursor = first["result"]["nextCursor"]
+        second = await _list_page(acp.client, 3, str(host.workspace), cursor)
+        ids = [item["sessionId"] for item in first["result"]["sessions"]]
+        ids += [item["sessionId"] for item in second["result"]["sessions"]]
+        assert len(ids) == len(set(ids)) == 60
+        assert "nextCursor" not in second["result"] or second["result"]["nextCursor"] is None
+
+
+@pytest.mark.parametrize(
+    "bad_cursor",
+    [
+        "!!!not-base64!!!",
+        _fake_cursor("hello"),
+        _fake_cursor("[1,2]"),
+        _fake_cursor("{}"),
+        _fake_cursor('{"u":1}'),
+        _fake_cursor('{"u":"1","t":"x"}'),
+        _fake_cursor('{"u":-1,"t":"x"}'),
+        _fake_cursor('{"u":true,"t":"x"}'),
+        _fake_cursor('{"u":1,"t":""}'),
+    ],
+)
+async def test_list_invalid_cursor_returns_minus_32602(
+    tmp_path: Path, bad_cursor: str
+) -> None:
+    """非法游标一律 -32602 + INVALID_CURSOR。"""
+    host = await _seeded_host(tmp_path, "thread-1", [{"kind": "user", "content": "你好"}])
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        response = await _list_page(
+            acp.client, 2, str(host.workspace), bad_cursor
+        )
+        error = response["error"]
+        assert error["code"] == -32602
+        assert error["data"]["code"] == "INVALID_CURSOR"
 
 
 async def test_list_in_echo_mode_maps_to_minus_32603(tmp_path: Path) -> None:

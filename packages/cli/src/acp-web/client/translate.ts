@@ -17,6 +17,8 @@
 
 import type { EventEnvelope } from "@za38/protocol"
 
+import { parseParentMeta } from "../ext"
+
 /** Python `translate.py` 的 `MAX_OUTPUT_CHARS`：输出超过它就不再增长。 */
 export const MAX_OUTPUT_CHARS = 64 * 1024
 
@@ -52,9 +54,31 @@ export type AcpSessionUpdate = {
   [key: string]: unknown
 }
 
+/** 标准 `PromptResponse.usage`（camelCase）或扩展里的 snake_case。 */
+export type PromptUsage = {
+  inputTokens?: unknown
+  outputTokens?: unknown
+  cachedReadTokens?: unknown
+  input_tokens?: unknown
+  output_tokens?: unknown
+  cached_tokens?: unknown
+  cached_read_tokens?: unknown
+}
+
+/** `run.started` 里给状态栏用的模型。三个名字都必须有，否则界面不显示。 */
+export type StartedModel = {
+  id: string
+  model: string
+  provider_label: string
+  is_default?: boolean
+  available?: boolean
+  source?: string
+  context_window_tokens?: number
+}
+
 /** `session/prompt` 的响应（或 JSON-RPC 错误）。 */
 export type PromptOutcome =
-  | { stopReason: string; _meta?: unknown }
+  | { stopReason: string; _meta?: unknown; usage?: PromptUsage | null }
   | { error: { code: number; message: string; data?: unknown } }
 
 export function isPromptError(outcome: PromptOutcome): outcome is { error: { code: number; message: string; data?: unknown } } {
@@ -70,6 +94,53 @@ export function nameOf(title: string | undefined, toolCallId?: string, meta?: un
   }
   const head = (title ?? "").split(/\s/, 1)[0]?.trim() ?? ""
   return head || "tool"
+}
+
+const PLAN_STAGE_BY_LABEL: Record<string, "requirement" | "spec" | "plan" | "implement" | "review"> = {
+  需求: "requirement",
+  规格: "spec",
+  计划: "plan",
+  实现: "implement",
+  检视: "review",
+}
+
+function planStages(entries: unknown): Array<{ id: "requirement" | "spec" | "plan" | "implement" | "review"; state: "pending" | "current" | "confirmed" | "failed" }> | null {
+  if (!Array.isArray(entries)) return null
+  const stages: Array<{ id: "requirement" | "spec" | "plan" | "implement" | "review"; state: "pending" | "current" | "confirmed" | "failed" }> = []
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue
+    const raw = entry as { content?: unknown; status?: unknown }
+    if (typeof raw.content !== "string" || !raw.content) continue
+    const failed = raw.content.endsWith("（失败）")
+    const label = failed ? raw.content.slice(0, -"（失败）".length) : raw.content
+    const id = PLAN_STAGE_BY_LABEL[label]
+    if (!id) continue
+    const state = failed
+      ? "failed"
+      : raw.status === "in_progress"
+        ? "current"
+        : raw.status === "completed"
+          ? "confirmed"
+          : "pending"
+    stages.push({ id, state })
+  }
+  return stages.length ? stages : null
+}
+
+function finiteToken(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+/** 标准 usage 优先。没有这块对象时返回 null，调用方再看扩展里的 run.usage。 */
+function readPromptUsage(value: unknown): { input: number; output: number; cached?: number } | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as PromptUsage
+  const cached = finiteToken(raw.cachedReadTokens) ?? finiteToken(raw.cached_tokens) ?? finiteToken(raw.cached_read_tokens)
+  return {
+    input: finiteToken(raw.inputTokens) ?? finiteToken(raw.input_tokens) ?? 0,
+    output: finiteToken(raw.outputTokens) ?? finiteToken(raw.output_tokens) ?? 0,
+    ...(cached !== undefined ? { cached } : {}),
+  }
 }
 
 export function metaApproval(meta: unknown): Record<string, unknown> | null {
@@ -90,6 +161,8 @@ export function updateText(content: unknown): string | null {
 
 export class RunTranslator {
   private sequence = 0
+  /** compose.progress 要求 revision 严格递增，迟到的同号帧会被丢掉。 */
+  private planRevision = 0
   private readonly tools = new Map<string, ToolState>()
   private finished = false
   private readonly droppedKinds = new Map<string, number>()
@@ -101,9 +174,26 @@ export class RunTranslator {
     this.log = options.log ?? (() => {})
   }
 
-  /** `drive` ⑤ 的起步事件。 */
-  started(): EventEnvelope {
-    return this.emit("run.started", { mode: "build", resumed: false })
+  /** `drive` ⑤ 的起步事件。不传模型时保持原来的 build 起步帧。 */
+  started(options?: { mode?: string; model?: StartedModel }): EventEnvelope {
+    const model = options?.model
+    const profile = model?.id && model.model && model.provider_label
+      ? {
+          id: model.id,
+          model: model.model,
+          provider_label: model.provider_label,
+          context_window_tokens: typeof model.context_window_tokens === "number" ? model.context_window_tokens : 0,
+          capabilities: [] as string[],
+          is_default: model.is_default === true,
+          available: model.available !== false,
+          source: model.source || "config",
+        }
+      : undefined
+    return this.emit("run.started", {
+      mode: options?.mode === "compose" ? "compose" : "build",
+      resumed: false,
+      ...(profile ? { primary_model: { profile } } : {}),
+    })
   }
 
   /** 处理一条 session/update，返回产生的事件（通常 0-2 条）。 */
@@ -127,6 +217,10 @@ export class RunTranslator {
       case "user_message_chunk":
         // 非回放期出现 user 块不产事件（回放进 ReplayBuffer）。
         return []
+      case "plan":
+        return this.onPlan(update)
+      case "usage_update":
+        return this.onUsage(update)
       default:
         this.drop("unknown_update", update.sessionUpdate ?? "missing")
         return []
@@ -164,21 +258,74 @@ export class RunTranslator {
   }
 
   /** `session/prompt` 成功响应 → run.completed。 */
-  private completed(outcome: { stopReason: string; _meta?: unknown }, finishReason: string): EventEnvelope {
-    const run = ((outcome._meta as { harnessCode?: { run?: unknown } } | null)?.harnessCode?.run ?? {}) as {
-      usage?: unknown; duration_ms?: unknown; context?: unknown
-    }
-    const usage = run.usage && typeof run.usage === "object" ? run.usage as { input_tokens?: unknown; output_tokens?: unknown; cached_tokens?: unknown } : null
+  private completed(outcome: { stopReason: string; _meta?: unknown; usage?: PromptUsage | null }, finishReason: string): EventEnvelope {
+    const harness = (outcome._meta as {
+      harnessCode?: {
+        run?: { usage?: unknown; duration_ms?: unknown; context?: unknown }
+        command?: { historyChanged?: unknown }
+      }
+    } | null)?.harnessCode
+    const run = harness?.run ?? {}
+    const usage = readPromptUsage(outcome.usage) ?? readPromptUsage(run.usage) ?? { input: 0, output: 0 }
+    const context: Record<string, unknown> = run.context && typeof run.context === "object"
+      ? { ...(run.context as Record<string, unknown>) }
+      : {}
+    // /undo 和 /redo 告诉客户端历史变了，控制器据此重新打开会话。
+    if (harness?.command?.historyChanged === true) context.historyChanged = true
     return this.emit("run.completed", {
       usage: {
-        input_tokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : 0,
-        output_tokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : 0,
-        ...(typeof usage?.cached_tokens === "number" ? { cached_tokens: usage.cached_tokens } : {}),
+        input_tokens: usage.input,
+        output_tokens: usage.output,
+        ...(usage.cached !== undefined ? { cached_tokens: usage.cached } : {}),
       },
       duration_ms: typeof run.duration_ms === "number" ? run.duration_ms : this.now() - this.options.startedAtMs,
       finish_reason: finishReason,
-      context: run.context && typeof run.context === "object" ? run.context as Record<string, unknown> : {},
+      context,
     })
+  }
+
+  /**
+   * ACP plan 的中文短名还原成 Compose 阶段条。
+   * 需求对应界面上的 requirement，当前阶段记成 grill（分不出 grill 和 task）。
+   */
+  private onPlan(update: AcpSessionUpdate): EventEnvelope[] {
+    const stages = planStages(update.entries)
+    if (!stages) {
+      this.drop("unknown_update", "plan")
+      return []
+    }
+    this.planRevision += 1
+    const current = stages.find(stage => stage.state === "current")
+      ?? stages.find(stage => stage.state === "failed")
+      ?? stages[stages.length - 1]!
+    const busy = stages.some(stage => stage.state === "current" || stage.state === "pending" || stage.state === "failed")
+    return [this.emit("compose.progress", {
+      revision: this.planRevision,
+      thread_id: this.options.threadId,
+      slug: "compose",
+      complexity: "simple",
+      current_stage: current.id === "requirement" ? "grill" : current.id,
+      status: busy ? "active" : "completed",
+      waiting: "none",
+      stages,
+      documents: [],
+      fix_rounds: 0,
+    })]
+  }
+
+  /** 上下文用量。界面只认 estimated_tokens / input_cap_tokens 这一对数字。 */
+  private onUsage(update: AcpSessionUpdate): EventEnvelope[] {
+    const used = update.used
+    const size = update.size
+    if (typeof used !== "number" || typeof size !== "number" || !Number.isFinite(used) || !Number.isFinite(size) || used < 0 || size < 0) {
+      this.drop("unknown_update", "usage_update")
+      return []
+    }
+    return [this.emit("context.updated", {
+      action: "usage",
+      estimated_tokens: used,
+      input_cap_tokens: size,
+    })]
   }
 
   private onToolCall(update: AcpSessionUpdate): EventEnvelope[] {
@@ -197,7 +344,7 @@ export class RunTranslator {
       const terminal = this.terminalEvents(update, tool)
       events.push(...terminal)
     }
-    return events
+    return this.withParent(events, parseParentMeta(update._meta))
   }
 
   private onToolUpdate(update: AcpSessionUpdate): EventEnvelope[] {
@@ -264,6 +411,17 @@ export class RunTranslator {
         original_bytes: new TextEncoder().encode(content).byteLength,
       },
     })]
+  }
+
+  /** 子代理卡（带 harnessCode.parent）的事件补 execution/agent 顶层归属，供分组。 */
+  private withParent(events: EventEnvelope[], parent: { executionId: string; agentId?: string } | undefined): EventEnvelope[] {
+    if (!parent) return events
+    for (const ev of events) {
+      const e = ev as EventEnvelope & { execution_id?: string; agent_id?: string }
+      e.execution_id = parent.executionId
+      if (parent.agentId) e.agent_id = parent.agentId
+    }
+    return events
   }
 
   private emit<T extends EventEnvelope["type"]>(type: T, payload: unknown): EventEnvelope {

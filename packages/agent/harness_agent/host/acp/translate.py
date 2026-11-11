@@ -34,11 +34,14 @@ from acp.helpers import (
 )
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanUpdate,
     AgentThoughtChunk,
+    PlanEntry,
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
     ToolKind,
+    UsageUpdate,
 )
 
 from harness_agent.host.acp.tool_display import (
@@ -47,8 +50,16 @@ from harness_agent.host.acp.tool_display import (
     tool_kind,
     tool_title,
 )
+from harness_agent.host.acp.ext import parent_meta
 
-Update = AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress
+Update = (
+    AgentMessageChunk
+    | AgentThoughtChunk
+    | ToolCallStart
+    | ToolCallProgress
+    | AgentPlanUpdate
+    | UsageUpdate
+)
 """本模块会产出的 ACP `session/update` 联合类型。"""
 
 MAX_OUTPUT_CHARS: Final = 64 * 1024
@@ -74,14 +85,27 @@ _IGNORED_EVENT_TYPES: Final = frozenset(
         "run.started",
         "run.progress",
         "skill.loaded",
-        "context.updated",
         "interaction.resolved",
     }
 )
 """已知但 S1 不翻译的事件；静默丢弃，不算「未知类型」。"""
 
 _IGNORED_EVENT_PREFIXES: Final = ("compose.", "goal.")
-"""按前缀归类的已知事件族，同样静默丢弃。"""
+"""按前缀归类的已知事件族，同样静默丢弃。Goal 计划与 Compose 是否活跃在丢弃前单独处理。"""
+
+_COMPOSE_ACTIVE: Final = frozenset({"active", "waiting_user", "verifying"})
+"""Compose 还在跑时不发 Goal 计划，避免两套计划叠在同一张 ACP 计划上。"""
+
+_COMPOSE_LABELS: Final = {
+    "requirement": "需求",
+    "grill": "需求",
+    "task": "需求",
+    "spec": "规格",
+    "plan": "计划",
+    "implement": "实现",
+    "review": "检视",
+}
+"""阶段 id 到界面上的中文短名。客户端再按这些名字还原阶段条。"""
 
 TERMINAL_EVENT_TYPES: Final = frozenset({"run.completed", "run.cancelled", "run.failed"})
 """Run 终态事件类型。"""
@@ -103,7 +127,7 @@ class ApprovalTarget:
 
     `raw_input` 为 `UNSET` 表示参数不可发送（超 256 KiB 或缺失）；
     `updates` 必须先于 `session/request_permission` 发出去，客户端才有卡片可挂。
-    `matched` 是诊断口径：`id` 精确关联、`args` 降级匹配、`none` 兜底卡。
+    `matched` 是诊断口径：`id` 按 id 关联、`none` 兜底卡。
     """
 
     tool_call_id: str
@@ -112,7 +136,7 @@ class ApprovalTarget:
     locations: list[ToolCallLocation]
     raw_input: object
     updates: list[Update]
-    matched: Literal["id", "args", "none"]
+    matched: Literal["id", "none"]
 
 
 @dataclass(slots=True)
@@ -173,27 +197,64 @@ def acp_tool_call_id(run_id: str, tool_call_id: str) -> str:
     return f"{run_id}:{tool_call_id}"
 
 
+def acp_child_tool_call_id(run_id: str, execution_id: str, tool_call_id: str) -> str:
+    """子代理工具卡的会话内唯一 id：`{run_id}:{execution_id}:{v3_id}`（§7.3）。
+
+    与 `acp_tool_call_id` 同形：把子代理 execution id 并进来避免撞父卡。
+    """
+    return f"{run_id}:{execution_id}:{tool_call_id}"
+
+
 class RunTranslator:
     """把一个 Run 的 v3 事件翻译成 ACP update 的纯状态机。"""
 
-    def __init__(self, run_id: str, locator: PathLocator) -> None:
-        """绑定 Run 身份与位置解析器；`segment` 从 0 开始，每遇到工具开始加一。"""
+    def __init__(self, run_id: str, locator: PathLocator, *, subagent: bool = False) -> None:
+        """绑定 Run 身份与位置解析器；`subagent` 标记本连接是否协商了子代理扩展。"""
         self._run_id = run_id
         self._locator = locator
+        self._subagent = subagent
         self._segment = 0
         self._tools: dict[str, _ToolState] = {}
         self._terminal: RunOutcome | None = None
         self.ignored_types: set[str] = set()
         self.dropped_child_events = 0
+        # child_execution_id → (父 task 卡 ACP id, child_agent_id)：
+        # 来自 tool.delta 的 child 绑定字段，供 parent_meta 与正文累加定位父卡。
+        self._child_parents: dict[str, tuple[str, str | None]] = {}
+        # child_execution_id → 累计正文：子代理 content.delta 写回父卡输出。
+        self._child_outputs: dict[str, str] = {}
+        self._compose_active = False
+        self._goal_texts: dict[str, str] = {}
+        self._last_usage: tuple[int, int] | None = None
 
     def feed(self, event: Mapping[str, object]) -> TranslateResult:
         """处理一条 v3 事件记录；终态之后到达的事件一律丢弃。"""
         if self._terminal is not None:
             return TranslateResult()
+        event_type = event.get("type")
+        payload = event.get("payload")
+        if (
+            event_type == "tool.delta"
+            and isinstance(payload, Mapping)
+            and payload.get("child_execution_id")
+        ):
+            # 父卡上的 child 绑定 delta：登记映射，事件本身按父卡规则照常处理。
+            exec_id = str(payload["child_execution_id"])
+            self._child_parents[exec_id] = (
+                acp_tool_call_id(self._run_id, str(payload.get("tool_call_id") or "")),
+                payload.get("child_agent_id") if isinstance(payload.get("child_agent_id"), str) else None,
+            )
+        # Compose 进度可能带 parent_execution_id。先翻译，否则会被当成子事件丢掉，阶段条出不来。
+        if event_type == "compose.progress":
+            data = payload if isinstance(payload, Mapping) else {}
+            self._compose_active = data.get("status") in _COMPOSE_ACTIVE
+            return TranslateResult(self._compose_plan(data))
+        if event_type == "compose.summary":
+            data = payload if isinstance(payload, Mapping) else {}
+            return TranslateResult(self._compose_summary(data))
         # 子 agent（inline child）的事件与父级共用一条流，只按 parent_execution_id 区分。
         if event.get("parent_execution_id") is not None:
-            self.dropped_child_events += 1
-            return TranslateResult()
+            return self._feed_child(event)
         event_type = event.get("type")
         if not isinstance(event_type, str):
             return TranslateResult()
@@ -211,10 +272,138 @@ class RunTranslator:
             return TranslateResult(self._tool_completed(data))
         if event_type in TERMINAL_EVENT_TYPES:
             return TranslateResult([], self._set_terminal(event_type, data))
+        if event_type == "context.updated":
+            return TranslateResult(self._usage_update(data))
+        if event_type == "goal.changed":
+            return TranslateResult(self._goal_changed(data))
+        if event_type == "goal.evaluation":
+            return TranslateResult(self._goal_evaluation(data))
         if event_type in _IGNORED_EVENT_TYPES or event_type.startswith(_IGNORED_EVENT_PREFIXES):
             return TranslateResult()
         self.ignored_types.add(event_type)
         return TranslateResult()
+
+    def _compose_plan(self, data: Mapping[str, object]) -> list[Update]:
+        """把 compose.progress.stages 收成一张 ACP 计划。没有 stages 时不发计划。"""
+        stages = data.get("stages")
+        if not isinstance(stages, list):
+            return []
+        entries: list[PlanEntry] = []
+        for stage in stages:
+            if not isinstance(stage, Mapping):
+                continue
+            stage_id = stage.get("id")
+            if not isinstance(stage_id, str) or not stage_id:
+                continue
+            label = _COMPOSE_LABELS.get(stage_id, stage_id)
+            state = stage.get("state")
+            if state == "failed":
+                content = f"{label}（失败）"
+                status = "completed"
+            elif state == "current":
+                content = label
+                status = "in_progress"
+            elif state in {"confirmed", "skipped"}:
+                content = label
+                status = "completed"
+            else:
+                content = label
+                status = "pending"
+            entries.append(PlanEntry(content=content, priority="medium", status=status))
+        if not entries:
+            return []
+        return [AgentPlanUpdate(session_update="plan", entries=entries)]
+
+    def _compose_summary(self, data: Mapping[str, object]) -> list[Update]:
+        """Compose 收尾正文单独一条消息，messageId 固定，方便客户端替换而不是叠段。"""
+        text = data.get("text")
+        if not isinstance(text, str) or not text:
+            return []
+        return [
+            AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=text_block(text),
+                message_id=f"{self._run_id}:compose-summary",
+            )
+        ]
+
+    def _usage_update(self, data: Mapping[str, object]) -> list[Update]:
+        """context.updated 里两个整数都在、且和上次不同，才发 usage_update。"""
+        used = data.get("estimated_tokens")
+        size = data.get("context_window_tokens")
+        if not _nonneg_int(used) or not _nonneg_int(size):
+            return []
+        assert isinstance(used, int) and isinstance(size, int)
+        pair = (used, size)
+        if pair == self._last_usage:
+            return []
+        self._last_usage = pair
+        return [UsageUpdate(session_update="usage_update", used=used, size=size)]
+
+    def _goal_changed(self, data: Mapping[str, object]) -> list[Update]:
+        """Goal 变了就整表替换 ACP 计划。Compose 进行中只记住条文，不发计划。"""
+        goal = data.get("goal")
+        entries: list[PlanEntry] = []
+        if goal is None:
+            self._goal_texts.clear()
+        elif isinstance(goal, Mapping):
+            done = goal.get("status") == "complete"
+            criteria = goal.get("criteria")
+            if isinstance(criteria, list):
+                for item in criteria:
+                    if not isinstance(item, Mapping):
+                        continue
+                    criterion_id = item.get("criterion_id")
+                    text = item.get("text")
+                    if not isinstance(criterion_id, str) or not criterion_id:
+                        continue
+                    if not isinstance(text, str) or not text:
+                        continue
+                    self._goal_texts[criterion_id] = text
+                    entries.append(
+                        PlanEntry(
+                            content=text,
+                            priority="medium",
+                            status="completed" if done else "pending",
+                        )
+                    )
+        else:
+            return []
+        if self._compose_active:
+            return []
+        return [AgentPlanUpdate(session_update="plan", entries=entries)]
+
+    def _goal_evaluation(self, data: Mapping[str, object]) -> list[Update]:
+        """按判定阶段改每条的状态。没有 criterion_id 的项跳过。"""
+        if self._compose_active:
+            return []
+        phase = data.get("phase")
+        result = data.get("result")
+        criteria = data.get("criteria")
+        entries: list[PlanEntry] = []
+        if isinstance(criteria, list):
+            for item in criteria:
+                if not isinstance(item, Mapping):
+                    continue
+                criterion_id = item.get("criterion_id")
+                if not isinstance(criterion_id, str) or not criterion_id:
+                    continue
+                if phase == "checking":
+                    status = "in_progress"
+                elif phase == "result" and (item.get("passed") is True or result == "satisfied"):
+                    status = "completed"
+                else:
+                    status = "pending"
+                entries.append(
+                    PlanEntry(
+                        content=self._goal_texts.get(criterion_id) or criterion_id,
+                        priority="medium",
+                        status=status,
+                    )
+                )
+        if not entries:
+            return []
+        return [AgentPlanUpdate(session_update="plan", entries=entries)]
 
     def leftovers(self) -> list[ToolCallProgress]:
         """终态时把还没结束的工具补发成 `failed`，否则界面会一直转圈。
@@ -238,6 +427,7 @@ class RunTranslator:
         tool_call_id: str | None,
         is_child: bool,
         agent_id: str | None,
+        execution_id: str | None = None,
     ) -> ApprovalTarget:
         """把一次审批关联到一张工具卡，并给出必须先发出去的卡片更新。
 
@@ -245,46 +435,53 @@ class RunTranslator:
               `tool_call_id`（可能为空）；子代理审批直接走兜底卡。
         输出：卡片 id、标题、类别、位置、rawInput 与 `updates`。
 
-        判断顺序：子代理 → 有 id 按 id（已收尾/已被占用则兜底）→
-                  没 id 按「同名 + 参数相同 + 未被占用」降级匹配 → 兜底卡。
-        兜底卡用 `approval:{request_id}`，请求 id 本身已在会话内唯一。
+        判断顺序：子代理 → 有 id 按 id（找不到就同 id 先建卡；已收尾/已占用
+                  才兜底）→ 无 id 直接兜底卡（现在只剩目录信任类，由 prepare_trust
+                  用 `trust:{request_id}`）。兜底卡 `approval:{request_id}` 本身
+                  已在会话内唯一。
         """
+        # 有意取舍（Spec §7.2）：provider 在同一 execution 里重复使用同一个
+        # tool_call_id 时，Host 把后一次事件卡改成合成 id（见
+        # `runtime/execution_stream.py::allocate_tool_id`，形如 tool-{run_id}-{n}），
+        # 而审批预检登记的是 provider 原始 id——这种极少见的情况按 id 找到的
+        # 卡已收尾，审批落到兜底卡，不再靠参数猜测。
         raw = UNSET if args is None else bounded_raw_input(dict(args))
         title = tool_title(name, args)
         kind = tool_kind(name)
         locations = self._locator.locations(name, args)
         fallback_id = f"approval:{request_id}"
         if is_child:
-            # 翻译器丢弃了子代理事件，不认得它们的工具卡，只能用兜底卡。
+            # 子代理卡 id = "{exec}:{tcid}"：与事件翻译用的复合键一致，按 id 找卡；
+            # 没有 execution_id 或 action 缺 id 时才退兜底卡（GAP-34）。
             prefix = f"{agent_id}: " if agent_id else ""
+            if execution_id and tool_call_id:
+                card_key = f"{execution_id}:{tool_call_id}"
+                known = self._tools.get(card_key)
+                state = known or self._state_for_id(card_key, name)
+                if state.final or state.permission_claimed:
+                    return self._aux_card(
+                        fallback_id, f"{prefix}{title}", kind, locations, raw, "none"
+                    )
+                return self._claim(
+                    state,
+                    title=f"{prefix}{title}" if prefix else title,
+                    kind=kind,
+                    locations=locations,
+                    raw=raw,
+                    matched="id",
+                )
             return self._aux_card(
                 fallback_id, f"{prefix}{title}", kind, locations, raw, "none"
             )
         if tool_call_id:
             known = self._tools.get(tool_call_id)
-            if known is None:
-                # provider 重复使用 id 时，事件里的真实卡改用了合成 id，按 id 找不到；
-                # 先按「同名 + 参数相同」认领已有卡，免得再造一张永远转圈的幻影卡。
-                by_args = self._match_by_args(name, args)
-                if by_args is not None:
-                    return self._claim(
-                        by_args,
-                        title=title,
-                        kind=kind,
-                        locations=locations,
-                        raw=raw,
-                        matched="args",
-                    )
+            # 按 id 找不到就同 id 先建卡——随后到的 tool.started（同 id）复用它，
+            # 整个更新序列里该 id 只出现一次卡片创建。
             state = known or self._state_for_id(tool_call_id, name)
             if state.final or state.permission_claimed:
                 return self._aux_card(fallback_id, title, kind, locations, raw, "none")
             return self._claim(
                 state, title=title, kind=kind, locations=locations, raw=raw, matched="id"
-            )
-        matched = self._match_by_args(name, args)
-        if matched is not None:
-            return self._claim(
-                matched, title=title, kind=kind, locations=locations, raw=raw, matched="args"
             )
         return self._aux_card(fallback_id, title, kind, locations, raw, "none")
 
@@ -323,7 +520,7 @@ class RunTranslator:
         kind: ToolKind,
         locations: list[ToolCallLocation],
         raw: object,
-        matched: Literal["id", "args"],
+        matched: Literal["id"],
     ) -> ApprovalTarget:
         """占用一张已有工具卡：补标题/位置/参数，卡还没建就现在建。"""
         state.kind = kind
@@ -414,21 +611,94 @@ class RunTranslator:
                 return state
         return None
 
-    def _match_by_args(
-        self, name: str, args: Mapping[str, object] | None
-    ) -> _ToolState | None:
-        """没有 id 时按「同名 + 参数相同 + 未被占用 + 未结束」找最早的一张卡。"""
-        if not name or args is None:
-            return None
-        for state in self._tools.values():
-            if state.aux or state.final or state.permission_claimed or not state.announced:
-                continue
-            if state.name != name:
-                continue
-            parsed = state.raw_input if state.input_announced else self._parse_arguments(state)
-            if isinstance(parsed, Mapping) and dict(parsed) == dict(args):
-                return state
-        return None
+    def _feed_child(self, event: Mapping[str, object]) -> TranslateResult:
+        """子代理事件 → 子代理工具卡 / 父卡正文累加（§7.3 GAP-16）。
+
+        工具事件与父卡共用同一套处理：把 `tool_call_id` 换成
+        `"{execution_id}:{v3_id}"` 后走同一 handler，acp 卡 id 自动变成
+        `run:exec:v3_id` 三层形（与 `acp_child_tool_call_id` 一致）。
+        协商了 subagent 扩展时给卡带 `parent` 元数据；正文 delta 写回父卡输出。
+        """
+        execution_id = event.get("execution_id")
+        if not isinstance(execution_id, str) or not execution_id:
+            self.dropped_child_events += 1
+            return TranslateResult()
+        event_type = event.get("type")
+        payload = event.get("payload")
+        raw_agent = event.get("agent_id")
+        agent_id = raw_agent if isinstance(raw_agent, str) and raw_agent else None
+
+        if event_type == "content.delta":
+            return self._child_content_delta(execution_id, payload)
+        if event_type == "reasoning.delta":
+            self.dropped_child_events += 1
+            return TranslateResult()
+        if event_type in {"tool.started", "tool.delta", "tool.completed"}:
+            return self._child_tool_event(event_type, execution_id, agent_id, payload)
+        self.dropped_child_events += 1
+        return TranslateResult()
+
+    def _child_content_delta(
+        self, execution_id: str, payload: object
+    ) -> TranslateResult:
+        """子代理正文按整段替换语义累加进父 task 卡；无绑定则丢弃。"""
+        parent = self._child_parents.get(execution_id)
+        text = payload.get("text") if isinstance(payload, Mapping) else None
+        if parent is None or not isinstance(text, str) or not text:
+            self.dropped_child_events += 1
+            return TranslateResult()
+        acc = self._child_outputs.get(execution_id, "") + text
+        if len(acc) > MAX_OUTPUT_CHARS:
+            acc = acc[:MAX_OUTPUT_CHARS] + "…"
+        self._child_outputs[execution_id] = acc
+        return TranslateResult(
+            [update_tool_call(parent[0], content=[tool_content(text_block(acc))])]
+        )
+
+    def _child_tool_event(
+        self,
+        event_type: str,
+        execution_id: str,
+        agent_id: str | None,
+        payload: object,
+    ) -> TranslateResult:
+        """子代理工具事件走与根卡相同的 handler，键换成 `exec:tcid` 复合键。"""
+        if not isinstance(payload, Mapping):
+            self.dropped_child_events += 1
+            return TranslateResult()
+        tcid = payload.get("tool_call_id")
+        if not isinstance(tcid, str) or not tcid:
+            self.dropped_child_events += 1
+            return TranslateResult()
+        data = dict(payload)
+        data["tool_call_id"] = f"{execution_id}:{tcid}"
+        handler = {
+            "tool.started": self._tool_started,
+            "tool.delta": self._tool_delta,
+            "tool.completed": self._tool_completed,
+        }[event_type]
+        updates = handler(data)
+        if not updates:
+            return TranslateResult()
+        # 标题加代理名前缀；协商扩展时带 parent 元数据（父卡 id + agent + exec）。
+        patched: list[Update] = []
+        meta = None
+        if self._subagent:
+            parent = self._child_parents.get(execution_id)
+            if parent is not None:
+                meta = parent_meta(
+                    tool_call_id=parent[0],
+                    agent_id=agent_id,
+                    execution_id=execution_id,
+                )
+        for update in updates:
+            title = getattr(update, "title", None)
+            if agent_id and isinstance(title, str) and title and not title.startswith(f"{agent_id}: "):
+                update = update.model_copy(update={"title": f"{agent_id}: {title}"})
+            if meta is not None:
+                update = update.model_copy(update={"field_meta": meta})
+            patched.append(update)
+        return TranslateResult(patched)
 
     def _content_delta(self, data: Mapping[str, object]) -> list[Update]:
         """正文增量 → `agent_message_chunk`，messageId 用当前段号。"""
@@ -631,6 +901,11 @@ def bounded_raw_input(value: object) -> object:
     return value if size <= _MAX_RAW_INPUT_BYTES else UNSET
 
 
+def _nonneg_int(value: object) -> bool:
+    """bool 是 int 的子类，不能把它当成 token 数。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _is_absolute(path: str) -> bool:
     """判断是否为绝对路径；空串与异常一律当相对路径（不发 locations）。"""
     if not path:
@@ -662,7 +937,28 @@ def _run_summary(data: Mapping[str, object]) -> dict[str, object] | None:
     return summary or None
 
 
+MAX_OUTBOUND_FRAME_BYTES: Final = 6 * 1024 * 1024
+"""单帧出站上限；桥（S3）会拒绝超过 8 MiB 的帧，留一段余量。`session/update` 与权限请求共用。"""
+
+
+def frame_chars(message: object) -> int:
+    """估算一条出站消息序列化后的字符数；模型对象以外或序列化失败时返回 0。
+
+    估算用 `json.dumps(ensure_ascii=True)` 的字符数：SDK 用 `ensure_ascii` 序列化，
+    emoji 等字符会膨胀成 3 倍、控制字符 6 倍，所以按字符数保守估计。
+    """
+    dump = getattr(message, "model_dump", None)
+    if dump is None:
+        return 0
+    try:
+        payload = dump(mode="json", by_alias=True, exclude_defaults=True)
+        return len(json.dumps(payload, ensure_ascii=True))
+    except (TypeError, ValueError):
+        return 0
+
+
 __all__ = [
+    "MAX_OUTBOUND_FRAME_BYTES",
     "MAX_OUTPUT_CHARS",
     "ApprovalTarget",
     "RunOutcome",
@@ -671,5 +967,7 @@ __all__ = [
     "UNSET",
     "Update",
     "acp_tool_call_id",
+    "acp_child_tool_call_id",
     "bounded_raw_input",
+    "frame_chars",
 ]

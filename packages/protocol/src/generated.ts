@@ -1,14 +1,14 @@
 /** 此文件由 packages/protocol/schema/v3.json 生成，请勿手工修改。 */
 
 export const PROTOCOL_MAJOR = 3 as const
-export const PROTOCOL_MINOR = 11 as const
-export const PROTOCOL_SCHEMA_SHA256 = "27f0954229fba3e3b13ab938b637cb802c4aff790b61f0230ab13a3c0dbc7f54" as const
+export const PROTOCOL_MINOR = 10 as const
+export const PROTOCOL_SCHEMA_SHA256 = "0663487d6eeecab47128935bb30bd509cba87f962c0f8c3c33be5a339f024b7d" as const
 export const MAX_FRAME_BYTES = 8388608 as const
 export const MAX_TOOL_PAYLOAD_BYTES = 1048576 as const
 export const CLIENT_METHODS = ["initialize","commands.bind","run.start","run.cancel","run.set_approval_mode","context.compact","config.show","config.path","config.details","config.preview","config.commit","settings.list","settings.set","settings.remove","threads.list","threads.open","threads.watch","threads.unwatch","threads.side_question","threads.list_turns","threads.undo","threads.redo","threads.set_title","models.list","skills.list","skills.inspect","skills.set_enabled","skills.install","skills.update","skills.remove","skills.market.list","plugins.list","plugins.inspect","plugins.validate","plugins.install","plugins.update","plugins.set_enabled","plugins.remove","agents.list","agents.inspect","teams.list","teams.inspect","teams.generate","teams.run","teams.cancel","mcp.status","mcp.add","mcp.remove","code_index.status","code_index.apply","host.attachment.create","host.attachment.revoke","host.control.acquire","host.control.release","host.control.status","compose.inspect","compose.abandon","goal.inspect","goal.request","goal.mutate"] as const
 export const EVENT_TYPES = ["run.started","run.progress","skill.loaded","content.delta","reasoning.delta","tool.started","tool.delta","tool.completed","context.updated","compose.progress","compose.summary","interaction.resolved","run.completed","run.cancelled","run.failed","goal.evaluation","goal.changed"] as const
 export const INTERACTION_METHODS = ["interaction.approval","interaction.question","interaction.directory_trust","interaction.plan","interaction.plugin_consent","interaction.goal"] as const
-export const NOTIFICATION_METHODS = ["thread.summary","code_index.changed"] as const
+export const NOTIFICATION_METHODS = ["thread.summary","thread.approval_mode","code_index.changed"] as const
 export const SERVER_CAPABILITIES = ["run.cancel","run.approval_mode","run.multithread","host.control","config.read","config.write","threads.read","context.manage","skills.read","skills.manage","mcp.read","mcp.manage","code_index.read","code_index.manage","plugins.read","plugins.manage","agents.read","teams.read","teams.manage","models.read","models.select","host.attach","settings.read","settings.manage","goal.read","goal.manage"] as const
 export const OPERATION_CAPABILITIES = {"initialize":null,"commands.bind":null,"run.start":null,"run.cancel":"run.cancel","run.set_approval_mode":"run.approval_mode","context.compact":"context.manage","config.show":"config.read","config.path":"config.read","config.details":"config.write","config.preview":"config.write","config.commit":"config.write","settings.list":"settings.read","settings.set":"settings.manage","settings.remove":"settings.manage","threads.list":"threads.read","threads.open":"threads.read","threads.watch":"threads.read","threads.unwatch":"threads.read","threads.side_question":"threads.read","threads.list_turns":"threads.read","threads.undo":"threads.read","threads.redo":"threads.read","threads.set_title":"threads.read","models.list":"models.read","skills.list":"skills.read","skills.inspect":"skills.read","skills.set_enabled":"skills.manage","skills.install":"skills.manage","skills.update":"skills.manage","skills.remove":"skills.manage","skills.market.list":"skills.read","plugins.list":"plugins.read","plugins.inspect":"plugins.read","plugins.validate":"plugins.read","plugins.install":"plugins.manage","plugins.update":"plugins.manage","plugins.set_enabled":"plugins.manage","plugins.remove":"plugins.manage","agents.list":"agents.read","agents.inspect":"agents.read","teams.list":"teams.read","teams.inspect":"teams.read","teams.generate":"teams.manage","teams.run":"teams.manage","teams.cancel":"teams.manage","mcp.status":"mcp.read","mcp.add":"mcp.manage","mcp.remove":"mcp.manage","code_index.status":"code_index.read","code_index.apply":"code_index.manage","host.attachment.create":"host.attach","host.attachment.revoke":"host.attach","host.control.acquire":"host.control","host.control.release":"host.control","host.control.status":"host.control","compose.inspect":"threads.read","compose.abandon":"threads.read","goal.inspect":"goal.read","goal.request":"goal.manage","goal.mutate":"goal.manage"} as const
 export const OPERATION_MIN_MINOR = {"commands.bind":6,"run.set_approval_mode":8,"settings.list":8,"settings.set":8,"settings.remove":8,"threads.set_title":9,"skills.list":8,"plugins.list":8,"plugins.inspect":8,"plugins.validate":8,"plugins.install":8,"plugins.update":8,"plugins.set_enabled":8,"plugins.remove":8,"agents.list":8,"mcp.status":8,"code_index.status":10,"code_index.apply":10,"goal.inspect":8,"goal.request":8,"goal.mutate":8} as const
@@ -88,6 +88,7 @@ export const Method = {
   INTERACTION_PLUGIN_CONSENT: "interaction.plugin_consent",
   INTERACTION_GOAL: "interaction.goal",
   THREAD_SUMMARY: "thread.summary",
+  THREAD_APPROVAL_MODE: "thread.approval_mode",
   CODE_INDEX_CHANGED: "code_index.changed",
 } as const
 
@@ -152,12 +153,13 @@ export type SettingsRemoveParams = { "name": string; "setting": string; "scope"?
 export type SettingsMutationResult = { "operation": "set" | "remove"; "scope": SettingsScope; "summary": SettingsSummary; "diagnostics": Array<string> }
 export type ConfigPathResult = { "workspace": string; "paths": Array<string>; "explicit_path": string | null }
 export type ThreadSummary = { "thread_id": string; "created_at_ms": number; "updated_at_ms": number; "first_message": string; "latest_message": string; "message_count": number; "title": string | null }
+export type ThreadApprovalMode = { "thread_id": string; "mode": ApprovalMode }
 export type ComposeActivityRecord = { "run_id": string; "event_sequence": number; "activity_id": string; "stage": "grill" | "task" | "spec" | "plan" | "implement" | "verify"; "task_id"?: string; "task_title"?: string; "attempt": number; "execution_id"?: string; "agent_id"?: string; "kind": "summary" | "tool_terminal" | "truncation"; "label": string; "status": string; "bounded_text"?: string; "created_at_ms": number }
-export type ThreadMessage = { "kind": "user" | "assistant" | "tool"; "content": string; "tool_name"?: string; "created_at_ms"?: number; "run_id"?: string | null; "record_id"?: string | null }
+export type ThreadMessage = { "kind": "user" | "assistant" | "tool"; "content": string; "tool_name"?: string; "created_at_ms"?: number; "tool_call_id"?: string; "arguments"?: {  }; "status"?: "completed" | "failed" }
 export type ThreadsListParams = { "limit"?: number }
 export type ThreadsListResult = { "threads": Array<ThreadSummary> }
 export type ThreadsOpenParams = { "thread_id": string }
-export type ThreadsOpenResult = { "thread": ThreadSummary; "messages": Array<ThreadMessage>; "plan": ThreadPlan; "thread_mode"?: (InteractionMode) | (null); "compose_progress"?: (ComposeProgress) | (null); "goal": (GoalProjection) | (null); "goal_pending": (GoalPendingProjection) | (null); "goal_activities": Array<GoalActivityProjection>; "run_summaries": Array<RunSummary> }
+export type ThreadsOpenResult = { "thread": ThreadSummary; "messages": Array<ThreadMessage>; "plan": ThreadPlan; "thread_mode"?: (InteractionMode) | (null); "compose_progress"?: (ComposeProgress) | (null); "goal": (GoalProjection) | (null); "goal_pending": (GoalPendingProjection) | (null); "goal_activities": Array<GoalActivityProjection> }
 export type ThreadPlan = { "has_plan": boolean; "plan_markdown": string; "plan_virtual_path": "/.harness/plan.md"; "plan_display_path": string }
 export type ThreadsUnwatchResult = { "removed": boolean }
 export type ThreadsSideQuestionParams = { "thread_id": string; "question": string; "model_profile_id"?: string }
@@ -247,13 +249,13 @@ export type ComposeInspectResult = { "progress": (ComposeProgress) | (null) }
 export type ComposeAbandonParams = { "thread_id": string; "reason"?: string }
 export type ComposeAbandonResult = { "progress": ComposeProgress }
 export type InteractionResolvedPayload = { "request_id": string; "type": "approval" | "question" | "directory_trust" | "plan" | "plugin_consent" | "goal" }
-export type Usage = { "input_tokens": number | null; "output_tokens": number | null; "input_complete": boolean; "output_complete": boolean; "cached_tokens"?: number }
+export type Usage = { "input_tokens": number; "output_tokens": number; "cached_tokens"?: number }
 export type RunCompletedPayload = { "usage": Usage; "duration_ms": number; "finish_reason": string; "context": JsonObject }
-export type RunCancelledPayload = { "reason": string; "usage": Usage; "duration_ms": number }
+export type RunCancelledPayload = { "reason": string }
 export type RunFailure = { "code": string; "message": string; "retryable": boolean }
-export type RunFailedPayload = { "error": RunFailure; "usage": Usage; "duration_ms": number }
+export type RunFailedPayload = { "error": RunFailure }
 export type InteractionBase = { "thread_id": string; "run_id": string; "timeout_ms": number; "payload": JsonObject }
-export type FileDiffPresentation = { "kind": "file_diff"; "operation": "write" | "edit" | "delete"; "path": string; "added_lines": number; "removed_lines": number; "truncated": boolean; "unified_diff": string }
+export type FileDiffPresentation = { "kind": "file_diff"; "operation": "write" | "edit" | "delete"; "path": string; "added_lines": number; "removed_lines": number; "truncated": boolean; "unified_diff": string; "old_text"?: string | null; "new_text"?: string | null }
 export type DirectoryTrustDecision = "allow_session" | "deny"
 export type DirectoryTrustRequest = { "thread_id": string; "run_id": string; "timeout_ms": number; "execution_id"?: string; "parent_execution_id"?: string | null; "agent_id"?: string; "compose_scope"?: ComposeActivityScope; "payload": { "interrupt_id": string; "directory": string; "target_path": string; "tool_name": string; "access": "read" | "write"; "shadows_workspace": boolean; "decisions": Array<DirectoryTrustDecision> } }
 export type DirectoryTrustResponse = { "decision": DirectoryTrustDecision }
@@ -291,7 +293,6 @@ export type GoalEvaluationEventPayload = { "goal_id": string; "goal_revision": n
 export type GoalChangedPayload = { "reason": "blocked" | "completed" | "proposal_applied" | "resumed_after_blocker"; "goal": (GoalProjection) | (null) }
 export type GoalInteractionRequest = { "thread_id": string; "run_id": string; "timeout_ms": number; "execution_id"?: string; "parent_execution_id"?: string | null; "agent_id"?: string; "compose_scope"?: ComposeActivityScope; "payload": { "interrupt_id": string; "request_id": string; "proposal_kind": "create" | "replace" | "amend"; "base_goal_id": string | null; "base_revision": number | null; "objective": string; "assumptions": Array<string>; "criteria": Array<string>; "decisions": Array<"accepted" | "edited" | "rejected" | "cancelled"> } }
 export type GoalInteractionResponse = ({ "decision": "accepted"; "feedback"?: string }) | ({ "decision": "edited"; "criteria": Array<string>; "feedback"?: string }) | ({ "decision": "rejected"; "feedback"?: string }) | ({ "decision": "cancelled"; "feedback"?: string })
-export type RunSummary = { "run_id": string; "outcome": "completed" | "failed" | "cancelled"; "usage": Usage; "duration_ms"?: number }
 
 export type CommandsBindParams = CommandBindingsParams
 export type CommandsBindResult = CommandBindingsResult
@@ -440,6 +441,7 @@ export interface InteractionMap {
 export type InteractionMethod = keyof InteractionMap
 export interface NotificationMap {
   "thread.summary": { params: ThreadSummary }
+  "thread.approval_mode": { params: ThreadApprovalMode }
   "code_index.changed": { params: CodeIndexSnapshot }
 }
 export type NotificationName = keyof NotificationMap

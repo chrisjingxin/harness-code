@@ -32,6 +32,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+QUESTION_UNSUPPORTED = "当前客户端不支持提问，请自行决定或在回复中说明"
+"""连接还活着、但没声明提问能力时，原样交回给模型的那一句。"""
+
 
 def interaction_method(interaction_type: str) -> str:
     """把类型化 Interaction 映射为协议反向请求方法名。"""
@@ -83,6 +86,8 @@ class ProtocolConnection:
     command_bindings: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    # 只有 ACP 连接打开。Skill 目录变了才给它发 `commands.catalog`，v3 客户端不收这帧。
+    watch_command_catalog: bool = False
     closed: bool = False
 
 
@@ -101,11 +106,26 @@ class ProtocolInteractionAdapter:
     ) -> InteractionResult:
         """向 owner 请求审批/问答，超时、断开和缺少 capability 均安全降级。"""
         connection = self._host._connections.get(owner.connection_id)
+        handles = (
+            self._host._connection_handles(connection) if connection is not None else set()
+        )
+        # 连接还在、只是不会画提问卡：不能交回空答案，否则模型会当成用户取消。
         if (
-            connection is None
-            or connection.closed
-            or interaction.type not in self._host._connection_handles(connection)
+            connection is not None
+            and not connection.closed
+            and interaction.type == "question"
+            and "question" not in handles
         ):
+            logger.info("Interaction %s disabled by capability negotiation", interaction.request_id)
+            return InteractionResult(
+                {
+                    "status": "error",
+                    "error": QUESTION_UNSUPPORTED,
+                    "answers": {},
+                },
+                expired=True,
+            )
+        if connection is None or connection.closed or interaction.type not in handles:
             logger.info("Interaction %s disabled by capability negotiation", interaction.request_id)
             return InteractionResult(self._default_value(interaction), expired=True)
 

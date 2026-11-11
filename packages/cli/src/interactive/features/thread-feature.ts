@@ -52,7 +52,7 @@ function threadOpenResult(value: unknown): {
       throw new Error("Agent 返回了无效的 thread message")
     }
     if (typeof message.content !== "string") throw new Error("Agent 返回了无效的 thread message")
-    messages.push({
+    const entry: RestoredThreadMessage = {
       kind: message.kind,
       runId: typeof message.run_id === "string" ? message.run_id : undefined,
       recordId: typeof message.record_id === "string" ? message.record_id : undefined,
@@ -61,7 +61,14 @@ function threadOpenResult(value: unknown): {
       createdAtMs: typeof message.created_at_ms === "number" && Number.isSafeInteger(message.created_at_ms) && message.created_at_ms > 0
         ? message.created_at_ms
         : undefined,
-    })
+    }
+    // HC-200 S2：tool 记录的回放三键按类型 fail-soft 收取；旧数据/非法值都不带。
+    if (typeof message.tool_call_id === "string" && message.tool_call_id) entry.toolCallId = message.tool_call_id
+    if (typeof message.arguments === "object" && message.arguments !== null && !Array.isArray(message.arguments)) {
+      entry.toolArguments = message.arguments as Record<string, unknown>
+    }
+    if (message.status === "completed" || message.status === "failed") entry.toolStatus = message.status
+    messages.push(entry)
   }
   const composeActivities: RestoredComposeActivity[] = []
   const rawActivities = Array.isArray(record.compose_activities) ? record.compose_activities : []

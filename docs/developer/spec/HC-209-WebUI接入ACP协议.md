@@ -1,6 +1,6 @@
 # HC-209：WebUI接入ACP协议规格
 
-来源：[Task](../task/HC-209-WebUI接入ACP协议.md)。Task 的范围、入口（`harness web`）、传输方案（stdio 为主、WebSocket 只做浏览器调试桥）和前端复用方式（复用组件、只写适配层）已由用户确认。本规格把它们落实到模块、接口、映射表和验证方式。
+来源：[Task](../task/archive/HC-209-WebUI接入ACP协议.md)。Task 的范围、入口（`harness web`）、传输方案（stdio 为主、WebSocket 只做浏览器调试桥）和前端复用方式（复用组件、只写适配层）已由用户确认。本规格把它们落实到模块、接口、映射表和验证方式。
 
 状态：用户已确认（2026-11-05），包括扩展前缀 `_meta.harnessCode` / `_harnessCode/`。后续按 [Plan](../plan/HC-209-WebUI接入ACP协议.md) 与 [Todo](../todo/HC-209-WebUI接入ACP协议.md) 实施。
 

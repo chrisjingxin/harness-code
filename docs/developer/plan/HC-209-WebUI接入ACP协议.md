@@ -1,6 +1,6 @@
 # HC-209：WebUI接入ACP协议实施计划
 
-来源：[Task](../task/HC-209-WebUI接入ACP协议.md) / [Spec](../spec/HC-209-WebUI接入ACP协议.md)。Task 与 Spec 已由用户确认。实现严格 TDD：每一项先写失败的测试，再写最小实现，再整理。每次只推进到下一个可演示停点，到达后停下等用户确认。
+来源：[Task](../task/archive/HC-209-WebUI接入ACP协议.md) / [Spec](../spec/HC-209-WebUI接入ACP协议.md)。Task 与 Spec 已由用户确认。实现严格 TDD：每一项先写失败的测试，再写最小实现，再整理。每次只推进到下一个可演示停点，到达后停下等用户确认。
 
 ## 计划总览
 

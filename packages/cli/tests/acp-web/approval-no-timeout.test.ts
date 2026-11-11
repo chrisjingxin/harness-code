@@ -35,7 +35,7 @@ describe("审批无超时（controller + AcpAgentGateway + manualScheduler）", 
     })
     const { client, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, settleCommandsMs: 20 })
+    const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 20 })
 
     const { scheduler, runAll, runExpired } = manualScheduler()
     const controller = createInteractiveController({

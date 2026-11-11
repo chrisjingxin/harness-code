@@ -353,7 +353,14 @@ async def serve_acp_streams(
     guard = FrameGuard(streams.reader, sdk_reader, streams.writer)
     guard_task = asyncio.create_task(guard.run(), name="harness-acp-frames")
     sdk_task = asyncio.create_task(
-        run_agent(cast(Any, agent), streams.writer, sdk_reader),
+        run_agent(
+            cast(Any, agent),
+            streams.writer,
+            sdk_reader,
+            # session/resume 与 session/close 在 SDK 里属于 unstable 方法集，
+            # 不开这个开关路由层直接回 method_not_found。
+            use_unstable_protocol=True,
+        ),
         name="harness-acp-sdk",
     )
     stop = asyncio.Event()

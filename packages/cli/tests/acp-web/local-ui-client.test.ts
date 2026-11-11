@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test"
 
 import { AcpAgentGateway } from "../../src/acp-web/client/acp-agent-gateway"
 import { createLocalUiClient } from "../../src/acp-web/client/local-ui-client"
-import { createAcpRuntime } from "../../src/acp-web/client/runtime"
+import { createAcpCommandRegistry, createAcpRuntime } from "../../src/acp-web/client/runtime"
 import { createInteractiveController } from "../../src/interactive/controller"
 import { FakeAgent, pairedStreams } from "./support/fake-agent"
 
@@ -16,7 +16,7 @@ async function makeSession() {
   const agent = new FakeAgent()
   const { client, agent: agentStream } = pairedStreams()
   agent.attach(agentStream)
-  const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", settleCommandsMs: 10 })
+  const { gateway, boot } = await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", commandsTimeoutMs: 10 })
   const controller = createInteractiveController({ gateway, baseRuntime: createAcpRuntime(boot) })
   return { agent, controller, client: createLocalUiClient({ controller }) }
 }
@@ -60,7 +60,7 @@ describe("LocalUiClient", () => {
     })
     const { client: ws, agent: agentStream } = pairedStreams()
     agent.attach(agentStream)
-    const { gateway, boot } = await AcpAgentGateway.connect({ stream: ws, cwd: "/tmp/ws", settleCommandsMs: 10 })
+    const { gateway, boot } = await AcpAgentGateway.connect({ stream: ws, cwd: "/tmp/ws", commandsTimeoutMs: 10 })
     const controller = createInteractiveController({ gateway, baseRuntime: createAcpRuntime(boot) })
     const client = createLocalUiClient({ controller })
     await controller.dispatch({ type: "input.submit", value: "跑" })
@@ -69,6 +69,23 @@ describe("LocalUiClient", () => {
     expect(view.interaction).not.toBeNull()
     expect((view.interaction as { deadlineAtMs: number }).deadlineAtMs).toBe(Number.POSITIVE_INFINITY)
     client.close()
+  })
+
+  test("ACP 命令表换掉之后，新建对话仍清空当前会话", async () => {
+    const { controller, client } = await makeSession()
+    await controller.dispatch({ type: "input.submit", value: "你好" })
+    await new Promise(resolve => setTimeout(resolve, 40))
+    expect(controller.getSnapshot().currentThreadId).not.toBeNull()
+    controller.replaceCommandRegistry?.(createAcpCommandRegistry([]))
+    const outcome = await controller.dispatch({ type: "command.execute", commandId: "thread.new" })
+    expect(outcome).toMatchObject({ status: "accepted" })
+    expect(controller.getSnapshot().currentThreadId).toBeNull()
+    const notice = controller.getSnapshot().timeline.flatMap(item => (
+      item.type === "message" ? [item.message.content] : []
+    )).join("\n")
+    expect(notice).not.toContain("未知命令")
+    client.close()
+    await controller.close()
   })
 
   test("handoff 固定 web-active；workspaceIntent 恒拒绝 GAP-11；close 幂等", async () => {

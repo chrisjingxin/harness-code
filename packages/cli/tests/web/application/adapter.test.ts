@@ -1307,3 +1307,10 @@ test("接管关闭后不继续读取排队文件", async () => {
   await Promise.resolve()
   expect(client.workspaceIntents).toEqual([{ type: "workspace.preview-file", path: "a.ts" }])
 })
+
+test("threads-load-more 转成 InteractiveIntent 提交给控制器（漏测点 1）", async () => {
+  const client = createFakeClient()
+  const { adapter } = makeAdapter(client)
+  await adapter.dispatch({ type: "threads-load-more" })
+  expect(client.intents).toEqual([{ type: "threads-load-more" }])
+})

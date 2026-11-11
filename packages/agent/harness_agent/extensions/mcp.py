@@ -829,11 +829,11 @@ class McpConnectionManager:
         return self.get_server_statuses()
 
     async def connect_all(self) -> None:
-        """建立所有已配置 MCP 服务器的连接并加载工具。
+        """建立当前快照的连接。失败的服务器跳过，不阻止 Agent 启动。"""
+        await self._connect_runtime(self._current_resource.value)
 
-        连接失败的服务器记录警告并跳过，不阻止 Agent 启动。
-        """
-        runtime = self._current_resource.value
+    async def _connect_runtime(self, runtime: _McpRuntime) -> None:
+        """给指定 runtime 建连。已经连过的直接返回；失败只记状态，不抛出。"""
         if runtime.connected:
             return
         configs = runtime.snapshot.servers
@@ -843,7 +843,7 @@ class McpConnectionManager:
 
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
-        connections = self._build_connections()
+        connections = self._build_connections(runtime)
         if not connections:
             logger.warning("No valid MCP connections after environment expansion")
             runtime.connected = True
@@ -1055,13 +1055,15 @@ class McpConnectionManager:
             },
         )
 
-    def _build_connections(self) -> dict[str, Any]:
+    def _build_connections(self, runtime: _McpRuntime | None = None) -> dict[str, Any]:
         """将 McpServerConfig 列表转换为 MultiServerMCPClient 的 connections 字典。
 
         用户 MCP 在此时展开环境变量；portable Plugin MCP 已在 adapter 中完成
         保留 placeholder 替换，运行时保持其余字段字面值。
+        不传 runtime 时仍读当前快照，已有调用方不用改。
         """
-        runtime = self._current_resource.value
+        if runtime is None:
+            runtime = self._current_resource.value
         connections: dict[str, Any] = {}
         for config in runtime.snapshot.servers:
             conn = self._build_single_connection(config)
@@ -1077,6 +1079,53 @@ class McpConnectionManager:
                     "error": "environment variable(s) not set",
                 }
         return connections
+
+    async def ensure_side_runtime(self, snapshot: McpConfigSnapshot) -> None:
+        """连接一份不替换当前快照的侧路 runtime。
+
+        会话 MCP 不能走 `apply_snapshot`：那个方法会换掉全局当前快照，
+        其它会话的工具会跟着变。连接失败记在这份 runtime 的状态里，不抛出。
+        """
+        resources = self._resources.setdefault(snapshot.digest, [])
+        resource = next(
+            (
+                candidate
+                for candidate in reversed(resources)
+                if candidate.state is ResourceState.READY
+            ),
+            None,
+        )
+        if resource is None:
+            resource = self._create_resource(snapshot)
+            resources.append(resource)
+        await self._connect_runtime(resource.value)
+
+    def tools_for_digest(self, digest: str) -> tuple[Any, ...]:
+        """返回这份快照已连上的工具；没有侧路 runtime 时返回空元组。"""
+        for resource in reversed(self._resources.get(digest, ())):
+            if resource.state is ResourceState.READY:
+                return tuple(resource.value.tools)
+        return ()
+
+    async def release_side_runtime(self, digest: str) -> None:
+        """关闭这个 digest 上不是当前快照的 runtime。当前快照不动。"""
+        current = self._current_resource
+        kept: list[SharedResourceHandle[_McpRuntime]] = []
+        for resource in self._resources.get(digest, ()):
+            if resource is current:
+                kept.append(resource)
+                continue
+            try:
+                await resource.close()
+            except Exception:
+                try:
+                    await resource.close(force=True)
+                except Exception:
+                    logger.warning("MCP side runtime close failed", exc_info=True)
+        if kept:
+            self._resources[digest] = kept
+        else:
+            self._resources.pop(digest, None)
 
     def _build_single_connection(self, config: McpServerConfig) -> dict[str, Any] | None:
         """构建单个服务器的连接参数；环境变量缺失时返回 None。"""

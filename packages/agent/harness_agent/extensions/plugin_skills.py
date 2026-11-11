@@ -226,6 +226,25 @@ class LoadedSkill:
         }
 
 
+def _skill_command_name(skill_id: str, taken: set[str]) -> str:
+    """给可调用 Skill 起斜杠名。
+
+    完整 id 带 `/`，斜杠解析吃不进去，所以先用最后一段。撞名再换成把 `/` 写成 `:` 的全名，
+    还撞就加数字后缀。被占掉的名字不出现在菜单里。
+    """
+    last = skill_id.rsplit("/", 1)[-1]
+    candidate = f"skill:{last}"
+    if candidate.casefold() not in taken:
+        return candidate
+    fallback = "skill:" + skill_id.replace("/", ":")
+    if fallback.casefold() not in taken:
+        return fallback
+    suffix = 2
+    while f"{fallback}:{suffix}".casefold() in taken:
+        suffix += 1
+    return f"{fallback}:{suffix}"
+
+
 class SkillRegistry:
     """建立一个进程级不可变 catalog，并提供安全的按需读取。"""
 
@@ -444,6 +463,25 @@ class SkillRegistry:
                 {
                     "id": record.skill_id,
                     "name": name,
+                    "description": record.description,
+                    "argument_hint": record.argument_hint,
+                    "requested_skill_id": record.skill_id,
+                    "plugin_id": plugin_id,
+                }
+            )
+        taken = {str(item["name"]).casefold() for item in commands}
+        for record in sorted(self.records, key=lambda item: item.skill_id):
+            if record.kind != "skill" or not record.enabled or not record.user_invocable:
+                continue
+            skill_name = _skill_command_name(record.skill_id, taken)
+            taken.add(skill_name.casefold())
+            # Host 协议要求每条命令都有 plugin_id。Skill 没有插件时用来源名占位
+            #（builtin / project / user）；真正的插件 Skill 去掉 `plugin:` 前缀。
+            plugin_id = record.source.removeprefix("plugin:") or "skill"
+            commands.append(
+                {
+                    "id": record.skill_id,
+                    "name": skill_name,
                     "description": record.description,
                     "argument_hint": record.argument_hint,
                     "requested_skill_id": record.skill_id,

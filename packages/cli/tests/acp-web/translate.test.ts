@@ -154,6 +154,28 @@ describe("RunTranslator：终态映射", () => {
     expect(final).toMatchObject({ type: "run.completed", payload: { usage: { input_tokens: 3, output_tokens: 5 }, duration_ms: 42, finish_reason: "end_turn", context: { a: 1 } } })
   })
 
+  test("command.historyChanged 合并进 run.completed 的 context", () => {
+    const t = new RunTranslator(opts)
+    const final = t.finish({
+      stopReason: "end_turn",
+      _meta: { harnessCode: { command: { name: "undo", historyChanged: true }, run: { context: { a: 1 } } } },
+    })
+    expect(final).toMatchObject({ type: "run.completed", payload: { context: { a: 1, historyChanged: true } } })
+  })
+
+  test("PromptResponse.usage 优先于扩展里的 run.usage", () => {
+    const t = new RunTranslator(opts)
+    const final = t.finish({
+      stopReason: "end_turn",
+      usage: { inputTokens: 3, outputTokens: 4, cachedReadTokens: 1, totalTokens: 8 },
+      _meta: { harnessCode: { run: { usage: { input_tokens: 9, output_tokens: 9 }, duration_ms: 7 } } },
+    })
+    expect(final).toMatchObject({
+      type: "run.completed",
+      payload: { usage: { input_tokens: 3, output_tokens: 4, cached_tokens: 1 }, duration_ms: 7 },
+    })
+  })
+
   test("缺 _meta → 零值与 now - startedAt；cancelled / max_tokens / refusal", () => {
     const t = new RunTranslator(opts)
     expect(t.finish({ stopReason: "end_turn" })).toMatchObject({ payload: { usage: { input_tokens: 0, output_tokens: 0 }, duration_ms: 100, context: {} } })
@@ -166,6 +188,50 @@ describe("RunTranslator：终态映射", () => {
     const t = new RunTranslator(opts)
     const final = t.finish({ error: { code: -32603, message: "boom", data: { code: "MODEL_CONFIGURATION_REQUIRED", message: "未配置模型", retryable: false } } })
     expect(final).toMatchObject({ type: "run.failed", payload: { error: { code: "MODEL_CONFIGURATION_REQUIRED", message: "未配置模型", retryable: false } } })
+  })
+})
+
+describe("RunTranslator：计划与用量", () => {
+  test("plan 还原成 compose.progress，revision 递增", () => {
+    const t = new RunTranslator(opts)
+    const first = t.update({
+      sessionUpdate: "plan",
+      entries: [
+        { content: "需求", status: "completed", priority: "medium" },
+        { content: "规格（失败）", status: "completed", priority: "medium" },
+        { content: "计划", status: "in_progress", priority: "medium" },
+        { content: "实现", status: "pending", priority: "medium" },
+        { content: "检视", status: "pending", priority: "medium" },
+      ],
+    })
+    expect(first[0]).toMatchObject({
+      type: "compose.progress",
+      payload: {
+        revision: 1,
+        thread_id: "t1",
+        current_stage: "plan",
+        stages: [
+          { id: "requirement", state: "confirmed" },
+          { id: "spec", state: "failed" },
+          { id: "plan", state: "current" },
+          { id: "implement", state: "pending" },
+          { id: "review", state: "pending" },
+        ],
+      },
+    })
+    const second = t.update({
+      sessionUpdate: "plan",
+      entries: [{ content: "需求", status: "in_progress", priority: "medium" }],
+    })
+    expect(second[0]).toMatchObject({ payload: { revision: 2, current_stage: "grill" } })
+  })
+
+  test("usage_update 变成上下文数字", () => {
+    const t = new RunTranslator(opts)
+    expect(t.update({ sessionUpdate: "usage_update", used: 12, size: 100 })[0]).toMatchObject({
+      type: "context.updated",
+      payload: { action: "usage", estimated_tokens: 12, input_cap_tokens: 100 },
+    })
   })
 })
 

@@ -440,7 +440,8 @@ export class AgentClient {
   }
 
   /** 读取当前 project 的可恢复 thread 摘要；thread_id 只在 TUI 内部用于后续打开。 */
-  listThreads(limit = 80): Promise<ThreadsListResult> {
+  // IPC 线协议 THREADS_LIST 不携带 cursor：TUI/IPC 端不参与加载更多。
+  listThreads(limit = 80, _cursor?: string): Promise<ThreadsListResult> {
     return this.request(Method.THREADS_LIST, { limit })
   }
 

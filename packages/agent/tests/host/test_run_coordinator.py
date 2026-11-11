@@ -2629,3 +2629,187 @@ async def test_provider_retry_drops_failed_build_output_before_transcript_commit
     assert "THINK" not in repr(persistence.records)
     assert run.pending_transcript == []
     assert persistence.completed is True
+
+
+def _run_completion_for_test():
+    from harness_agent.host.run_coordinator import RunCompletion
+    return RunCompletion(status="completed", usage={}, duration_ms=0, finish_reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_request_interaction_waits_for_event_fanout_barrier() -> None:
+    """GAP-35：交互帧不得早于同 Run 已入队的事件发出（屏障语义）。
+
+    模拟真实乱序：事件在 run.events 里还没被扇出任务消费时，request_interaction
+    必须等扇出排到它前面的事件全部送完后才调 interaction_port。无屏障时端口
+    会立刻被调用——本测试在改动前应当红。
+    """
+
+    calls: list[str] = []
+
+    class _RecordingInteraction:
+        async def request(self, _owner, _run, _interaction) -> InteractionResult:
+            calls.append("interaction.request")
+            return InteractionResult({"decision": "approve"})
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_RecordingInteraction(),
+        diagnostic_log=_RecordingDiagnosticLog(),
+    )
+    run = RunState(
+        start=StartRun(mode="build", thread_id="thread", run_id="run-barrier", input=UserRunInput(message="hello")),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        started_at=coordinator._clock(),
+        diagnostic_log=coordinator._diagnostic_log.child({"thread_id": "thread"}),
+        task=asyncio.create_task(asyncio.sleep(60)),
+    )
+    spec = InteractionRequest(
+        request_id="req-1", type="approval", payload={}, interrupt_id="i-1",
+        execution_id="exec-1", parent_execution_id=None, agent_id="main",
+        compose_scope=None, serial_context=None,
+    )
+    coordinator._emit(run, "test.delta", {"kind": "text"})
+
+    # 无人消费 run.events 时，交互必须等待屏障（先验证没有立刻发出）。
+    request_task = asyncio.create_task(
+        coordinator._lifecycle_port.request_interaction(run, spec)
+    )
+    await asyncio.sleep(0.05)
+    assert calls == [], "事件未扇出时交互请求不应发出"
+
+    # 模拟扇出任务：按序消费队列，遇到屏障项解除屏障。
+    async def drain() -> list[object]:
+        out: list[object] = []
+        while True:
+            item = await asyncio.wait_for(run.events.get(), 1)
+            if item is None:
+                return out
+            out.append(item)
+            from harness_agent.host.run_coordinator import _FanoutBarrier
+            if isinstance(item, _FanoutBarrier) and not item.done.done():
+                item.done.set_result(None)
+                return out
+
+    drained = await drain()
+    result = await asyncio.wait_for(request_task, 1)
+    assert calls == ["interaction.request"]
+    assert result.value == {"decision": "approve"}
+    # 屏障前的正文事件必须先于屏障被消费（顺序可观察）。
+    assert drained[0].type == "test.delta"
+    run.task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_request_interaction_skips_barrier_after_run_completion() -> None:
+    """Run 终态后扇出已停，request_interaction 直接发请求不挂住。"""
+    calls: list[str] = []
+
+    class _RecordingInteraction:
+        async def request(self, _owner, _run, _interaction) -> InteractionResult:
+            calls.append("interaction.request")
+            return InteractionResult({"decision": "approve"})
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_RecordingInteraction(),
+        diagnostic_log=_RecordingDiagnosticLog(),
+    )
+    run = RunState(
+        start=StartRun(mode="build", thread_id="thread", run_id="run-done", input=UserRunInput(message="hello")),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        started_at=coordinator._clock(),
+        diagnostic_log=coordinator._diagnostic_log.child({"thread_id": "thread"}),
+        completion=_run_completion_for_test(),
+    )
+    spec = InteractionRequest(
+        request_id="req-2", type="approval", payload={}, interrupt_id="i-2",
+        execution_id="exec-1", parent_execution_id=None, agent_id="main",
+        compose_scope=None, serial_context=None,
+    )
+    result = await asyncio.wait_for(
+        coordinator._lifecycle_port.request_interaction(run, spec), 1
+    )
+    assert result.value == {"decision": "approve"}
+    assert calls == ["interaction.request"]
+
+
+@pytest.mark.asyncio
+async def test_barrier_leftover_resolved_when_event_stream_ends() -> None:
+    """_read_events 终止时 finally 排干队列：哨兵之后到达的屏障也被解除。"""
+    from harness_agent.host.run_coordinator import _FanoutBarrier
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_NoopInteraction(),
+        diagnostic_log=_RecordingDiagnosticLog(),
+    )
+    run = RunState(
+        start=StartRun(mode="build", thread_id="thread", run_id="run-drain", input=UserRunInput(message="hello")),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        started_at=coordinator._clock(),
+        diagnostic_log=coordinator._diagnostic_log.child({"thread_id": "thread"}),
+    )
+    # 竞态残留：屏障在哨兵之后入队（Run 终态与交互请求并发），
+    # 扇出循环消费不到它，靠 _read_events finally 解除，等屏障方不悬挂。
+    run.events.put_nowait(None)
+    barrier = _FanoutBarrier(done=asyncio.get_running_loop().create_future())
+    run.events.put_nowait(barrier)
+    async for _ in coordinator._read_events(run):
+        pass
+    assert barrier.done.done()
+
+
+@pytest.mark.asyncio
+async def test_barrier_waiter_gets_cancellation_cleanly() -> None:
+    """等屏障的协程被取消：CancelledError 正常上抛，不吞不悬挂。"""
+    calls: list[str] = []
+
+    class _RecordingInteraction:
+        async def request(self, _owner, _run, _interaction) -> InteractionResult:
+            calls.append("interaction.request")
+            return InteractionResult({"decision": "approve"})
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_RecordingInteraction(),
+        diagnostic_log=_RecordingDiagnosticLog(),
+    )
+    run = RunState(
+        start=StartRun(mode="build", thread_id="thread", run_id="run-cancel-wait", input=UserRunInput(message="hello")),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        started_at=coordinator._clock(),
+        diagnostic_log=coordinator._diagnostic_log.child({"thread_id": "thread"}),
+        task=asyncio.create_task(asyncio.sleep(60)),
+    )
+    spec = InteractionRequest(
+        request_id="req-4", type="approval", payload={}, interrupt_id="i-4",
+        execution_id="exec-1", parent_execution_id=None, agent_id="main",
+        compose_scope=None, serial_context=None,
+    )
+    coordinator._emit(run, "test.delta", {})
+    task = asyncio.create_task(
+        coordinator._lifecycle_port.request_interaction(run, spec)
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == []
+    run.task.cancel()

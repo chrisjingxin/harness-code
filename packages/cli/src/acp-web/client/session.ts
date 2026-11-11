@@ -12,7 +12,7 @@ import { createInteractiveController } from "../../interactive/controller"
 import type { InteractiveController } from "../../interactive/types"
 import { AcpAgentGateway, type AcpBootInfo } from "./acp-agent-gateway"
 import { createLocalUiClient } from "./local-ui-client"
-import { createAcpRuntime } from "./runtime"
+import { createAcpCommandRegistry, createAcpRuntime, synthesizeAgentCommands } from "./runtime"
 import type { WebUiClient } from "../../web/ui-client"
 import type { WsCloseInfo } from "./ws-stream"
 
@@ -30,12 +30,16 @@ export async function composeAcpWebSession(options: {
   closed?: Promise<WsCloseInfo>
   now?: () => number
   uuid?: () => string
-  settleCommandsMs?: number
+  commandsTimeoutMs?: number
 }): Promise<AcpWebSession> {
   const { gateway, boot } = await AcpAgentGateway.connect(options)
   const runtime = createAcpRuntime(boot)
-  // 不传 resolveMentions（直通）、不传 workspaceGit、不传 initialThreadId（空首页）。
+  // @文件由网关改成 resource_link，不在控制器里读盘。不传 workspaceGit，不传 initialThreadId（空首页）。
   const controller = createInteractiveController({ gateway, baseRuntime: runtime })
+  // 握手之后目录再变，用新的整张表换掉菜单。第一张表已经在 runtime 里。
+  gateway.setCommandTableListener(commands => {
+    controller.replaceCommandRegistry?.(createAcpCommandRegistry(synthesizeAgentCommands(commands)))
+  })
   const client = createLocalUiClient({ controller })
   return {
     client,

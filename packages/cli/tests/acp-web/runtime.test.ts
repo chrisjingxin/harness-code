@@ -22,7 +22,7 @@ const baseBoot: AcpBootInfo = {
 describe("createAcpRuntime", () => {
   test("能力集合：list+load 全开 → threads.read；有 modes → run.approval_mode", () => {
     const runtime = createAcpRuntime(baseBoot)
-    expect(runtime.capabilities).toEqual(["run.cancel", "threads.read", "run.approval_mode"])
+    expect(runtime.capabilities).toEqual(["run.cancel", "threads.read", "run.approval_mode", "models.read", "models.select"])
     expect(runtime.workspace).toBe("/tmp/ws")
     expect(runtime.cliVersion).toBe("9.9.9")
     expect(runtime.modelConfigured).toBe(true)
@@ -31,9 +31,9 @@ describe("createAcpRuntime", () => {
   })
 
   test("无 modes / 无 list：能力收窄", () => {
-    expect(createAcpRuntime({ ...baseBoot, modes: null }).capabilities).toEqual(["run.cancel", "threads.read"])
-    expect(createAcpRuntime({ ...baseBoot, canListSessions: false }).capabilities).toEqual(["run.cancel", "run.approval_mode"])
-    expect(createAcpRuntime({ ...baseBoot, canLoadSession: false }).capabilities).toEqual(["run.cancel", "run.approval_mode"])
+    expect(createAcpRuntime({ ...baseBoot, modes: null }).capabilities).toEqual(["run.cancel", "threads.read", "models.read", "models.select"])
+    expect(createAcpRuntime({ ...baseBoot, canListSessions: false }).capabilities).toEqual(["run.cancel", "run.approval_mode", "models.read", "models.select"])
+    expect(createAcpRuntime({ ...baseBoot, canLoadSession: false }).capabilities).toEqual(["run.cancel", "run.approval_mode", "models.read", "models.select"])
   })
 
   test("approvalMode 取 currentModeId；未知值回退默认", () => {
@@ -42,9 +42,11 @@ describe("createAcpRuntime", () => {
     expect(createAcpRuntime({ ...baseBoot, modes: null }).approvalMode).toBe("auto")
   })
 
-  test("不含 skills.read / models.* / config.*", () => {
-    for (const capability of createAcpRuntime(baseBoot).capabilities ?? []) {
-      expect(capability).not.toMatch(/^(skills|models|mcp|agents|goal|config|context)/)
+  test("不含 skills.read / mcp.* / config.*；模型选择已接入", () => {
+    const capabilities = createAcpRuntime(baseBoot).capabilities ?? []
+    expect(capabilities).toEqual(expect.arrayContaining(["models.read", "models.select"]))
+    for (const capability of capabilities) {
+      expect(capability).not.toMatch(/^(skills|mcp|agents|goal|config|context)/)
     }
   })
 
@@ -76,31 +78,50 @@ describe("synthesizeAgentCommands（GAP-37）", () => {
     expect(logs).toEqual([{ event: "command.dropped", reason: "duplicate", name: "X" }])
   })
 
-  test("与内置命令（含别名）重名的项丢弃并记日志", () => {
-    const logs: Array<{ event: string; reason?: string }> = []
-    const commands = synthesizeAgentCommands(
-      [{ name: "compact", description: "撞名", hint: null }, { name: "resume", description: "撞别名", hint: null }, { name: "mine", description: "ok", hint: null }],
-      e => logs.push(e),
-    )
-    expect(commands.map(c => c.name)).toEqual(["mine"])
-    expect(logs.map(l => l.reason)).toEqual(["builtin-collision", "builtin-collision"])
+  test("与本地内置同名的命令保留，交给 ACP 执行", () => {
+    const commands = synthesizeAgentCommands([
+      { name: "compact", description: "压缩", hint: null },
+      { name: "resume", description: "恢复", hint: null },
+      { name: "mine", description: "ok", hint: null },
+    ])
+    expect(commands.map(c => c.name)).toEqual(["compact", "resume", "mine"])
+  })
+
+  test("有 requestedSkillId 时用真实 Skill id", () => {
+    const commands = synthesizeAgentCommands([
+      { name: "skill:citrus-check", description: "检查", hint: null, requestedSkillId: "project/citrus-check", pluginId: "acp" },
+    ])
+    expect(commands[0]).toMatchObject({ requested_skill_id: "project/citrus-check", plugin_id: "acp" })
   })
 })
 
-describe("createAcpCommandRegistry（Q4）", () => {
-  test("插件命令在不含 skills.read 的 capabilities 下 available；requiresIdle 保留", () => {
+describe("createAcpCommandRegistry", () => {
+  test("代理命令可点：没有本地 capability 要求，空闲时才能执行", () => {
     const commands = synthesizeAgentCommands([{ name: "review", description: "代码评审", hint: null }])
     const registry = createAcpCommandRegistry(commands)
     const definition = registry.definitions.find(d => d.name === "review")!
-    expect(definition.source.type).toBe("plugin")
-    // availability 需要 context —— 直接看 requirements.capabilities 被剥掉。
+    expect(definition.source).toEqual({ type: "plugin", id: "acp" })
     expect(definition.requirements?.capabilities).toBeUndefined()
     expect(definition.requirements?.requiresIdle).toBe(true)
+    expect(definition.requestedSkillId).toBe("review")
+    expect(definition.safety?.runtime).toBe("allowed")
   })
 
-  test("内置命令的 requirements 不被改动", () => {
+  test("空表只留新建对话，不把本地 compact 混进来", () => {
     const registry = createAcpCommandRegistry([])
-    const compact = registry.definitions.find(d => d.name === "compact")!
-    expect(compact.requirements?.capabilities).toEqual(["context.manage"])
+    expect(registry.definitions.map(definition => definition.id)).toEqual(["thread.new"])
+    expect(registry.get("thread.new")).toMatchObject({
+      name: "new",
+      source: { type: "builtin" },
+    })
+    expect(registry.resolveName("compact")).toBeUndefined()
+  })
+
+  test("Agent 已经占用 new 这个名字时，按钮仍按 thread.new 执行", () => {
+    const commands = synthesizeAgentCommands([{ name: "new", description: "别的新", hint: null }])
+    const registry = createAcpCommandRegistry(commands)
+    expect(registry.get("new")?.source).toEqual({ type: "plugin", id: "acp" })
+    expect(registry.get("thread.new")?.id).toBe("thread.new")
+    expect(registry.get("thread.new")?.name).not.toBe("new")
   })
 })

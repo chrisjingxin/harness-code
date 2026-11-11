@@ -44,7 +44,7 @@ export type PermissionOutcome =
   | { outcome: "selected"; optionId: string }
   | { outcome: "cancelled" }
 
-const APPROVAL_DECISIONS = new Set(["approve_once", "approve_thread", "approve_project", "reject"])
+const APPROVAL_DECISIONS = new Set(["approve_once", "approve_thread", "approve_project", "reject", "reject_with_feedback"])
 const TRUST_DECISIONS = new Set(["allow_session", "deny"])
 
 /** `presentation` 形状完整才透传（保持 v3 snake_case），否则丢弃。 */
@@ -73,6 +73,48 @@ function requestArgs(rawInput: unknown): Record<string, unknown> {
  * 构造 `InteractionRequestEnvelope`；形状不全或决策无交集返回 null
  * （网关据此 fail closed 回 `cancelled`）。
  */
+/** 标准 diff 内容块 → `file_diff` presentation；形状不符返回 null。 */
+function synthesizeFileDiff(block: unknown): FileDiffPresentation | null {
+  const b = block as { type?: unknown; path?: unknown; oldText?: unknown; newText?: unknown } | null
+  if (!b || b.type !== "diff" || typeof b.path !== "string" || !b.path) return null
+  const oldText = typeof b.oldText === "string" ? b.oldText : null
+  const newText = typeof b.newText === "string" ? b.newText : ""
+  const operation = oldText === null ? "write" : (newText === "" ? "delete" : "edit")
+  const removed = oldText === null ? 0 : oldText.split("\n").length - 1
+  const added = newText === "" ? 0 : newText.split("\n").length - 1
+  return {
+    kind: "file_diff", operation, path: b.path,
+    unified_diff: unifiedDiff(b.path, oldText, newText),
+    added_lines: Math.max(0, added), removed_lines: Math.max(0, removed),
+    truncated: false,
+    ...(oldText !== null ? { old_text: oldText } : { old_text: null }),
+    new_text: newText === "" ? null : newText,
+  } as FileDiffPresentation
+}
+
+/** 最小行级 diff：公共前后缀剪掉，中间段逐行 -/+，无依赖。 */
+function unifiedDiff(path: string, oldText: string | null, newText: string): string {
+  const a = (oldText ?? "").split("\n"), b = newText.split("\n")
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1
+  let tail = 0
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail += 1
+  const ctx = head > 0 ? ` ${a[head - 1]}` : ""
+  const removed = a.slice(head, a.length - tail).map(l => `-${l}`)
+  const added = b.slice(head, b.length - tail).map(l => `+${l}`)
+  return [`--- a/${path}`, `+++ b/${path}`, `@@ -${head + 1} +${head + 1} @@${ctx}`, ...removed, ...added].join("\n")
+}
+
+/** 从 toolCall.content 里取第一个标准 diff 块并合成 presentation；没有返回 null。 */
+function presentationFromContent(content: unknown): FileDiffPresentation | null {
+  if (!Array.isArray(content)) return null
+  for (const item of content) {
+    const p = synthesizeFileDiff(item)
+    if (p) return p
+  }
+  return null
+}
+
 export function buildInteractionRequest(
   input: PermissionInput,
   context: PermissionContext,
@@ -85,7 +127,7 @@ export function buildInteractionRequest(
 
   if (meta.type === "approval") {
     const filtered = decisions.filter(id => APPROVAL_DECISIONS.has(id)) as Array<
-      "approve_once" | "approve_thread" | "approve_project" | "reject"
+      "approve_once" | "approve_thread" | "approve_project" | "reject" | "reject_with_feedback"
     >
     if (filtered.length === 0) return null
     const description = typeof meta.description === "string" && meta.description
@@ -111,7 +153,9 @@ export function buildInteractionRequest(
           }],
         } as unknown as JsonValue,
         decisions: filtered,
-        ...(isFileDiff(meta.presentation) ? { presentation: meta.presentation } : {}),
+        ...(isFileDiff(meta.presentation)
+        ? { presentation: meta.presentation }
+        : (() => { const p = presentationFromContent((input.toolCall as { content?: unknown }).content); return p ? { presentation: p } : {} })()),
       },
     }
   }

@@ -8,13 +8,14 @@ import { fileURLToPath } from "node:url"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const desktop = join(root, "apps/desktop")
 const [previewId, operation] = process.argv.slice(2)
-// 固定目标只对应仓库内三份构建配置，不接受用户传入的目录或页面地址。
+// 每个目标对应仓库内固定的构建配置，不接受用户传入的目录或页面地址。
 const configs = {
   hc205: "electron.vite.preview.config.ts",
   hc206: "electron.vite.hc206-preview.config.ts",
   hc207: "electron.vite.hc207-preview.config.ts",
+  hc208: "electron.vite.hc208-preview.config.ts",
 }
-if (!Object.hasOwn(configs, previewId)) throw new Error("预览目标只支持 hc205、hc206 或 hc207")
+if (!Object.hasOwn(configs, previewId)) throw new Error(`预览目标只支持 ${Object.keys(configs).join("、")}`)
 if (!["dev", "build", "preview"].includes(operation)) throw new Error("预览命令只支持 dev、build 或 preview")
 const outputName = `${previewId}-ui-preview`
 const output = join(root, "tmp", outputName)

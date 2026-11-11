@@ -32,7 +32,7 @@ export type CatalogKey = "threads" | "models" | "skills" | "mcp" | "agents"
 export type InternalCatalog<T> = LoadableCatalog<T> & { epoch: number }
 
 export type CatalogState = {
-  threads: InternalCatalog<ThreadSummary>
+  threads: InternalCatalog<ThreadSummary> & { nextCursor: string | null; loadingMore: boolean }
   models: InternalCatalog<ModelProfile>
   skills: InternalCatalog<SkillMenuItem>
   mcp: InternalCatalog<McpServerStatus>
@@ -45,7 +45,7 @@ function errorMessage(error: unknown): string {
 
 export class CatalogFeature {
   readonly state: CatalogState = {
-    threads: { status: "idle", items: [], epoch: 0 },
+    threads: { status: "idle", items: [], epoch: 0, nextCursor: null, loadingMore: false },
     models: { status: "idle", items: [], epoch: 0 },
     skills: { status: "idle", items: [], epoch: 0 },
     mcp: { status: "idle", items: [], epoch: 0 },
@@ -58,9 +58,10 @@ export class CatalogFeature {
     this.closed = true
   }
 
-  /** 重置某项或者全量 Catalog 为 idle 状态。Skills、MCP 与 Agents 属于全局配置，跨 Thread 保持不变。 */
+  /** 重置某项或者全量 Catalog 为 idle 状态。Skills、MCP 与 Agents 属于全局配置，跨 Thread 保持不变；
+      Thread 目录也是工作区级（不随切换当前会话重置）：只停掉在途翻页标记，条目与游标原样保留。 */
   reset(options: { models?: readonly ModelProfile[] } = {}, ctx: FeatureContext): void {
-    this.state.threads = { status: "idle", items: [], epoch: this.state.threads.epoch }
+    this.state.threads = { ...this.state.threads, loadingMore: false }
     if (options.models) {
       this.state.models = { status: "ready", items: options.models, epoch: this.state.models.epoch }
     } else {
@@ -89,6 +90,8 @@ export class CatalogFeature {
       status: "ready",
       items: sortThreadsByRecency(next),
       epoch: this.state.threads.epoch,
+      nextCursor: this.state.threads.nextCursor,
+      loadingMore: this.state.threads.loadingMore,
     }
     ctx.publish()
   }
@@ -96,16 +99,61 @@ export class CatalogFeature {
   /** 读取 Thread catalog；异步结果只允许写回对应打开轮次。 */
   async refreshThreadCatalog(ctx: FeatureContext): Promise<void> {
     const epoch = ++this.state.threads.epoch
-    this.state.threads = { status: "loading", items: this.state.threads.items, epoch }
+    // 先存旧条目与游标：loading 态会把 nextCursor 清空，refresh 完成后按合并规则还原。
+    const prevItems = this.state.threads.items
+    const prevCursor = this.state.threads.nextCursor
+    this.state.threads = { status: "loading", items: prevItems, epoch, nextCursor: null, loadingMore: false }
     ctx.publish()
     try {
       const result = await ctx.gateway.listThreads()
       if (this.closed || epoch !== this.state.threads.epoch) return
-      this.state.threads = { status: "ready", items: sortThreadsByRecency(result.threads), epoch }
+      // 已滚动加载过后续页时，不能把列表塌回第一页：合并旧条目，id 相同以新页为准。
+      const incomingIds = new Set(result.threads.map(t => t.thread_id))
+      const extras = prevItems.filter(t => !incomingIds.has(t.thread_id))
+      const loadedBeyondPage1 = extras.length > 0
+      this.state.threads = {
+        status: "ready",
+        items: sortThreadsByRecency([...result.threads, ...extras]),
+        epoch,
+        // 键集游标稳定：加载过超过第一页就保留原游标，否则取新第一页的游标。
+        nextCursor: loadedBeyondPage1
+          ? prevCursor
+          : ((result as { nextCursor?: string | null }).nextCursor ?? null),
+        loadingMore: false,
+      }
       ctx.publish()
     } catch (error) {
       if (this.closed || epoch !== this.state.threads.epoch) return
-      this.state.threads = { status: "error", items: this.state.threads.items, message: errorMessage(error), epoch }
+      this.state.threads = { status: "error", items: this.state.threads.items, message: errorMessage(error), epoch, nextCursor: this.state.threads.nextCursor, loadingMore: false }
+      ctx.publish()
+    }
+  }
+
+  /** 加载下一页 Thread catalog：仅当有 nextCursor、非加载中、已就绪时触发。
+      epoch 沿用同一防迟到机制：若期间发生了 refresh，本页结果直接丢弃。 */
+  async loadMoreThreads(ctx: FeatureContext): Promise<void> {
+    const state = this.state.threads
+    if (this.closed || state.nextCursor == null || state.loadingMore || state.status !== "ready") return
+    const epoch = state.epoch
+    const cursor = state.nextCursor
+    this.state.threads = { ...state, loadingMore: true }
+    ctx.publish()
+    try {
+      const result = await ctx.gateway.listThreads(cursor)
+      if (this.closed || epoch !== this.state.threads.epoch) return
+      const merged = new Map(this.state.threads.items.map(item => [item.thread_id, item]))
+      for (const item of result.threads) merged.set(item.thread_id, item)
+      this.state.threads = {
+        ...this.state.threads,
+        status: "ready",
+        items: sortThreadsByRecency([...merged.values()]),
+        nextCursor: (result as { nextCursor?: string | null }).nextCursor ?? null,
+        loadingMore: false,
+      }
+      ctx.publish()
+    } catch (error) {
+      if (this.closed || epoch !== this.state.threads.epoch) return
+      this.state.threads = { ...this.state.threads, status: "error", message: errorMessage(error), loadingMore: false }
       ctx.publish()
     }
   }

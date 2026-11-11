@@ -23,7 +23,7 @@ describe("ReplayBuffer：history 录制帧", () => {
     expect(replay.messages).toEqual([
       { kind: "user", content: "先看一眼" },
       { kind: "assistant", content: "看完了。" },
-      { kind: "tool", tool_name: "read_file", content: "工具输出" },
+      { kind: "tool", tool_name: "read_file", content: "工具输出", tool_call_id: "history-seed:h2", status: "completed" },
     ])
   })
 
@@ -76,8 +76,49 @@ describe("ReplayBuffer：拼接与边界", () => {
     replay.accept(chunk("agent_message_chunk", "s:m2", "后半"))
     expect(replay.messages).toEqual([
       { kind: "assistant", content: "前半" },
-      { kind: "tool", tool_name: "cat", content: "out" },
+      { kind: "tool", tool_name: "cat", content: "out", tool_call_id: "s:t1", status: "completed" },
       { kind: "assistant", content: "后半" },
     ])
+  })
+})
+
+describe("回放 tool_call 带 args/status（2.9/2.12）", () => {
+  test("rawInput → arguments；status failed → failed", () => {
+    const buf = new ReplayBuffer()
+    buf.accept({
+      sessionUpdate: "tool_call",
+      toolCallId: "s1:h0",
+      title: "execute ls",
+      rawInput: { command: "ls" },
+      status: "failed",
+      content: [{ type: "content", content: { type: "text", text: "boom" } }],
+    } as never)
+    const msg = buf.messages.find(m => m.kind === "tool")!
+    expect(msg.tool_call_id).toBe("s1:h0")
+    expect(msg.arguments).toEqual({ command: "ls" })
+    expect(msg.status).toBe("failed")
+  })
+
+  test("completed → completed；旧数据无 rawInput → 无 arguments", () => {
+    const buf = new ReplayBuffer()
+    buf.accept({
+      sessionUpdate: "tool_call",
+      toolCallId: "s1:h0",
+      title: "execute ls",
+      rawInput: { command: "ls" },
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "ok" } }],
+    } as never)
+    buf.accept({
+      sessionUpdate: "tool_call",
+      toolCallId: "s1:h1",
+      title: "legacy",
+      content: [{ type: "content", content: { type: "text", text: "old" } }],
+    } as never)
+    const [a, b] = buf.messages.filter(m => m.kind === "tool")
+    expect(a!.status).toBe("completed")
+    expect(a!.arguments).toEqual({ command: "ls" })
+    expect(b!.arguments).toBeUndefined()
+    expect(b!.status).toBe("completed")
   })
 })

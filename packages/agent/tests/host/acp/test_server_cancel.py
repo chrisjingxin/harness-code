@@ -27,6 +27,7 @@ from tests.support.acp_harness import (
     text,
     tool_args,
     tool_start,
+    primary_path_resolver,
 )
 
 
@@ -52,8 +53,17 @@ async def _send_prompt(client: RawAcpClient, session_id: str, request_id: int = 
 
 
 async def _wait_for_update(client: RawAcpClient) -> None:
-    """等到第一条 session/update，证明 prompt 已被处理。"""
-    await client.read_until(lambda frame: frame.get("method") == "session/update")
+    """等到第一条正文 update，证明 Run 真的在流（不是命令表那类会话级帧）。
+
+    `available_commands_update` 在 `session/new` 响应后立刻到达、与 Run 无关；
+    拿它当「prompt 已被处理」信号会让 cancel 过早发出，落进 Run 受理窗口里
+    `run_coordinator.cancel` 不 cancel 任务的盲区（status=="accepted"）。
+    """
+    await client.read_until(
+        lambda frame: frame.get("method") == "session/update"
+        and frame.get("params", {}).get("update", {}).get("sessionUpdate")
+        == "agent_message_chunk"
+    )
 
 
 async def test_cancel_active_run_returns_cancelled(tmp_path: Path) -> None:
@@ -276,7 +286,7 @@ async def test_aclose_fails_dangling_run_future(tmp_path: Path) -> None:
     server._runs["r1"] = _ActiveRun(
         run_id="r1",
         session_id="s1",
-        translator=RunTranslator("r1", PathLocator(host.workspace)),
+        translator=RunTranslator("r1", PathLocator(primary_path_resolver(host.workspace))),
         done=future,
     )
     await server.aclose()

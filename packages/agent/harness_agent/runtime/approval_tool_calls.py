@@ -20,7 +20,7 @@ payload 是在处理完前一个之后才生成的。带过期的缓存会让后
 from __future__ import annotations
 
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Mapping
 
 from harness_agent.runtime.approval_presentation import approval_fingerprint
@@ -43,7 +43,8 @@ class ToolCallIdStore:
         if max_entries < 1:
             raise ValueError("TOOL_CALL_ID_LIMIT_INVALID")
         self._max_entries = max_entries
-        self._entries: OrderedDict[str, str] = OrderedDict()
+        self._entries: OrderedDict[str, deque[str]] = OrderedDict()
+        self._size = 0
         self._lock = threading.RLock()
 
     def remember(
@@ -52,10 +53,10 @@ class ToolCallIdStore:
         tool_args: Mapping[str, object],
         tool_call_id: str,
     ) -> bool:
-        """登记一个指纹；空名字、空 id 或参数无法稳定编码时返回 False。
+        """登记一个指纹→id；空名字、空 id 或参数无法稳定编码时返回 False。
 
-        同一指纹再次登记覆盖旧值：跨轮次的同参数调用（先 `ls`、后又 `ls`）
-        覆盖到的就是最新一次，不会串到旧卡片上。
+        同指纹的多次预检按 FIFO 追加：同名同参数的两个待审批调用各自
+        拿自己的 id（第 i 次预检对应第 i 次审批），不再互相覆盖。
         """
         if not tool_name or not tool_call_id:
             return False
@@ -63,22 +64,31 @@ class ToolCallIdStore:
         if key is None:
             return False
         with self._lock:
-            self._entries.pop(key, None)
-            self._entries[key] = tool_call_id
-            while len(self._entries) > self._max_entries:
-                self._entries.popitem(last=False)
+            queue = self._entries.setdefault(key, deque())
+            self._entries.move_to_end(key)
+            queue.append(tool_call_id)
+            self._size += 1
+            while self._size > self._max_entries:
+                _, oldest = self._entries.popitem(last=False)
+                self._size -= len(oldest)
         return True
 
-    def lookup(self, tool_name: str, tool_args: Mapping[str, object]) -> str | None:
-        """按指纹取 provider id；缺失或参数不可编码时返回 None。"""
+    def take(self, tool_name: str, tool_args: Mapping[str, object]) -> str | None:
+        """按指纹取出并消费队首 id；缺失、耗尽或参数不可编码时返回 None。
+
+        消费语义：同一个 id 只交付一次——两张同指纹审批各自取走自己的登记。
+        """
         key = approval_fingerprint(tool_name, tool_args)
         if key is None:
             return None
         with self._lock:
-            value = self._entries.get(key)
-            if value is None:
+            queue = self._entries.get(key)
+            if not queue:
                 return None
-            self._entries.move_to_end(key)
+            value = queue.popleft()
+            self._size -= 1
+            if not queue:
+                self._entries.pop(key, None)
             return value
 
     def clear(self) -> None:

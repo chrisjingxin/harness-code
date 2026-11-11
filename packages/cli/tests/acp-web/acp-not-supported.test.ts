@@ -1,13 +1,14 @@
 /**
  * `UNSUPPORTED_METHODS` 漂移与行为锁定（设计 §6.5）：
- * ① 与 `AgentGateway` 接口的 38 个方法去掉 11 个已实现后完全相同——
+ * ① 与 `AgentGateway` 接口的 39 个方法去掉 13 个已实现后完全相同——
  *    接口新增方法而没归类时本测试失败；
  * ② 每个方法调用返回被拒绝的 Promise，`code = ACP_NOT_SUPPORTED`、
  *    `message` 含表里登记的 GAP 编号；
  * ③ 是拒绝的 Promise 而不是同步抛出：真实构造控制器不炸，
  *    `catalogs.skills` 落为 error；
- * ④ `runtime.capabilities` 不含 skills.* / models.* / mcp.* /
+ * ④ `runtime.capabilities` 不含 skills.* / mcp.* /
  *    agents.* / goal.* / config.* / context.manage。
+ *    `models.read` 与 `models.select` 已接入。
  */
 
 import { describe, expect, test } from "bun:test"
@@ -19,7 +20,7 @@ import { FakeAgent, pairedStreams } from "./support/fake-agent"
 
 /** `AgentGateway` 接口的全部方法名（写在测试里，新增方法漏归类会红）。 */
 const ALL_METHODS = [
-  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose",
+  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose", "onApprovalModeChanged",
   "setInteractionHandler", "abandonInteraction",
   "startRun", "cancel", "setApprovalMode",
   "compactContext", "configDetails", "previewConfig", "commitConfig",
@@ -34,23 +35,23 @@ const ALL_METHODS = [
 ] as const
 
 const IMPLEMENTED = new Set([
-  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose",
+  "onProtocolError", "onThreadSummary", "onCodeIndexChanged", "onClose", "onApprovalModeChanged",
   "setInteractionHandler", "abandonInteraction",
-  "startRun", "cancel", "setApprovalMode", "listThreads", "openThread",
+  "startRun", "cancel", "setApprovalMode", "listThreads", "openThread", "listModels",
 ])
 
 async function gateway(): Promise<AcpAgentGateway> {
   const { client, agent } = pairedStreams()
   new FakeAgent().attach(agent)
-  return (await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, settleCommandsMs: 10 })).gateway
+  return (await AcpAgentGateway.connect({ stream: client, cwd: "/tmp/ws", now: () => 1, commandsTimeoutMs: 10 })).gateway
 }
 
 describe("UNSUPPORTED_METHODS", () => {
-  test("与 AgentGateway 接口 38 个方法去掉 11 个已实现后完全相同", () => {
+  test("与 AgentGateway 接口 39 个方法去掉 12 个已实现后完全相同", () => {
     const expected = ALL_METHODS.filter(m => !IMPLEMENTED.has(m)).sort()
     expect(Object.keys(UNSUPPORTED_METHODS).sort()).toEqual(expected)
-    expect(ALL_METHODS).toHaveLength(38)
-    expect(Object.keys(UNSUPPORTED_METHODS)).toHaveLength(27)
+    expect(ALL_METHODS).toHaveLength(39)
+    expect(Object.keys(UNSUPPORTED_METHODS)).toHaveLength(26)
   })
 
   test.each(Object.keys(UNSUPPORTED_METHODS))("%s → 拒绝的 Promise，code=ACP_NOT_SUPPORTED，含 GAP 编号", async method => {
@@ -87,10 +88,13 @@ describe("UNSUPPORTED_METHODS", () => {
     await controller.close()
   })
 
-  test("runtime.capabilities 不含 skills.* / models.* / mcp.* / agents.* / goal.* / config.* / context.manage", async () => {
+  test("runtime.capabilities 不含 skills.* / mcp.* / agents.* / goal.* / config.* / context.manage", async () => {
     const g = await gateway()
-    for (const capability of g.runtime.capabilities ?? []) {
-      expect(capability).not.toMatch(/^(skills|models|mcp|agents|goal|config|context)\./)
+    const capabilities = g.runtime.capabilities ?? []
+    expect(capabilities).toContain("models.read")
+    expect(capabilities).toContain("models.select")
+    for (const capability of capabilities) {
+      expect(capability).not.toMatch(/^(skills|mcp|agents|goal|config|context)\./)
     }
   })
 })

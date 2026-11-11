@@ -37,7 +37,7 @@ describe("WorkspaceSidebar", () => {
       expect(items.length).toBe(2)
       expect(handle.container.querySelectorAll(".thread-item-icon").length).toBe(2)
       expect(items[0]?.textContent).toContain("你好")
-      expect(items[0]?.querySelector(".thread-item-summary")?.textContent).toBe("已完成")
+      expect(items[0]?.querySelector(".thread-item-summary")?.textContent).toBe("3 条 · latest assistant reply")
       expect(handle.container.textContent).not.toContain("thread-1")
       expect(handle.container.querySelector(".file-explorer")).toBeNull()
       expect(handle.container.querySelector(".file-tree")).toBeNull()
@@ -70,7 +70,7 @@ describe("WorkspaceSidebar", () => {
       const active = items.find(button => button.getAttribute("data-active") === "true")
       expect(active?.disabled).toBe(false)
       expect(active?.querySelector(".thread-item-summary")?.textContent).toBe("正在处理当前变更")
-      expect(inactive?.querySelector(".thread-item-summary")?.textContent).toBe("已完成")
+      expect(inactive?.querySelector(".thread-item-summary")?.textContent).toBe("3 条 · latest assistant reply")
     } finally {
       handle.unmount()
     }
@@ -180,4 +180,73 @@ test("左下仅保留设置与工具，直接打开弹窗", () => {
     expect(intents).toEqual([{ type: "settings-open" }])
     expect(handle.container.querySelector('[role="menu"]')).toBeNull()
   } finally { handle.unmount() }
+})
+
+describe("WorkspaceSidebar：会话分页与摘要预览", () => {
+  const threadsCatalog = (items: ReturnType<typeof makeThread>[], nextCursor: string | null, loadingMore = false) =>
+    ({ ...makeCatalog(items), nextCursor, loadingMore })
+
+  const mount = (catalog: ReturnType<typeof threadsCatalog>, intents: WebIntent[]): RenderHandle => {
+    const interactive = makeInteractive({
+      catalogs: { ...makeInteractive().catalogs, threads: catalog },
+    })
+    return mountSidebar(makeSnapshot({ interactive }), intents)
+  }
+
+  const scrollToBottom = (handle: RenderHandle) => {
+    const list = handle.container.querySelector<HTMLElement>(".sidebar-list")
+    expect(list).not.toBeNull()
+    // 假 DOM 没有真实布局：手动写滚动几何再派发 scroll 事件。
+    Object.defineProperty(list!, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(list!, "clientHeight", { value: 100, configurable: true })
+    Object.defineProperty(list!, "scrollTop", { value: 900, configurable: true })
+    act(() => { list!.dispatchEvent(new Event("scroll")) })
+  }
+
+  test("渲染条数与最近一句预览；无摘要字段只显示标题行副标题", () => {
+    const catalog = threadsCatalog(
+      [makeThread({ thread_id: "t-1", message_count: 42, latest_message: "最后一句", first_message: "x" }),
+       makeThread({ thread_id: "t-2", message_count: 0, latest_message: "", first_message: "" })],
+      null,
+    )
+    const handle = mount(catalog, [])
+    try {
+      const items = handle.container.querySelectorAll(".thread-item")
+      expect(items[0]?.querySelector(".thread-item-summary")?.textContent).toBe("42 条 · 最后一句")
+      expect(items[1]?.querySelector(".thread-item-summary")?.textContent).toBe("已完成")
+    } finally {
+      handle.unmount()
+    }
+  })
+
+  test("滚到底触发一次 threads-load-more；无 nextCursor 不触发", () => {
+    const intents: WebIntent[] = []
+    const handle = mount(threadsCatalog([makeThread()], "c-1"), intents)
+    try {
+      scrollToBottom(handle)
+      expect(intents).toEqual([{ type: "threads-load-more" }])
+    } finally {
+      handle.unmount()
+    }
+    const intents2: WebIntent[] = []
+    const handle2 = mount(threadsCatalog([makeThread()], null), intents2)
+    try {
+      scrollToBottom(handle2)
+      expect(intents2).toEqual([])
+    } finally {
+      handle2.unmount()
+    }
+  })
+
+  test("loadingMore 中滚到底不重复触发", () => {
+    const intents: WebIntent[] = []
+    const handle = mount(threadsCatalog([makeThread()], "c-1", true), intents)
+    try {
+      scrollToBottom(handle)
+      scrollToBottom(handle)
+      expect(intents).toEqual([])
+    } finally {
+      handle.unmount()
+    }
+  })
 })

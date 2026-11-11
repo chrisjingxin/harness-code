@@ -334,7 +334,7 @@ async def test_initialize_records_server_side_diagnostic_event(tmp_path: Path) -
 
 
 async def test_v6_commands_bind_is_available_after_minor_negotiation(tmp_path: Path):
-    """协商到 v6 后，当前 snapshot 可以完成一次空 command binding。"""
+    """协商到 v6 后，可以按当前 snapshot 把命令（含可调用 Skill）一次绑完。"""
     from harness_agent.host.agent_host import AgentHost
 
     server = AgentHost(allow_echo=True, config_home=tmp_path / "home")
@@ -357,7 +357,13 @@ async def test_v6_commands_bind_is_available_after_minor_negotiation(tmp_path: P
     await server.dispatch(
         _request(
             "commands.bind",
-            {"snapshot_id": initialized["skills_snapshot"]["id"], "bindings": []},
+            {
+                "snapshot_id": initialized["skills_snapshot"]["id"],
+                "bindings": [
+                    {"id": item["id"], "name": item["name"]}
+                    for item in initialized["agent_commands"]
+                ],
+            },
             "bind-v6",
         )
     )
@@ -4183,7 +4189,12 @@ async def test_host_startup_uses_one_enabled_plugin_snapshot_for_skill_and_mcp(
     assert frames[0]["result"]["skills_snapshot"]["count"] >= 1
     assert server._skill_registry is not None
     assert server._skill_registry.resolve(f"plugin/{plugin_id}/review")
-    assert frames[0]["result"]["agent_commands"] == [
+    audit_commands = [
+        item
+        for item in frames[0]["result"]["agent_commands"]
+        if item["id"] == f"plugin/{plugin_id}/command/audit"
+    ]
+    assert audit_commands == [
         {
             "id": f"plugin/{plugin_id}/command/audit",
             "name": f"plugin:{plugin_id.replace('/', ':')}:audit",

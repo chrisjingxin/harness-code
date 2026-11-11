@@ -15,22 +15,22 @@ def test_remember_and_lookup_roundtrip() -> None:
     """登记后能按同一工具名与参数查回 provider id。"""
     store = ToolCallIdStore()
     assert store.remember("execute", {"command": "npm test"}, "call-1") is True
-    assert store.lookup("execute", {"command": "npm test"}) == "call-1"
+    assert store.take("execute", {"command": "npm test"}) == "call-1"
 
 
 def test_args_key_order_does_not_matter() -> None:
     """参数键顺序不影响指纹，与审批展示缓存的口径一致。"""
     store = ToolCallIdStore()
     assert store.remember("write_file", {"file_path": "/a.py", "content": "x"}, "call-2")
-    assert store.lookup("write_file", {"content": "x", "file_path": "/a.py"}) == "call-2"
+    assert store.take("write_file", {"content": "x", "file_path": "/a.py"}) == "call-2"
 
 
 def test_different_args_or_tool_do_not_hit() -> None:
     """参数不同或工具名不同都不能命中，避免把审批挂到别的卡片上。"""
     store = ToolCallIdStore()
     assert store.remember("execute", {"command": "ls"}, "call-3")
-    assert store.lookup("execute", {"command": "ls -la"}) is None
-    assert store.lookup("web_fetch", {"command": "ls"}) is None
+    assert store.take("execute", {"command": "ls -la"}) is None
+    assert store.take("web_fetch", {"command": "ls"}) is None
 
 
 def test_unserializable_args_are_rejected() -> None:
@@ -38,7 +38,7 @@ def test_unserializable_args_are_rejected() -> None:
     store = ToolCallIdStore()
     args = {"command": _Unserializable()}
     assert store.remember("execute", args, "call-4") is False
-    assert store.lookup("execute", args) is None
+    assert store.take("execute", args) is None
 
 
 def test_empty_name_or_id_is_rejected() -> None:
@@ -46,7 +46,7 @@ def test_empty_name_or_id_is_rejected() -> None:
     store = ToolCallIdStore()
     assert store.remember("", {"a": 1}, "call-5") is False
     assert store.remember("execute", {"a": 1}, "") is False
-    assert store.lookup("execute", {"a": 1}) is None
+    assert store.take("execute", {"a": 1}) is None
 
 
 def test_lru_evicts_oldest_beyond_capacity() -> None:
@@ -54,20 +54,22 @@ def test_lru_evicts_oldest_beyond_capacity() -> None:
     store = ToolCallIdStore(max_entries=2)
     assert store.remember("execute", {"n": 1}, "call-1")
     assert store.remember("execute", {"n": 2}, "call-2")
-    assert store.lookup("execute", {"n": 1}) == "call-1"  # 变成最新
+    assert store.take("execute", {"n": 1}) == "call-1"  # 消费队首
     assert store.remember("execute", {"n": 3}, "call-3")
-    assert store.lookup("execute", {"n": 2}) is None
-    assert store.lookup("execute", {"n": 1}) == "call-1"
-    assert store.lookup("execute", {"n": 3}) == "call-3"
+    assert store.take("execute", {"n": 2}) == "call-2"
+    assert store.take("execute", {"n": 3}) == "call-3"
+    assert store.take("execute", {"n": 2}) is None  # 已耗尽
     assert MAX_TOOL_CALL_IDS == 256
 
 
-def test_same_fingerprint_keeps_latest_id() -> None:
+def test_same_fingerprint_takes_ids_fifo() -> None:
     """同一指纹再次登记覆盖旧值：跨轮次同参数调用拿到的是最新 id。"""
     store = ToolCallIdStore()
     assert store.remember("execute", {"command": "ls"}, "call-old")
     assert store.remember("execute", {"command": "ls"}, "call-new")
-    assert store.lookup("execute", {"command": "ls"}) == "call-new"
+    assert store.take("execute", {"command": "ls"}) == "call-old"
+    assert store.take("execute", {"command": "ls"}) == "call-new"
+    assert store.take("execute", {"command": "ls"}) is None
 
 
 def test_clear_releases_everything() -> None:
@@ -75,7 +77,7 @@ def test_clear_releases_everything() -> None:
     store = ToolCallIdStore()
     assert store.remember("execute", {"command": "ls"}, "call-6")
     store.clear()
-    assert store.lookup("execute", {"command": "ls"}) is None
+    assert store.take("execute", {"command": "ls"}) is None
 
 
 def test_no_expiry_over_time(monkeypatch) -> None:
@@ -86,7 +88,7 @@ def test_no_expiry_over_time(monkeypatch) -> None:
     store = ToolCallIdStore()
     assert store.remember("execute", {"command": "ls"}, "call-7")
     monkeypatch.setattr(time, "monotonic", lambda: time.monotonic() + 3600)
-    assert store.lookup("execute", {"command": "ls"}) == "call-7"
+    assert store.take("execute", {"command": "ls"}) == "call-7"
 
 
 def test_invalid_capacity_is_rejected() -> None:

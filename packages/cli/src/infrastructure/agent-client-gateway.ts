@@ -31,7 +31,6 @@ import type {
   TeamsListResult,
   TeamsRunParams,
   TeamsRunResult,
-  ThreadsListResult,
   ThreadsListTurnsResult,
   ThreadSummary,
   ThreadsOpenResult,
@@ -49,6 +48,7 @@ import { AgentClient, JsonRpcRemoteError } from "../ipc/client"
 import {
   AgentGatewayError,
   type AgentGateway,
+  type ThreadsPageResult,
   type AgentGatewayStartRunInput,
   type InteractiveAgentRun,
 } from "../interactive/ports/agent-gateway"
@@ -162,9 +162,10 @@ export class AgentClientGateway implements AgentGateway {
     }
   }
 
-  async listThreads(): Promise<ThreadsListResult> {
+  async listThreads(_cursor?: string): Promise<ThreadsPageResult> {
     try {
-      return await this.client.listThreads()
+      // IPC THREADS_LIST 不支持游标：一次返回全量，nextCursor 恒 null。
+      return { ...(await this.client.listThreads()), nextCursor: null }
     } catch (error) {
       throw this.wrapError(error)
     }

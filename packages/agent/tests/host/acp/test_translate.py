@@ -14,6 +14,7 @@ from typing import Any
 
 from acp.schema import ToolCallProgress, ToolCallStart
 
+from tests.support.acp_harness import primary_path_resolver
 from harness_agent.host.acp.tool_display import PathLocator
 from harness_agent.host.acp.translate import (
     _MAX_RAW_INPUT_BYTES,
@@ -42,7 +43,7 @@ def _event(kind: str, payload: dict[str, Any] | None = None, **overrides: Any) -
 
 def _translator(tmp_path: Path) -> RunTranslator:
     """默认翻译器：工作区是一个临时目录。"""
-    return RunTranslator("r1", PathLocator(tmp_path))
+    return RunTranslator("r1", PathLocator(primary_path_resolver(tmp_path)))
 
 
 def _feed_ok(translator: RunTranslator, event: dict[str, Any]) -> list[Any]:
@@ -380,7 +381,7 @@ def test_completed_after_announce_does_not_rewrite_title_to_bare_name(tmp_path: 
     assert done.title is None  # 不传 title，客户端沿用已公告的标题
 
 
-def test_prepare_approval_without_id_matches_card_by_name_and_args(tmp_path: Path) -> None:
+def test_prepare_approval_without_id_uses_fallback_card(tmp_path: Path) -> None:
     """没有 id 时降级匹配：同名、参数相同、还没被别的审批占用。"""
     translator = _translator(tmp_path)
     _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
@@ -396,15 +397,15 @@ def test_prepare_approval_without_id_matches_card_by_name_and_args(tmp_path: Pat
         is_child=False,
         agent_id=None,
     )
-    assert target.matched == "args"
-    assert target.tool_call_id == acp_tool_call_id("r1", "call_0")
+    assert target.matched == "none"
+    assert target.tool_call_id == "approval:req-1"
 
 
-def test_reused_provider_id_claims_the_existing_card_by_args(tmp_path: Path) -> None:
+def test_reused_provider_id_builds_card_under_original_id(tmp_path: Path) -> None:
     """provider 重复用 id：事件里的卡是合成 id，审批带的却是原 id。
 
-    按 id 找不到时要先按「同名 + 参数相同」认领已有卡，否则会多出一张
-    永远转圈、最后被标成 failed 的幻影卡（Code Review R2）。
+    按原 id 找不到（事件卡已改名）→ 用同一个原 id 建卡并认领；
+    不再按参数猜测（Spec §7.2：这种极少见情况接受双卡）。
     """
     translator = _translator(tmp_path)
     _feed_ok(translator, _event("tool.started", {"tool_call_id": "tool-r1-2", "name": "execute"}))
@@ -420,14 +421,14 @@ def test_reused_provider_id_claims_the_existing_card_by_args(tmp_path: Path) -> 
         is_child=False,
         agent_id=None,
     )
-    assert target.matched == "args"
-    assert target.tool_call_id == acp_tool_call_id("r1", "tool-r1-2")
-    # 只有一张卡：收尾时不会冒出第二张永远转圈的幻影卡。
-    assert {update.tool_call_id for update in translator.leftovers()} == {target.tool_call_id}
+    # 按原 id 找不到卡（事件卡已改合成 id）→ 用同一个原 id 建卡并认领；
+    # 合成卡照常由工具事件收尾，这是 Spec §7.2 接受的取舍。
+    assert target.matched == "id"
+    assert target.tool_call_id == acp_tool_call_id("r1", "call_0")
 
 
-def test_two_approvals_never_share_one_card(tmp_path: Path) -> None:
-    """第二个同参数审批不能抢第一张卡：它会得到自己的兜底卡。"""
+def test_two_idless_approvals_each_get_own_fallback_card(tmp_path: Path) -> None:
+    """无 id 审批各自拿 `approval:{request_id}` 兜底卡，互不共用。"""
     translator = _translator(tmp_path)
     _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
     _feed_ok(
@@ -450,7 +451,8 @@ def test_two_approvals_never_share_one_card(tmp_path: Path) -> None:
         is_child=False,
         agent_id=None,
     )
-    assert first.matched == "args"
+    assert first.matched == "none"
+    assert first.tool_call_id == "approval:req-1"
     assert second.matched == "none"
     assert second.tool_call_id == "approval:req-2"
 
@@ -672,3 +674,157 @@ def test_raw_input_serialization_limit(tmp_path: Path) -> None:
     # 只有 rawInput 被丢弃；标题仍按设计显示截断后的参数。
     assert progress.raw_input is None
     assert progress.title.startswith("execute ")
+
+
+def test_approval_arriving_before_tool_started_claims_card_once(tmp_path: Path) -> None:
+    """审批先于 tool.started 到达：用同 id 建卡认领，随后 tool.started 复用该卡。"""
+    translator = _translator(tmp_path)
+    target = translator.prepare_approval(
+        request_id="req-1",
+        name="execute",
+        args={"command": "npm test"},
+        tool_call_id="call_0",
+        is_child=False,
+        agent_id=None,
+    )
+    assert target.matched == "id"
+    assert target.tool_call_id == acp_tool_call_id("r1", "call_0")
+    # 随后的 tool.started（同 id）复用这张卡：整个序列该 id 只有一次创建。
+    updates = _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    creates = [u for u in updates if u.session_update == "tool_call"]
+    assert len(creates) <= 1
+
+
+def test_two_approvals_with_distinct_ids_claim_their_own_cards(tmp_path: Path) -> None:
+    """同名同参数、id 不同的两次调用：两次审批各自挂各自的卡。"""
+    translator = _translator(tmp_path)
+    for cid in ("call_0", "call_1"):
+        _feed_ok(translator, _event("tool.started", {"tool_call_id": cid, "name": "execute"}))
+        _feed_ok(translator, _event("tool.delta", {"tool_call_id": cid, "arguments_delta": '{"command":"npm test"}'}))
+    first = translator.prepare_approval(
+        request_id="req-1", name="execute", args={"command": "npm test"},
+        tool_call_id="call_0", is_child=False, agent_id=None)
+    second = translator.prepare_approval(
+        request_id="req-2", name="execute", args={"command": "npm test"},
+        tool_call_id="call_1", is_child=False, agent_id=None)
+    assert first.tool_call_id == acp_tool_call_id("r1", "call_0")
+    assert second.tool_call_id == acp_tool_call_id("r1", "call_1")
+
+
+def test_approval_whose_id_card_is_final_uses_fallback(tmp_path: Path) -> None:
+    """审批 id 对应的卡已收尾 → 退到 `approval:{request_id}` 兜底卡。"""
+    translator = _translator(tmp_path)
+    _feed_ok(translator, _event("tool.started", {"tool_call_id": "call_0", "name": "execute"}))
+    _feed_ok(translator, _event("tool.completed", {"tool_call_id": "call_0", "output": "ok"}))
+    target = translator.prepare_approval(
+        request_id="req-7", name="execute", args={"command": "npm test"},
+        tool_call_id="call_0", is_child=False, agent_id=None)
+    assert target.matched == "none"
+    assert target.tool_call_id == "approval:req-7"
+
+
+def test_goal_changed_becomes_a_plan(tmp_path: Path) -> None:
+    """goal.changed 整表替换成 ACP 计划；完成的目标条目是 completed。"""
+    translator = _translator(tmp_path)
+    [update] = _feed_ok(
+        translator,
+        _event(
+            "goal.changed",
+            {
+                "reason": "proposal_applied",
+                "goal": {
+                    "status": "active",
+                    "criteria": [
+                        {"criterion_id": "c1", "text": "有失败用例"},
+                        {"criterion_id": "", "text": "跳过"},
+                        {"criterion_id": "c2", "text": ""},
+                    ],
+                },
+            },
+        ),
+    )
+    assert update.session_update == "plan"
+    assert [(entry.content, entry.status) for entry in update.entries] == [
+        ("有失败用例", "pending")
+    ]
+    [done] = _feed_ok(
+        translator,
+        _event(
+            "goal.changed",
+            {
+                "reason": "completed",
+                "goal": {
+                    "status": "complete",
+                    "criteria": [{"criterion_id": "c1", "text": "有失败用例"}],
+                },
+            },
+        ),
+    )
+    assert done.entries[0].status == "completed"
+
+
+def test_compose_progress_suppresses_goal_plan_but_keeps_text(tmp_path: Path) -> None:
+    """Compose 进行中不发 Goal 计划；结束后的判定仍用记住的条文。"""
+    translator = _translator(tmp_path)
+    assert _feed_ok(translator, _event("compose.progress", {"status": "active"})) == []
+    assert (
+        _feed_ok(
+            translator,
+            _event(
+                "goal.changed",
+                {
+                    "reason": "proposal_applied",
+                    "goal": {
+                        "status": "active",
+                        "criteria": [{"criterion_id": "c1", "text": "有失败用例"}],
+                    },
+                },
+            ),
+        )
+        == []
+    )
+    assert _feed_ok(translator, _event("compose.progress", {"status": "completed"})) == []
+    [update] = _feed_ok(
+        translator,
+        _event(
+            "goal.evaluation",
+            {
+                "phase": "checking",
+                "criteria": [{"criterion_id": "c1", "passed": False, "gap": None}],
+            },
+        ),
+    )
+    assert update.entries[0].content == "有失败用例"
+    assert update.entries[0].status == "in_progress"
+    assert update.entries[0].priority == "medium"
+
+
+def test_goal_evaluation_result_uses_passed_or_satisfied(tmp_path: Path) -> None:
+    """判定阶段：通过或整单 satisfied 标完成，其余回到 pending。"""
+    translator = _translator(tmp_path)
+    [update] = _feed_ok(
+        translator,
+        _event(
+            "goal.evaluation",
+            {
+                "phase": "result",
+                "result": "needs_revision",
+                "criteria": [
+                    {"criterion_id": "c1", "passed": True},
+                    {"criterion_id": "c2", "passed": False},
+                ],
+            },
+        ),
+    )
+    assert [entry.status for entry in update.entries] == ["completed", "pending"]
+    assert update.entries[1].content == "c2"
+    assert _feed_ok(translator, _event("goal.note", {})) == []
+    assert translator.ignored_types == set()
+
+
+def test_null_goal_clears_the_plan(tmp_path: Path) -> None:
+    """goal 为空时发一张空计划，把界面上的旧条目清掉。"""
+    translator = _translator(tmp_path)
+    [update] = _feed_ok(translator, _event("goal.changed", {"reason": "blocked", "goal": None}))
+    assert update.session_update == "plan"
+    assert update.entries == []

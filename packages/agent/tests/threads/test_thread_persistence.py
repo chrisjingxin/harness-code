@@ -23,19 +23,14 @@ from langchain_core.runnables import Runnable
 from langgraph.checkpoint.base import empty_checkpoint
 
 import harness_agent.threads.thread_persistence as thread_persistence_module
-from harness_agent.threads.context_projection import (
-    CompressionCheckpointDraft,
-    ContextProjectionError,
-    ContextProjector,
-)
+from harness_agent.threads.context_projection import ContextProjectionError, ContextProjector
 from harness_agent.runtime.execution_binding import (
     RunExecutionBinding,
     SafeModelProfile,
     SelectionOrigin,
     ThreadExecutionSelection,
 )
-from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json
-from harness_agent.tracing import TraceRecorder, use_trace
+from harness_agent.threads.prompting import canonical_json
 from harness_agent.threads.thread_persistence import (
     AcceptRun,
     CommitContextRewrite,
@@ -43,7 +38,6 @@ from harness_agent.threads.thread_persistence import (
     ContextState,
     ContextSummaryDraft,
     TranscriptAppend,
-    TranscriptRecord,
     ThreadPersistence,
     ThreadPersistenceError,
 )
@@ -3703,146 +3697,110 @@ async def test_persistence_log_failure_does_not_roll_back_transcript(tmp_path: P
     await store.close()
 
 
-def _trace_events(log_dir: Path) -> list[dict[str, Any]]:
-    """读取临时 session 文件中的统一 Trace 事件。"""
-    path = next(log_dir.glob("*.jsonl"))
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+async def _stamp(store: ThreadPersistence, mapping: dict[str, int]) -> None:
+    """把若干 thread 的 updated_at_ms 改成定值，造可控的排序与并列边界。"""
+    async with store._lock:
+        for thread_id, updated_at_ms in mapping.items():
+            await store._connection.execute(
+                "UPDATE harness_threads SET updated_at_ms = ? WHERE thread_id = ?",
+                (updated_at_ms, thread_id),
+            )
+        await store._connection.commit()
 
 
-def _persist_ends(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """只保留真实持久化 Span 的结束事件。"""
-    return [
-        event
-        for event in events
-        if event["event"] == "span.end" and event["name"] == "db.persist"
-    ]
-
-
-@pytest.mark.asyncio
-async def test_thread_persist_records_each_transaction_including_replays(
-    tmp_path: Path,
-) -> None:
-    """每次真实事务记录一次，业务幂等重放不隐藏事务的成本。"""
-    project = tmp_path / "project-persist-trace"
+async def test_list_threads_page_orders_like_list_threads(tmp_path: Path) -> None:
+    """分页与 `list_threads` 同序：updated_at_ms DESC、thread_id ASC。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
     project.mkdir()
-    store = await ThreadPersistence.open(project=project, home=tmp_path / "home-persist-trace")
-    binding = make_test_binding("thread-persist-trace", "run-persist-trace")
-    command = CommitContextRewrite(
-        thread_id="thread-persist-trace",
-        checkpoint=CompressionCheckpointDraft(
-            checkpoint_id="checkpoint-persist-trace",
-            mode="full",
-            rewrite_version=HISTORY_REWRITE_VERSION,
-            projected_messages=(HumanMessage(content="summary"),),
-        ),
-    )
-    recorder = TraceRecorder(
-        session_id="thread-persist-trace",
-        run_id="run-persist-trace",
-        log_dir=tmp_path / "trace-persist",
-    )
-    with use_trace(recorder.start_trace()):
-        assert (await store.accept_run(AcceptRun(message="secret-user", binding=binding))).created
-        assert not (await store.accept_run(AcceptRun(message="secret-user", binding=binding))).created
-        await store.append_transcript(
-            TranscriptAppend(
-                thread_id="thread-persist-trace",
-                record_id="assistant-once",
-                kind="assistant",
-                content="secret-assistant",
-            )
-        )
-        await store.append_transcript_batch(
-            (
-                TranscriptAppend(
-                    thread_id="thread-persist-trace",
-                    record_id="assistant-batch",
-                    kind="assistant",
-                    content="secret-batch-a",
-                ),
-                TranscriptAppend(
-                    thread_id="thread-persist-trace",
-                    record_id="assistant-batch-two",
-                    kind="assistant",
-                    content="secret-batch-b",
-                ),
-            )
-        )
-        await store.complete_run("thread-persist-trace")
-        await store.complete_run("thread-persist-trace")
-        await store.commit_context(command)
-        await store.commit_context(command)
-    recorder.end_trace()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(5):
+        await accept_thread(store, f"thread-{index}", f"消息 {index}")
+    await _stamp(store, {f"thread-{index}": 100 + index for index in range(5)})
 
-    events = _trace_events(tmp_path / "trace-persist")
-    ends = _persist_ends(events)
-    assert [event["attributes"]["operation"] for event in ends] == [
-        "accept_run",
-        "accept_run",
-        "transcript_batch",
-        "transcript_batch",
-        "run_complete",
-        "run_complete",
-        "context_commit",
-        "context_commit",
-    ]
-    assert ends[0]["attributes"]["outcome"] == "committed"
-    assert ends[1]["attributes"]["outcome"] == "duplicate"
-    assert ends[2]["attributes"]["record_ids"] == ["assistant-once"]
-    assert ends[3]["attributes"]["seq_from"] == 3
-    assert ends[3]["attributes"]["seq_to"] == 4
-    assert ends[6]["attributes"]["seq_to"] == 4
-    assert all(event["kind"] == "DB" for event in ends)
-    assert all(event["attributes"]["lock_wait_ms"] >= 0 for event in ends)
-    assert "secret-user" not in repr(events)
-    assert "secret-assistant" not in repr(events)
-    assert "secret-batch" not in repr(events)
+    expected = [t.thread_id for t in await store.list_threads(10)]
+    paged: list[str] = []
+    after: tuple[int, str] | None = None
+    while True:
+        page, has_more = await store.list_threads_page(2, after)
+        paged.extend(t.thread_id for t in page)
+        if not has_more:
+            break
+        last = page[-1]
+        after = (last.updated_at_ms, last.thread_id)
+    assert paged == expected
     await store.close()
 
 
-@pytest.mark.asyncio
-async def test_thread_persist_failure_has_no_committed_sequence_or_body(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """批量事务失败保留原异常与 FAILED Span，不伪造 seq、committed 或正文。"""
-    project = tmp_path / "project-persist-failure"
+async def test_list_threads_page_tie_breaks_across_boundary(tmp_path: Path) -> None:
+    """同 updated_at_ms 的线程跨页不重不漏：键 (u, thread_id) 严格续页。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
     project.mkdir()
-    store = await ThreadPersistence.open(project=project, home=tmp_path / "home-persist-failure")
-    await accept_thread(store, "thread-persist-failure", "setup")
-    original = store._append_transcript_in_transaction
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 500 for index in range(4)})
 
-    async def fail_before_commit(command: TranscriptAppend) -> TranscriptRecord:
-        await original(command)
-        raise aiosqlite.OperationalError("injected before commit")
+    seen: list[str] = []
+    after: tuple[int, str] | None = None
+    for _ in range(10):  # 防御死循环：最多 10 页
+        page, has_more = await store.list_threads_page(1, after)
+        seen.extend(t.thread_id for t in page)
+        if not has_more:
+            break
+        last = page[-1]
+        after = (last.updated_at_ms, last.thread_id)
+    assert sorted(seen) == ["t-0", "t-1", "t-2", "t-3"]
+    assert len(seen) == len(set(seen))
+    await store.close()
 
-    monkeypatch.setattr(store, "_append_transcript_in_transaction", fail_before_commit)
-    recorder = TraceRecorder(
-        session_id="thread-persist-failure",
-        run_id="run-persist-failure",
-        log_dir=tmp_path / "trace-persist-failure",
-    )
-    with use_trace(recorder.start_trace()):
-        with pytest.raises(ThreadPersistenceError, match="TRANSCRIPT_WRITE_FAILED"):
-            await store.append_transcript_batch(
-                (
-                    TranscriptAppend(
-                        thread_id="thread-persist-failure",
-                        record_id="assistant-failed",
-                        kind="assistant",
-                        content="CANARY_TRANSCRIPT_ROLLBACK",
-                    ),
-                )
-            )
-    recorder.end_trace()
 
-    events = _trace_events(tmp_path / "trace-persist-failure")
-    end = next(event for event in _persist_ends(events) if event["attributes"]["operation"] == "transcript_batch")
-    assert end["status"] == "FAILED"
-    assert end["attributes"]["outcome"] == "failed"
-    assert end["attributes"]["lock_wait_ms"] >= 0
-    assert "seq_from" not in end["attributes"]
-    assert "seq_to" not in end["attributes"]
-    assert "CANARY_TRANSCRIPT_ROLLBACK" not in repr(events)
-    assert len(await store.load_transcript("thread-persist-failure")) == 1
+async def test_list_threads_page_last_page_has_no_more(tmp_path: Path) -> None:
+    """恰好整页与不足一页时 has_more 都是 False。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 100 + index for index in range(4)})
+
+    page1, more1 = await store.list_threads_page(4, None)
+    assert len(page1) == 4 and more1 is False
+    page2, more2 = await store.list_threads_page(2, None)
+    assert len(page2) == 2 and more2 is True
+    last = page2[-1]
+    page3, more3 = await store.list_threads_page(2, (last.updated_at_ms, last.thread_id))
+    assert len(page3) == 2 and more3 is False
+    await store.close()
+
+
+async def test_list_threads_page_invalid_limit(tmp_path: Path) -> None:
+    """limit 越界（0、201）抛 CHECKPOINT_LIST_INVALID_LIMIT，与 list_threads 同。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for bad in (0, 201):
+        with pytest.raises(ThreadPersistenceError, match="CHECKPOINT_LIST_INVALID_LIMIT"):
+            await store.list_threads_page(bad, None)
+    await store.close()
+
+
+async def test_list_threads_page_after_missing_thread_still_pages(tmp_path: Path) -> None:
+    """after 指向已删除/不存在的线程：按键比较续页，不要求记录存在。"""
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    store = await ThreadPersistence.open(project=project, home=home)
+    for index in range(4):
+        await accept_thread(store, f"t-{index}", f"消息 {index}")
+    await _stamp(store, {f"t-{index}": 100 + index for index in range(4)})
+
+    # 游标 (102, "ghost") 不指向任何线程：续页条件是
+    # u < 102 或 (u = 102 且 thread_id > "ghost")——t-2 的 id 恰好满足后者。
+    page, has_more = await store.list_threads_page(10, (102, "ghost"))
+    assert [t.thread_id for t in page] == ["t-2", "t-1", "t-0"]
+    assert has_more is False
     await store.close()

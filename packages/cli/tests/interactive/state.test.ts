@@ -739,6 +739,38 @@ test("终态清理 compose projection", () => {
   expect(state.composeState).toBeNull()
 })
 
+test("restoreThread 回放 tool 消息带参数与真实状态（HC-200 S2 返工）", () => {
+  const restored = restoreThread("restored-thread", [
+    {
+      kind: "tool",
+      content: "读取失败",
+      toolName: "read_file",
+      toolCallId: "call-1",
+      toolArguments: { file_path: "/a.txt" },
+      toolStatus: "failed",
+    },
+    {
+      kind: "tool",
+      content: "输出内容",
+      toolName: "execute",
+      toolCallId: "call-2",
+      toolArguments: { command: "ls" },
+      toolStatus: "completed",
+    },
+    { kind: "tool", content: "旧数据工具", toolName: "execute" },
+  ])
+  const toolItems = restored.timeline.filter(i => i.type === "tool").map(i => i.tool)
+  expect(toolItems[0]).toMatchObject({
+    name: "read_file", status: "failed",
+    arguments: JSON.stringify({ file_path: "/a.txt" }),
+  })
+  expect(toolItems[1]).toMatchObject({
+    status: "completed", arguments: JSON.stringify({ command: "ls" }),
+  })
+  // 旧数据（无三键）回退：空参数 + completed
+  expect(toolItems[2]).toMatchObject({ status: "completed", arguments: "" })
+})
+
 test("restoreThread 保留会话级 workMode 并清空 compose projection", () => {
   const state = setWorkMode(createInitialState(), "compose")
   const restored = restoreThread("thread-2", [{ kind: "user", content: "历史" }], state.workMode)

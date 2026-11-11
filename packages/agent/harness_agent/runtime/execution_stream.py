@@ -640,6 +640,12 @@ def resume_value(spec: StreamInteractionRequest, response: object) -> dict[str, 
                 "expired": bool(response.get("expired")),
             }
         }
+    if spec.type == "question":
+        # 过期标记和错误文案会叠在同一个字典上。先认错误，避免被收成「用户取消」。
+        error = response.get("error")
+        message = error.strip() if isinstance(error, str) else ""
+        if response.get("status") == "error" or message:
+            return {spec.interrupt_id: {"status": "error", "error": message, "answers": []}}
     answers_by_id = response.get("answers", {})
     answers: list[str] = []
     if isinstance(answers_by_id, Mapping):

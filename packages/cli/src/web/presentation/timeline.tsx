@@ -1266,7 +1266,7 @@ function InteractionCardImpl({ interaction }: { interaction: InteractionCard }):
     >
       <div className="interaction-card-header">
         <span className="interaction-card-type">
-          {interaction.type === "approval" ? "审批" : interaction.type === "directory_trust" ? "目录信任" : "询问"}
+          {interactionTypeLabel(interaction.type)}
         </span>
         <span className={`interaction-card-status interaction-status-${label.tone}`}>
           {label.text}
@@ -1291,10 +1291,20 @@ MemoInteractionCard.displayName = "InteractionCard"
  * pending 不进入历史区（被 `live-interaction-slot` 取代），但保留分支避免
  * 状态类型未来增加时出现未匹配分支；cancelled 包含本地超时与远端失效两种来源。
  */
+function interactionTypeLabel(type: InteractionCard["type"]): string {
+  if (type === "approval") return "审批"
+  if (type === "directory_trust") return "目录信任"
+  if (type === "goal") return "审核目标"
+  if (type === "plan") return "审阅计划"
+  return "询问"
+}
+
 function interactionTerminalLabel(interaction: InteractionCard): {
   text: string
   tone: "ok" | "reject" | "timeout" | "neutral"
 } {
+  if (interaction.type === "goal" && interaction.status === "approved") return { text: "已接受", tone: "ok" }
+  if (interaction.type === "plan" && interaction.status === "approved") return { text: "已批准", tone: "ok" }
   const tones: Record<InteractionCard["status"], "ok" | "reject" | "timeout" | "neutral"> = {
     approved: "ok",
     rejected: "reject",

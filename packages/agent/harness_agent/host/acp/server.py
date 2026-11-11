@@ -21,8 +21,11 @@ Host 的扇出任务并发调 `sender` 进来的。如果直接在 `sender` 里 
     不同会话：允许并发（连接启用 run.multithread）
 
 【一次 prompt 的顺序】
-    prompt 请求 → 校验 → 转文本 → start_run(on_accepted 登记 Run)
+    prompt 请求 → 校验 → 转文本
+              → 内置斜杠命令：直接调 Host，不启动 Run，不写 Transcript
+              → 其余：start_run(on_accepted 登记 Run)
               → await run.done（由 pump 在推完终态之前的所有 update 之后 resolve）
+              → 终态里若有目标续跑，接着启动，本轮 prompt 先不返回
               → 返回 PromptResponse / 错误
 """
 
@@ -36,17 +39,21 @@ import sys
 import time
 import uuid
 from collections.abc import Coroutine, Mapping, Sequence
+from urllib.parse import unquote, urlparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from acp.exceptions import RequestError
-from acp.helpers import SessionUpdate
+from acp.helpers import SessionUpdate, text_block
 from acp.schema import (
     AgentCapabilities,
+    AgentMessageChunk,
     AvailableCommandsUpdate,
+    ConfigOptionUpdate,
     CurrentModeUpdate,
     Implementation,
+    CloseSessionResponse,
     InitializeResponse,
     ListSessionsResponse,
     LoadSessionResponse,
@@ -54,24 +61,71 @@ from acp.schema import (
     NewSessionResponse,
     PromptCapabilities,
     PromptResponse,
+    ResumeSessionResponse,
+    SessionAdditionalDirectoriesCapabilities,
     SessionCapabilities,
+    SessionCloseCapabilities,
+    SessionConfigOptionSelect,
     SessionListCapabilities,
+    SessionResumeCapabilities,
+    SetSessionConfigOptionResponse,
     SetSessionModeResponse,
     ToolCallUpdate,
+    Usage,
+    UsageUpdate,
 )
 
 from harness_agent import __version__
 from harness_agent.diagnostic_log.runtime import ensure_log
 from harness_agent.extensions.plugin_skills import SkillError
 from harness_agent.extensions.skills import SkillError as CatalogSkillError
-from harness_agent.host.acp.commands import CommandIndex
+from harness_agent.host.acp.commands import (
+    ABANDON_TEXT,
+    QUEUED_GOAL_TEXT,
+    REDO_TEXT,
+    TITLE_TEXT,
+    UNDO_TEXT,
+    CommandIndex,
+    GoalVerb,
+    compact_sentence,
+    goal_inspect_text,
+    goal_mutate_text,
+    parse_builtin,
+    undo_target,
+    validate_builtin,
+)
+from harness_agent.host.acp.config import (
+    MODEL_CONFIG_ID,
+    WORKFLOW_CONFIG_ID,
+    build_config_options,
+    option_values,
+)
+from harness_agent.host.acp.inline import (
+    MAX_SINGLE_FILE_BYTES,
+    InlineBudget,
+    InlinePiece,
+    join_model_message,
+    piece_for_bytes,
+    placeholder,
+)
 from harness_agent.host.acp.ext import (
     Negotiation,
     agent_capabilities_meta,
+    command_chunk_meta,
+    command_meta,
+    merge_harness_meta,
     negotiate,
     run_meta,
 )
-from harness_agent.host.acp.modes import MODE_IDS, default_mode, mode_state
+from harness_agent.host.acp.elicitation import (
+    ElicitationBroker,
+    FormJob,
+    forms_enabled,
+    goal_form,
+    plan_form,
+    question_form,
+)
+from harness_agent.host.acp.modes import allowed_mode_ids, default_mode, mode_state
 from harness_agent.host.acp.permissions import (
     PermissionBroker,
     PermissionDone,
@@ -81,19 +135,29 @@ from harness_agent.host.acp.permissions import (
     parse_interaction,
 )
 from harness_agent.host.acp.sessions import (
-    LIST_SESSIONS_LIMIT,
+    SESSIONS_PAGE_SIZE,
+    decode_cursor,
+    encode_cursor,
     replay_updates,
     session_info,
     session_info_update,
 )
 from harness_agent.host.acp.tool_display import PathLocator
 from harness_agent.host.acp.translate import (
+    MAX_OUTBOUND_FRAME_BYTES,
     TERMINAL_EVENT_TYPES,
     RunOutcome,
     RunTranslator,
+    frame_chars,
 )
 from harness_agent.host.connection import ProtocolConnection, RpcError
-from harness_agent.host.run_coordinator import RunError, UserRunInput
+from harness_agent.host.run_coordinator import (
+    GoalContinuationRunInput,
+    GoalProposalRunInput,
+    InteractionMode,
+    RunError,
+    UserRunInput,
+)
 from harness_agent.host.service_types import (
     ApprovalModeName,
     HostServicePort,
@@ -114,7 +178,12 @@ _UPPERCASE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 _SUPPORTED_INTERACTIONS: frozenset[str] = frozenset(
     {"interaction.approval", "interaction.directory_trust"}
 )
-"""本服务真的能翻译成 ACP 权限请求的交互类型；其余一律 fail-closed。"""
+"""没声明表单时能翻译的交互。提问、计划和目标只在声明了表单之后才入队。"""
+
+_FORM_INTERACTIONS: frozenset[str] = frozenset(
+    {"interaction.question", "interaction.plan", "interaction.goal"}
+)
+"""会画表单时改走 elicitation，不再按未知交互立刻拒绝。"""
 
 _MODE_RACE_CODES: frozenset[str] = frozenset(
     {
@@ -135,6 +204,11 @@ class _Session:
     busy: bool = False
     cancel_requested: bool = False
     run: _ActiveRun | None = None
+    # 切到 plan 之前的模式。批准计划后 Host 用它切回去。
+    mode_before_plan: ApprovalModeName | None = None
+    # 下一轮 prompt 才读这两项。运行中改配置不回头改已经受理的 Run。
+    model_id: str | None = None
+    workflow: str = "build"
 
 
 @dataclass(slots=True)
@@ -145,6 +219,59 @@ class _ActiveRun:
     session_id: str
     translator: RunTranslator
     done: asyncio.Future[RunOutcome] = field(default=None)  # type: ignore[assignment]
+
+
+@dataclass(frozen=True, slots=True)
+class _GoalFollow:
+    """`/goal` 创建或修订：请求已记下，还要启动一轮真正的 Run。"""
+
+    run_input: GoalProposalRunInput
+    command: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class _GoalResume:
+    """`/goal resume` 的说明已经发出，还要按续跑编号把任务做起来。"""
+
+    run_id: str
+    run_input: GoalContinuationRunInput
+    command: dict[str, object]
+
+
+_GoalContinuationReason = Literal["accepted", "amended", "resumed"]
+
+
+def goal_continuation_from(value: object) -> tuple[str, GoalContinuationRunInput] | None:
+    """从终态 context 或 mutate 结果取出续跑。字段不全就当没有，不启动。"""
+    if not isinstance(value, Mapping):
+        return None
+    continuation_id = value.get("continuation_id")
+    goal_id = value.get("goal_id")
+    revision = value.get("goal_revision")
+    reason = value.get("reason")
+    if not isinstance(continuation_id, str) or not continuation_id:
+        return None
+    if not isinstance(goal_id, str) or not goal_id:
+        return None
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        return None
+    if reason not in {"accepted", "amended", "resumed"}:
+        return None
+    return continuation_id, GoalContinuationRunInput(
+        goal_id=goal_id,
+        goal_revision=revision,
+        reason=cast(_GoalContinuationReason, reason),
+    )
+
+
+def continuation_from_outcome(outcome: RunOutcome) -> tuple[str, GoalContinuationRunInput] | None:
+    """只在成功终态里找续跑。取消或失败不再接着做。"""
+    if outcome.kind != "completed" or outcome.summary is None:
+        return None
+    context = outcome.summary.get("context")
+    if not isinstance(context, Mapping):
+        return None
+    return goal_continuation_from(context.get("goal_continuation"))
 
 
 def to_request_error(
@@ -201,11 +328,17 @@ def to_request_error(
                 {"code": "THREAD_NOT_FOUND", "retryable": False},
             )
         if exc.code == -32602:
-            return RequestError(
-                -32602,
-                exc.message,
-                {"code": "INVALID_PARAMS", "message": _truncate(exc.message), "retryable": False},
-            )
+            message = exc.message or ""
+            # 已经是稳定大写码的参数错误原样对外；普通文案仍收成 INVALID_PARAMS。
+            code = message if _UPPERCASE_CODE.match(message) else "INVALID_PARAMS"
+            data: dict[str, object] = {
+                "code": code,
+                "message": _truncate(message),
+                "retryable": False,
+            }
+            if isinstance(exc.data, Mapping) and "path" in exc.data:
+                data["path"] = exc.data["path"]
+            return RequestError(-32602, message, data)
         message = exc.message or ""
         if _UPPERCASE_CODE.match(message):
             code = message
@@ -288,6 +421,9 @@ class AcpServer:
         self._log = ensure_log(log)
         self._client: Any | None = None
         self._connection: ProtocolConnection | None = None
+        # 握手闸门（§6.1）：initialize 一进入就创建，结束时 resolve。
+        # True=成功 False=失败；不用 set_exception，避免「无等待者」告警。
+        self._init_future: asyncio.Future[bool] | None = None
         self._sessions: dict[str, _Session] = {}
         self._runs: dict[str, _ActiveRun] = {}
         self._outbox: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
@@ -300,6 +436,8 @@ class AcpServer:
         self._snapshot: HostSnapshot | None = None
         self._request_tasks: set[asyncio.Task[None]] = set()
         self._broker: PermissionBroker | None = None
+        self._forms = False
+        self._elicitation: ElicitationBroker | None = None
         # 连接级命令表（2.5）。握手时绑定一次；绑定失败就保持空表，`/x` 当普通文本。
         self._commands: CommandIndex = CommandIndex()
         # 扩展协商（2.7）。没协商成功时任何帧都不带 `_meta.harnessCode`。
@@ -324,11 +462,15 @@ class AcpServer:
               资源初始化失败（客户端应重试或提示用户）。
         """
         started = time.monotonic()
-        if self._connection is not None:
+        if self._init_future is not None:
             raise RequestError(-32600, "ALREADY_INITIALIZED", {"code": "ALREADY_INITIALIZED"})
+        # 必须在第一个 await 之前创建：流水线到达的 session/* 会凭它判断
+        # 「initialize 进行中」而不是「还没握手」。
+        self._init_future = asyncio.get_running_loop().create_future()
         try:
             snapshot = await self._host.ensure_ready()
         except Exception as exc:
+            self._init_future.set_result(False)
             self._log_failure("initialize", started, "ensure_ready", exc, "HOST_INIT_FAILED")
             raise RequestError(
                 -32603,
@@ -338,11 +480,37 @@ class AcpServer:
         self._snapshot = snapshot
         # 协商只在第一次握手做；没声明或声明无效时 `self._ext` 保持默认（全部关闭）。
         self._ext = negotiate(client_capabilities)
+        self._forms = forms_enabled(client_capabilities)
+        handles = ["approval", "directory_trust"]
+        if self._forms:
+            handles.extend(("question", "plan", "goal"))
+        capabilities = [
+            "run.multithread",
+            "run.cancel",
+            "threads.read",
+            "run.approval_mode",
+            "models.select",
+            "context.manage",
+        ]
+        if self._forms:
+            capabilities.append("goal.manage")
         self._connection = self._host.open_connection(
             self._sender,
-            enabled_capabilities=("run.multithread", "run.cancel", "threads.read"),
-            interaction_handles=("approval", "directory_trust"),
+            enabled_capabilities=tuple(capabilities),
+            interaction_handles=tuple(handles),
             role="owner",
+        )
+        # 目录变了要重推命令表。别的 v3 连接不看这条通知。
+        self._connection.watch_command_catalog = True
+        self._elicitation = (
+            ElicitationBroker(
+                host=self._host,
+                connection=self._connection,
+                client=self._client,
+                log=self._log,
+            )
+            if self._forms
+            else None
         )
         self._broker = PermissionBroker(
             host=self._host,
@@ -350,19 +518,29 @@ class AcpServer:
             client=self._client,
             log=self._log,
             on_done=self._on_permission_done,
+            elicitation=self._elicitation,
         )
         await self._bind_commands(snapshot)
         self._pump_task = asyncio.create_task(self._pump(), name="harness-acp-pump")
         self._log_request("initialize", started)
+        # resolve 必须发生在返回之前：从这里到 SDK 把响应 put 进发送队列之间
+        # 没有挂起点（无界队列 put 不让出），被唤醒的 session/* 任务只会在
+        # 本响应入队之后才得到运行机会，所以「initialize 响应一定先到达」。
+        self._init_future.set_result(True)
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,
             agent_capabilities=AgentCapabilities(
                 load_session=True,
                 prompt_capabilities=PromptCapabilities(
-                    image=False, audio=False, embedded_context=False
+                    image=False, audio=False, embedded_context=True
                 ),
-                mcp_capabilities=McpCapabilities(http=False, sse=False, acp=False),
-                session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
+                mcp_capabilities=McpCapabilities(http=True, sse=False, acp=False),
+                session_capabilities=SessionCapabilities(
+                    list=SessionListCapabilities(),
+                    resume=SessionResumeCapabilities(),
+                    close=SessionCloseCapabilities(),
+                    additional_directories=SessionAdditionalDirectoriesCapabilities(),
+                ),
                 field_meta=agent_capabilities_meta(self._ext),
             ),
             auth_methods=[],
@@ -382,13 +560,12 @@ class AcpServer:
     ) -> NewSessionResponse:
         """建立会话：校验 cwd 是本进程绑定的工作区，生成 sessionId。
 
-        异常：`-32600` 未 initialize；`-32602` + `WORKSPACE_MISMATCH` cwd 不匹配。
-        `mcpServers` / `additionalDirectories` 在 S1 只记个数到 stderr（可能含密钥，
-        绝不回显），会话照常创建。
+        异常：`-32600` 未 initialize；`-32602` + `WORKSPACE_MISMATCH` cwd 不匹配；
+              `-32602` + `INVALID_ADDITIONAL_DIRECTORY` 附加目录整单拒绝。
+        会话 MCP 里跳过的项只记诊断，不让建会话失败，也不把命令或环境变量写进日志。
         """
         started = time.monotonic()
-        if self._connection is None:
-            raise RequestError(-32600, "NOT_INITIALIZED", {"code": "NOT_INITIALIZED"})
+        await self._ready()
         workspace = self._host.workspace
         if not _same_workspace(cwd, workspace):
             self._log_failure("session/new", started, "workspace_check", None, "WORKSPACE_MISMATCH")
@@ -397,17 +574,18 @@ class AcpServer:
                 "WORKSPACE_MISMATCH",
                 {"code": "WORKSPACE_MISMATCH", "expected": str(workspace)},
             )
-        _report_ignored("mcpServers", mcp_servers)
-        _report_ignored("additionalDirectories", additional_directories)
         session_id = str(uuid.uuid4())
-        mode = _session_mode(self._snapshot)
-        self._sessions[session_id] = _Session(session_id=session_id, approval_mode=mode)
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
+        mode = _session_mode(self._snapshot, plan=self._forms)
+        session = _Session(session_id=session_id, approval_mode=mode)
+        self._sessions[session_id] = session
         self._log_request("session/new", started)
         # 命令列表在响应之后到达：SDK 先把响应入队，后台任务才开始跑。
         self._spawn(self._push_commands(session_id))
         return NewSessionResponse(
             session_id=session_id,
-            modes=mode_state(mode),
+            modes=mode_state(mode, plan=self._forms),
+            config_options=await self._config_options(session),
         )
 
     async def load_session(
@@ -427,6 +605,7 @@ class AcpServer:
               `-32002` + `THREAD_NOT_FOUND`（线程不存在，含 `session/new` 后还没落库）。
         """
         started = time.monotonic()
+        await self._ready()
         connection = self._require_connection()
         if self._closing:
             raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
@@ -439,20 +618,117 @@ class AcpServer:
                 "WORKSPACE_MISMATCH",
                 {"code": "WORKSPACE_MISMATCH", "expected": str(self._host.workspace)},
             )
-        _report_ignored("mcpServers", mcp_servers)
-        _report_ignored("additionalDirectories", additional_directories)
-        # 下面这段到 `_begin_request()` 必须在一个同步段内完成：先置 busy 占位再 await，
-        # 否则两个并发的 load 会同时通过检查，把同一份历史回放两遍。
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
+        session = await self._prepare_thread_session(
+            connection, session_id, "session/load", started, replay=True
+        )
+        self._log_request("session/load", started)
+        self._spawn(self._push_commands(session_id))
+        return LoadSessionResponse(
+            modes=mode_state(session.approval_mode, plan=self._forms),
+            config_options=await self._config_options(session),
+        )
+
+    async def resume_session(
+        self,
+        cwd: str,
+        session_id: str,
+        additional_directories: list[object] | None = None,
+        mcp_servers: list[object] | None = None,
+        **kwargs: object,
+    ) -> ResumeSessionResponse:
+        """续接已落库线程：订阅事件但不回放历史，响应带模式。
+
+        输入/校验与 `session/load` 完全一致；已在本连接登记且空闲的会话直接
+        幂等成功（不重复读库、不重复订阅），两边都会照推一次命令表。
+        异常：同 `session/load`（含 THREAD_BUSY / THREAD_NOT_FOUND / WORKSPACE_MISMATCH）。
+        """
+        started = time.monotonic()
+        await self._ready()
+        connection = self._require_connection()
+        if self._closing:
+            raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
+        if not _same_workspace(cwd, self._host.workspace):
+            self._log_failure(
+                "session/resume", started, "workspace_check", None, "WORKSPACE_MISMATCH"
+            )
+            raise RequestError(
+                -32602,
+                "WORKSPACE_MISMATCH",
+                {"code": "WORKSPACE_MISMATCH", "expected": str(self._host.workspace)},
+            )
+        await self._apply_session_resources(session_id, additional_directories, mcp_servers)
+        existing = self._sessions.get(session_id)
+        if existing is not None and not existing.busy:
+            self._log_request("session/resume", started)
+            self._spawn(self._push_commands(session_id))
+            return ResumeSessionResponse(
+                modes=mode_state(existing.approval_mode, plan=self._forms),
+                config_options=await self._config_options(existing),
+            )
+        session = await self._prepare_thread_session(
+            connection, session_id, "session/resume", started, replay=False
+        )
+        self._log_request("session/resume", started)
+        self._spawn(self._push_commands(session_id))
+        return ResumeSessionResponse(
+            modes=mode_state(session.approval_mode, plan=self._forms),
+            config_options=await self._config_options(session),
+        )
+
+    async def close_session(
+        self, session_id: str, **kwargs: object
+    ) -> CloseSessionResponse:
+        """关闭会话：取消在途 Run 与挂起审批、退订线程、移除登记；幂等。
+
+        未知会话静默成功；已知会话的在途 Run 按现有取消语义收尾（对应 prompt
+        响应为 cancelled）。S4 在此处释放会话级 MCP 与附加目录。
+        """
+        await self._ready()
+        connection = self._require_connection()
+        session = self._sessions.get(session_id)
+        if session is None:
+            return CloseSessionResponse()
+        # 与 session/cancel 同序：先让 Run 进取消，再取消权限任务，避免
+        # 「拒绝」抢在「取消」之前多恢复一轮。
+        session.cancel_requested = True
+        active = session.run
+        if active is not None:
+            await self._cancel_active(active)
+        if self._broker is not None:
+            self._broker.cancel_session(session_id)
+        if self._elicitation is not None:
+            self._elicitation.cancel_session(session_id)
+        self._host.unwatch_thread(connection, session_id)
+        self._sessions.pop(session_id, None)
+        await self._drop_session_resources(session_id)
+        return CloseSessionResponse()
+
+    async def _prepare_thread_session(
+        self,
+        connection: ProtocolConnection,
+        session_id: str,
+        method: str,
+        started: float,
+        *,
+        replay: bool,
+    ) -> _Session:
+        """load/resume 共用段：占位 + 订阅 + 失败清理；`replay` 决定是否回放历史。
+
+        同步段内先置 busy 占位再 await：并发 load/resume 只有一个能过 busy
+        检查，另一个立刻 THREAD_BUSY，不会重复读库或重复回放。
+        """
         existing = self._sessions.get(session_id)
         if existing is not None and existing.busy:
             raise RequestError(
                 -32603, "THREAD_BUSY", {"code": "THREAD_BUSY", "retryable": True}
             )
         session = existing or _Session(
-            session_id=session_id, approval_mode=_session_mode(self._snapshot)
+            session_id=session_id,
+            approval_mode=_session_mode(self._snapshot, plan=self._forms),
         )
         created = existing is None
-        # 失败时只摘掉本次新加的订阅：该会话之前若已 load 成功，旧订阅要保留。
+        # 失败时只摘掉本次新加的订阅：该会话之前若已订阅成功，旧订阅要保留。
         was_watching = session_id in connection.watched_threads
         session.busy = True
         if created:
@@ -460,10 +736,11 @@ class AcpServer:
         self._begin_request()
         try:
             opened = await self._host.open_and_watch_thread(connection, session_id)
-            messages = opened.get("messages")
-            if isinstance(messages, Sequence) and not isinstance(messages, str):
-                for update in replay_updates(session_id, messages):
-                    await self._send(session_id, update)
+            if replay:
+                messages = opened.get("messages")
+                if isinstance(messages, Sequence) and not isinstance(messages, str):
+                    for update in replay_updates(session_id, messages, PathLocator(self._host.resolve_display_path)):
+                        await self._send(session_id, update)
         except BaseException as exc:
             # 失败时把占位、订阅、在途计数全部收干净，否则该会话永远 busy。
             if created:
@@ -471,15 +748,13 @@ class AcpServer:
             if not was_watching:
                 self._host.unwatch_thread(connection, session_id)
             if isinstance(exc, Exception):
-                self._log_failure("session/load", started, "open_thread", exc, "LOAD_FAILED")
+                self._log_failure(method, started, "open_thread", exc, "THREAD_SESSION_FAILED")
                 raise to_request_error(exc, startup_error=None) from exc
             raise
         finally:
             session.busy = False
             self._finish_request()
-        self._log_request("session/load", started)
-        self._spawn(self._push_commands(session_id))
-        return LoadSessionResponse(modes=mode_state(session.approval_mode))
+        return session
 
     async def list_sessions(
         self,
@@ -487,30 +762,48 @@ class AcpServer:
         cursor: str | None = None,
         **kwargs: object,
     ) -> ListSessionsResponse:
-        """列出当前工作区的会话：固定 200 条，不分页。
+        """列出当前工作区的会话：每页 50 条，游标 keyset 翻页。
 
-        输入：`cwd` 必须是本进程绑定的工作区；`cursor` 我们从不发出，收到就表示
-              客户端已经翻过末页，直接回空列表。
-        输出：按最后活动时间倒序的 `SessionInfo` 列表，不带 `nextCursor`。
-        异常：`-32600` 未 initialize；`-32603` + `THREADS_UNAVAILABLE_IN_ECHO_MODE`
-              （echo 模式没有线程存储）。
+        输入：`cwd` 必须是本进程绑定的工作区（先判，不匹配直接回空且不解游标）；
+              `cursor` 是上一页 `nextCursor` 原值。
+        输出：按最后活动时间倒序的 `SessionInfo` 列表；`has_more` 时带 `nextCursor`，
+              取本页最后一条的 (updated_at_ms, thread_id) 编码。
+        异常：`-32600` 未 initialize；`-32602` + `INVALID_CURSOR`（游标乱码或形状不对）；
+              `-32603` + `THREADS_UNAVAILABLE_IN_ECHO_MODE`（echo 模式没有线程存储）。
         """
         started = time.monotonic()
+        await self._ready()
         self._require_connection()
         if self._closing:
             raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
         workspace = self._host.workspace
-        if (cwd is not None and not _same_workspace(cwd, workspace)) or cursor is not None:
+        if cwd is not None and not _same_workspace(cwd, workspace):
             return ListSessionsResponse(sessions=[])
+        after: tuple[int, str] | None = None
+        if cursor is not None:
+            try:
+                after = decode_cursor(cursor)
+            except RequestError as exc:
+                self._log_failure(
+                    "session/list", started, "cursor_decode", exc, "INVALID_CURSOR"
+                )
+                raise
         try:
-            threads = await self._host.list_threads(LIST_SESSIONS_LIMIT)
+            threads, has_more = await self._host.list_threads_page(
+                SESSIONS_PAGE_SIZE, after
+            )
         except Exception as exc:
             # 统一交给 `to_request_error` 一个出口：这里只记日志再抛出，不吞异常。
-            self._log_failure("session/list", started, "list_threads", exc, "LIST_FAILED")
+            self._log_failure("session/list", started, "list_threads_page", exc, "LIST_FAILED")
             raise to_request_error(exc, startup_error=None) from exc
         self._log_request("session/list", started)
+        next_cursor = None
+        if has_more and threads:
+            last = threads[-1]
+            next_cursor = encode_cursor((last.updated_at_ms, last.thread_id))
         return ListSessionsResponse(
-            sessions=[session_info(thread, workspace) for thread in threads]
+            sessions=[session_info(thread, workspace, self._ext) for thread in threads],
+            next_cursor=next_cursor,
         )
 
     async def prompt(
@@ -525,12 +818,12 @@ class AcpServer:
               运行失败；`-32602` 内容块不支持或空 prompt。
         """
         started = time.monotonic()
+        await self._ready()
         connection = self._connection
         session = self._sessions.get(session_id)
         if connection is None or session is None:
             raise RequestError.resource_not_found(session_id)
-        # 下面这段（含内容转换）必须在一个同步段内完成，中间不能 await：
-        # 否则两个并发 prompt 可能都通过 busy 检查，双双进入 start_run。
+        # busy 必须在第一个 await 之前置位，否则两个 prompt 会同时通过检查。
         if self._closing:
             raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
         if session.busy:
@@ -539,51 +832,78 @@ class AcpServer:
                 "THREAD_BUSY",
                 {"code": "THREAD_BUSY", "retryable": True},
             )
-        text = prompt_text(prompt)
+        # 先占住会话再读文件：读盘会让出，不能让第二个 prompt 也通过 busy 检查。
         session.busy = True
-        # 上一轮的迟到 cancel 不能误伤这一轮。
         session.cancel_requested = False
         self._begin_request()
-        run_id = str(uuid.uuid4())
+        try:
+            text, model_message = await self._prepare_prompt(prompt)
+        except BaseException:
+            session.busy = False
+            self._finish_request()
+            raise
+        builtin = parse_builtin(text, forms=self._forms)
+        goal_follow: GoalProposalRunInput | GoalContinuationRunInput | None = None
+        goal_command: dict[str, object] | None = None
+        preset_run_id: str | None = None
+        if builtin is not None:
+            try:
+                handled = await self._run_builtin(connection, session, builtin)
+            except asyncio.CancelledError:
+                session.busy = False
+                self._finish_request()
+                raise
+            except RequestError:
+                session.busy = False
+                self._finish_request()
+                raise
+            except BaseException as exc:
+                session.busy = False
+                self._finish_request()
+                raise self._builtin_error(exc) from exc
+            if isinstance(handled, PromptResponse):
+                session.busy = False
+                self._finish_request()
+                self._log_request("session/prompt", started)
+                return handled
+            if isinstance(handled, _GoalResume):
+                preset_run_id = handled.run_id
+            goal_follow = handled.run_input
+            goal_command = handled.command
+        run_id = preset_run_id or str(uuid.uuid4())
+        # 续跑可能再接一轮。结束时每一轮都要摘掉，不能只摘最后一轮的编号。
+        tracked_runs = [run_id]
         # 本次 Run 提交给 Host 的模式；若用户在准备阶段改了模式，`on_accepted` 会补发。
         effective_mode = session.approval_mode
-        active = _ActiveRun(
-            run_id=run_id,
-            session_id=session_id,
-            translator=RunTranslator(run_id, PathLocator(self._host.workspace)),
-            done=asyncio.get_running_loop().create_future(),
-        )
-
-        async def on_accepted(_accepted: object) -> None:
-            # 登记不晚于第一个事件：扇出任务在回调之后才创建。
-            session.run = active
-            self._runs[run_id] = active
-            if session.cancel_requested:
-                await self._cancel_active(active)
-                return
-            if session.approval_mode != effective_mode:
-                # 用户在 Run 准备阶段改了模式：这次 Run 已用旧模式起来，补一次提交，
-                # 免得上层看到的模式与实际生效的模式不一致。
-                with contextlib.suppress(RunError):
-                    # Run 刚好结束或被取消：模式已经记在会话上，不向客户端报错。
-                    await self._host.set_approval_mode(
-                        connection, session_id, run_id, session.approval_mode
-                    )
 
         try:
-            await self._host.start_run(
-                connection,
-                StartRunRequest(
-                    thread_id=session_id,
-                    run_id=run_id,
-                    mode="build",
-                    input=UserRunInput(text, requested_skill=self._commands.match(text)),
-                    requested_approval_mode=session.approval_mode,
-                ),
-                on_accepted=on_accepted,
+            # `/goal` 即使用户停在 Compose，也按 Build 跑确认；其余沿用会话工作模式。
+            workflow: InteractionMode = "build" if goal_follow is not None or session.workflow != "compose" else "compose"
+            run_input = goal_follow if goal_follow is not None else UserRunInput(
+                text,
+                requested_skill=self._commands.match(text),
+                model_message=None if model_message == text else model_message,
             )
-            outcome = await active.done
+            outcome = await self._await_host_run(
+                connection,
+                session,
+                session_id,
+                run_id,
+                run_input,
+                workflow=workflow,
+                effective_mode=effective_mode,
+            )
+            outcome = await self._follow_goal_continuations(
+                connection,
+                session,
+                session_id,
+                outcome,
+                effective_mode,
+                tracked_runs,
+            )
         except asyncio.CancelledError:
+            raise
+        except RequestError:
             raise
         except BaseException as exc:
             if session.cancel_requested:
@@ -597,20 +917,27 @@ class AcpServer:
             # 否则 wait_idle 会一直等到宽限期结束才返回。
             session.busy = False
             session.run = None
-            self._runs.pop(run_id, None)
-            # Run 终态后清掉它挂起的权限任务：客户端可能永远不回答。
-            if self._broker is not None:
-                self._broker.cancel_run(run_id)
+            for tracked in tracked_runs:
+                self._runs.pop(tracked, None)
+                # Run 终态后清掉它挂起的权限任务：客户端可能永远不回答。
+                if self._broker is not None:
+                    self._broker.cancel_run(tracked)
+                if self._elicitation is not None:
+                    self._elicitation.cancel_run(tracked)
             self._finish_request()
         self._log_request("session/prompt", started)
-        return self._prompt_response(outcome, session)
+        response = self._prompt_response(outcome, session)
+        if goal_command is not None and self._ext.commands:
+            merged = merge_harness_meta(response.field_meta, command_meta(goal_command))
+            response = response.model_copy(update={"field_meta": merged})
+        return response
 
     async def set_session_mode(
         self, session_id: str, mode_id: str, **kwargs: object
     ) -> SetSessionModeResponse:
         """切换审批模式：有活动 Run 就提交给 Host，没有就只记在会话上。
 
-        输入：`mode_id` 必须是四个对外模式之一（`plan` 也是非法值）。
+        输入：`mode_id` 必须是当前连接广告过的模式。没声明表单时 `plan` 也是非法值。
         输出：`SetSessionModeResponse`；模式真的变了才推 `current_mode_update`。
         异常：`-32600` 未 initialize；`-32002` 未知会话；`-32602` + `UNKNOWN_MODE`；
               `-32603` + `RUN_APPROVAL_MODE_BUSY`（正在等审批，可重试）或
@@ -618,17 +945,27 @@ class AcpServer:
               `NOT_FOUND` / `TERMINAL` / `CANCELLED` 是同一类竞态，只记在会话上。
         """
         started = time.monotonic()
+        await self._ready()
         connection = self._require_connection()
         if self._closing:
             raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
         session = self._sessions.get(session_id)
         if session is None:
             raise RequestError.resource_not_found(session_id)
-        if mode_id not in MODE_IDS:
+        if mode_id not in allowed_mode_ids(plan=self._forms):
             raise RequestError(
                 -32602, "UNKNOWN_MODE", {"code": "UNKNOWN_MODE", "retryable": False}
             )
         mode: ApprovalModeName = cast(ApprovalModeName, mode_id)
+        previous_mode = session.approval_mode
+        previous_before = session.mode_before_plan
+        # 先记到会话上再提交 Host：模式回声可能在 await 返回前就进泵，
+        # 会话已经是新值时泵不再补发第二帧。
+        session.approval_mode = mode
+        if mode == "plan" and previous_mode != "plan":
+            session.mode_before_plan = previous_mode
+        elif previous_mode == "plan" and mode != "plan":
+            session.mode_before_plan = None
         active = session.run
         if active is not None:
             try:
@@ -637,10 +974,11 @@ class AcpServer:
                 )
             except RunError as exc:
                 if exc.code not in _MODE_RACE_CODES:
+                    session.approval_mode = previous_mode
+                    session.mode_before_plan = previous_before
                     # 忙与计划锁定是真失败：模式不记，交给统一错误映射给客户端。
                     raise to_request_error(exc, startup_error=None) from exc
-        changed = session.approval_mode != mode
-        session.approval_mode = mode
+        changed = previous_mode != mode
         if changed:
             await self._send(
                 session_id,
@@ -650,6 +988,67 @@ class AcpServer:
             )
         self._log_request("session/set_mode", started)
         return SetSessionModeResponse()
+
+    async def set_config_option(
+        self,
+        config_id: str,
+        session_id: str,
+        value: str | bool,
+        **kwargs: object,
+    ) -> SetSessionConfigOptionResponse:
+        """改模型或工作流。只影响下一轮 prompt，不改已经在跑的 Run。
+
+        未知 id 回 `UNKNOWN_CONFIG_OPTION`，值不在可选项里回 `INVALID_CONFIG_VALUE`。
+        成功时既推 `config_option_update`，也在响应里带回整套选项。
+        """
+        await self._ready()
+        if self._closing:
+            raise RequestError(-32603, "SHUTTING_DOWN", {"code": "SHUTTING_DOWN"})
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise RequestError.resource_not_found(session_id)
+        if not isinstance(value, str):
+            raise RequestError(
+                -32602,
+                "INVALID_CONFIG_VALUE",
+                {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+            )
+        options = await self._config_options(session)
+        if config_id == MODEL_CONFIG_ID:
+            model = next((item for item in options if item.id == MODEL_CONFIG_ID), None)
+            if model is None:
+                raise RequestError(
+                    -32602,
+                    "UNKNOWN_CONFIG_OPTION",
+                    {"code": "UNKNOWN_CONFIG_OPTION", "retryable": False},
+                )
+            if value not in option_values(model):
+                raise RequestError(
+                    -32602,
+                    "INVALID_CONFIG_VALUE",
+                    {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+                )
+            session.model_id = value
+        elif config_id == WORKFLOW_CONFIG_ID:
+            if value not in {"build", "compose"}:
+                raise RequestError(
+                    -32602,
+                    "INVALID_CONFIG_VALUE",
+                    {"code": "INVALID_CONFIG_VALUE", "retryable": False},
+                )
+            session.workflow = value
+        else:
+            raise RequestError(
+                -32602,
+                "UNKNOWN_CONFIG_OPTION",
+                {"code": "UNKNOWN_CONFIG_OPTION", "retryable": False},
+            )
+        updated = await self._config_options(session)
+        await self._send(
+            session_id,
+            ConfigOptionUpdate(session_update="config_option_update", config_options=updated),
+        )
+        return SetSessionConfigOptionResponse(config_options=updated)
 
     async def cancel(self, session_id: str, **kwargs: object) -> None:
         """取消该会话当前 Run 与挂起的审批；未知会话或已结束的 Run 静默忽略。
@@ -666,6 +1065,8 @@ class AcpServer:
             await self._cancel_active(active)
         if self._broker is not None:
             self._broker.cancel_session(session_id)
+        if self._elicitation is not None:
+            self._elicitation.cancel_session(session_id)
 
     # —— 给 stdio.py 的关闭钩子 ——
 
@@ -692,10 +1093,11 @@ class AcpServer:
     async def aclose(self) -> None:
         """关闭连接、停掉权限任务与发送泵，并兜底失败仍悬挂的 Run Future。
 
-        顺序不能反：先 `close_connection` 让 Host 把挂起的交互 fail-closed，
-        再取消权限任务（它们的 `fail_interaction` 此时返回 False，什么也不做），
-        最后才停泵。
+        顺序不能反：先放掉每个会话的额外目录和 MCP，再 `close_connection`
+        让 Host 把挂起的交互 fail-closed，然后取消权限任务，最后才停泵。
         """
+        for session_id in list(self._sessions):
+            await self._drop_session_resources(session_id)
         connection = self._connection
         self._connection = None
         if connection is not None:
@@ -704,6 +1106,9 @@ class AcpServer:
         broker, self._broker = self._broker, None
         if broker is not None:
             await broker.aclose()
+        elicitation, self._elicitation = self._elicitation, None
+        if elicitation is not None:
+            await elicitation.aclose()
         if self._pump_task is not None:
             self._pump_task.cancel()
             await asyncio.gather(self._pump_task, return_exceptions=True)
@@ -735,7 +1140,19 @@ class AcpServer:
                 if isinstance(params, Mapping):
                     self._outbox.put_nowait(("thread_summary", dict(params)))
                 return
-            if method in _SUPPORTED_INTERACTIONS and isinstance(frame.get("id"), str):
+            if method == "thread.approval_mode":
+                params = frame.get("params")
+                if isinstance(params, Mapping):
+                    self._outbox.put_nowait(("approval_mode", dict(params)))
+                return
+            if method == "commands.catalog":
+                params = frame.get("params")
+                commands = params.get("commands") if isinstance(params, Mapping) else None
+                if isinstance(commands, list):
+                    self._outbox.put_nowait(("commands_catalog", commands))
+                return
+            supported = _SUPPORTED_INTERACTIONS | _FORM_INTERACTIONS if self._forms else _SUPPORTED_INTERACTIONS
+            if method in supported and isinstance(frame.get("id"), str):
                 # 交给 pump：那里知道 Run/会话是否可用，也可能需要先补一张工具卡。
                 self._outbox.put_nowait(("interaction", dict(frame)))
                 return
@@ -782,6 +1199,10 @@ class AcpServer:
                     await self._pump_interaction(payload)
                 elif kind == "thread_summary":
                     await self._pump_thread_summary(payload)
+                elif kind == "approval_mode":
+                    await self._pump_approval_mode(payload)
+                elif kind == "commands_catalog":
+                    await self._pump_commands_catalog(payload)
                 else:
                     await self._pump_approval_done(payload)
             except asyncio.CancelledError:
@@ -868,8 +1289,18 @@ class AcpServer:
                 tool_call_id=tool_call_id,
                 is_child=parsed.is_child,
                 agent_id=parsed.agent_id,
+                execution_id=parsed.execution_id,
             )
-            job = build_approval_job(parsed, target, ext_approval=self._ext.approval)
+            job = build_approval_job(
+                parsed,
+                target,
+                ext_approval=self._ext.approval,
+                workspace=self._host.workspace,
+                forms=self._forms,
+            )
+        elif parsed.kind in {"question", "plan", "goal"}:
+            await self._pump_form(parsed, frame, session)
+            return
         else:
             target = active.translator.prepare_trust(
                 request_id=parsed.request_id,
@@ -889,6 +1320,48 @@ class AcpServer:
             await self._fail_interaction(frame)
             return
         self._broker.start(job)
+
+    async def _pump_form(
+        self,
+        parsed: Any,
+        frame: Mapping[str, object],
+        session: _Session,
+    ) -> None:
+        """把提问、计划或目标收成一张表单。收不成就立刻拒绝，避免 Run 挂死。"""
+        if self._elicitation is None or session.cancel_requested or self._closing:
+            await self._fail_interaction(frame)
+            return
+        spec = {"question": question_form, "plan": plan_form, "goal": goal_form}[parsed.kind](
+            parsed.payload
+        )
+        if spec is None:
+            await self._fail_interaction(frame)
+            return
+        self._elicitation.start(
+            FormJob(
+                request_id=parsed.request_id,
+                session_id=parsed.session_id,
+                run_id=parsed.run_id,
+                spec=spec,
+            )
+        )
+
+    async def _pump_approval_mode(self, params: Mapping[str, object]) -> None:
+        """别的路径改了审批模式：会话还没跟上时补一条 `current_mode_update`。"""
+        session = self._sessions.get(str(params.get("thread_id") or ""))
+        mode = params.get("mode")
+        if session is None or not isinstance(mode, str) or session.approval_mode == mode:
+            return
+        previous = session.approval_mode
+        if mode == "plan" and previous != "plan":
+            session.mode_before_plan = previous
+        elif previous == "plan" and mode != "plan":
+            session.mode_before_plan = None
+        session.approval_mode = cast(ApprovalModeName, mode)
+        await self._send(
+            session.session_id,
+            CurrentModeUpdate(session_update="current_mode_update", current_mode_id=mode),
+        )
 
     async def _pump_approval_done(self, done: PermissionDone) -> None:
         """权限任务收尾：批准的真实工具卡转 `in_progress`，兜底/信任卡直接终态。"""
@@ -923,17 +1396,36 @@ class AcpServer:
             await self._host.bind_commands(
                 connection, snapshot.skills_snapshot_id, bindings
             )
-        except Exception as exc:  # noqa: BLE001 - 绑定失败只能降级为「无命令」，不能拖垮握手
+        except Exception as exc:  # noqa: BLE001 - 绑定失败只能降级为内置命令，不能拖垮握手
             self._log_failure("initialize", started, "bind_commands", exc, "BIND_COMMANDS_FAILED")
-            self._commands = CommandIndex()
+            self._commands = CommandIndex.from_snapshot([], forms=self._forms)
             return
-        self._commands = CommandIndex.from_snapshot(snapshot.agent_commands)
+        self._commands = CommandIndex.from_snapshot(snapshot.agent_commands, forms=self._forms)
+        self._log_dropped_commands()
+
+    def _log_dropped_commands(self) -> None:
+        """同名被挤掉的命令不宣告，只留一条不含正文的诊断。"""
+        for item in self._commands.dropped:
+            self._log.warn(
+                "acp.command.dropped",
+                {"name": item.name, "source": item.source, "reason": "name_conflict"},
+            )
+
+    async def _pump_commands_catalog(self, commands: object) -> None:
+        """目录变了就整表换掉，并推给这条连接上的每个会话。不再次 bind。"""
+        entries = commands if isinstance(commands, list) else []
+        self._commands = CommandIndex.from_snapshot(entries, forms=self._forms)
+        self._log_dropped_commands()
+        for session_id in list(self._sessions):
+            await self._push_commands(session_id)
 
     async def _push_commands(self, session_id: str) -> None:
-        """推送 `available_commands_update`；空命令表不发帧（空列表没有信息量）。"""
-        commands = self._commands.available_commands()
-        if not commands:
-            return
+        """推送 `available_commands_update`；空表也发（§11.1 性能优化 1）。
+
+        客户端没有别的信号能区分「命令表还在路上」和「这个 Agent 本来就没有
+        命令」，空表帧就是那个「已落定」信号，缺了它客户端只能按超时兜底。
+        """
+        commands = self._commands.available_commands(commands_ext=self._ext.commands)
         await self._send(
             session_id,
             AvailableCommandsUpdate(
@@ -982,17 +1474,400 @@ class AcpServer:
         except (ConnectionError, BrokenPipeError, RuntimeError):
             self._outbound_broken = True
 
+    # —— 内部：会话资源、配置与 prompt 正文 ——
+
+    async def _apply_session_resources(
+        self,
+        session_id: str,
+        directories: Sequence[object] | None,
+        servers: Sequence[object] | None,
+    ) -> None:
+        """先登记附加目录，再登记会话 MCP。MCP 失败时把刚登记的目录撤掉。
+
+        目录校验失败时会话还没放进表里，调用方不会留下半个会话。
+        """
+        try:
+            self._host.set_session_roots(session_id, list(directories or []))
+        except RpcError as exc:
+            raise to_request_error(exc, startup_error=None) from exc
+        try:
+            await self._host.set_session_mcp(session_id, _mcp_mappings(servers))
+        except Exception:
+            self._host.set_session_roots(session_id, [])
+            raise
+
+    async def _drop_session_resources(self, session_id: str) -> None:
+        """关闭或断线时撤销这个线程名下的会话目录和会话 MCP。重复调用无副作用。"""
+        self._host.set_session_roots(session_id, [])
+        await self._host.set_session_mcp(session_id, [])
+
+    async def _config_options(self, session: _Session) -> list[SessionConfigOptionSelect]:
+        """读模型目录拼配置项。目录读失败就只留下工作流，不让建会话失败。"""
+        profiles: list[Mapping[str, object]] = []
+        last: str | None = None
+        connection = self._connection
+        if connection is not None:
+            try:
+                listed = await self._host.list_models(connection, session.session_id)
+            except RpcError:
+                listed = {}
+            raw = listed.get("profiles") if isinstance(listed, Mapping) else None
+            if isinstance(raw, list):
+                profiles = [item for item in raw if isinstance(item, Mapping)]
+            selection = listed.get("thread_selection") if isinstance(listed, Mapping) else None
+            if isinstance(selection, Mapping) and isinstance(selection.get("primary_profile"), str):
+                last = selection["primary_profile"]
+        return build_config_options(
+            profiles,
+            selected_model=session.model_id,
+            last_profile=last,
+            workflow=session.workflow,
+        )
+
+    async def _prepare_prompt(self, prompt: Sequence[object]) -> tuple[str, str]:
+        """把内容块收成（记录原文, 给模型的正文）。
+
+        记录里只有用户文本和 `@路径`。授权根内的文件内容只出现在模型正文前面。
+        图片、音频和二进制嵌入资源仍然拒绝。
+        """
+        parts: list[str] = []
+        pieces: list[str] = []
+        budget = InlineBudget()
+        for block in prompt:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                parts.append(str(getattr(block, "text", "")))
+                continue
+            if block_type == "resource_link":
+                mention, piece = await self._inline_link(str(getattr(block, "uri", "")), budget)
+            elif block_type == "resource":
+                mention, piece = self._inline_embedded(block, budget)
+            else:
+                raise RequestError(
+                    -32602,
+                    "UNSUPPORTED_CONTENT_BLOCK",
+                    {"code": "UNSUPPORTED_CONTENT_BLOCK", "type": block_type},
+                )
+            parts.append(mention)
+            if piece:
+                pieces.append(piece)
+        text = "\n".join(parts)
+        if not text.strip():
+            raise RequestError(
+                -32602,
+                "EMPTY_PROMPT",
+                {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
+            )
+        return text, join_model_message(pieces, text)
+
+    async def _inline_link(self, uri: str, budget: InlineBudget) -> tuple[str, str | None]:
+        """根内文件读入内联块；其它链接保持 `@uri`，不读盘。"""
+        path = _file_uri_path(uri)
+        if path is None:
+            return f"@{uri}", None
+        authorized = self._host.authorize_existing_file(path)
+        if authorized is None:
+            return f"@{uri}", None
+        try:
+            piece = await asyncio.to_thread(_piece_from_file, authorized, budget)
+        except OSError:
+            return f"@{uri}", None
+        return f"@{authorized}", piece.text
+
+    def _inline_embedded(self, block: object, budget: InlineBudget) -> tuple[str, str | None]:
+        """嵌入的文本按同样预算格式化。二进制嵌入没有文本可内联，直接拒绝。"""
+        resource = getattr(block, "resource", None)
+        uri = str(getattr(resource, "uri", "") or "")
+        text = getattr(resource, "text", None)
+        blob = getattr(resource, "blob", None)
+        if isinstance(blob, str) or not isinstance(text, str):
+            raise RequestError(
+                -32602,
+                "UNSUPPORTED_CONTENT_BLOCK",
+                {"code": "UNSUPPORTED_CONTENT_BLOCK", "type": "resource"},
+            )
+        label = _file_uri_path(uri) or uri or "resource"
+        piece = piece_for_bytes(label, text.encode("utf-8"), budget)
+        return f"@{uri or label}", piece.text
+
     # —— 内部：Run 与响应 ——
+
+    async def _await_host_run(
+        self,
+        connection: ProtocolConnection,
+        session: _Session,
+        session_id: str,
+        run_id: str,
+        run_input: UserRunInput | GoalProposalRunInput | GoalContinuationRunInput,
+        *,
+        workflow: InteractionMode,
+        effective_mode: ApprovalModeName,
+    ) -> RunOutcome:
+        """受理一轮 Run 并等到终态。登记发生在第一个事件之前。"""
+        active = _ActiveRun(
+            run_id=run_id,
+            session_id=session_id,
+            translator=RunTranslator(run_id, PathLocator(self._host.resolve_display_path), subagent=self._ext.subagent),
+            done=asyncio.get_running_loop().create_future(),
+        )
+
+        async def on_accepted(_accepted: object) -> None:
+            # 登记不晚于第一个事件：扇出任务在回调之后才创建。
+            session.run = active
+            self._runs[run_id] = active
+            if session.cancel_requested:
+                await self._cancel_active(active)
+                return
+            if session.approval_mode != effective_mode:
+                # 用户在 Run 准备阶段改了模式：这次 Run 已用旧模式起来，补一次提交，
+                # 免得上层看到的模式与实际生效的模式不一致。
+                with contextlib.suppress(RunError):
+                    # Run 刚好结束或被取消：模式已经记在会话上，不向客户端报错。
+                    await self._host.set_approval_mode(
+                        connection, session_id, run_id, session.approval_mode
+                    )
+
+        await self._host.start_run(
+            connection,
+            StartRunRequest(
+                thread_id=session_id,
+                run_id=run_id,
+                mode=workflow,
+                input=run_input,
+                requested_primary_profile=session.model_id,
+                requested_approval_mode=session.approval_mode,
+                pre_plan_mode=(
+                    session.mode_before_plan if session.approval_mode == "plan" else None
+                ),
+            ),
+            on_accepted=on_accepted,
+        )
+        return await active.done
+
+    async def _follow_goal_continuations(
+        self,
+        connection: ProtocolConnection,
+        session: _Session,
+        session_id: str,
+        outcome: RunOutcome,
+        effective_mode: ApprovalModeName,
+        tracked_runs: list[str],
+    ) -> RunOutcome:
+        """终态里带着目标续跑时，接着把那次任务跑完，再结束这一轮 prompt。
+
+        续跑编号就是 Run 编号。同一编号再出现就停，避免终态把刚跑完的那次又交回来。
+        """
+        seen = set(tracked_runs)
+        current = outcome
+        while not session.cancel_requested:
+            parsed = continuation_from_outcome(current)
+            if parsed is None or parsed[0] in seen:
+                return current
+            continuation_id, run_input = parsed
+            seen.add(continuation_id)
+            tracked_runs.append(continuation_id)
+            current = await self._await_host_run(
+                connection,
+                session,
+                session_id,
+                continuation_id,
+                run_input,
+                workflow="build",
+                effective_mode=effective_mode,
+            )
+        return current
+
+    async def _run_builtin(
+        self,
+        connection: ProtocolConnection,
+        session: _Session,
+        call: Any,
+    ) -> PromptResponse | _GoalFollow | _GoalResume:
+        """执行一条内置命令。创建目标或恢复续跑时返回后续 Run，其余直接回复。"""
+        checked = validate_builtin(call)
+        session_id = session.session_id
+        if call.name == "compact":
+            result = await self._host.compact_thread(connection, session_id)
+            text, usage = compact_sentence(result)
+            response = await self._command_reply(session_id, text, {"name": "compact"})
+            if usage is not None:
+                await self._send(
+                    session_id,
+                    UsageUpdate(session_update="usage_update", used=usage[0], size=usage[1]),
+                )
+            return response
+        if call.name == "btw":
+            result = await self._host.side_question(connection, session_id, call.args)
+            reply = result.get("reply_text")
+            return await self._command_reply(
+                session_id,
+                reply if isinstance(reply, str) else "",
+                {"name": "btw", "ephemeral": True},
+                ephemeral=True,
+            )
+        if call.name == "undo":
+            mode = checked if isinstance(checked, str) else "both"
+            target = undo_target(await self._host.list_turns(connection, session_id))
+            result = await self._host.undo_thread(
+                connection, session_id, str(target["turn_id"]), mode
+            )
+            files = result.get("restored_files_count")
+            turn = target.get("turn_index")
+            return await self._command_reply(
+                session_id,
+                UNDO_TEXT.format(
+                    turn=turn if isinstance(turn, int) else 0,
+                    files=files if isinstance(files, int) else 0,
+                ),
+                {"name": "undo", "historyChanged": True},
+            )
+        if call.name == "redo":
+            result = await self._host.redo_thread(connection, session_id)
+            files = result.get("restored_files_count")
+            return await self._command_reply(
+                session_id,
+                REDO_TEXT.format(files=files if isinstance(files, int) else 0),
+                {"name": "redo", "historyChanged": True},
+            )
+        if call.name == "title":
+            result = await self._host.set_thread_title(connection, session_id, call.args)
+            thread = result.get("thread")
+            title = call.args
+            if isinstance(thread, Mapping):
+                stored = thread.get("title")
+                if isinstance(stored, str) and stored:
+                    title = stored
+                update = session_info_update(thread)
+                if update is not None:
+                    await self._send(session_id, update)
+            return await self._command_reply(
+                session_id, TITLE_TEXT.format(title=title), {"name": "title"}
+            )
+        if call.name == "abandon":
+            await self._host.compose_abandon(connection, session_id, call.args or None)
+            return await self._command_reply(session_id, ABANDON_TEXT, {"name": "abandon"})
+        if call.name == "goal" and isinstance(checked, GoalVerb):
+            return await self._run_goal(connection, session_id, checked)
+        raise RpcError(-32602, "INVALID_COMMAND_ARGUMENTS")
+
+    async def _run_goal(
+        self,
+        connection: ProtocolConnection,
+        session_id: str,
+        verb: GoalVerb,
+    ) -> PromptResponse | _GoalFollow | _GoalResume:
+        """查看、暂停、清空立刻回复；创建、修订和带回续跑的恢复交给后续 Run。"""
+        if verb.kind == "inspect":
+            snapshot = await self._host.goal_inspect(connection, session_id)
+            return await self._command_reply(
+                session_id,
+                goal_inspect_text(snapshot),
+                {"name": "goal", "goal": snapshot},
+            )
+        if verb.kind == "mutate":
+            # 存储层用目标编号和版本做比对。不带上时，暂停会被当成冲突拒绝。
+            snapshot = await self._host.goal_inspect(connection, session_id)
+            goal = snapshot.get("goal") if isinstance(snapshot, Mapping) else None
+            goal_id = goal.get("goal_id") if isinstance(goal, Mapping) else None
+            revision = goal.get("revision") if isinstance(goal, Mapping) else None
+            result = await self._host.goal_mutate(
+                connection,
+                session_id,
+                str(uuid.uuid4()),
+                verb.action or "",
+                goal_id if isinstance(goal_id, str) else None,
+                revision if isinstance(revision, int) and not isinstance(revision, bool) else None,
+            )
+            goal = result.get("goal")
+            projection = goal if isinstance(goal, Mapping) else result
+            command = {"name": "goal", "goal": dict(projection)}
+            # 排队的变更先不跑。恢复若已经给出续跑，说明发出去之后接着做。
+            parsed = None if result.get("disposition") == "queued" else goal_continuation_from(
+                result.get("continuation")
+            )
+            if parsed is not None:
+                await self._emit_command_chunk(session_id, goal_mutate_text(verb.action or ""), command)
+                return _GoalResume(run_id=parsed[0], run_input=parsed[1], command=command)
+            return await self._command_reply(
+                session_id,
+                goal_mutate_text(verb.action or ""),
+                command,
+            )
+        request_id = str(uuid.uuid4())
+        result = await self._host.goal_request(
+            connection,
+            session_id,
+            request_id,
+            verb.request_kind or "create",
+            verb.input_text,
+        )
+        if result.get("disposition") == "queued":
+            return await self._command_reply(session_id, QUEUED_GOAL_TEXT, {"name": "goal"})
+        return _GoalFollow(GoalProposalRunInput(request_id=request_id), {"name": "goal"})
+
+    def _builtin_error(self, exc: BaseException) -> RequestError:
+        """内置命令的错误。线程忙统一说成可重试的 THREAD_BUSY，其余走唯一映射。"""
+        if isinstance(exc, RequestError):
+            return exc
+        busy = (
+            isinstance(exc, RpcError) and exc.message in {"CONTEXT_COMPACTION_RUN_ACTIVE", "THREAD_BUSY"}
+        ) or (isinstance(exc, RunError) and exc.code == "THREAD_BUSY")
+        if busy:
+            return RequestError(
+                -32603, "THREAD_BUSY", {"code": "THREAD_BUSY", "retryable": True}
+            )
+        return to_request_error(exc, startup_error=None)
+
+    async def _emit_command_chunk(
+        self,
+        session_id: str,
+        text: str,
+        command: Mapping[str, object],
+        *,
+        ephemeral: bool = False,
+    ) -> None:
+        """把命令结果先推给客户端。没声明 commands 扩展时不带扩展字段。"""
+        chunk_meta = (
+            command_chunk_meta(command, ephemeral=ephemeral) if self._ext.commands else None
+        )
+        await self._send(
+            session_id,
+            AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=text_block(text),
+                message_id=f"cmd:{uuid.uuid4()}",
+                **({"field_meta": chunk_meta} if chunk_meta else {}),
+            ),
+        )
+
+    async def _command_reply(
+        self,
+        session_id: str,
+        text: str,
+        command: Mapping[str, object],
+        *,
+        ephemeral: bool = False,
+    ) -> PromptResponse:
+        """先把结果块推出去，再返回 end_turn。"""
+        await self._emit_command_chunk(session_id, text, command, ephemeral=ephemeral)
+        response_meta = command_meta(command) if self._ext.commands else None
+        return PromptResponse(
+            stop_reason="end_turn",
+            **({"field_meta": response_meta} if response_meta else {}),
+        )
 
     def _prompt_response(self, outcome: RunOutcome, session: _Session) -> PromptResponse:
         """把 Run 终态映射成 ACP 响应；失败时抛 `RequestError`。"""
         if outcome.kind == "completed":
+            usage = _prompt_usage(outcome.summary)
             if self._ext.run_summary and outcome.summary:
-                # 只有声明了 runSummary 的客户端才拿得到运行摘要。
+                # 只有声明了 runSummary 的客户端才拿得到运行摘要。标准 usage 始终带上。
                 return PromptResponse(
-                    stop_reason="end_turn", field_meta=run_meta(outcome.summary)
+                    stop_reason="end_turn",
+                    usage=usage,
+                    field_meta=run_meta(outcome.summary),
                 )
-            return PromptResponse(stop_reason="end_turn")
+            return PromptResponse(stop_reason="end_turn", usage=usage)
         if outcome.kind == "cancelled" or session.cancel_requested:
             # ACP 约定：取消期间出现的错误一律按 cancelled 返回。
             return PromptResponse(stop_reason="cancelled")
@@ -1064,6 +1939,25 @@ class AcpServer:
         self._in_flight += 1
         self._idle.clear()
 
+    async def _ready(self) -> None:
+        """握手闸门：会话类方法的第一道检查，保证握手的响应先于一切会话响应。
+
+        输入：无。
+        输出：无；返回即表示 initialize 已成功、`_connection` 可用。
+        异常：`-32600` + `NOT_INITIALIZED`——还没收到 initialize（立即，不等待）；
+              `-32603` + `HOST_INIT_FAILED`（retryable）——initialize 失败，
+              与握手响应同因，客户端据此重试整条连接。
+        """
+        future = self._init_future
+        if future is None:
+            raise RequestError(-32600, "NOT_INITIALIZED", {"code": "NOT_INITIALIZED"})
+        if not await future:
+            raise RequestError(
+                -32603,
+                "HOST_INIT_FAILED",
+                {"code": "HOST_INIT_FAILED", "retryable": True},
+            )
+
     def _require_connection(self) -> ProtocolConnection:
         """取已协商的连接；未握手时回 -32600（ACP 要求先 initialize）。"""
         connection = self._connection
@@ -1132,10 +2026,112 @@ def _same_workspace(cwd: str, workspace: Path) -> bool:
         return False
 
 
-def _session_mode(snapshot: HostSnapshot | None) -> ApprovalModeName:
-    """取会话的初始审批模式；`plan` 不对外暴露，退回 `default`。"""
+def _session_mode(snapshot: HostSnapshot | None, *, plan: bool = False) -> ApprovalModeName:
+    """取会话的初始审批模式。没声明表单时 `plan` 退回 `default`。"""
     raw = snapshot.default_approval_mode if snapshot is not None else None
-    return default_mode(raw)
+    return default_mode(raw, plan=plan)
+
+
+def _prompt_usage(summary: Mapping[str, object] | None) -> Usage | None:
+    """把 `run.completed` 的 usage 收成 ACP `Usage`。没有 usage 对象时不编造。
+
+    缺整数或布尔值都按 0。缓存命中依次看 cached_read_tokens、cached_tokens、
+    cached_input_tokens，只有非负整数才带上。
+    """
+    if not isinstance(summary, Mapping):
+        return None
+    usage = summary.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+
+    def as_int(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return 0
+        return value
+
+    input_tokens = as_int(usage.get("input_tokens"))
+    output_tokens = as_int(usage.get("output_tokens"))
+    cached: int | None = None
+    for key in ("cached_read_tokens", "cached_tokens", "cached_input_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            cached = value
+            break
+    return Usage(
+        total_tokens=input_tokens + output_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_read_tokens=cached,
+    )
+
+
+def _file_uri_path(uri: str) -> str | None:
+    """`file://` 取出路径；`file://localhost/tmp/a` 得到 `/tmp/a`。其它 scheme 返回 None。"""
+    parsed = urlparse(uri)
+    if parsed.scheme != "file" or not parsed.path:
+        return None
+    return unquote(parsed.path)
+
+
+def _piece_from_file(path: str, budget: InlineBudget) -> InlinePiece:
+    """先看大小。达到单文件上限就不再把正文读进内存。"""
+    file = Path(path)
+    size = file.stat().st_size
+    if size >= MAX_SINGLE_FILE_BYTES:
+        return InlinePiece(path, placeholder(path, size), False)
+    return piece_for_bytes(path, file.read_bytes(), budget)
+
+
+def _mcp_mappings(servers: Sequence[object] | None) -> list[Mapping[str, object]]:
+    """把 SDK 的 MCP 模型收成 Host 认识的普通映射。命令和请求头留在映射里，诊断由 Host 去掉。"""
+    mapped: list[Mapping[str, object]] = []
+    for item in servers or []:
+        if isinstance(item, Mapping):
+            entry = dict(item)
+            if not isinstance(entry.get("transport"), str) and isinstance(entry.get("type"), str):
+                entry["transport"] = entry["type"]
+            mapped.append(entry)
+            continue
+        name = getattr(item, "name", "")
+        if hasattr(item, "command"):
+            mapped.append(
+                {
+                    "name": name,
+                    "transport": "stdio",
+                    "command": getattr(item, "command", "") or "",
+                    "args": list(getattr(item, "args", ()) or ()),
+                    "env": _pair_dict(getattr(item, "env", ()) or ()),
+                }
+            )
+            continue
+        if hasattr(item, "server_id"):
+            mapped.append({"name": name, "transport": "acp"})
+            continue
+        transport = "sse" if "Sse" in type(item).__name__ else "http"
+        mapped.append(
+            {
+                "name": name,
+                "transport": transport,
+                "url": getattr(item, "url", "") or "",
+                "headers": _pair_dict(getattr(item, "headers", ()) or ()),
+            }
+        )
+    return mapped
+
+
+def _pair_dict(entries: object) -> dict[str, str]:
+    """把 `{name, value}` 列表收成字典。缺字段的项跳过。"""
+    result: dict[str, str] = {}
+    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence):
+        return result
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            key, value = entry.get("name"), entry.get("value")
+        else:
+            key, value = getattr(entry, "name", None), getattr(entry, "value", None)
+        if isinstance(key, str) and isinstance(value, str):
+            result[key] = value
+    return result
 
 
 def _report_ignored(name: str, values: Sequence[object] | None) -> None:
@@ -1146,10 +2142,6 @@ def _report_ignored(name: str, values: Sequence[object] | None) -> None:
     sys.stderr.flush()
 
 
-_MAX_OUTBOUND_FRAME_BYTES = 6 * 1024 * 1024
-"""单帧出站上限；桥（S3）会拒绝超过 8 MiB 的帧，留一段余量。"""
-
-
 def _fit_update(update: Any) -> Any:
     """超过单帧上限时依次丢弃 rawInput、rawOutput，最后截 content。
 
@@ -1158,13 +2150,13 @@ def _fit_update(update: Any) -> Any:
     """
     if not isinstance(update, ToolCallUpdate):
         return update
-    if _frame_chars(update) <= _MAX_OUTBOUND_FRAME_BYTES:
+    if frame_chars(update) <= MAX_OUTBOUND_FRAME_BYTES:
         return update
     trimmed = update.model_copy(update={"raw_input": None})
-    if _frame_chars(trimmed) <= _MAX_OUTBOUND_FRAME_BYTES:
+    if frame_chars(trimmed) <= MAX_OUTBOUND_FRAME_BYTES:
         return trimmed
     trimmed = trimmed.model_copy(update={"raw_output": None})
-    if _frame_chars(trimmed) <= _MAX_OUTBOUND_FRAME_BYTES:
+    if frame_chars(trimmed) <= MAX_OUTBOUND_FRAME_BYTES:
         return trimmed
     content = trimmed.content
     if content is None:
@@ -1173,7 +2165,7 @@ def _fit_update(update: Any) -> Any:
         update={
             "content": [
                 item.model_copy(
-                    update={"content": _cap_text_block(item, _MAX_OUTBOUND_FRAME_BYTES // 4)}
+                    update={"content": _cap_text_block(item, MAX_OUTBOUND_FRAME_BYTES // 4)}
                 )
                 if hasattr(item, "content")
                 else item
@@ -1191,17 +2183,6 @@ def _cap_text_block(item: object, limit: int) -> Any:
     if not isinstance(text, str) or len(text) <= limit or copier is None:
         return inner
     return copier(update={"text": text[: limit - 1] + "…"})
-
-
-def _frame_chars(update: Any) -> int:
-    """估算一帧序列化后的字符数。"""
-    import json
-
-    try:
-        payload = update.model_dump(mode="json", by_alias=True, exclude_defaults=True)
-        return len(json.dumps(payload, ensure_ascii=True))
-    except (TypeError, ValueError):
-        return 0
 
 
 __all__ = [
