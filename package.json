@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
+    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/runner-core --workspace @workbench/runner --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
     "typecheck": "npm run typecheck --workspaces",
     "check:boundaries": "node scripts/workbench/check-boundaries.mjs",
     "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",

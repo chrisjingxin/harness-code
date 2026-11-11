@@ -7,7 +7,19 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "electron-vite dev",
-    "preview": "electron-vite preview --skipBuild"
+    "preview": "electron-vite preview --skipBuild",
+    "dev:ui-preview": "node ../../scripts/workbench/ui-preview.mjs hc205 dev",
+    "build:ui-preview": "node ../../scripts/workbench/ui-preview.mjs hc205 build",
+    "preview:ui": "node ../../scripts/workbench/ui-preview.mjs hc205 preview",
+    "dev:conversation-preview": "node ../../scripts/workbench/ui-preview.mjs hc206 dev",
+    "build:conversation-preview": "node ../../scripts/workbench/ui-preview.mjs hc206 build",
+    "preview:conversation": "node ../../scripts/workbench/ui-preview.mjs hc206 preview",
+    "dev:project-preview": "node ../../scripts/workbench/ui-preview.mjs hc207 dev",
+    "build:project-preview": "node ../../scripts/workbench/ui-preview.mjs hc207 build",
+    "preview:project": "node ../../scripts/workbench/ui-preview.mjs hc207 preview",
+    "dev:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc208 dev",
+    "build:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc208 build",
+    "preview:navigation": "node ../../scripts/workbench/ui-preview.mjs hc208 preview"
   },
   "dependencies": {
     "@workbench/contracts": "0.2.0",

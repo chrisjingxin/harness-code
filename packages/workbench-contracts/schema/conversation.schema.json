@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.invalid/schema/conversation.schema.json",
+  "$defs": {
+    "Sequence": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+    },
+    "ShareVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+    },
+    "ConversationTitle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "MessageText": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "UserAuthor": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "user", "type": "string" },
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "username": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z][a-z0-9]{0,31}$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 }
+      },
+      "required": ["kind", "userId", "username", "displayName"],
+      "additionalProperties": false
+    },
+    "AgentAuthor": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "agent", "type": "string" },
+        "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["kind", "agentConfigId"],
+      "additionalProperties": false
+    },
+    "MessageAuthor": {
+      "oneOf": [
+        { "$ref": "#/$defs/UserAuthor" },
+        { "$ref": "#/$defs/AgentAuthor" }
+      ]
+    },
+    "MessageState": {
+      "type": "string",
+      "enum": ["streaming", "completed", "interrupted"]
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "author": { "$ref": "#/$defs/MessageAuthor" },
+        "createdSequence": { "$ref": "#/$defs/Sequence" },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "text": { "$ref": "#/$defs/MessageText" },
+        "state": { "$ref": "#/$defs/MessageState" }
+      },
+      "required": ["messageId", "conversationId", "executionId", "author", "createdSequence", "createdAt", "text", "state"],
+      "additionalProperties": false
+    },
+    "ExecutionState": {
+      "type": "string",
+      "enum": ["queued", "dispatching", "accepted", "running", "unknown", "succeeded", "failed", "cancelled", "rejected"]
+    },
+    "CancelState": {
+      "type": "string",
+      "enum": ["none", "requested", "delivered", "resolved"]
+    },
+    "ExecutionReasonCode": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "enum": [
+            "WAITING_DEVICE",
+            "WAITING_PREVIOUS",
+            "WAITING_PROJECT",
+            "WAITING_EXECUTOR",
+            "AUTHOR_UNAVAILABLE",
+            "PROJECT_NOT_SHARED",
+            "SHARE_VERSION_CHANGED",
+            "DEVICE_REVOKED",
+            "TARGET_INVALID",
+            "PROJECT_ROOT_CHANGED",
+            "CAPABILITY_UNAVAILABLE",
+            "CANCEL_REQUESTED",
+            "DELIVERY_UNCONFIRMED",
+            "DEVICE_DISCONNECTED",
+            "RUNNER_STATE_UNKNOWN",
+            "NATIVE_SESSION_UNAVAILABLE",
+            "EXECUTION_FAILED",
+            "CANCELLED_BEFORE_DISPATCH",
+            "CANCELLED_BY_RUNNER"
+          ]
+        }
+      ]
+    },
+    "ExecutionView": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputSequence": { "$ref": "#/$defs/Sequence" },
+        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "state": { "$ref": "#/$defs/ExecutionState" },
+        "lastConfirmedState": { "$ref": "#/$defs/ExecutionState" },
+        "cancelState": { "$ref": "#/$defs/CancelState" },
+        "reasonCode": { "$ref": "#/$defs/ExecutionReasonCode" },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["executionId", "conversationId", "inputId", "inputSequence", "initiatedByUserId", "state", "lastConfirmedState", "cancelState", "reasonCode", "createdAt", "updatedAt"],
+      "additionalProperties": false
+    },
+    "ConversationSummary": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "title": { "$ref": "#/$defs/ConversationTitle" },
+        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "currentUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["conversationId", "workspaceId", "title", "createdByUserId", "currentUserId", "deviceId", "projectId", "agentConfigId", "createdAt"],
+      "additionalProperties": false
+    },
+    "ConversationPageCursor": {
+      "type": "object",
+      "properties": {
+        "beforeCreatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "beforeId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["beforeCreatedAt", "beforeId"],
+      "additionalProperties": false
+    },
+    "ConversationListResponse": {
+      "type": "object",
+      "properties": {
+        "conversations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConversationSummary" },
+          "maxItems": 100
+        },
+        "nextPage": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/ConversationPageCursor" }
+          ]
+        }
+      },
+      "required": ["conversations", "nextPage"],
+      "additionalProperties": false
+    },
+    "ConversationResponse": {
+      "type": "object",
+      "properties": {
+        "conversation": { "$ref": "#/$defs/ConversationSummary" }
+      },
+      "required": ["conversation"],
+      "additionalProperties": false
+    },
+    "CreateConversationRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "title": { "$ref": "#/$defs/ConversationTitle" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["requestId", "title", "deviceId", "projectId", "agentConfigId"],
+      "additionalProperties": false
+    },
+    "CreateConversationResponse": {
+      "type": "object",
+      "properties": {
+        "conversation": { "$ref": "#/$defs/ConversationSummary" },
+        "committedSequence": { "$ref": "#/$defs/Sequence" }
+      },
+      "required": ["conversation", "committedSequence"],
+      "additionalProperties": false
+    },
+    "SendInputRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "text": { "$ref": "#/$defs/MessageText" }
+      },
+      "required": ["requestId", "text"],
+      "additionalProperties": false
+    },
+    "InputSavedResponse": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "inputSequence": { "$ref": "#/$defs/Sequence" },
+        "committedSequence": { "$ref": "#/$defs/Sequence" },
+        "savedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["conversationId", "inputId", "executionId", "inputSequence", "committedSequence", "savedAt"],
+      "additionalProperties": false
+    },
+    "CancelExecutionRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["requestId"],
+      "additionalProperties": false
+    },
+    "CancelExecutionResponse": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "cancelState": { "$ref": "#/$defs/CancelState" },
+        "stateAtRequest": { "$ref": "#/$defs/ExecutionState" },
+        "committedSequence": { "$ref": "#/$defs/Sequence" }
+      },
+      "required": ["executionId", "cancelState", "stateAtRequest", "committedSequence"],
+      "additionalProperties": false
+    },
+    "ExecutionResponse": {
+      "type": "object",
+      "properties": {
+        "execution": { "$ref": "#/$defs/ExecutionView" }
+      },
+      "required": ["execution"],
+      "additionalProperties": false
+    },
+    "ConversationEventPayloadConversationCreated": {
+      "type": "object",
+      "properties": {
+        "conversation": { "$ref": "#/$defs/ConversationSummary" }
+      },
+      "required": ["conversation"],
+      "additionalProperties": false
+    },
+    "ConversationEventPayloadMessageCreated": {
+      "type": "object",
+      "properties": {
+        "message": { "$ref": "#/$defs/Message" }
+      },
+      "required": ["message"],
+      "additionalProperties": false
+    },
+    "ConversationEventPayloadTextAppended": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "text": { "type": "string", "maxLength": 8192 }
+      },
+      "required": ["executionId", "messageId", "text"],
+      "additionalProperties": false
+    },
+    "ConversationEventPayloadMessageClosed": {
+      "type": "object",
+      "properties": {
+        "executionId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "state": { "type": "string", "enum": ["completed", "interrupted"] }
+      },
+      "required": ["executionId", "messageId", "state"],
+      "additionalProperties": false
+    },
+    "ConversationEventPayloadExecutionChanged": {
+      "type": "object",
+      "properties": {
+        "execution": { "$ref": "#/$defs/ExecutionView" }
+      },
+      "required": ["execution"],
+      "additionalProperties": false
+    },
+    "ConversationCreatedEvent": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "conversation.created", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "sequence": { "$ref": "#/$defs/Sequence" },
+        "payload": { "$ref": "#/$defs/ConversationEventPayloadConversationCreated" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "workspaceId", "conversationId", "sequence", "payload"],
+      "additionalProperties": false
+    },
+    "MessageCreatedEvent": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "message.created", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "sequence": { "$ref": "#/$defs/Sequence" },
+        "payload": { "$ref": "#/$defs/ConversationEventPayloadMessageCreated" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "workspaceId", "conversationId", "sequence", "payload"],
+      "additionalProperties": false
+    },
+    "MessageTextAppendedEvent": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "message.text.appended", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "sequence": { "$ref": "#/$defs/Sequence" },
+        "payload": { "$ref": "#/$defs/ConversationEventPayloadTextAppended" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "workspaceId", "conversationId", "sequence", "payload"],
+      "additionalProperties": false
+    },
+    "MessageClosedEvent": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "message.closed", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "sequence": { "$ref": "#/$defs/Sequence" },
+        "payload": { "$ref": "#/$defs/ConversationEventPayloadMessageClosed" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "workspaceId", "conversationId", "sequence", "payload"],
+      "additionalProperties": false
+    },
+    "ExecutionChangedEvent": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": { "const": 1, "type": "integer" },
+        "messageId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "type": { "const": "execution.changed", "type": "string" },
+        "occurredAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "sequence": { "$ref": "#/$defs/Sequence" },
+        "payload": { "$ref": "#/$defs/ConversationEventPayloadExecutionChanged" }
+      },
+      "required": ["protocolVersion", "messageId", "type", "occurredAt", "workspaceId", "conversationId", "sequence", "payload"],
+      "additionalProperties": false
+    },
+    "ConversationEvent": {
+      "oneOf": [
+        { "$ref": "#/$defs/ConversationCreatedEvent" },
+        { "$ref": "#/$defs/MessageCreatedEvent" },
+        { "$ref": "#/$defs/MessageTextAppendedEvent" },
+        { "$ref": "#/$defs/MessageClosedEvent" },
+        { "$ref": "#/$defs/ExecutionChangedEvent" }
+      ]
+    },
+    "HistoryResponse": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "throughSequence": { "$ref": "#/$defs/Sequence" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConversationEvent" },
+          "maxItems": 200
+        },
+        "nextAfterSequence": { "$ref": "#/$defs/Sequence" },
+        "hasMore": { "type": "boolean" }
+      },
+      "required": ["conversationId", "throughSequence", "events", "nextAfterSequence", "hasMore"],
+      "additionalProperties": false
+    },
+    "RequestOperation": {
+      "type": "string",
+      "enum": ["conversation.create", "input.send", "execution.cancel"]
+    },
+    "RequestReceiptResponse": {
+      "type": "object",
+      "properties": {
+        "operation": { "$ref": "#/$defs/RequestOperation" },
+        "result": {
+          "oneOf": [
+            { "$ref": "#/$defs/CreateConversationResponse" },
+            { "$ref": "#/$defs/InputSavedResponse" },
+            { "$ref": "#/$defs/CancelExecutionResponse" }
+          ]
+        }
+      },
+      "required": ["operation", "result"],
+      "additionalProperties": false
+    }
+  }
+}

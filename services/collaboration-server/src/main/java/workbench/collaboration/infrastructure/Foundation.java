@@ -10,7 +10,7 @@ import org.springframework.dao.DuplicateKeyException;
 import java.util.*;
 
 /**
- * 三表数据基础：显式迁移/初始化；普通启动仅校验，不修复、不补回成员。
+ * 数据基础：显式迁移/初始化；普通启动仅校验，不修复、不补回成员。
  * 查自然键 → 只插缺失行 → 全部成功才提交；任何错误回滚，唯一键竞争至多重试一次。
  */
 public final class Foundation {
@@ -31,10 +31,14 @@ public final class Foundation {
   public void validate() {
     flyway.validate();
     var info = flyway.info();
-    if (info.current() == null || info.pending().length != 0 || info.current().getVersion().compareTo(MigrationVersion.fromVersion("001")) != 0)
+    if (info.current() == null || info.pending().length != 0 || info.current().getVersion().compareTo(MigrationVersion.fromVersion("003")) != 0)
       throw new IllegalStateException("数据库迁移版本未就绪");
-    Integer tables = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('wb_user','wb_workspace','wb_workspace_member') AND engine = 'InnoDB' AND table_collation = 'utf8mb4_unicode_ci'", Integer.class);
-    if (!Integer.valueOf(3).equals(tables)) throw new IllegalStateException("基础表引擎或字符集不符合要求");
+    Integer tables = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ("
+      + "'wb_user','wb_workspace','wb_workspace_member',"
+      + "'wb_device','wb_device_project','wb_device_request',"
+      + "'wb_conversation','wb_message','wb_execution','wb_execution_event','wb_execution_receipt','wb_request_receipt') "
+      + "AND engine = 'InnoDB' AND table_collation = 'utf8mb4_unicode_ci'", Integer.class);
+    if (!Integer.valueOf(12).equals(tables)) throw new IllegalStateException("业务表引擎或字符集不符合要求");
   }
   /** 只用于显式 init-demo；不会更新已有显示名、停用状态或历史 ID。 */
   public void initializeDemo() {

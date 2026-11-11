@@ -4,17 +4,29 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs');fs.copyFileSync('src/theme.css','dist/theme.css');fs.copyFileSync('src/identity/identity.css','dist/identity/identity.css')\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'),p=require('node:path');const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.css')){const rel=p.relative('src',f);fs.mkdirSync(p.dirname(p.join('dist',rel)),{recursive:true});fs.copyFileSync(f,p.join('dist',rel))}}};walk('src')\" && node ../../scripts/workbench/generate-native-theme.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./theme.css": "./dist/theme.css",
+    "./project.css": "./dist/project/project.css",
+    "./conversation.css": "./dist/conversation/conversation.css",
+    "./navigation.css": "./dist/navigation/navigation.css",
+    "./layout.css": "./dist/layout/layout.css",
+    "./native-theme": {
+      "types": "./dist/native-theme.d.ts",
+      "import": "./dist/native-theme.js"
     }
   },
   "dependencies": {
-    "@workbench/contracts": "0.2.0"
+    "@workbench/contracts": "0.2.0",
+    "lucide-react": "1.16.0",
+    "marked": "17.0.1",
+    "shiki": "3.23.0"
   },
   "devDependencies": {
     "@types/react": "19.3.0"

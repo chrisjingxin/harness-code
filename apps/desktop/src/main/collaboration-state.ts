@@ -109,6 +109,9 @@ export class CollaborationState {
     if (!result.ok) this.#failure(result.error)
     return result
   }
+  /** 仅主进程内部组合使用；调用方仍要按当前代次核对自己的异步结果。 */
+  network(): CollaborationClient | null { return this.#client }
+
   /** 销毁后不再发通知/接受业务；同一窗口重开将创建全新客户端。 */
   dispose(): void {
     this.#disposed = true; this.#generation++; this.#listeners.clear()

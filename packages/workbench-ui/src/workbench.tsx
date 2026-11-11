@@ -3,12 +3,15 @@
  * 控件动作 → 宿主处理 → 实际状态回显；这里没有预置聊天或业务数据。
  */
 import { useEffect, useState } from "react"
-import type { CollaborationHost, DesktopHost, ThemeMode, WindowState } from "@workbench/contracts"
+import type { CollaborationHost, DesktopHost, DeviceHost, ThemeMode, WindowState } from "@workbench/contracts"
+import { BrandMark } from "./common/brand.js"
 import { IdentityPanel } from "./identity/identity-panel.js"
-import "./theme.css"
+import { DeviceRegistrationPanel } from "./device-registration/device-registration.js"
+import "./device-registration/device-registration.css"
+import "./workbench.css"
 
 /** 为原生桌面组合的基础内容；窗口状态订阅随组件销毁解除。 */
-export function Workbench({ host, collaboration }: { host: DesktopHost; collaboration: CollaborationHost }) {
+export function Workbench({ host, collaboration, devices }: { host: DesktopHost; collaboration: CollaborationHost; devices?: DeviceHost }) {
   const [state, setState] = useState<WindowState>({ themeMode: "system", colorScheme: "light", zoomPercent: 100 })
   const [directory, setDirectory] = useState<string | null>(null)
   const [error, setError] = useState("")
@@ -34,7 +37,7 @@ export function Workbench({ host, collaboration }: { host: DesktopHost; collabor
     finally { setChoosing(false) }
   }
   return <div className="workbench">
-    <header className="titlebar"><span className="brand-mark">W</span><span>协作工作台</span><span className="stage">基础桌面</span></header>
+    <header className="titlebar"><span className="brand-mark"><BrandMark /></span><span>协作工作台</span><span className="stage">基础桌面</span></header>
     <main>
       <div className="eyebrow">WORKBENCH</div>
       <h1>从本机开始</h1>
@@ -51,7 +54,8 @@ export function Workbench({ host, collaboration }: { host: DesktopHost; collabor
       </section>
       {error && <p className="error" role="alert">{error}</p>}
       <IdentityPanel host={collaboration} />
-      <footer>基础桌面已就绪。共享会话与执行能力将在后续版本接入。</footer>
+      {devices && <DeviceRegistrationPanel host={devices} collaboration={collaboration} />}
+      <footer>基础桌面已就绪。共享会话与设备托管已接入，真实 Agent 执行仍由后续 ACP 任务提供。</footer>
     </main>
   </div>
 }

@@ -1,13 +1,24 @@
 /**
- * 主进程身份网络：具名方法 → wire 校验 → 固定服务 origin → 安全结果。
- * Cookie/CSRF 只存在于实例私有内存；UI/IPC 后续只消费业务 DTO，不获得网络或凭据入口。
+ * 主进程网络：具名方法 → wire 校验 → 固定服务 origin → 安全结果。
+ * 身份、会话与设备共用同一 Cookie/CSRF 实例；SSE 只走具名解析器，不暴露给 renderer。
  */
 import { randomUUID } from "node:crypto"
+import { setTimeout as delay } from "node:timers/promises"
 import { Cookie, CookieJar } from "tough-cookie"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import formats from "ajv-formats"
-import platform from "@workbench/contracts/schema" with { type: "json" }
-import type { CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorResponse, MembersResponse, MetaResponse, WorkspaceListResponse } from "@workbench/contracts"
+import platform from "@workbench/contracts/schema/platform" with { type: "json" }
+import conversationSchema from "@workbench/contracts/schema/conversation" with { type: "json" }
+import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
+import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
+import type {
+  CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorResponse,
+  MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
+  CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
+  CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
+  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, ProjectListResponse,
+  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse,
+} from "@workbench/contracts"
 
 type Transport = typeof fetch
 type Session = { jar: CookieJar; csrf: string | null; abort: AbortController }
@@ -17,17 +28,24 @@ const messages: Record<CollaborationError["code"], string> = {
   METHOD_NOT_ALLOWED: "请求方法不支持", UNSUPPORTED_MEDIA_TYPE: "请求正文必须使用 JSON", ALREADY_AUTHENTICATED: "请先退出当前账号",
   PAYLOAD_TOO_LARGE: "请求体过大", PROTOCOL_VERSION_UNSUPPORTED: "协议版本不支持", SERVICE_UNAVAILABLE: "服务连接暂不可用",
   INTERNAL_ERROR: "服务暂时无法处理请求", NETWORK_UNAVAILABLE: "无法确认服务连接，请重试读取", TLS_ERROR: "服务证书校验失败",
-  INVALID_SERVER_RESPONSE: "服务响应不符合契约",
+  INVALID_SERVER_RESPONSE: "服务响应不符合契约", REQUEST_ID_CONFLICT: "请求编号已用于其他操作", CURSOR_AHEAD: "事件位置超出已提交范围",
+  PROJECT_NOT_SHARED: "项目未共享或已停止共享", TARGET_UNAVAILABLE: "目标设备或执行配置不可用",
+  EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新", REGISTRATION_CONFLICT: "设备标识已被占用",
+  DEVICE_AUTHENTICATION_REQUIRED: "设备凭据已失效", DEVICE_ACTION_REJECTED: "当前账号不能管理该设备",
+  SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
 }
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
 }
+interface CallOptions { body?: unknown; inputSchema?: string; query?: Record<string, string>; session?: Session }
+interface StreamHandle { close(): void }
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
 export class CollaborationClient {
   readonly #origin: string
   readonly #transport: Transport
   readonly #ajv = new Ajv2020({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false })
+  readonly #types = new Map<string, string>()
   #session: Session = this.#emptySession()
   #closing = new Set<Session>()
   #disposed = false
@@ -39,10 +57,11 @@ export class CollaborationClient {
       !(url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "127.0.0.1"))) throw new Error("服务地址无效")
     this.#origin = origin
     this.#transport = transport
-    // 此依赖发布为 CJS；NodeNext 按声明的 default 属性接入同一个格式插件。
     formats.default(this.#ajv)
-    this.#ajv.addSchema(platform)
-    for (const name of Object.keys(platform.$defs)) this.#validator(name)
+    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema]) {
+      this.#ajv.addSchema(schema)
+      for (const name of Object.keys(schema.$defs)) this.#types.set(name, `${schema.$id}#/$defs/${name}`)
+    }
   }
   #emptySession(): Session { return { jar: new CookieJar(undefined, { prefixSecurity: "strict" }), csrf: null, abort: new AbortController() } }
   #discardSession() {
@@ -60,7 +79,8 @@ export class CollaborationClient {
     this.#closing.clear()
   }
   #validator(name: string) {
-    const validate = this.#ajv.getSchema(`${platform.$id}#/$defs/${name}`)
+    const target = this.#types.get(name)
+    const validate = target ? this.#ajv.getSchema(target) : undefined
     if (!validate) throw new ClientProblem("INVALID_SERVER_RESPONSE")
     return validate
   }
@@ -77,7 +97,7 @@ export class CollaborationClient {
         const { done, value } = await reader.read()
         if (done) break
         size += value.byteLength
-        if (size > 65536) { await reader.cancel(); throw new ClientProblem("INVALID_SERVER_RESPONSE") }
+        if (size > 1_048_576) { await reader.cancel(); throw new ClientProblem("INVALID_SERVER_RESPONSE") }
         chunks.push(value)
       }
     } finally { reader.releaseLock() }
@@ -87,21 +107,22 @@ export class CollaborationClient {
     try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) }
     catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
   }
-  /** 只有内部固定路由能调用；每次异步结果先核对所属会话，旧响应不能写入新 Jar。 */
-  async #call<T>(path: string, schema: string | null, method = "GET", input?: { username: string }, session = this.#session): Promise<CollaborationResult<T>> {
+  async #call<T>(path: string, schema: string | null, method = "GET", options: CallOptions = {}): Promise<CollaborationResult<T>> {
     const requestId = randomUUID()
+    const session = options.session ?? this.#session
     try {
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
-      if (input && !this.#validator("DemoLoginRequest")(input)) return this.#error("INVALID_REQUEST", requestId)
-      const body = input ? JSON.stringify(input) : undefined
-      if (body && Buffer.byteLength(body) > 16384) return this.#error("PAYLOAD_TOO_LARGE", requestId)
+      if (options.body !== undefined && options.inputSchema && !this.#validator(options.inputSchema)(options.body)) return this.#error("INVALID_REQUEST", requestId)
+      const body = options.body === undefined ? undefined : JSON.stringify(options.body)
+      if (body && Buffer.byteLength(body) > 1_048_576) return this.#error("PAYLOAD_TOO_LARGE", requestId)
+      const query = options.query ? "?" + new URLSearchParams(options.query).toString() : ""
       const headers: Record<string, string> = { Origin: this.#origin, "X-Workbench-Protocol-Version": "1", "X-Request-Id": requestId }
       const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (cookie) headers.Cookie = cookie
       if (method === "POST" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
       if (body) headers["Content-Type"] = "application/json"
-      const response = await this.#transport(`${this.#origin}${path}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any([session.abort.signal, AbortSignal.timeout(10000)]) })
+      const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any([session.abort.signal, AbortSignal.timeout(10000)]) })
       if (!this.#live(session)) { void response.body?.cancel().catch(() => {}); throw new ClientProblem("NETWORK_UNAVAILABLE") }
       if (response.status >= 300 && response.status < 400) throw new ClientProblem("INVALID_SERVER_RESPONSE")
       for (const header of response.headers.getSetCookie()) {
@@ -120,11 +141,10 @@ export class CollaborationClient {
         if (!this.#validator("ErrorResponse")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
         const error = (data as ErrorResponse).error
         if (error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
-        // 显式错误CSRF只刷新，不自动重放原写操作；失败不等于获得重试授权。
         if (error.code === "CSRF_INVALID") session.csrf = null
-        return { ok: false, error: { ...error, message: messages[error.code] } }
+        return { ok: false, error: { ...error, message: messages[error.code] ?? error.message } }
       }
-      if (response.status !== 200 || !schema || !this.#validator(schema)(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+      if ((response.status !== 200 && response.status !== 201) || !schema || !this.#validator(schema)(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
       return { ok: true, value: data as T }
     } catch (e) {
       if (e instanceof ClientProblem) return this.#error(e.code, requestId)
@@ -138,16 +158,18 @@ export class CollaborationClient {
     }
   }
   async #csrf(session: Session) {
-    const result = await this.#call<CsrfResponse>("/api/v1/auth/csrf", "CsrfResponse", "GET", undefined, session)
+    const result = await this.#call<CsrfResponse>("/api/v1/auth/csrf", "CsrfResponse", "GET", { session })
     if (result.ok && this.#live(session)) session.csrf = result.value.token
     return result
   }
-  async #write<T>(path: string, schema: string | null, input?: { username: string }, session = this.#session): Promise<CollaborationResult<T>> {
+  async #write<T>(path: string, schema: string | null, options: CallOptions = {}): Promise<CollaborationResult<T>> {
+    const session = options.session ?? this.#session
     if (!session.csrf) { const token = await this.#csrf(session); if (!token.ok) return token }
-    const result = await this.#call<T>(path, schema, "POST", input, session)
+    const result = await this.#call<T>(path, schema, "POST", { ...options, session })
     if (!result.ok && result.error.code === "CSRF_INVALID" && this.#live(session)) await this.#csrf(session)
     return result
   }
+
   getMeta(): Promise<CollaborationResult<MetaResponse>> { return this.#call("/api/v1/meta", "MetaResponse") }
   listDemoUsers(): Promise<CollaborationResult<DemoUsersResponse>> { return this.#call("/api/v1/auth/demo-users", "DemoUsersResponse") }
   getCurrentUser(): Promise<CollaborationResult<CurrentUserResponse>> { return this.#call("/api/v1/auth/me", "CurrentUserResponse") }
@@ -160,13 +182,13 @@ export class CollaborationClient {
   async signIn(username: string): Promise<CollaborationResult<CurrentUserResponse>> {
     if (!this.#validator("DemoLoginRequest")({ username })) return this.#error("INVALID_REQUEST")
     const session = this.#session
-    const result = await this.#write<CurrentUserResponse>("/api/v1/auth/demo-login", "CurrentUserResponse", { username }, session)
+    const result = await this.#write<CurrentUserResponse>("/api/v1/auth/demo-login", "CurrentUserResponse", { body: { username }, inputSchema: "DemoLoginRequest", session })
     if (!this.#live(session)) return this.#error("NETWORK_UNAVAILABLE")
     if (result.ok || (!result.ok && ["NETWORK_UNAVAILABLE", "INVALID_SERVER_RESPONSE"].includes(result.error.code))) {
       const token = await this.#csrf(session)
       if (!token.ok) return token
       if (!this.#live(session)) return this.#error("NETWORK_UNAVAILABLE")
-      const confirmed = await this.#call<CurrentUserResponse>("/api/v1/auth/me", "CurrentUserResponse", "GET", undefined, session)
+      const confirmed = await this.#call<CurrentUserResponse>("/api/v1/auth/me", "CurrentUserResponse", "GET", { session })
       if (!this.#live(session) && (confirmed.ok || confirmed.error.code !== "AUTHENTICATION_REQUIRED")) return this.#error("NETWORK_UNAVAILABLE")
       if (confirmed.ok) return confirmed.value.user.username === username ? confirmed : this.#error("INVALID_SERVER_RESPONSE")
       return result.ok ? confirmed : result
@@ -181,12 +203,198 @@ export class CollaborationClient {
     this.#closing.add(closing)
     this.#discardSession()
     try {
-      const result = await this.#write<null>("/api/v1/auth/logout", null, undefined, closing)
+      const result = await this.#write<null>("/api/v1/auth/logout", null, { session: closing })
       if (!result.ok) return { ok: false, error: { ...result.error, message: "本机已退出，服务端退出未确认", retryable: false } }
       return result
     } finally {
       this.#closing.delete(closing); closing.abort.abort(); closing.csrf = null
       void closing.jar.removeAllCookies()
     }
+  }
+
+  listConversations(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<ConversationListResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations`, "ConversationListResponse", "GET", { query })
+  }
+  createConversation(workspaceId: string, request: CreateConversationRequest): Promise<CollaborationResult<CreateConversationResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations`, "CreateConversationResponse", { body: request, inputSchema: "CreateConversationRequest" })
+  }
+  getConversation(workspaceId: string, conversationId: string): Promise<CollaborationResult<ConversationResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}`, "ConversationResponse")
+  }
+  sendInput(workspaceId: string, conversationId: string, request: SendInputRequest): Promise<CollaborationResult<InputSavedResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/inputs`, "InputSavedResponse", { body: request, inputSchema: "SendInputRequest" })
+  }
+  getExecution(workspaceId: string, conversationId: string, executionId: string): Promise<CollaborationResult<ExecutionResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/executions/${executionId}`, "ExecutionResponse")
+  }
+  cancelExecution(workspaceId: string, conversationId: string, executionId: string, request: CancelExecutionRequest): Promise<CollaborationResult<CancelExecutionResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/executions/${executionId}/cancel`, "CancelExecutionResponse", { body: request, inputSchema: "CancelExecutionRequest" })
+  }
+  history(workspaceId: string, conversationId: string, query: Record<string, string> = {}): Promise<CollaborationResult<HistoryResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/history`, "HistoryResponse", "GET", { query })
+  }
+
+  /** 重连只携带已应用的连续位置。退出、换账号或关闭订阅会使旧流立即失效。 */
+  subscribeConversation(workspaceId: string, conversationId: string, afterSequence: string,
+                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string }) => void): StreamHandle {
+    const controller = new AbortController()
+    const session = this.#session
+    const signal = AbortSignal.any([controller.signal, session.abort.signal])
+    const live = () => !signal.aborted && !this.#disposed && session === this.#session
+    const emitProblem = (code: string) => { if (live()) onProblem({ code }) }
+    let cursor = afterSequence
+    let retry = 0
+    let lastEvent: string | undefined
+    let reconnect = false
+
+    const read = async () => {
+      const connection = new AbortController()
+      const connectionSignal = AbortSignal.any([signal, connection.signal])
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+      const deadline = (ms: number) => {
+        clearTimeout(timer)
+        timer = setTimeout(() => connection.abort(), ms)
+      }
+      try {
+        const headers: Record<string, string> = {
+          Origin: this.#origin, "X-Workbench-Protocol-Version": "1", Accept: "text/event-stream", "X-Request-Id": randomUUID(),
+        }
+        const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
+        if (!live()) return
+        if (cookie) headers.Cookie = cookie
+        const path = `/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/events`
+        const query = reconnect ? "" : `?afterSequence=${cursor}`
+        if (reconnect) headers["Last-Event-ID"] = `${conversationId}:${cursor}`
+        deadline(10_000)
+        const response = await this.#transport(`${this.#origin}${path}${query}`, {
+          method: "GET", headers, redirect: "manual", signal: connectionSignal,
+        })
+        if (!live() || connectionSignal.aborted) { void response.body?.cancel().catch(() => {}); return }
+        if (response.status !== 200) {
+          if (response.status >= 300 && response.status < 400) {
+            void response.body?.cancel().catch(() => {})
+            throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          }
+          const body = await this.#readJson(response)
+          if (!live()) return
+          if (!this.#validator("ErrorResponse")(body)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          throw new ClientProblem((body as ErrorResponse).error.code)
+        }
+        if (!response.body || response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "text/event-stream") {
+          void response.body?.cancel().catch(() => {})
+          throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        }
+        reader = response.body.getReader()
+        const decoder = new TextDecoder("utf-8", { fatal: true })
+        let pending = ""
+        let id: string | undefined
+        let name: string | undefined
+        let data: string[] = []
+        let bytes = 0
+        let comment = false
+        deadline(45_000)
+        while (live() && !connectionSignal.aborted) {
+          const { done, value } = await reader.read()
+          if (!live() || connectionSignal.aborted || done) return
+          deadline(45_000)
+          try { pending += decoder.decode(value, { stream: true }) }
+          catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
+          let newline = pending.indexOf("\n")
+          while (newline >= 0) {
+            if (!live() || connectionSignal.aborted) return
+            const line = pending.slice(0, newline).replace(/\r$/, "")
+            pending = pending.slice(newline + 1)
+            newline = pending.indexOf("\n")
+            bytes += Buffer.byteLength(line) + 1
+            if (bytes > 66_560) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+            if (!line) {
+              if (name === "stream.problem" && id === undefined) {
+                const problem = parse(data.join("\n"))
+                if (!this.#validator("ErrorResponse")(problem)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                throw new ClientProblem((problem as ErrorResponse).error.code)
+              }
+              if (name === "conversation.event") {
+                const content = data.join("\n")
+                const event = parse(content) as ConversationEvent
+                if (Buffer.byteLength(content) > 65_536 || !this.#validator("ConversationEvent")(event)
+                  || event.workspaceId !== workspaceId || event.conversationId !== conversationId
+                  || id !== `${conversationId}:${event.sequence}`)
+                  throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                if (event.sequence === cursor && content === lastEvent) {
+                  // 当前连接末尾的相同事件可安全忽略。无法核对的重复必须停止。
+                } else {
+                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                  onEvent(event)
+                  if (!live()) return
+                  cursor = event.sequence
+                  lastEvent = content
+                }
+                retry = 0
+              } else if (id !== undefined || name !== undefined || data.length) {
+                throw new ClientProblem("INVALID_SERVER_RESPONSE")
+              } else if (comment) retry = 0
+              id = undefined; name = undefined; data = []; bytes = 0; comment = false
+            } else if (line.startsWith(":")) comment = true
+            else if (line.startsWith("id:") && id === undefined) id = line.slice(3).replace(/^ /, "")
+            else if (line.startsWith("event:") && name === undefined) name = line.slice(6).replace(/^ /, "")
+            else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""))
+            else throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          }
+          if (bytes + Buffer.byteLength(pending) > 66_560) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        }
+      } finally {
+        clearTimeout(timer)
+        connection.abort()
+        if (reader) {
+          void reader.cancel().catch(() => {})
+          reader.releaseLock()
+        }
+      }
+    }
+
+    const parse = (value: string): unknown => {
+      try { return JSON.parse(value) }
+      catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
+    }
+    const run = async () => {
+      if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(conversationId)
+        || !/^(0|[1-9][0-9]{0,18})$/.test(cursor) || BigInt(cursor) > 9_223_372_036_854_775_807n) {
+        emitProblem("INVALID_REQUEST")
+        return
+      }
+      while (live()) {
+        try { await read() }
+        catch (failure) {
+          if (!live()) return
+          const code = failure instanceof ClientProblem ? failure.code : "NETWORK_UNAVAILABLE"
+          emitProblem(code)
+          if (code === "AUTHENTICATION_REQUIRED" && live()) this.#discardSession()
+          if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") return
+        }
+        if (!live()) return
+        reconnect = true
+        const wait = [1000, 2000, 5000][Math.min(retry++, 2)]
+        try { await delay(wait, undefined, { signal }) } catch { return }
+      }
+    }
+    void run()
+    return { close: () => controller.abort() }
+  }
+
+  registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/devices`, "DeviceRegistrationResponse", { body: request, inputSchema: "DeviceRegistrationRequest" })
+  }
+  listDevices(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<DeviceListResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/devices`, "DeviceListResponse", "GET", { query })
+  }
+  listProjects(workspaceId: string, deviceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<ProjectListResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/devices/${deviceId}/projects`, "ProjectListResponse", "GET", { query })
+  }
+  revokeDevice(workspaceId: string, deviceId: string, request: DeviceRevokeRequest): Promise<CollaborationResult<DeviceRevokedResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/devices/${deviceId}/revoke`, "DeviceRevokedResponse", { body: request, inputSchema: "DeviceRevokeRequest" })
+  }
+  stopSharing(workspaceId: string, projectId: string, request: ProjectStopSharingRequest): Promise<CollaborationResult<ProjectSavedResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/stop-sharing`, "ProjectSavedResponse", { body: request, inputSchema: "ProjectStopSharingRequest" })
   }
 }

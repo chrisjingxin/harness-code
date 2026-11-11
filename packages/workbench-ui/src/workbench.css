@@ -1,0 +1,34 @@
+/* 基础页布局只作用于本页；颜色与基础 reset 由公共主题提供。 */
+.workbench {
+  min-height:100vh;
+  background:var(--bg); color:var(--text);
+}
+:where(.workbench) button { cursor:pointer; border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:8px; padding:10px 16px; }
+:where(.workbench) button:hover:not(:disabled) { border-color:var(--accent); }
+:where(.workbench) button:disabled { opacity:.4; cursor:default; }
+.workbench .titlebar { height:56px; padding:0 150px 0 88px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; -webkit-app-region:drag; user-select:none; }
+.workbench .brand-mark { color:var(--accent); }
+.workbench .stage { color:var(--muted); font-size:11px; font-weight:400; border-left:1px solid var(--line); margin-left:8px; padding-left:16px; white-space:nowrap; }
+.workbench main { width:min(740px, 100%); margin:0 auto; padding:68px 28px 30px; }
+.workbench .eyebrow { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:2px; }
+:where(.workbench) h1 { font-size:34px; font-weight:600; letter-spacing:-1px; margin:16px 0 12px; }
+.workbench .intro { color:var(--muted); font-size:15px; margin:0 0 36px; }
+.workbench .project-card { display:flex; flex-wrap:wrap; gap:20px; align-items:center; padding:26px; background:var(--surface); border:1px solid var(--line); border-radius:14px; }
+.workbench .folder-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:11px; background:var(--accent-soft-2); color:var(--accent); font-size:34px; }
+.workbench .project-copy { flex:1; min-width:120px; }
+:where(.workbench) h2 { margin:0 0 8px; font-size:15px; font-weight:600; }
+.workbench .directory { color:var(--muted); font-size:12px; margin:0; overflow-wrap:anywhere; }
+.workbench .primary { background:var(--action); color:var(--action-text); border-color:var(--action); font-size:13px; font-weight:600; }
+.workbench .primary:hover:not(:disabled) { background:var(--action-hover); border-color:var(--action-hover); }
+.workbench .hint { margin:12px 4px 32px; color:var(--muted); font-size:12px; line-height:1.6; }
+.workbench .preferences { display:flex; flex-wrap:wrap; gap:24px 48px; border-top:1px solid var(--line); padding-top:26px; font-size:12px; }
+.workbench .preferences label, .workbench .zoom-control { display:flex; align-items:center; gap:14px; }
+.workbench .preferences select { border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:8px; padding:9px 28px 9px 12px; }
+.workbench .zoom-buttons { display:flex; }
+.workbench .zoom-buttons button { border-radius:0; padding:8px 13px; font-size:12px; }
+.workbench .zoom-buttons button:first-child { border-radius:8px 0 0 8px; }
+.workbench .zoom-buttons button:last-child { border-radius:0 8px 8px 0; }
+.workbench .zoom-buttons button+button { border-left:0; }
+.workbench footer { margin-top:55px; color:var(--muted); font-size:11px; line-height:1.8; }
+.workbench .error { color:var(--danger); font-size:13px; }
+@media (max-width:520px) { .workbench main { padding-top:36px; } :where(.workbench) h1 { font-size:28px; } .workbench .stage { display:none; } }

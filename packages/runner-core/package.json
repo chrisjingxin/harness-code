@@ -14,6 +14,10 @@
     }
   },
   "dependencies": {
-    "@workbench/contracts": "0.2.0"
+    "@workbench/contracts": "0.2.0",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
   }
 }

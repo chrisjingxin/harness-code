@@ -1,0 +1,125 @@
+/* 公共 Markdown、代码块和语法着色；文件布局由具体区域负责。 */
+/* ---------- Markdown ---------- */
+.markdown { min-width: 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p { margin: 7px 0; }
+.markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 16px 0 7px; font-family: var(--font-serif); letter-spacing: -.02em; line-height: 1.25; }
+.markdown h2 { font-size: 1.25rem; }
+.markdown h3 { font-size: 1.1rem; }
+.markdown h4, .markdown h5, .markdown h6 { font-size: .95rem; }
+.markdown ul, .markdown ol { margin: 7px 0; padding-left: 22px; }
+.markdown li { margin: 3px 0; }
+.markdown li > p { margin: 0; }
+.markdown li > p + p { margin-top: 6px; }
+.markdown blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--line-strong); color: var(--muted); }
+.markdown code { padding: 1px 5px; border-radius: var(--radius-control); background: var(--code-bg); color: var(--inline-code-text); font-size: .86em; }
+.markdown a { color: var(--link-text); text-decoration: underline; text-underline-offset: 2px; }
+.markdown a:hover { color: var(--link-text-hover); }
+.markdown-raw, .markdown-unsafe-link, .markdown-image-alt { color: var(--muted); white-space: pre-wrap; }
+.markdown-table-wrap { max-width: 100%; overflow-x: auto; }
+.markdown table { border-collapse: collapse; min-width: 100%; }
+.markdown th, .markdown td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; }
+.markdown th { background: var(--surface-2); }
+.markdown td[data-align="center"], .markdown th[data-align="center"] { text-align: center; }
+.markdown td[data-align="right"], .markdown th[data-align="right"] { text-align: right; }
+
+
+/* ---------- 语法着色与 CodeBlock ---------- */
+.wb-syntax .syntax-comment { color: var(--syntax-comment); font-style: italic; }
+.wb-syntax .syntax-keyword { color: var(--syntax-keyword); font-weight: 600; }
+.wb-syntax .syntax-function { color: var(--syntax-function); }
+.wb-syntax .syntax-variable { color: var(--syntax-variable); }
+.wb-syntax .syntax-string { color: var(--syntax-string); }
+.wb-syntax .syntax-number { color: var(--syntax-number); }
+.wb-syntax .syntax-type { color: var(--syntax-type); }
+.wb-syntax .syntax-operator { color: var(--syntax-operator); }
+.wb-syntax .syntax-punctuation { color: var(--syntax-punctuation); }
+.wb-syntax .syntax-tag { color: var(--syntax-tag); }
+.wb-syntax .syntax-attribute { color: var(--syntax-attribute); }
+.wb-syntax .syntax-constant { color: var(--syntax-constant); }
+
+/* CodeBlock 外壳：与工具输出同层的暖色内嵌面板，无窗格式双调头带；
+   语言标签是安静的小字 caption，复制按钮 hover/聚焦才现身。 */
+.code-block {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 0 10px;
+  font-size: 11px;
+  color: var(--subtle);
+}
+.code-block-lang {
+  font-family: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-weight: 500;
+  text-transform: lowercase;
+  letter-spacing: .04em;
+}
+.code-block-loading-hint {
+  font-weight: normal;
+  opacity: 0.7;
+}
+.code-block-copy {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  opacity: 0;
+}
+.code-block:hover .code-block-copy,
+.code-block:focus-within .code-block-copy,
+.code-block-copy:focus-visible { opacity: 1; }
+.code-block-copy svg { width: 14px; height: 14px; }
+.code-block-copy:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+.code-block-body {
+  padding: 6px 12px 10px;
+  overflow-x: auto;
+}
+.code-block-pre {
+  margin: 0;
+  white-space: pre;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.code-block-pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  word-break: normal;
+}
+.diff-code-line {
+  display: block;
+  min-width: max-content;
+  padding-inline: 10px;
+  margin-inline: -10px;
+}
+.diff-code-add { background: var(--diff-add-bg); }
+.diff-code-remove { background: var(--diff-remove-bg); }
+.diff-code-hunk { color: var(--accent); background: var(--surface-3); }
+
+
+.code-block-actions { display: flex; align-items: center; gap: 6px; }
+.code-block-unavailable, .code-block-error, .markdown-link-error { color: var(--muted); font-size: 11px; }
+.code-block-error, .markdown-link-error { color: var(--danger-text); }
+.code-block-error { display: block; padding: 0 12px 8px; }
+.code-block-copy:disabled { opacity: .45; cursor: not-allowed; }
+.markdown-task { list-style: none; }
+.markdown-task > input { margin-inline-end: 6px; }

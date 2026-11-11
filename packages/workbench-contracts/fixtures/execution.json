@@ -1,0 +1,345 @@
+[
+  {
+    "name": "deterministic-execution-start-cjk-emoji",
+    "schema": "ExecutionStartMessage",
+    "valid": true,
+    "bodySha256": "ca74ad0673d098445cd3bedd998a74a67021f8361756478e220464917be58c62",
+    "canonical": "{\"protocolVersion\":1,\"messageId\":\"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\",\"type\":\"execution.start\",\"occurredAt\":\"2026-11-08T02:03:04.005Z\",\"payload\":{\"workspaceId\":\"22222222-2222-4222-8222-222222222222\",\"conversationId\":\"33333333-3333-4333-8333-333333333333\",\"executionId\":\"88888888-8888-4888-8888-888888888888\",\"inputId\":\"77777777-7777-4777-8777-777777777777\",\"deviceId\":\"44444444-4444-4444-8444-444444444444\",\"projectId\":\"55555555-5555-4555-8555-555555555555\",\"inputSequence\":\"1\",\"initiatedByUserId\":\"11111111-1111-4111-8111-111111111111\",\"agentConfigId\":\"66666666-6666-4666-8666-666666666666\",\"shareVersion\":\"1\",\"nativeSessionId\":null,\"input\":{\"text\":\"检查 \\\"登录页\\\" \\\\ 路径\\n第二行 😀\"}}}",
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "type": "execution.start",
+      "occurredAt": "2026-11-08T02:03:04.005Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "inputSequence": "1",
+        "initiatedByUserId": "11111111-1111-4111-8111-111111111111",
+        "agentConfigId": "66666666-6666-4666-8666-666666666666",
+        "shareVersion": "1",
+        "nativeSessionId": null,
+        "input": {
+          "text": "检查 \"登录页\" \\ 路径\n第二行 😀"
+        },
+        "bodySha256": "ca74ad0673d098445cd3bedd998a74a67021f8361756478e220464917be58c62"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-cancel",
+    "schema": "ExecutionCancelMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0",
+      "type": "execution.cancel",
+      "occurredAt": "2026-11-08T02:04:00.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "requestedByUserId": "11111111-1111-4111-8111-111111111111",
+        "bodySha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-start-decision-allow",
+    "schema": "ExecutionStartDecisionMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+      "type": "execution.start.decision",
+      "occurredAt": "2026-11-08T02:03:05.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "decision": "allow",
+        "reasonCode": null,
+        "bodySha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-accepted",
+    "schema": "ExecutionAcceptedMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
+      "type": "execution.accepted",
+      "occurredAt": "2026-11-08T02:03:04.500Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "1",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "bodySha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-native-bound",
+    "schema": "ExecutionNativeBoundMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "c3c3c3c3-c3c3-43c3-83c3-c3c3c3c3c3c3",
+      "type": "execution.native.bound",
+      "occurredAt": "2026-11-08T02:03:05.500Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "2",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "startDecisionMessageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+        "nativeSessionId": "acp-session-中文-01",
+        "bodySha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-output-text",
+    "schema": "ExecutionOutputMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4",
+      "type": "execution.output",
+      "occurredAt": "2026-11-08T02:03:06.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "3",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "startDecisionMessageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+        "change": {
+          "type": "message.text.appended",
+          "messageId": "99999999-9999-4999-8999-999999999999",
+          "text": "正在检查…"
+        },
+        "bodySha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      }
+    }
+  },
+  {
+    "name": "invalid-execution-output-raw-acp",
+    "schema": "ExecutionOutputMessage",
+    "valid": false,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4",
+      "type": "execution.output",
+      "occurredAt": "2026-11-08T02:03:06.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "3",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "startDecisionMessageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+        "change": {
+          "type": "session.update",
+          "sessionUpdate": {
+            "sessionUpdate": "agent_message_chunk"
+          }
+        },
+        "bodySha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      }
+    }
+  },
+  {
+    "name": "valid-execution-terminal",
+    "schema": "ExecutionTerminalMessage",
+    "valid": true,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "e5e5e5e5-e5e5-45e5-85e5-e5e5e5e5e5e5",
+      "type": "execution.terminal",
+      "occurredAt": "2026-11-08T02:03:09.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "5",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "startDecisionMessageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+        "nativeSessionId": "acp-session-中文-01",
+        "state": "succeeded",
+        "reasonCode": null,
+        "invocationState": "finished",
+        "bodySha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    }
+  },
+  {
+    "name": "invalid-execution-terminal-unknown-state",
+    "schema": "ExecutionTerminalMessage",
+    "valid": false,
+    "data": {
+      "protocolVersion": 1,
+      "messageId": "e5e5e5e5-e5e5-45e5-85e5-e5e5e5e5e5e5",
+      "type": "execution.terminal",
+      "occurredAt": "2026-11-08T02:03:09.000Z",
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "conversationId": "33333333-3333-4333-8333-333333333333",
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "inputId": "77777777-7777-4777-8777-777777777777",
+        "deviceId": "44444444-4444-4444-8444-444444444444",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "runnerSequence": "5",
+        "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "startDecisionMessageId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+        "nativeSessionId": null,
+        "state": "unknown",
+        "reasonCode": null,
+        "invocationState": "finished",
+        "bodySha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    }
+  },
+  {
+    "name": "valid-RecordBatchRequest",
+    "schema": "RecordBatchRequest",
+    "valid": true,
+    "data": {
+      "deviceId": "44444444-4444-4444-8444-444444444444",
+      "connectionId": "abababab-abab-4bab-8bab-abababababab",
+      "executionId": "88888888-8888-4888-8888-888888888888",
+      "events": [
+        {
+          "protocolVersion": 1,
+          "messageId": "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
+          "type": "execution.accepted",
+          "occurredAt": "2026-11-08T02:03:04.500Z",
+          "payload": {
+            "workspaceId": "22222222-2222-4222-8222-222222222222",
+            "conversationId": "33333333-3333-4333-8333-333333333333",
+            "executionId": "88888888-8888-4888-8888-888888888888",
+            "inputId": "77777777-7777-4777-8777-777777777777",
+            "deviceId": "44444444-4444-4444-8444-444444444444",
+            "projectId": "55555555-5555-4555-8555-555555555555",
+            "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "runnerSequence": "1",
+            "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "bodySha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid-RecordBatchRequest-empty-events",
+    "schema": "RecordBatchRequest",
+    "valid": false,
+    "data": {
+      "deviceId": "44444444-4444-4444-8444-444444444444",
+      "connectionId": "abababab-abab-4bab-8bab-abababababab",
+      "executionId": "88888888-8888-4888-8888-888888888888",
+      "events": []
+    }
+  },
+  {
+    "name": "valid-RecordBatchResult",
+    "schema": "RecordBatchResult",
+    "valid": true,
+    "data": {
+      "ack": {
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "lastCommittedRunnerSequence": "1"
+      },
+      "startDecision": null
+    }
+  },
+  {
+    "name": "valid-ExecutionProblemGap",
+    "schema": "ExecutionProblem",
+    "valid": true,
+    "data": {
+      "kind": "gap",
+      "executionId": "88888888-8888-4888-8888-888888888888",
+      "expectedRunnerSequence": "2",
+      "lastCommittedRunnerSequence": "1"
+    }
+  },
+  {
+    "name": "invalid-ExecutionProblem-gap-missing-expected",
+    "schema": "ExecutionProblem",
+    "valid": false,
+    "data": {
+      "kind": "gap",
+      "executionId": "88888888-8888-4888-8888-888888888888",
+      "lastCommittedRunnerSequence": "1"
+    }
+  },
+  {
+    "name": "valid-ReconcileRequest",
+    "schema": "ReconcileRequest",
+    "valid": true,
+    "data": {
+      "deviceId": "44444444-4444-4444-8444-444444444444",
+      "connectionId": "abababab-abab-4bab-8bab-abababababab",
+      "ledgerId": "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd",
+      "executionId": "88888888-8888-4888-8888-888888888888",
+      "startCommandId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "startBodySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "localState": "accepted",
+      "storedDecisionMessageId": null,
+      "nativeSessionId": null
+    }
+  },
+  {
+    "name": "valid-ReconcileResult",
+    "schema": "ReconcileResult",
+    "valid": true,
+    "data": {
+      "action": "continueOriginal",
+      "ack": {
+        "executionId": "88888888-8888-4888-8888-888888888888",
+        "lastCommittedRunnerSequence": "0"
+      },
+      "startDecision": null
+    }
+  }
+]
