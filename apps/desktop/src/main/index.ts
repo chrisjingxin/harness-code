@@ -29,7 +29,7 @@ function openWindow(): void {
 }
 
 app.setName(__WORKBENCH_UI_PREVIEW__ ? {
-  hc205: "工作台主题预览", hc206: "工作台对话预览", hc207: "工作台项目预览",
+  hc205: "工作台主题预览", hc206: "工作台对话预览", hc207: "工作台项目预览", hc208: "工作台导航预览",
 }[__WORKBENCH_UI_PREVIEW__] : "协作工作台")
 app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([

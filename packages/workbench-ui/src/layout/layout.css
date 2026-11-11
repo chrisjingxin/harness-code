@@ -1,0 +1,137 @@
+.collaboration-layout {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  position: relative;
+}
+.collaboration-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.collaboration-header button,
+.collaboration-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+.collaboration-header-context {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.collaboration-header-context strong,
+.collaboration-header-context strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.collaboration-header-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collaboration-header-context strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.collaboration-header-context span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.collaboration-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.collaboration-left,
+.collaboration-right {
+  position: relative;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
+}
+.collaboration-left {
+  border-right: 1px solid var(--line);
+}
+.collaboration-left[data-mode="hidden"],
+.collaboration-right[data-mode="hidden"] {
+  border: 0;
+  visibility: hidden;
+}
+.collaboration-left[data-mode="overlay"],
+.collaboration-right[data-mode="overlay"] {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  box-shadow: var(--shadow);
+}
+.collaboration-left[data-mode="overlay"] {
+  left: 0;
+}
+.collaboration-right[data-mode="overlay"] {
+  right: 0;
+}
+.collaboration-left-resize {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+.collaboration-center {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.collaboration-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: var(--overlay-scrim);
+}
+.collaboration-modal {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 24px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  box-shadow: var(--shadow);
+}
+.collaboration-modal-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
+.collaboration-layout :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
