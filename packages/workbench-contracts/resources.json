@@ -3,17 +3,20 @@
     "platform.schema.json",
     "conversation.schema.json",
     "execution.schema.json",
-    "device.schema.json"
+    "device.schema.json",
+    "project.schema.json"
   ],
   "openapi": [
     "platform.openapi.json",
     "conversation.openapi.json",
-    "device.openapi.json"
+    "device.openapi.json",
+    "project.openapi.json"
   ],
   "fixtures": [
     "identity.json",
     "conversation.json",
     "execution.json",
-    "device.json"
+    "device.json",
+    "project.json"
   ]
 }

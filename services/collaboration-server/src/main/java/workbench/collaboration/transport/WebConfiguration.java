@@ -10,6 +10,7 @@ import workbench.collaboration.identity.IdentityService;
 import workbench.collaboration.identity.WorkspaceAccess;
 import workbench.collaboration.infrastructure.Foundation;
 import workbench.collaboration.realtime.*;
+import workbench.collaboration.project.*;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.Environment;
@@ -43,7 +44,7 @@ import java.util.*;
  */
 @Configuration(proxyBeanMethods = false)
 @Import({IdentityController.class, ConversationController.class, DeviceController.class,
-  ConversationStreamController.class, ApiExceptionHandler.class, DeviceWebSocketConfiguration.class})
+  ConversationStreamController.class, ProjectReadController.class, ApiExceptionHandler.class, DeviceWebSocketConfiguration.class})
 public class WebConfiguration {
   @Bean UserDetailsService noDefaultUsers() { return new InMemoryUserDetailsManager(); }
   @Bean WorkspaceAccess workspaceAccess(DataSource source) { return new WorkspaceAccess(source); }
@@ -72,6 +73,12 @@ public class WebConfiguration {
     return new DeviceChannel(contracts, devices, presence, store, conversations, receipts, recovery, codec);
   }
   @Bean DeviceHandshakeInterceptor deviceHandshakeInterceptor(DeviceService devices) { return new DeviceHandshakeInterceptor(devices); }
+  @Bean ProjectReadAccess projectReadAccess(Environment environment) { return new DemoProjectReadAccess(environment); }
+  @Bean ProjectReadService projectReadService(DataSource source, Contracts contracts, WorkspaceAccess access, ConversationStore store,
+                                               DeviceService devices, DeviceChannel channel, ProjectReadAccess projectReadAccess) {
+    return new ProjectReadService(source, contracts, access, store, devices, channel, projectReadAccess);
+  }
+
   @Bean(initMethod = "start", destroyMethod = "stop")
   @DependsOn("foundation")
   ExecutionDispatcher executionDispatcher(DataSource source, ConversationStore store, ConversationService conversations,
@@ -193,6 +200,25 @@ public class WebConfiguration {
       case "REGISTRATION_CONFLICT" -> "设备标识已被占用";
       case "SHARE_VERSION_CONFLICT" -> "共享版本已变化，请刷新后重试";
       case "DEVICE_ACTION_REJECTED" -> "当前账号不能管理该设备";
+      case "PROJECT_READ_UNAVAILABLE" -> "设备尚未接入项目读取";
+      case "PROJECT_READ_BUSY", "PROJECT_BUSY" -> "项目读取繁忙，请稍后重试";
+      case "PROJECT_READ_TIMEOUT" -> "项目读取超时";
+      case "PROJECT_SOURCE_UNKNOWN" -> "项目来源尚未确认";
+      case "PROJECT_REPOSITORY_DENIED" -> "当前账号没有仓库读取权限";
+      case "PROJECT_IDENTITY_UNBOUND" -> "当前账号尚未绑定 Git 身份";
+      case "PROJECT_AUTH_UNAVAILABLE" -> "仓库权限暂时无法核验";
+      case "PROJECT_ROOT_CHANGED" -> "原设备项目目录已变化";
+      case "PROJECT_PATH_INVALID" -> "项目路径无效";
+      case "PROJECT_FILE_NOT_FOUND" -> "项目文件不存在";
+      case "PROJECT_FILE_DENIED" -> "原设备没有文件读取权限";
+      case "PROJECT_FILE_UNSUPPORTED" -> "项目文件暂不支持预览";
+      case "PROJECT_FILE_CHANGED" -> "项目文件已变化，请刷新";
+      case "PROJECT_CURSOR_EXPIRED" -> "目录已变化，请重新加载";
+      case "PROJECT_LIMIT_EXCEEDED" -> "项目内容超出读取限制";
+      case "PROJECT_GIT_UNAVAILABLE" -> "Git 状态暂不可用";
+      case "PROJECT_GIT_ROOT_REQUIRED" -> "请登记完整仓库根目录";
+      case "PROJECT_GIT_STALE" -> "Git 状态已变化，请刷新";
+      case "PROJECT_READ_FAILED" -> "项目读取失败";
       case "INVALID_REQUEST" -> "请求参数无效";
       default -> "服务暂时无法处理请求";
     };
@@ -215,6 +241,7 @@ public class WebConfiguration {
       this.contracts = contracts; this.origin = origin; this.authority = authority; this.catalog = catalog;
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
+      request.setAttribute("workbench.requestStarted", System.nanoTime());
       String requestId = request.getHeader("X-Request-Id");
       if (requestId == null || !requestId.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) requestId = UUID.randomUUID().toString();
       response.setHeader("X-Request-Id", requestId); response.setHeader("Cache-Control", "no-store");

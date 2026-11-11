@@ -1,0 +1,64 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "项目只读契约",
+    "version": "1"
+  },
+  "paths": {
+    "/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/project/read": {
+      "post": {
+        "operationId": "readConversationProject",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/project.schema.json#/$defs/ProjectReadAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "原设备项目读取结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/project.schema.json#/$defs/ProjectReadResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

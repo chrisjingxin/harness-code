@@ -533,6 +533,8 @@
     "DeviceMessage": {
       "oneOf": [
         { "$ref": "#/$defs/DeviceControlMessage" },
+        { "$ref": "https://workbench.invalid/schema/project.schema.json#/$defs/ProjectReadCommand" },
+        { "$ref": "https://workbench.invalid/schema/project.schema.json#/$defs/ProjectReadReply" },
         { "$ref": "https://workbench.invalid/schema/execution.schema.json#/$defs/ExecutionStartMessage" },
         { "$ref": "https://workbench.invalid/schema/execution.schema.json#/$defs/ExecutionCancelMessage" },
         { "$ref": "https://workbench.invalid/schema/execution.schema.json#/$defs/ExecutionStartDecisionMessage" },

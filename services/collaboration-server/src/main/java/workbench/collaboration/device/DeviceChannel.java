@@ -10,6 +10,7 @@ import workbench.collaboration.device.DeviceDtos.*;
 import workbench.collaboration.execution.*;
 import workbench.collaboration.execution.ExecutionDtos.*;
 import workbench.collaboration.infrastructure.TimeCodec;
+import workbench.collaboration.transport.ApiProblem;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
@@ -21,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 设备通道：握手 Bearer 认证 → 单连接替换 → welcome → resume/ready → 命令下发与来源回执。
@@ -28,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class DeviceChannel extends AbstractWebSocketHandler implements DeviceDelivery, SubProtocolCapable {
   private record Connection(String connectionId, AuthenticatedDevice device, WebSocketSession session,
-                             ConcurrentWebSocketSessionDecorator decorator, String resumeId, Recovery progress) {}
+                             ConcurrentWebSocketSessionDecorator decorator, String resumeId, Recovery progress, boolean projectRead) {}
 
   private static final class Recovery {
     String requestId;
@@ -58,6 +60,20 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
   private final ExecutionCodec codec;
   private final JsonMapper mapper = JsonMapper.builder().build();
   private final Map<String, Connection> byDevice = new ConcurrentHashMap<>();
+  private final Map<String, PendingProjectRead> projectReads = new HashMap<>();
+  private record PendingProjectRead(String requestId, String connectionId, String workspaceId, String deviceId,
+                                    String projectId, String shareVersion, String kind, CompletableFuture<JsonNode> result) {}
+
+  /** HTTP 等待结束即释放记录，迟到回包不能被另一次请求接收。 */
+  public final class ProjectReadTicket implements AutoCloseable {
+    private final PendingProjectRead pending;
+    private ProjectReadTicket(PendingProjectRead pending) { this.pending = pending; }
+    public CompletableFuture<JsonNode> result() { return pending.result(); }
+    @Override public void close() {
+      synchronized (projectReads) { projectReads.remove(pending.requestId(), pending); }
+    }
+  }
+
   private final java.util.concurrent.ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(task -> {
     Thread thread = new Thread(task, "workbench-device-heartbeat");
     thread.setDaemon(true);
@@ -86,9 +102,11 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
     String connectionId = UUID.randomUUID().toString();
     session.getAttributes().put("workbench.connectionId", connectionId);
     Connection connection = new Connection(connectionId, device, session,
-      new ConcurrentWebSocketSessionDecorator(session, 5000, 512 * 1024), UUID.randomUUID().toString(), new Recovery());
+      new ConcurrentWebSocketSessionDecorator(session, 5000, 512 * 1024), UUID.randomUUID().toString(), new Recovery(),
+      Boolean.TRUE.equals(session.getAttributes().get("workbench.projectRead")));
     Connection old = attach(connection);
     if (old != null && !old.connectionId().equals(connectionId)) {
+      expireProjectReads(old.connectionId());
       try { old.session().close(new CloseStatus(4001, "replaced")); } catch (Exception ignored) {}
     }
     send(connection, new DeviceWelcomeMessage(1, UUID.randomUUID().toString(), "device.welcome", now(),
@@ -141,6 +159,7 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
             case "device.resume" -> resume(connection, node);
             case "device.command.status" -> commandStatus(connection, node.get("payload"));
             case "device.project.saved" -> projectSaved(connection, node);
+            case "project.read.result" -> projectReadResult(connection, node);
             case "device.problem" -> { close(connection, CloseStatus.POLICY_VIOLATION); return; }
             default -> throw new IllegalArgumentException("设备无权请求云端原命令或自行 ready");
           }
@@ -365,6 +384,7 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
     synchronized (connection.progress()) {
       byDevice.remove(connection.device().deviceId(), connection);
       presence.disconnected(connection.device().deviceId(), connection.connectionId());
+      expireProjectReads(connection.connectionId());
     }
     try { connection.session().close(status); } catch (Exception ignored) { /* 当前连接资格已撤销 */ }
   }
@@ -395,6 +415,7 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
     synchronized (connection.progress()) {
       byDevice.remove(connection.device().deviceId(), connection);
       presence.disconnected(connection.device().deviceId(), connection.connectionId());
+      expireProjectReads(connection.connectionId());
     }
   }
 
@@ -416,6 +437,72 @@ public final class DeviceChannel extends AbstractWebSocketHandler implements Dev
       close(connection, CloseStatus.SERVER_ERROR);
       return false;
     }
+  }
+
+  /**
+   * 在同一当前连接内登记等待并发送，设备只读消息不进入执行队列或恢复账本。
+   * 连接锁保护能力与连接身份，等待和授权均不占用该锁。
+   */
+  public ProjectReadTicket requestProjectRead(ReadableProject project, JsonNode action) {
+    Connection connection = byDevice.get(project.deviceId());
+    if (connection == null) throw new ApiProblem(503, "TARGET_UNAVAILABLE");
+    synchronized (connection.progress()) {
+      if (byDevice.get(project.deviceId()) != connection || !connection.progress().ready
+          || !devices.activeDevice(project.deviceId())) throw new ApiProblem(503, "TARGET_UNAVAILABLE");
+      if (!connection.projectRead()) throw new ApiProblem(503, "PROJECT_READ_UNAVAILABLE");
+      if (!connection.device().workspaceId().equals(project.workspaceId())) throw new ApiProblem(409, "PROJECT_NOT_SHARED");
+      String id = UUID.randomUUID().toString();
+      String version = Long.toString(project.shareVersion());
+      PendingProjectRead pending = new PendingProjectRead(id, connection.connectionId(), project.workspaceId(),
+        project.deviceId(), project.projectId(), version, action.path("kind").asText(), new CompletableFuture<>());
+      synchronized (projectReads) {
+        long count = projectReads.values().stream().filter(item -> item.deviceId().equals(project.deviceId())).count();
+        if (projectReads.size() >= 128 || count >= 4) throw new ApiProblem(503, "PROJECT_READ_BUSY");
+        projectReads.put(id, pending);
+      }
+      Map<String, Object> payload = Map.of("workspaceId", project.workspaceId(), "deviceId", project.deviceId(),
+        "projectId", project.projectId(), "shareVersion", version, "action", action);
+      Map<String, Object> message = Map.of("protocolVersion", 1, "messageId", id, "type", "project.read",
+        "occurredAt", now(), "payload", payload);
+      if (!send(connection, message)) {
+        synchronized (projectReads) { projectReads.remove(id, pending); }
+        throw new ApiProblem(503, "TARGET_UNAVAILABLE");
+      }
+      return new ProjectReadTicket(pending);
+    }
+  }
+
+  private void projectReadResult(Connection connection, JsonNode message) {
+    if (!connection.progress().ready || !connection.projectRead()) return;
+    JsonNode payload = message.path("payload");
+    PendingProjectRead pending;
+    synchronized (projectReads) {
+      pending = projectReads.get(payload.path("requestMessageId").asText());
+      if (pending == null || !pending.connectionId().equals(connection.connectionId())
+          || !pending.deviceId().equals(connection.device().deviceId())
+          || !pending.deviceId().equals(payload.path("deviceId").asText())
+          || !pending.workspaceId().equals(payload.path("workspaceId").asText())
+          || !pending.projectId().equals(payload.path("projectId").asText())
+          || !pending.shareVersion().equals(payload.path("shareVersion").asText())
+          || !pending.kind().equals(payload.path("kind").asText())) return;
+      JsonNode result = payload.path("result");
+      if (result.path("status").asText().equals("ok")
+          && !pending.kind().equals(result.path("response").path("kind").asText())) return;
+      projectReads.remove(pending.requestId(), pending);
+    }
+    pending.result().complete(payload.path("result"));
+  }
+
+  private void expireProjectReads(String connectionId) {
+    List<PendingProjectRead> expired = new ArrayList<>();
+    synchronized (projectReads) {
+      var iterator = projectReads.values().iterator();
+      while (iterator.hasNext()) {
+        PendingProjectRead pending = iterator.next();
+        if (pending.connectionId().equals(connectionId)) { expired.add(pending); iterator.remove(); }
+      }
+    }
+    for (PendingProjectRead pending : expired) pending.result().completeExceptionally(new ApiProblem(503, "TARGET_UNAVAILABLE"));
   }
 
   private void executionProblem(Connection connection, ExecutionFailure failure) {

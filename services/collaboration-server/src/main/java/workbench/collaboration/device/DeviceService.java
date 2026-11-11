@@ -221,6 +221,15 @@ public final class DeviceService {
     catch (ApiProblem problem) { return Optional.empty(); }
   }
 
+  /** 在授权调用方事务内取得已共享项目，不把 Agent 能力用于文件读取授权。 */
+  public ReadableProject requireReadableProject(String workspaceId, String deviceId, String projectId) {
+    var rows = jdbc.query("SELECT p.id,p.device_id,p.workspace_id,p.share_version FROM wb_device_project p JOIN wb_device d ON d.id = p.device_id JOIN wb_user owner ON owner.id = d.owner_user_id AND owner.enabled = 1 JOIN wb_workspace_member membership ON membership.user_id = d.owner_user_id AND membership.workspace_id = p.workspace_id WHERE p.id = ? AND p.device_id = ? AND p.workspace_id = ? AND d.workspace_id = p.workspace_id AND p.share_enabled = 1 AND d.revoked_at_ms IS NULL",
+      (row, n) -> new ReadableProject(row.getString(1), row.getString(2), row.getString(3), row.getLong(4)),
+      projectId, deviceId, workspaceId);
+    if (rows.isEmpty()) throw new ApiProblem(409, "PROJECT_NOT_SHARED");
+    return rows.getFirst();
+  }
+
   private DeviceRow requireOwner(String deviceId, String workspaceId, String userId, boolean lock) {
     var rows = jdbc.query("SELECT id,workspace_id,owner_user_id,ledger_id,name,created_at_ms,revoked_at_ms FROM wb_device WHERE id = ? AND workspace_id = ?"
       + (lock ? " FOR UPDATE" : ""),

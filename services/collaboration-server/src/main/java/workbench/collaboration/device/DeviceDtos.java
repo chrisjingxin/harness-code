@@ -51,6 +51,8 @@ public final class DeviceDtos {
   public record AuthenticatedDevice(String deviceId, String workspaceId, String ownerUserId, String ledgerId) {}
   /** 在调用方事务内读取的共享目标；shareVersion 固定为当前共享版本。 */
   public record SharedProject(String projectId, String deviceId, String workspaceId, String agentConfigId, long shareVersion) {}
+  /** 文件读取只依赖已共享项目本身，不依赖 Agent 配置。 */
+  public record ReadableProject(String projectId, String deviceId, String workspaceId, long shareVersion) {}
   /** 设备登记行，仅用于持久化与授权判断。 */
   public record DeviceRow(String id, String workspaceId, String ownerUserId, String ledgerId, String name, long createdAtMs, Long revokedAtMs) {}
   public record ProjectRow(String id, String deviceId, String workspaceId, String name, String rootRef, boolean shareEnabled,

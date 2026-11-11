@@ -37,6 +37,7 @@ public final class RouteCatalog {
     new Route("/api/v1/workspaces/{workspaceId}/members", Set.of("GET"), Auth.USER, 0, NONE),
     new Route("/api/v1/workspaces/{workspaceId}/conversations", Set.of("GET", "POST"), Auth.USER, 16384, PAGE),
     new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}", Set.of("GET"), Auth.USER, 0, NONE),
+    new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/project/read", Set.of("POST"), Auth.USER, 16384, NONE),
     new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/inputs", Set.of("POST"), Auth.USER, 65536, NONE),
     new Route("/api/v1/workspaces/{workspaceId}/requests/{requestId}", Set.of("GET"), Auth.USER, 0, Map.of("operation", OPERATION)),
     new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/executions/{executionId}", Set.of("GET"), Auth.USER, 0, NONE),

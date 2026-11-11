@@ -1,5 +1,6 @@
 /** 设备登记/共享 HTTP 与设备通道控制帧；执行正文只引用 execution 唯一源。 */
 import type { Uuid, Sequence, ShareVersion, UtcTimestamp } from "./conversation.js"
+import type { ProjectReadCommand, ProjectReadReply } from "./project.js"
 import type { CollaborationResult } from "./identity.js"
 import type {
   ExecutionStartMessage, ExecutionCancelMessage, ExecutionStartDecisionMessage, ExecutionEventsAckMessage,
@@ -169,6 +170,8 @@ export type DeviceControlMessage =
   | DeviceProblemMessage
 export type DeviceMessage =
   | DeviceControlMessage
+  | ProjectReadCommand
+  | ProjectReadReply
   | ExecutionStartMessage
   | CancelMessage
   | ExecutionStartDecisionMessage

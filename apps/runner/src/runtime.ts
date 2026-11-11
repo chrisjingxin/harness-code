@@ -8,6 +8,7 @@ import {
   CommandHandler, DeviceConnection, Ledger, OwnerLock, ProjectRegistry, UnavailableExecutionPort,
   type ExecutionPort, type LocalDeviceRegistration,
 } from "@workbench/runner-core"
+import { createProjectReadPort } from "./project-read.js"
 
 export interface RunnerConfig {
   server: string
@@ -72,6 +73,7 @@ export function startRunner(config: RunnerConfig, port: ExecutionPort = new Unav
     const handler = new CommandHandler(ledger, port, registry, message => connection?.send(message))
     connection = new DeviceConnection({
       server: config.server, secret: config.secret, deviceId: config.deviceId, workspaceId: config.workspaceId, ledgerId: config.ledgerId, ledger, handler,
+      projectRead: createProjectReadPort(registry, ledger),
       onState: next => { state = next; onState?.(next) },
     })
     connection.start()

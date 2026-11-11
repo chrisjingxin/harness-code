@@ -11,13 +11,14 @@ import platform from "@workbench/contracts/schema/platform" with { type: "json" 
 import conversationSchema from "@workbench/contracts/schema/conversation" with { type: "json" }
 import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
 import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
+import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
 import type {
   CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorResponse,
   MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
   CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
   CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
   DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, ProjectListResponse,
-  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse,
+  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse, ProjectReadAction, ProjectReadResponse,
 } from "@workbench/contracts"
 
 type Transport = typeof fetch
@@ -33,6 +34,16 @@ const messages: Record<CollaborationError["code"], string> = {
   EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新", REGISTRATION_CONFLICT: "设备标识已被占用",
   DEVICE_AUTHENTICATION_REQUIRED: "设备凭据已失效", DEVICE_ACTION_REJECTED: "当前账号不能管理该设备",
   SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
+  PROJECT_READ_UNAVAILABLE: "设备尚未接入项目读取", PROJECT_READ_BUSY: "项目读取繁忙，请稍后重试",
+  PROJECT_READ_TIMEOUT: "项目读取超时，请重试", PROJECT_SOURCE_UNKNOWN: "项目来源尚未确认",
+  PROJECT_REPOSITORY_DENIED: "当前账号没有仓库读取权限", PROJECT_IDENTITY_UNBOUND: "当前账号尚未绑定 Git 身份",
+  PROJECT_AUTH_UNAVAILABLE: "仓库权限暂时无法核验", PROJECT_ROOT_CHANGED: "原设备项目目录已变化",
+  PROJECT_BUSY: "原设备项目繁忙", PROJECT_PATH_INVALID: "项目路径无效",
+  PROJECT_FILE_NOT_FOUND: "项目文件不存在", PROJECT_FILE_DENIED: "原设备没有文件读取权限",
+  PROJECT_FILE_UNSUPPORTED: "项目文件暂不支持预览", PROJECT_FILE_CHANGED: "项目文件已变化，请刷新",
+  PROJECT_CURSOR_EXPIRED: "目录已变化，请重新加载", PROJECT_LIMIT_EXCEEDED: "项目内容超出读取限制",
+  PROJECT_GIT_UNAVAILABLE: "Git 状态暂不可用", PROJECT_GIT_ROOT_REQUIRED: "请登记完整仓库根目录",
+  PROJECT_GIT_STALE: "Git 状态已变化，请刷新", PROJECT_READ_FAILED: "项目读取失败",
 }
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
@@ -58,7 +69,7 @@ export class CollaborationClient {
     this.#origin = origin
     this.#transport = transport
     formats.default(this.#ajv)
-    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema]) {
+    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema, projectSchema]) {
       this.#ajv.addSchema(schema)
       for (const name of Object.keys(schema.$defs)) this.#types.set(name, `${schema.$id}#/$defs/${name}`)
     }
@@ -232,6 +243,19 @@ export class CollaborationClient {
   }
   history(workspaceId: string, conversationId: string, query: Record<string, string> = {}): Promise<CollaborationResult<HistoryResponse>> {
     return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/history`, "HistoryResponse", "GET", { query })
+  }
+
+  /** 请求与响应均校验项目 schema，服务从会话确定原设备及项目。 */
+  async readProject(workspaceId: string, conversationId: string, action: ProjectReadAction): Promise<CollaborationResult<ProjectReadResponse>> {
+    const result = await this.#write<ProjectReadResponse>(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/project/read`,
+      "ProjectReadResponse", { body: action, inputSchema: "ProjectReadAction" })
+    if (!result.ok) return result
+    const value = result.value
+    if (value.kind !== action.kind || (value.kind === "readPreview" && action.kind === "readPreview" && value.value.path !== action.path)
+      || (value.kind === "gitDiff" && action.kind === "gitDiff" && (value.value.path !== action.path || value.value.snapshot !== action.snapshot))) {
+      return this.#error("INVALID_SERVER_RESPONSE")
+    }
+    return result
   }
 
   /** 重连只携带已应用的连续位置。退出、换账号或关闭订阅会使旧流立即失效。 */
