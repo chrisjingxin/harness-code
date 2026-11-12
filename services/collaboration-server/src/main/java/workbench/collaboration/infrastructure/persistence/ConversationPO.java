@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：会话控制表持久化对象 (ConversationPO)
  *
@@ -54,7 +56,7 @@ public class ConversationPO {
 
     /** 会话运行状态：idle/running/waiting_approval/error */
     @TableField("status")
-    private String status;
+    private Integer status;
 
     /** 会话标题 */
     @TableField("title")
@@ -66,11 +68,11 @@ public class ConversationPO {
 
     /** 简报来源：rule/agent */
     @TableField("brief_source")
-    private String briefSource;
+    private Integer briefSource;
 
     /** 简报最近更新时间戳（毫秒，允许为空） */
-    @TableField("brief_updated_at_ms")
-    private Long briefUpdatedAtMs;
+    @TableField("brief_updated_at")
+    private LocalDateTime briefUpdatedAt;
 
     /** 已确认的最大已上传消息序号 */
     @TableField("synced_sequence")
@@ -81,12 +83,12 @@ public class ConversationPO {
     private String nativeSessionId;
 
     /** 创建时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     /** 最近一次状态更新时间戳（毫秒） */
-    @TableField("updated_at_ms")
-    private Long updatedAtMs;
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getPkId() {
         return pkId;
@@ -152,11 +154,11 @@ public class ConversationPO {
         this.taskId = taskId;
     }
 
-    public String getStatus() {
+    public Integer getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(Integer status) {
         this.status = status;
     }
 
@@ -176,20 +178,20 @@ public class ConversationPO {
         this.briefText = briefText;
     }
 
-    public String getBriefSource() {
+    public Integer getBriefSource() {
         return briefSource;
     }
 
-    public void setBriefSource(String briefSource) {
+    public void setBriefSource(Integer briefSource) {
         this.briefSource = briefSource;
     }
 
-    public Long getBriefUpdatedAtMs() {
-        return briefUpdatedAtMs;
+    public LocalDateTime getBriefUpdatedAt() {
+        return briefUpdatedAt;
     }
 
-    public void setBriefUpdatedAtMs(Long briefUpdatedAtMs) {
-        this.briefUpdatedAtMs = briefUpdatedAtMs;
+    public void setBriefUpdatedAt(LocalDateTime briefUpdatedAt) {
+        this.briefUpdatedAt = briefUpdatedAt;
     }
 
     public Long getSyncedSequence() {
@@ -208,19 +210,19 @@ public class ConversationPO {
         this.nativeSessionId = nativeSessionId;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public Long getUpdatedAtMs() {
-        return updatedAtMs;
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAtMs(Long updatedAtMs) {
-        this.updatedAtMs = updatedAtMs;
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

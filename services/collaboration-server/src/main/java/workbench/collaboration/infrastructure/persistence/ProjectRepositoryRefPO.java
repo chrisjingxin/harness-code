@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：项目仓库引用表持久化对象 (ProjectRepositoryRefPO)
  *
@@ -33,8 +35,8 @@ public class ProjectRepositoryRefPO {
     private String repositoryId;
 
     /** 引用建立时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     public Long getPkId() {
         return pkId;
@@ -60,11 +62,11 @@ public class ProjectRepositoryRefPO {
         this.repositoryId = repositoryId;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }

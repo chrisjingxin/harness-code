@@ -102,9 +102,9 @@ public class ConversationAppService {
                     long now = System.currentTimeMillis();
                     Conversation conversation = new Conversation(
                             UUID.randomUUID().toString(), workspaceId, projectId, userId,
-                            request.deviceId(), null, request.taskId(), "idle",
+                            request.deviceId(), "", request.taskId() == null ? "" : request.taskId(), "idle",
                             request.title() != null ? request.title() : "未命名会话",
-                            null, "rule", null, 0L, null, now, now);
+                            "", "rule", now, 0L, "", now, now);
                     conversations.insert(conversation);
                     conversations.insertRepositoryRefs(conversation.id(), repositoryIds, now);
                     return contracts.encode("ConversationDetailResponse",

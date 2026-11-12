@@ -163,9 +163,11 @@ export interface ConversationSummary {
   deviceId: string
   title: string
   status: ConversationStatus
-  briefText: string | null
+  /** 最近简报正文；空串表示无简报 */
+  briefText: string
   briefSource: ConversationBriefSource
-  briefUpdatedAtMs: number | null
+  /** 简报最近更新时间(epoch ms)；登记时取创建时间作基线 */
+  briefUpdatedAtMs: number
   /** 服务端已确认的最大已上传消息序号（单调水位） */
   syncedSequence: number
   updatedAt: string

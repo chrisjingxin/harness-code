@@ -20,15 +20,15 @@ package workbench.collaboration.domain.conversation;
  * @param projectId 所属业务项目标识（wb_project.id）
  * @param ownerUserId 会话主人用户标识（创建者，固定不变）
  * @param deviceId 主人执行设备标识
- * @param agentConfigId 会话绑定的智能体配置标识（允许为空）
- * @param taskId 关联的任务卡片标识（允许为空，由 HC-212 任务域写入）
+ * @param agentConfigId 会话绑定的智能体配置标识（空串表示未绑定）
+ * @param taskId 关联的任务卡片标识（空串表示无，由 HC-212 任务域写入）
  * @param status 会话运行状态：idle/running/waiting_approval/error
  * @param title 会话标题
- * @param briefText 最近简报正文（由主人 Runner 随同步批次上送）
+ * @param briefText 最近简报正文（由主人 Runner 随同步批次上送，空串表示无简报）
  * @param briefSource 简报来源：rule（规则生成）/agent（预留）
- * @param briefUpdatedAtMs 简报最近更新时间戳（毫秒，允许为空）
+ * @param briefUpdatedAtMs 简报最近更新时间戳（毫秒，登记时取创建时间作基线）
  * @param syncedSequence 已确认的最大已上传消息序号（单调水位线）
- * @param nativeSessionId 绑定的底层 Agent 本地会话标识（允许为空）
+ * @param nativeSessionId 绑定的底层 Agent 本地会话标识（空串表示未绑定）
  * @param createdAtMs 创建时间戳（毫秒）
  * @param updatedAtMs 最近一次更新时间戳（毫秒）
  */
@@ -44,7 +44,7 @@ public record Conversation(
         String title,
         String briefText,
         String briefSource,
-        Long briefUpdatedAtMs,
+        long briefUpdatedAtMs,
         long syncedSequence,
         String nativeSessionId,
         long createdAtMs,

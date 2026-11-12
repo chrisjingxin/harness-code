@@ -24,7 +24,7 @@ final class IdentityConverter {
         po.setUsername(user.username());
         po.setDisplayName(user.displayName());
         po.setEnabled(user.enabled() ? 1 : 0);
-        po.setCreatedAtMs(user.createdAtMs());
+        po.setCreatedAt(Times.ofMs(user.createdAtMs()));
         return po;
     }
 
@@ -34,7 +34,7 @@ final class IdentityConverter {
                 po.getUsername(),
                 po.getDisplayName(),
                 Integer.valueOf(1).equals(po.getEnabled()),
-                po.getCreatedAtMs()
+                Times.ms(po.getCreatedAt())
         );
     }
 
@@ -43,7 +43,7 @@ final class IdentityConverter {
         po.setId(workspace.id());
         po.setSlug(workspace.slug());
         po.setName(workspace.name());
-        po.setCreatedAtMs(workspace.createdAtMs());
+        po.setCreatedAt(Times.ofMs(workspace.createdAtMs()));
         return po;
     }
 
@@ -52,7 +52,7 @@ final class IdentityConverter {
                 po.getId(),
                 po.getSlug(),
                 po.getName(),
-                po.getCreatedAtMs()
+                Times.ms(po.getCreatedAt())
         );
     }
 
@@ -60,7 +60,7 @@ final class IdentityConverter {
         WorkspaceMemberPO po = new WorkspaceMemberPO();
         po.setWorkspaceId(member.workspaceId());
         po.setUserId(member.userId());
-        po.setCreatedAtMs(member.createdAtMs());
+        po.setCreatedAt(Times.ofMs(member.createdAtMs()));
         return po;
     }
 }

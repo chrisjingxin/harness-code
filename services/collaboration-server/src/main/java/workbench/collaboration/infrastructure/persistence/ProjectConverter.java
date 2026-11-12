@@ -28,10 +28,10 @@ final class ProjectConverter {
         po.setName(project.name());
         po.setDescription(project.description());
         po.setOwnerUserId(project.ownerUserId());
-        po.setStatus(project.status().code());
+        po.setStatus(project.status().db());
         po.setVersion(project.version());
-        po.setCreatedAtMs(project.createdAtMs());
-        po.setUpdatedAtMs(project.updatedAtMs());
+        po.setCreatedAt(Times.ofMs(project.createdAtMs()));
+        po.setUpdatedAt(Times.ofMs(project.updatedAtMs()));
         return po;
     }
 
@@ -42,10 +42,10 @@ final class ProjectConverter {
                 po.getName(),
                 po.getDescription(),
                 po.getOwnerUserId(),
-                ProjectStatus.fromCode(po.getStatus()),
+                ProjectStatus.fromDb(po.getStatus()),
                 po.getVersion(),
-                po.getCreatedAtMs(),
-                po.getUpdatedAtMs()
+                Times.ms(po.getCreatedAt()),
+                Times.ms(po.getUpdatedAt())
         );
     }
 
@@ -53,9 +53,9 @@ final class ProjectConverter {
         ProjectMemberPO po = new ProjectMemberPO();
         po.setProjectId(member.projectId());
         po.setUserId(member.userId());
-        po.setStatus(member.status().code());
-        po.setCreatedAtMs(member.createdAtMs());
-        po.setUpdatedAtMs(member.updatedAtMs());
+        po.setStatus(member.status().db());
+        po.setCreatedAt(Times.ofMs(member.createdAtMs()));
+        po.setUpdatedAt(Times.ofMs(member.updatedAtMs()));
         return po;
     }
 
@@ -63,9 +63,9 @@ final class ProjectConverter {
         return new ProjectMember(
                 po.getProjectId(),
                 po.getUserId(),
-                MemberStatus.fromCode(po.getStatus()),
-                po.getCreatedAtMs(),
-                po.getUpdatedAtMs()
+                MemberStatus.fromDb(po.getStatus()),
+                Times.ms(po.getCreatedAt()),
+                Times.ms(po.getUpdatedAt())
         );
     }
 
@@ -73,11 +73,11 @@ final class ProjectConverter {
         ProjectRepositoryRefPO po = new ProjectRepositoryRefPO();
         po.setProjectId(reference.projectId());
         po.setRepositoryId(reference.repositoryId());
-        po.setCreatedAtMs(reference.createdAtMs());
+        po.setCreatedAt(Times.ofMs(reference.createdAtMs()));
         return po;
     }
 
     static ProjectRepositoryRef toReference(ProjectRepositoryRefPO po) {
-        return new ProjectRepositoryRef(po.getProjectId(), po.getRepositoryId(), po.getCreatedAtMs());
+        return new ProjectRepositoryRef(po.getProjectId(), po.getRepositoryId(), Times.ms(po.getCreatedAt()));
     }
 }

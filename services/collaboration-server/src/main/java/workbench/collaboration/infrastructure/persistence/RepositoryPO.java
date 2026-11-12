@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：团队仓库目录表持久化对象 (RepositoryPO)
  *
@@ -36,9 +38,12 @@ public class RepositoryPO {
     @TableField("name")
     private String name;
 
-    /** 远端仓库地址（团队内唯一键） */
+    /** 远端仓库地址 */
     @TableField("remote_url")
     private String remoteUrl;
+    /** remote_url 的 SHA-256 摘要（团队内唯一键，替代前缀索引防误冲突） */
+    @TableField("remote_url_sha256")
+    private String remoteUrlSha256;
 
     /** 默认分支名 */
     @TableField("default_branch")
@@ -46,19 +51,19 @@ public class RepositoryPO {
 
     /** 目录状态：active/archived */
     @TableField("status")
-    private String status;
+    private Integer status;
 
     /** 登记者用户标识 */
     @TableField("created_by_user_id")
     private String createdByUserId;
 
     /** 登记时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     /** 最近修改时间戳（毫秒） */
-    @TableField("updated_at_ms")
-    private Long updatedAtMs;
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getPkId() {
         return pkId;
@@ -100,6 +105,14 @@ public class RepositoryPO {
         this.remoteUrl = remoteUrl;
     }
 
+    public String getRemoteUrlSha256() {
+        return remoteUrlSha256;
+    }
+
+    public void setRemoteUrlSha256(String remoteUrlSha256) {
+        this.remoteUrlSha256 = remoteUrlSha256;
+    }
+
     public String getDefaultBranch() {
         return defaultBranch;
     }
@@ -108,11 +121,11 @@ public class RepositoryPO {
         this.defaultBranch = defaultBranch;
     }
 
-    public String getStatus() {
+    public Integer getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(Integer status) {
         this.status = status;
     }
 
@@ -124,19 +137,19 @@ public class RepositoryPO {
         this.createdByUserId = createdByUserId;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public Long getUpdatedAtMs() {
-        return updatedAtMs;
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAtMs(Long updatedAtMs) {
-        this.updatedAtMs = updatedAtMs;
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

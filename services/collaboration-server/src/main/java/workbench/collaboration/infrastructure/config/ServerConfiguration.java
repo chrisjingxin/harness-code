@@ -80,6 +80,10 @@ public class ServerConfiguration {
         config.setConnectionTimeout(pool.getConnectionTimeoutMs());
         config.setValidationTimeout(pool.getValidationTimeoutMs());
         config.setInitializationFailTimeout(pool.getInitializationFailTimeoutMs());
+        // 云平台 TCP 连接 240s 强断：连接存活/空闲/保活三项必须全部压在该阈值内，否则复用死连接
+        config.setMaxLifetime(pool.getMaxLifetimeMs());
+        config.setIdleTimeout(pool.getIdleTimeoutMs());
+        config.setKeepaliveTime(pool.getKeepaliveTimeMs());
 
         // 预编译语句物理连接缓存优化：短事务反复走同一条 SQL 时不必每次重新向数据库申请准备
         config.addDataSourceProperty("cachePrepStmts", "true");

@@ -38,10 +38,10 @@ class FoundationTest {
     }
 
     private static Set<String> compliantColumns() {
-        return Set.of("wb_device.owner_user_id", "wb_repository.remote_url", "wb_repository.status",
-                "wb_project.owner_user_id", "wb_project.version",
+        return Set.of("wb_device.owner_user_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
+                "wb_repository.status", "wb_project.owner_user_id", "wb_project.version",
                 "wb_conversation.project_id", "wb_conversation.owner_user_id", "wb_conversation.status",
-                "wb_conversation.brief_source", "wb_conversation.synced_sequence",
+                "wb_conversation.brief_source", "wb_conversation.brief_updated_at", "wb_conversation.synced_sequence",
                 "wb_local_repo_binding.device_id", "wb_local_repo_binding.repository_id",
                 "wb_conversation_repository.conversation_id", "wb_conversation_repository.repository_id");
     }

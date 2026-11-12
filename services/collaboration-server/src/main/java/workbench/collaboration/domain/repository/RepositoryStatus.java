@@ -10,19 +10,27 @@ package workbench.collaboration.domain.repository;
  *
  * <p>【协作边界】
  * - 上游调用方：ProjectAccessPolicy、RepositoryAppService。
- * - 下游依赖方：RepositoryConverter 负责枚举与 VARCHAR 列互转。
+ * - 下游依赖方：RepositoryConverter 负责枚举与 TINYINT 列互转。
  */
 public enum RepositoryStatus {
 
-    ACTIVE("active"),
-    ARCHIVED("archived");
+    ACTIVE(1, "active"),
+    ARCHIVED(2, "archived");
 
+    private final int db;
     private final String code;
 
-    RepositoryStatus(String code) {
+    RepositoryStatus(int db, String code) {
+        this.db = db;
         this.code = code;
     }
 
+    /** 数据库 TINYINT 存储值 */
+    public int db() {
+        return db;
+    }
+
+    /** 对外契约字符串值 */
     public String code() {
         return code;
     }
@@ -34,5 +42,14 @@ public enum RepositoryStatus {
             }
         }
         throw new IllegalArgumentException("未知仓库状态: " + code);
+    }
+
+    public static RepositoryStatus fromDb(int db) {
+        for (RepositoryStatus status : values()) {
+            if (status.db == db) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("未知仓库状态码: " + db);
     }
 }

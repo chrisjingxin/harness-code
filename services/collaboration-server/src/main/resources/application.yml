@@ -47,6 +47,10 @@ workbench:
     connection-timeout-ms: 3000
     validation-timeout-ms: 1000
     initialization-fail-timeout-ms: 5000
+    # 云平台 TCP 连接 240s 强断：三项全部压在阈值内，否则复用被断开的物理连接
+    max-lifetime-ms: 200000
+    idle-timeout-ms: 180000
+    keepalive-time-ms: 120000
   # 冒烟和本机启动默认不连接 Redis、Kafka、ES。生产改成 cluster。
   middleware:
     mode: standalone

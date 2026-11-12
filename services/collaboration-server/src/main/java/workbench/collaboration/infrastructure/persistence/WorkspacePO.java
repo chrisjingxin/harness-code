@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：工作区表持久化对象 (WorkspacePO)
  *
@@ -36,8 +38,8 @@ public class WorkspacePO {
     private String name;
 
     /** 创建时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     public Long getPkId() {
         return pkId;
@@ -71,11 +73,11 @@ public class WorkspacePO {
         this.name = name;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }

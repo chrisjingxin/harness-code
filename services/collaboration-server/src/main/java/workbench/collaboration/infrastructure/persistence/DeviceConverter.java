@@ -28,8 +28,8 @@ final class DeviceConverter {
         po.setRegistrationId(device.registrationId());
         po.setRegistrationBodySha256(device.registrationBodySha256());
         po.setRevoked(device.revoked() ? 1 : 0);
-        po.setCreatedAtMs(device.createdAtMs());
-        po.setUpdatedAtMs(device.updatedAtMs());
+        po.setCreatedAt(Times.ofMs(device.createdAtMs()));
+        po.setUpdatedAt(Times.ofMs(device.updatedAtMs()));
         return po;
     }
 
@@ -44,8 +44,8 @@ final class DeviceConverter {
                 po.getRegistrationId(),
                 po.getRegistrationBodySha256(),
                 Integer.valueOf(1).equals(po.getRevoked()),
-                po.getCreatedAtMs(),
-                po.getUpdatedAtMs()
+                Times.ms(po.getCreatedAt()),
+                Times.ms(po.getUpdatedAt())
         );
     }
 }

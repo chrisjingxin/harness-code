@@ -5,13 +5,15 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：项目成员表持久化对象 (ProjectMemberPO)
  *
  * <p>【功能定义】
  * 映射 TDSQL 表 wb_project_member 的持久化实体。
  * 移出成员只翻转 status 不删行（D9）：removed 记录保留审计事实，
- * updated_at_ms 供看板标注"已离开项目"。
+ * updated_at 供看板标注"已离开项目"。
  *
  * <p>【协作边界】
  * - 上游调用方：ProjectMemberMapper、ProjectConverter、ProjectRepositoryImpl。
@@ -34,15 +36,15 @@ public class ProjectMemberPO {
 
     /** 成员状态：active/removed */
     @TableField("status")
-    private String status;
+    private Integer status;
 
     /** 首次加入时间戳（毫秒，upsert 回 active 保留原值） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     /** 状态最近变更时间戳（毫秒） */
-    @TableField("updated_at_ms")
-    private Long updatedAtMs;
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getPkId() {
         return pkId;
@@ -68,27 +70,27 @@ public class ProjectMemberPO {
         this.userId = userId;
     }
 
-    public String getStatus() {
+    public Integer getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(Integer status) {
         this.status = status;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public Long getUpdatedAtMs() {
-        return updatedAtMs;
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAtMs(Long updatedAtMs) {
-        this.updatedAtMs = updatedAtMs;
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

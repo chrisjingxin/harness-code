@@ -3,6 +3,7 @@ package workbench.collaboration.infrastructure.persistence;
 import workbench.collaboration.domain.repository.LocalRepoBinding;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryStatus;
+import workbench.collaboration.infrastructure.contract.Digests;
 
 /**
  * 模块：团队仓库目录持久化对象与领域模型转换器 (RepositoryConverter)
@@ -25,11 +26,13 @@ final class RepositoryConverter {
         po.setWorkspaceId(repository.workspaceId());
         po.setName(repository.name());
         po.setRemoteUrl(repository.remoteUrl());
+        // 唯一约束落在摘要列：应用侧算摘要写入，DB 对 (workspace_id, remote_url_sha256) 兜底
+        po.setRemoteUrlSha256(Digests.sha256Hex(repository.remoteUrl()));
         po.setDefaultBranch(repository.defaultBranch());
-        po.setStatus(repository.status().code());
+        po.setStatus(repository.status().db());
         po.setCreatedByUserId(repository.createdByUserId());
-        po.setCreatedAtMs(repository.createdAtMs());
-        po.setUpdatedAtMs(repository.updatedAtMs());
+        po.setCreatedAt(Times.ofMs(repository.createdAtMs()));
+        po.setUpdatedAt(Times.ofMs(repository.updatedAtMs()));
         return po;
     }
 
@@ -40,10 +43,10 @@ final class RepositoryConverter {
                 po.getName(),
                 po.getRemoteUrl(),
                 po.getDefaultBranch(),
-                RepositoryStatus.fromCode(po.getStatus()),
+                RepositoryStatus.fromDb(po.getStatus()),
                 po.getCreatedByUserId(),
-                po.getCreatedAtMs(),
-                po.getUpdatedAtMs()
+                Times.ms(po.getCreatedAt()),
+                Times.ms(po.getUpdatedAt())
         );
     }
 
@@ -51,11 +54,11 @@ final class RepositoryConverter {
         LocalRepoBindingPO po = new LocalRepoBindingPO();
         po.setDeviceId(binding.deviceId());
         po.setRepositoryId(binding.repositoryId());
-        po.setCreatedAtMs(binding.createdAtMs());
+        po.setCreatedAt(Times.ofMs(binding.createdAtMs()));
         return po;
     }
 
     static LocalRepoBinding toBinding(LocalRepoBindingPO po) {
-        return new LocalRepoBinding(po.getDeviceId(), po.getRepositoryId(), po.getCreatedAtMs());
+        return new LocalRepoBinding(po.getDeviceId(), po.getRepositoryId(), Times.ms(po.getCreatedAt()));
     }
 }

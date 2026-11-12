@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：设备档案表持久化对象 (DevicePO)
  *
@@ -62,12 +64,12 @@ public class DevicePO {
     private Integer revoked;
 
     /** 注册时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     /** 最近一次更新时间戳（毫秒） */
-    @TableField("updated_at_ms")
-    private Long updatedAtMs;
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getPkId() {
         return pkId;
@@ -149,19 +151,19 @@ public class DevicePO {
         this.revoked = revoked;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public Long getUpdatedAtMs() {
-        return updatedAtMs;
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAtMs(Long updatedAtMs) {
-        this.updatedAtMs = updatedAtMs;
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

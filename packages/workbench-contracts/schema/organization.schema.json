@@ -256,19 +256,9 @@
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "type": "string" },
         "status": { "$ref": "#/$defs/ConversationStatus" },
-        "briefText": {
-          "anyOf": [
-            { "type": "null" },
-            { "type": "string" }
-          ]
-        },
+        "briefText": { "type": "string", "maxLength": 2000 },
         "briefSource": { "$ref": "#/$defs/ConversationBriefSource" },
-        "briefUpdatedAtMs": {
-          "anyOf": [
-            { "type": "null" },
-            { "type": "integer", "minimum": 0 }
-          ]
-        },
+        "briefUpdatedAtMs": { "type": "integer", "minimum": 0 },
         "syncedSequence": { "type": "integer", "minimum": 0 },
         "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "repositories": { "type": "array", "items": { "$ref": "#/$defs/ConversationRepositoryItem" } }

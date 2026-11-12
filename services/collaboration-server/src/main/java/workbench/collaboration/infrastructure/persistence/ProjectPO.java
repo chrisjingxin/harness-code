@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：业务项目表持久化对象 (ProjectPO)
  *
@@ -45,19 +47,19 @@ public class ProjectPO {
 
     /** 项目状态：active/archived */
     @TableField("status")
-    private String status;
+    private Integer status;
 
     /** 乐观并发版本号，创建为 1，每次 CAS 写入 +1 */
     @TableField("version")
     private Long version;
 
     /** 创建时间戳（毫秒） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     /** 最近修改时间戳（毫秒） */
-    @TableField("updated_at_ms")
-    private Long updatedAtMs;
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getPkId() {
         return pkId;
@@ -107,11 +109,11 @@ public class ProjectPO {
         this.ownerUserId = ownerUserId;
     }
 
-    public String getStatus() {
+    public Integer getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(Integer status) {
         this.status = status;
     }
 
@@ -123,19 +125,19 @@ public class ProjectPO {
         this.version = version;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
-    public Long getUpdatedAtMs() {
-        return updatedAtMs;
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
     }
 
-    public void setUpdatedAtMs(Long updatedAtMs) {
-        this.updatedAtMs = updatedAtMs;
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

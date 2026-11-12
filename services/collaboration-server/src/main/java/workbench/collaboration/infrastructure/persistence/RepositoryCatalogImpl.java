@@ -50,8 +50,8 @@ public class RepositoryCatalogImpl implements RepositoryCatalog {
                 .eq("id", repository.id())
                 .set("name", repository.name())
                 .set("default_branch", repository.defaultBranch())
-                .set("status", repository.status().code())
-                .set("updated_at_ms", repository.updatedAtMs()));
+                .set("status", repository.status().db())
+                .set("updated_at", Times.ofMs(repository.updatedAtMs())));
         if (rows != 1) {
             throw new IllegalStateException("仓库目录条目不存在");
         }
@@ -61,7 +61,7 @@ public class RepositoryCatalogImpl implements RepositoryCatalog {
     public List<Repository> listByWorkspace(String workspaceId, RepositoryStatus status) {
         QueryWrapper<RepositoryPO> query = new QueryWrapper<RepositoryPO>().eq("workspace_id", workspaceId);
         if (status != null) {
-            query.eq("status", status.code());
+            query.eq("status", status.db());
         }
         query.orderByAsc("name").orderByAsc("id");
         return repositories.selectList(query).stream()

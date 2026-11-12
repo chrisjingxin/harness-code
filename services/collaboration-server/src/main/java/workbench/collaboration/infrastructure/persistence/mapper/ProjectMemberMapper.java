@@ -21,10 +21,10 @@ import workbench.collaboration.infrastructure.persistence.ProjectMemberPO;
 public interface ProjectMemberMapper extends BaseMapper<ProjectMemberPO> {
 
     /**
-     * 幂等写入成员记录：唯一键冲突时更新 status 与 updated_at_ms，保留原 created_at_ms。
+     * 幂等写入成员记录：唯一键冲突时更新 status 与 updated_at，保留原 created_at。
      */
-    @Insert("INSERT INTO wb_project_member (project_id, user_id, status, created_at_ms, updated_at_ms)"
-            + " VALUES (#{projectId}, #{userId}, #{status}, #{createdAtMs}, #{updatedAtMs})"
-            + " ON DUPLICATE KEY UPDATE status = VALUES(status), updated_at_ms = VALUES(updated_at_ms)")
+    @Insert("INSERT INTO wb_project_member (project_id, user_id, status, created_at, updated_at)"
+            + " VALUES (#{projectId}, #{userId}, #{status}, #{createdAt}, #{updatedAt})"
+            + " ON DUPLICATE KEY UPDATE status = VALUES(status), updated_at = VALUES(updated_at)")
     int upsert(ProjectMemberPO po);
 }

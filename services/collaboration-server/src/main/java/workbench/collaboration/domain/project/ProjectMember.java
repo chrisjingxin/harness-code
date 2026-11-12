@@ -6,7 +6,7 @@ package workbench.collaboration.domain.project;
  * <p>【功能定义】
  * 表示一名团队用户在某项目中的成员资格。
  * 移出成员只翻转 status 为 removed、不删行（D9）：保留审计事实，
- * removed 记录带 updated_at_ms 供看板标注"已离开项目"。
+ * removed 记录带 updated_at 供看板标注"已离开项目"。
  *
  * <p>【协作边界】
  * - 上游调用方：ProjectAccessPolicy、ProjectAppService、ProjectConverter。

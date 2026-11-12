@@ -10,29 +10,37 @@ package workbench.collaboration.domain.project;
  *
  * <p>【协作边界】
  * - 上游调用方：ProjectAccessPolicy、应用服务层。
- * - 下游依赖方：ProjectConverter 负责枚举与 VARCHAR 列互转。
+ * - 下游依赖方：ProjectConverter 负责枚举与 TINYINT 列互转。
  */
 public enum MemberStatus {
 
-    ACTIVE("active"),
-    REMOVED("removed");
+    ACTIVE(1, "active"),
+    REMOVED(2, "removed");
 
+    private final int db;
     private final String code;
 
-    MemberStatus(String code) {
+    MemberStatus(int db, String code) {
+        this.db = db;
         this.code = code;
     }
 
+    /** 数据库 TINYINT 存储值 */
+    public int db() {
+        return db;
+    }
+
+    /** 对外契约字符串值 */
     public String code() {
         return code;
     }
 
-    public static MemberStatus fromCode(String code) {
+    public static MemberStatus fromDb(int db) {
         for (MemberStatus status : values()) {
-            if (status.code.equals(code)) {
+            if (status.db == db) {
                 return status;
             }
         }
-        throw new IllegalArgumentException("未知成员状态: " + code);
+        throw new IllegalArgumentException("未知成员状态码: " + db);
     }
 }

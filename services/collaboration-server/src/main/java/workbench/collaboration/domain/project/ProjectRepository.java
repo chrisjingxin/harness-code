@@ -56,7 +56,7 @@ public interface ProjectRepository {
     List<ProjectMember> listMembers(String projectId);
 
     /**
-     * 幂等写入成员记录：不存在则插入，存在则更新 status 与 updated_at_ms（保留原 created_at_ms）。
+     * 幂等写入成员记录：不存在则插入，存在则更新 status 与 updated_at（保留原 created_at）。
      */
     void upsertMember(ProjectMember member);
 

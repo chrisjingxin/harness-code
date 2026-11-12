@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.time.LocalDateTime;
+
 /**
  * 模块：设备本机仓库登记表持久化对象 (LocalRepoBindingPO)
  *
@@ -32,8 +34,8 @@ public class LocalRepoBindingPO {
     private String repositoryId;
 
     /** 最近一次登记时间戳（毫秒，重复 upsert 刷新） */
-    @TableField("created_at_ms")
-    private Long createdAtMs;
+    @TableField("created_at")
+    private LocalDateTime createdAt;
 
     public Long getPkId() {
         return pkId;
@@ -59,11 +61,11 @@ public class LocalRepoBindingPO {
         this.repositoryId = repositoryId;
     }
 
-    public Long getCreatedAtMs() {
-        return createdAtMs;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setCreatedAtMs(Long createdAtMs) {
-        this.createdAtMs = createdAtMs;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }

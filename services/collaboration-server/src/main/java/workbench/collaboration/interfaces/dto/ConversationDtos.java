@@ -37,7 +37,7 @@ public final class ConversationDtos {
             String status,
             String briefText,
             String briefSource,
-            Long briefUpdatedAtMs,
+            long briefUpdatedAtMs,
             long syncedSequence,
             String updatedAt,
             List<ConversationRepositoryItem> repositories

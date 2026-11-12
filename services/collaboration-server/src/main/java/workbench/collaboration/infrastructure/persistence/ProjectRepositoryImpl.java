@@ -63,16 +63,16 @@ public class ProjectRepositoryImpl implements ProjectRepository {
                 .eq("version", expectedVersion)
                 .set("name", project.name())
                 .set("description", project.description())
-                .set("status", project.status().code())
+                .set("status", project.status().db())
                 .setSql("version = version + 1")
-                .set("updated_at_ms", project.updatedAtMs())) == 1;
+                .set("updated_at", Times.ofMs(project.updatedAtMs()))) == 1;
     }
 
     @Override
     public List<Project> listForMember(String workspaceId, String userId) {
         List<String> projectIds = members.selectList(new QueryWrapper<ProjectMemberPO>()
                         .eq("user_id", userId)
-                        .eq("status", MemberStatus.ACTIVE.code()))
+                        .eq("status", MemberStatus.ACTIVE.db()))
                 .stream().map(ProjectMemberPO::getProjectId).toList();
         if (projectIds.isEmpty()) {
             return List.of();
@@ -80,7 +80,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         return projects.selectList(new QueryWrapper<ProjectPO>()
                         .eq("workspace_id", workspaceId)
                         .in("id", projectIds)
-                        .orderByDesc("updated_at_ms").orderByDesc("id"))
+                        .orderByDesc("updated_at").orderByDesc("id"))
                 .stream().map(ProjectConverter::toProject).toList();
     }
 
@@ -96,7 +96,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public List<ProjectMember> listMembers(String projectId) {
         return members.selectList(new QueryWrapper<ProjectMemberPO>()
                         .eq("project_id", projectId)
-                        .orderByAsc("created_at_ms").orderByAsc("user_id"))
+                        .orderByAsc("created_at").orderByAsc("user_id"))
                 .stream().map(ProjectConverter::toMember).toList();
     }
 
@@ -109,7 +109,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public int countMembers(String projectId, MemberStatus status) {
         return Math.toIntExact(members.selectCount(new QueryWrapper<ProjectMemberPO>()
                 .eq("project_id", projectId)
-                .eq("status", status.code())));
+                .eq("status", status.db())));
     }
 
     @Override
@@ -137,7 +137,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public List<ProjectRepositoryRef> listReferences(String projectId) {
         return references.selectList(new QueryWrapper<ProjectRepositoryRefPO>()
                         .eq("project_id", projectId)
-                        .orderByAsc("created_at_ms").orderByAsc("repository_id"))
+                        .orderByAsc("created_at").orderByAsc("repository_id"))
                 .stream().map(ProjectConverter::toReference).toList();
     }
 

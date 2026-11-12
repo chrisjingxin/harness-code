@@ -29,13 +29,16 @@ import java.util.UUID;
  *      wb_conversation、wb_conversation_repository；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned pk_id (PRI auto_increment)；
- *    - 抽查新语义关键列：wb_device.owner_user_id、wb_conversation 的 owner/status/brief/synced_sequence 等；
+ *    - 抽查新语义关键列：wb_device.owner_user_id、wb_repository.remote_url_sha256、
+ *      wb_conversation 的 owner/status/brief/synced_sequence/brief_updated_at 等；
+ *    - 团队规范落库形态：时间列 DATETIME(3)（*_at），状态列 TINYINT，全列 NOT NULL。
  * 2. 彻底移除旧模型残留：
  *    - 绝不允许出现历史流水表（wb_message、wb_execution 系列、wb_request_receipt、
  *      wb_device_request、wb_outbox_event）；
  *    - 绝不允许出现旧协作模型表 wb_device_project、wb_handoff、wb_message_reference；
  *    - wb_device 不得再有 workspace_id 列（设备属人不属团队，D11）；
- *    - wb_conversation 不得再有 current_user_id/active_execution_id/next_sequence/created_by_user_id 旧列。
+ *    - wb_conversation 不得再有 current_user_id/active_execution_id/next_sequence/created_by_user_id 旧列；
+ *    - 全表不得残留旧 *_at_ms BIGINT 时间列（已迁移为 *_at DATETIME(3)）。
  *    一旦探测到残留立即拒绝服务启动。
  *
  * <p>【协作边界】
@@ -54,9 +57,9 @@ public final class Foundation {
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
     private static final Map<String, List<String>> REQUIRED_COLUMNS = Map.of(
             "wb_device", List.of("owner_user_id"),
-            "wb_repository", List.of("remote_url", "status"),
+            "wb_repository", List.of("remote_url", "remote_url_sha256", "status"),
             "wb_project", List.of("owner_user_id", "version"),
-            "wb_conversation", List.of("project_id", "owner_user_id", "status", "brief_source", "synced_sequence"),
+            "wb_conversation", List.of("project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence"),
             "wb_local_repo_binding", List.of("device_id", "repository_id"),
             "wb_conversation_repository", List.of("conversation_id", "repository_id")
     );
@@ -69,9 +72,19 @@ public final class Foundation {
     );
 
     /** 严禁残留的旧语义列：表 -> 禁止列 */
-    private static final Map<String, List<String>> REMOVED_COLUMNS = Map.of(
-            "wb_device", List.of("workspace_id"),
-            "wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence")
+    private static final Map<String, List<String>> REMOVED_COLUMNS = Map.ofEntries(
+            Map.entry("wb_device", List.of("workspace_id", "created_at_ms", "updated_at_ms")),
+            Map.entry("wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence",
+                    "created_at_ms", "updated_at_ms", "brief_updated_at_ms")),
+            Map.entry("wb_user", List.of("created_at_ms")),
+            Map.entry("wb_workspace", List.of("created_at_ms")),
+            Map.entry("wb_workspace_member", List.of("created_at_ms")),
+            Map.entry("wb_repository", List.of("created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project", List.of("created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project_member", List.of("created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project_repository", List.of("created_at_ms")),
+            Map.entry("wb_local_repo_binding", List.of("created_at_ms")),
+            Map.entry("wb_conversation_repository", List.of("created_at_ms"))
     );
 
     private final JdbcTemplate jdbc;

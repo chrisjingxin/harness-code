@@ -20,10 +20,10 @@ import workbench.collaboration.infrastructure.persistence.LocalRepoBindingPO;
 public interface LocalRepoBindingMapper extends BaseMapper<LocalRepoBindingPO> {
 
     /**
-     * 幂等写入登记：唯一键冲突时刷新 created_at_ms（最近一次登记时间）。
+     * 幂等写入登记：唯一键冲突时刷新 created_at（最近一次登记时间）。
      */
-    @Insert("INSERT INTO wb_local_repo_binding (device_id, repository_id, created_at_ms)"
-            + " VALUES (#{deviceId}, #{repositoryId}, #{createdAtMs})"
-            + " ON DUPLICATE KEY UPDATE created_at_ms = VALUES(created_at_ms)")
+    @Insert("INSERT INTO wb_local_repo_binding (device_id, repository_id, created_at)"
+            + " VALUES (#{deviceId}, #{repositoryId}, #{createdAt})"
+            + " ON DUPLICATE KEY UPDATE created_at = VALUES(created_at)")
     int upsert(LocalRepoBindingPO po);
 }

@@ -117,14 +117,14 @@ public class ConversationSyncAppService {
         ConversationDtos.SyncBrief syncBrief = request.brief();
         Brief brief = syncBrief == null ? null : new Brief(syncBrief.status(), syncBrief.briefText(), syncBrief.briefSource());
         long watermark = items.isEmpty() ? conversation.syncedSequence() : items.getLast().sequence();
-        // 显式装箱成 Long：否则三元运算把可空列拆箱成原始 long，"空批且无简报"时空指针
-        Long briefUpdatedAt = brief != null ? Long.valueOf(now) : conversation.briefUpdatedAtMs();
+        long briefUpdatedAt = brief != null ? now : conversation.briefUpdatedAtMs();
         Conversation updated = new Conversation(
                 conversation.id(), conversation.workspaceId(), conversation.projectId(), conversation.ownerUserId(),
                 conversation.deviceId(), conversation.agentConfigId(), conversation.taskId(),
                 brief != null && brief.status() != null ? brief.status() : conversation.status(),
                 conversation.title(),
-                brief != null ? brief.briefText() : conversation.briefText(),
+                // briefText 为 null 表示清空简报——落库统一 '' 空串哨兵（全列 NOT NULL）
+                brief != null ? (brief.briefText() == null ? "" : brief.briefText()) : conversation.briefText(),
                 brief != null && brief.briefSource() != null ? brief.briefSource() : conversation.briefSource(),
                 briefUpdatedAt,
                 watermark, conversation.nativeSessionId(), conversation.createdAtMs(), now);
@@ -137,9 +137,9 @@ public class ConversationSyncAppService {
                 "ownerUserId", updated.ownerUserId(),
                 "title", updated.title(),
                 "status", updated.status(),
-                "briefText", updated.briefText() == null ? "" : updated.briefText(),
+                "briefText", updated.briefText(),
                 "briefSource", updated.briefSource(),
-                "briefUpdatedAtMs", updated.briefUpdatedAtMs() == null ? 0L : updated.briefUpdatedAtMs(),
+                "briefUpdatedAtMs", updated.briefUpdatedAtMs(),
                 "syncedSequence", updated.syncedSequence(),
                 "updatedAtMs", now)));
 

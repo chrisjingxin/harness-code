@@ -79,6 +79,12 @@ public class WorkbenchProperties {
         private long connectionTimeoutMs = 3000;
         private long validationTimeoutMs = 1000;
         private long initializationFailTimeoutMs = 5000;
+        /** 物理连接最大存活时长：必须小于云平台 240s TCP 强制断开阈值，否则复用死连接 */
+        private long maxLifetimeMs = 200_000;
+        /** 空闲连接回收阈值：同样压在 240s 以内 */
+        private long idleTimeoutMs = 180_000;
+        /** 空闲连接保活探测间隔：在云平台断连前主动探活 */
+        private long keepaliveTimeMs = 120_000;
 
         public int getMaximumSize() {
             return maximumSize;
@@ -118,6 +124,30 @@ public class WorkbenchProperties {
 
         public void setInitializationFailTimeoutMs(long initializationFailTimeoutMs) {
             this.initializationFailTimeoutMs = initializationFailTimeoutMs;
+        }
+
+        public long getMaxLifetimeMs() {
+            return maxLifetimeMs;
+        }
+
+        public void setMaxLifetimeMs(long maxLifetimeMs) {
+            this.maxLifetimeMs = maxLifetimeMs;
+        }
+
+        public long getIdleTimeoutMs() {
+            return idleTimeoutMs;
+        }
+
+        public void setIdleTimeoutMs(long idleTimeoutMs) {
+            this.idleTimeoutMs = idleTimeoutMs;
+        }
+
+        public long getKeepaliveTimeMs() {
+            return keepaliveTimeMs;
+        }
+
+        public void setKeepaliveTimeMs(long keepaliveTimeMs) {
+            this.keepaliveTimeMs = keepaliveTimeMs;
         }
     }
 

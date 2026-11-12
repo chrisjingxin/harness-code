@@ -198,8 +198,8 @@ class ConversationSyncAppServiceTest {
 
     private static Conversation conversation(long watermark) {
         return new Conversation(
-                CONV, WS, PROJECT, OWNER, DEVICE, null, null, "idle", "联调",
-                null, "rule", null, watermark, null, 1L, 1L);
+                CONV, WS, PROJECT, OWNER, DEVICE, "", "", "idle", "联调",
+                "", "rule", 1L, watermark, "", 1L, 1L);
     }
 
     private static String auth() {

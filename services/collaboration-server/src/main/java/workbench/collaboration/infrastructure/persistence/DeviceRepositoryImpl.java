@@ -57,10 +57,10 @@ public class DeviceRepositoryImpl implements DeviceRepository {
     public List<Device> listByOwner(String ownerUserId, Long beforeCreatedAtMs, String beforeId, int limit) {
         QueryWrapper<DevicePO> query = new QueryWrapper<DevicePO>().eq("owner_user_id", ownerUserId);
         if (beforeCreatedAtMs != null && beforeId != null) {
-            query.and(wrapper -> wrapper.lt("created_at_ms", beforeCreatedAtMs)
-                    .or(inner -> inner.eq("created_at_ms", beforeCreatedAtMs).lt("id", beforeId)));
+            query.and(wrapper -> wrapper.lt("created_at", Times.ofMs(beforeCreatedAtMs))
+                    .or(inner -> inner.eq("created_at", Times.ofMs(beforeCreatedAtMs)).lt("id", beforeId)));
         }
-        query.orderByDesc("created_at_ms").orderByDesc("id").last("LIMIT " + limit);
+        query.orderByDesc("created_at").orderByDesc("id").last("LIMIT " + limit);
         return devices.selectList(query).stream()
                 .map(DeviceConverter::toDevice)
                 .toList();
