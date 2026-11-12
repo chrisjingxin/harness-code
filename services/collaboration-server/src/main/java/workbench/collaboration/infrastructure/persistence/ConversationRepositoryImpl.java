@@ -16,13 +16,13 @@ import java.util.Optional;
  * <p>【功能定义】
  * 基于 MyBatis-Plus 实现对 TDSQL 表 wb_conversation 的持久化读写。
  * 遵循高可用协作原则：
- * 1. 悲观行锁防并发（lockById）：通过 SQL 尾部追加 FOR UPDATE 锁定当前行，防止并发序号竞争；
- * 2. 游标分页排序保序：基于 (created_at_ms, id) 联合降序排列，彻底避免深分页深度扫描与数据漏读；
- * 3. 显式列更新置空保护：针对 activeExecutionId 与 nativeSessionId 允许被清空的业务场景，
- *    通过 UpdateWrapper 显式 set 字段，覆盖 MyBatis-Plus 默认跳过 null 值的行为。
+ * 1. 悲观行锁防并发（lockById）：同步推进 synced_sequence 水位时通过 FOR UPDATE 锁行，防止水位互相覆盖；
+ * 2. 游标分页排序保序：项目内会话按 (updated_at_ms, id) 联合降序排列，避免深分页漏读；
+ * 3. 显式列更新置空保护：taskId/agentConfigId/brief/nativeSessionId 允许被清空，
+ *    通过 UpdateWrapper 显式 set，覆盖 MyBatis-Plus 默认跳过 null 值的行为。
  *
  * <p>【协作边界】
- * - 上游调用方：ConversationAppService。
+ * - 上游调用方：ConversationSyncAppService。
  * - 下游依赖方：ConversationMapper、ConversationConverter。
  */
 @Repository
@@ -48,14 +48,14 @@ public class ConversationRepositoryImpl implements ConversationRepository {
     }
 
     @Override
-    public List<Conversation> list(String workspaceId, Long beforeCreatedAtMs, String beforeId, int limit) {
-        QueryWrapper<ConversationPO> query = new QueryWrapper<ConversationPO>().eq("workspace_id", workspaceId);
-        // 游标过滤条件：(created_at_ms < beforeCreatedAtMs) OR (created_at_ms = beforeCreatedAtMs AND id < beforeId)
-        if (beforeCreatedAtMs != null && beforeId != null) {
-            query.and(wrapper -> wrapper.lt("created_at_ms", beforeCreatedAtMs)
-                    .or(inner -> inner.eq("created_at_ms", beforeCreatedAtMs).lt("id", beforeId)));
+    public List<Conversation> listByProject(String projectId, Long beforeUpdatedAtMs, String beforeId, int limit) {
+        QueryWrapper<ConversationPO> query = new QueryWrapper<ConversationPO>().eq("project_id", projectId);
+        // 游标过滤条件：(updated_at_ms < beforeUpdatedAtMs) OR (updated_at_ms = beforeUpdatedAtMs AND id < beforeId)
+        if (beforeUpdatedAtMs != null && beforeId != null) {
+            query.and(wrapper -> wrapper.lt("updated_at_ms", beforeUpdatedAtMs)
+                    .or(inner -> inner.eq("updated_at_ms", beforeUpdatedAtMs).lt("id", beforeId)));
         }
-        query.orderByDesc("created_at_ms").orderByDesc("id").last("LIMIT " + limit);
+        query.orderByDesc("updated_at_ms").orderByDesc("id").last("LIMIT " + limit);
         return conversations.selectList(query).stream()
                 .map(ConversationConverter::toConversation)
                 .toList();
@@ -70,20 +70,23 @@ public class ConversationRepositoryImpl implements ConversationRepository {
 
     @Override
     public void update(Conversation conversation) {
-        // 架构防护动机 (Why)：MyBatis-Plus 实体更新默认会忽略值为 null 的属性；
-        // 但会话终态或空闲时必须将 activeExecutionId 与 nativeSessionId 显式置空，因此使用 UpdateWrapper 显式 set
+        // 架构防护动机 (Why)：MyBatis-Plus 实体更新默认忽略 null 属性；
+        // 任务解绑、简报清空等场景必须显式置空，因此使用 UpdateWrapper 显式 set
         int rows = conversations.update(null, new UpdateWrapper<ConversationPO>()
                 .eq("id", conversation.id())
                 .set("workspace_id", conversation.workspaceId())
-                .set("title", conversation.title())
-                .set("created_by_user_id", conversation.createdByUserId())
-                .set("current_user_id", conversation.currentUserId())
-                .set("device_id", conversation.deviceId())
                 .set("project_id", conversation.projectId())
+                .set("owner_user_id", conversation.ownerUserId())
+                .set("device_id", conversation.deviceId())
                 .set("agent_config_id", conversation.agentConfigId())
-                .set("next_sequence", conversation.nextSequence())
+                .set("task_id", conversation.taskId())
+                .set("status", conversation.status())
+                .set("title", conversation.title())
+                .set("brief_text", conversation.briefText())
+                .set("brief_source", conversation.briefSource())
+                .set("brief_updated_at_ms", conversation.briefUpdatedAtMs())
+                .set("synced_sequence", conversation.syncedSequence())
                 .set("native_session_id", conversation.nativeSessionId())
-                .set("active_execution_id", conversation.activeExecutionId())
                 .set("updated_at_ms", conversation.updatedAtMs()));
         if (rows != 1) {
             throw new IllegalStateException("会话不存在");

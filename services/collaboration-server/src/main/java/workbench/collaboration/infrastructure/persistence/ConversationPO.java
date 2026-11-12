@@ -10,8 +10,8 @@ import com.baomidou.mybatisplus.annotation.TableName;
  *
  * <p>【功能定义】
  * 映射 TDSQL 核心小表 wb_conversation 的持久化实体（Persistent Object）。
- * 遵循“零分表精简状态”规范：仅持久化会话的控制状态、绑定的执行设备/项目、
- * 会话单调连续序号发生器（next_sequence）以及当前活跃执行标识。
+ * HC-211 新形态：仅持久化项目归属、主人设备、运行状态简报与已同步序号水位；
+ * 不再保留成员轮换、活跃执行与服务端序号发生器旧列。
  *
  * <p>【协作边界】
  * - 上游调用方：ConversationMapper、ConversationConverter、ConversationRepositoryImpl。
@@ -32,41 +32,53 @@ public class ConversationPO {
     @TableField("workspace_id")
     private String workspaceId;
 
+    /** 所属业务项目标识 */
+    @TableField("project_id")
+    private String projectId;
+
+    /** 会话主人（创建者）用户标识，固定不变 */
+    @TableField("owner_user_id")
+    private String ownerUserId;
+
+    /** 主人执行设备标识 */
+    @TableField("device_id")
+    private String deviceId;
+
+    /** 绑定的 Agent 运行配置标识（允许为空） */
+    @TableField("agent_config_id")
+    private String agentConfigId;
+
+    /** 关联的任务卡片标识（允许为空） */
+    @TableField("task_id")
+    private String taskId;
+
+    /** 会话运行状态：idle/running/waiting_approval/error */
+    @TableField("status")
+    private String status;
+
     /** 会话标题 */
     @TableField("title")
     private String title;
 
-    /** 会话创建者用户标识 */
-    @TableField("created_by_user_id")
-    private String createdByUserId;
+    /** 最近简报正文（允许为空） */
+    @TableField("brief_text")
+    private String briefText;
 
-    /** 当前拥有该会话控制权的用户标识 */
-    @TableField("current_user_id")
-    private String currentUserId;
+    /** 简报来源：rule/agent */
+    @TableField("brief_source")
+    private String briefSource;
 
-    /** 绑定的执行设备标识（Electron Daemon 所在设备） */
-    @TableField("device_id")
-    private String deviceId;
+    /** 简报最近更新时间戳（毫秒，允许为空） */
+    @TableField("brief_updated_at_ms")
+    private Long briefUpdatedAtMs;
 
-    /** 绑定的项目标识 */
-    @TableField("project_id")
-    private String projectId;
+    /** 已确认的最大已上传消息序号 */
+    @TableField("synced_sequence")
+    private Long syncedSequence;
 
-    /** 绑定的 Agent 运行配置标识 */
-    @TableField("agent_config_id")
-    private String agentConfigId;
-
-    /** 下一个待分配的单调连续事件序号 */
-    @TableField("next_sequence")
-    private Long nextSequence;
-
-    /** 绑定的 ACP 本地引擎会话标识 */
+    /** 绑定的底层 Agent 本地会话标识（允许为空） */
     @TableField("native_session_id")
     private String nativeSessionId;
-
-    /** 当前运行中的执行标识（为空表示空闲） */
-    @TableField("active_execution_id")
-    private String activeExecutionId;
 
     /** 创建时间戳（毫秒） */
     @TableField("created_at_ms")
@@ -100,28 +112,20 @@ public class ConversationPO {
         this.workspaceId = workspaceId;
     }
 
-    public String getTitle() {
-        return title;
+    public String getProjectId() {
+        return projectId;
     }
 
-    public void setTitle(String title) {
-        this.title = title;
+    public void setProjectId(String projectId) {
+        this.projectId = projectId;
     }
 
-    public String getCreatedByUserId() {
-        return createdByUserId;
+    public String getOwnerUserId() {
+        return ownerUserId;
     }
 
-    public void setCreatedByUserId(String createdByUserId) {
-        this.createdByUserId = createdByUserId;
-    }
-
-    public String getCurrentUserId() {
-        return currentUserId;
-    }
-
-    public void setCurrentUserId(String currentUserId) {
-        this.currentUserId = currentUserId;
+    public void setOwnerUserId(String ownerUserId) {
+        this.ownerUserId = ownerUserId;
     }
 
     public String getDeviceId() {
@@ -132,14 +136,6 @@ public class ConversationPO {
         this.deviceId = deviceId;
     }
 
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
     public String getAgentConfigId() {
         return agentConfigId;
     }
@@ -148,12 +144,60 @@ public class ConversationPO {
         this.agentConfigId = agentConfigId;
     }
 
-    public Long getNextSequence() {
-        return nextSequence;
+    public String getTaskId() {
+        return taskId;
     }
 
-    public void setNextSequence(Long nextSequence) {
-        this.nextSequence = nextSequence;
+    public void setTaskId(String taskId) {
+        this.taskId = taskId;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getBriefText() {
+        return briefText;
+    }
+
+    public void setBriefText(String briefText) {
+        this.briefText = briefText;
+    }
+
+    public String getBriefSource() {
+        return briefSource;
+    }
+
+    public void setBriefSource(String briefSource) {
+        this.briefSource = briefSource;
+    }
+
+    public Long getBriefUpdatedAtMs() {
+        return briefUpdatedAtMs;
+    }
+
+    public void setBriefUpdatedAtMs(Long briefUpdatedAtMs) {
+        this.briefUpdatedAtMs = briefUpdatedAtMs;
+    }
+
+    public Long getSyncedSequence() {
+        return syncedSequence;
+    }
+
+    public void setSyncedSequence(Long syncedSequence) {
+        this.syncedSequence = syncedSequence;
     }
 
     public String getNativeSessionId() {
@@ -162,14 +206,6 @@ public class ConversationPO {
 
     public void setNativeSessionId(String nativeSessionId) {
         this.nativeSessionId = nativeSessionId;
-    }
-
-    public String getActiveExecutionId() {
-        return activeExecutionId;
-    }
-
-    public void setActiveExecutionId(String activeExecutionId) {
-        this.activeExecutionId = activeExecutionId;
     }
 
     public Long getCreatedAtMs() {

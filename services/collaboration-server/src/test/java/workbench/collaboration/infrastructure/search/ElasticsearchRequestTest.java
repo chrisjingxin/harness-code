@@ -29,7 +29,7 @@ class ElasticsearchRequestTest {
     assertThat(body.readUtf8()).contains("\"timeout\":\"800ms\"").contains("\"conversationId\":\"conv\"");
 
     var convIndex = requests.indexConversation(workspaceId, "conv-1", "{\"conversationId\":\"conv-1\"}");
-    assertThat(convIndex.url().encodedPath()).isEqualTo("/wb_conversation_handoff_v1/_doc/conv-1");
+    assertThat(convIndex.url().encodedPath()).isEqualTo("/wb_conversation_v1/_doc/conv-1");
     assertThat(convIndex.url().queryParameter("routing")).isEqualTo(workspaceId);
 
     var filtered = requests.search(workspaceId, "conv\"quote", 99L, "key\"word", 25);

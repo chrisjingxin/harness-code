@@ -7,7 +7,7 @@ import workbench.collaboration.domain.conversation.Conversation;
  *
  * <p>【功能定义】
  * 提供 Conversation 领域聚合根与 ConversationPO 数据表持久化对象之间的双向转换。
- * 遵循空值保留契约：nativeSessionId（底层 ACP 会话标识）与 activeExecutionId（活跃执行标识）
+ * 遵循空值保留契约：taskId、agentConfigId、briefText、briefUpdatedAtMs、nativeSessionId
  * 为空时必须保留 null 语义，供底层 UpdateWrapper 正确执行清空操作。
  *
  * <p>【协作边界】
@@ -22,15 +22,18 @@ final class ConversationConverter {
         ConversationPO po = new ConversationPO();
         po.setId(conversation.id());
         po.setWorkspaceId(conversation.workspaceId());
-        po.setTitle(conversation.title());
-        po.setCreatedByUserId(conversation.createdByUserId());
-        po.setCurrentUserId(conversation.currentUserId());
-        po.setDeviceId(conversation.deviceId());
         po.setProjectId(conversation.projectId());
+        po.setOwnerUserId(conversation.ownerUserId());
+        po.setDeviceId(conversation.deviceId());
         po.setAgentConfigId(conversation.agentConfigId());
-        po.setNextSequence(conversation.nextSequence());
+        po.setTaskId(conversation.taskId());
+        po.setStatus(conversation.status());
+        po.setTitle(conversation.title());
+        po.setBriefText(conversation.briefText());
+        po.setBriefSource(conversation.briefSource());
+        po.setBriefUpdatedAtMs(conversation.briefUpdatedAtMs());
+        po.setSyncedSequence(conversation.syncedSequence());
         po.setNativeSessionId(conversation.nativeSessionId());
-        po.setActiveExecutionId(conversation.activeExecutionId());
         po.setCreatedAtMs(conversation.createdAtMs());
         po.setUpdatedAtMs(conversation.updatedAtMs());
         return po;
@@ -40,15 +43,18 @@ final class ConversationConverter {
         return new Conversation(
                 po.getId(),
                 po.getWorkspaceId(),
-                po.getTitle(),
-                po.getCreatedByUserId(),
-                po.getCurrentUserId(),
-                po.getDeviceId(),
                 po.getProjectId(),
+                po.getOwnerUserId(),
+                po.getDeviceId(),
                 po.getAgentConfigId(),
-                po.getNextSequence(),
+                po.getTaskId(),
+                po.getStatus(),
+                po.getTitle(),
+                po.getBriefText(),
+                po.getBriefSource(),
+                po.getBriefUpdatedAtMs(),
+                po.getSyncedSequence(),
                 po.getNativeSessionId(),
-                po.getActiveExecutionId(),
                 po.getCreatedAtMs(),
                 po.getUpdatedAtMs()
         );

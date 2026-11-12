@@ -15,7 +15,7 @@ import java.util.Set;
  *
  * <p>【功能定义】
  * 本模块为独立桌面协作工作台 Java 中继服务（collaboration-server）的标准 Spring Boot 主启动入口。
- * 负责引导 Spring 容器装配、解析启动引导参数，并按需执行契约自检、数据库迁移或常驻 Web 协作中继服务。
+ * 负责引导 Spring 容器装配、解析启动引导参数，并按需执行契约自检、演示数据初始化或常驻 Web 协作中继服务。
  *
  * <p>【协作边界】
  * - 上游调用方：操作系统进程管理、Docker 容器、Node 运维脚本（scripts/workbench/server.mjs）。
@@ -25,12 +25,16 @@ import java.util.Set;
  * <pre>
  * CLI 命令行入参 args ──> 提取 --workbench.command
  *                              │
- *     ┌────────────────────────┼────────────────────────┐
- *     ▼                        ▼                        ▼
- * [contracts]             [migrate / init-demo]      [start] (默认)
- * 纯内存契约自检            无 Web 容器 (NONE)          Servlet 容器 (SERVLET)
- * 不连数据库/中间件         执行数据库操作后关闭退出    常驻监听 HTTP/WebSocket/SSE
+ *              ┌───────────────┼────────────────┐
+ *              ▼               ▼                ▼
+ *        [contracts]      [init-demo]        [start] (默认)
+ *        纯内存契约自检    无 Web 容器 (NONE)   Servlet 容器 (SERVLET)
+ *        不连数据库       写演示数据后退出      常驻监听 HTTP
  * </pre>
+ *
+ * <p>【DDL 约定（HC-211 D7）】
+ * 数据库结构唯一来源是 classpath:db/schema.sql，由运维手工执行；应用从不执行 DDL，
+ * start 时由 Foundation 只读核对必需表/列与禁止表，不符即拒绝启动。
  */
 @SpringBootApplication
 @MapperScan("workbench.collaboration.infrastructure.persistence.mapper")
@@ -42,9 +46,8 @@ public class Application {
      *
      * <p>【契约说明】
      * - 入参：args 命令行入参，支持通过 "--workbench.command={command}" 指定运行模式。
-     *   - "start"（默认）：启动 HTTP/SSE/WebSocket 协作服务；
+     *   - "start"（默认）：启动 HTTP 协作服务；
      *   - "contracts"：执行平台与中继服务双端 JSON Schema 契约自检，零外部网络与数据库依赖；
-     *   - "migrate"：仅执行 Flyway/DDL 数据库迁移，完成即退出；
      *   - "init-demo"：仅执行测试演示数据初始化，完成即退出。
      * - 异常：若传入非法命令字，抛出 IllegalArgumentException。
      *
@@ -65,14 +68,14 @@ public class Application {
         }
 
         // 命令合法性防篡改防御
-        if (!Set.of("migrate", "init-demo", "start").contains(command)) {
+        if (!Set.of("init-demo", "start").contains(command)) {
             throw new IllegalArgumentException("未知运行命令");
         }
 
         SpringApplication app = new SpringApplication(Application.class);
 
         // 架构不变量：进程是否监听外部端口必须在 Spring 容器初始化前定死；
-        // 迁移与演示数据初始化任务设置为 NONE，防止不必要的端口占用与外部网络请求进入半初始化容器
+        // 演示数据初始化任务设置为 NONE，防止不必要的端口占用与外部网络请求进入半初始化容器
         app.setWebApplicationType(command.equals("start") ? WebApplicationType.SERVLET : WebApplicationType.NONE);
 
         var context = app.run(args);

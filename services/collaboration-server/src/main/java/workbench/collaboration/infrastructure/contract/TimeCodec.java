@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter;
  * 模块：时间戳编解码转换器 (TimeCodec)
  *
  * <p>【功能定义】
- * 规范平台对外 HTTP、WebSocket、SSE 以及 JSON 契约中的统一时间格式。
+ * 规范平台对外 HTTP 接口与 JSON 契约中的统一时间格式。
  * 遵循严格契约标准：网络传输中一律强制采用三位毫秒精度的 UTC 'Z' 格式字符串（yyyy-MM-dd'T'HH:mm:ss.SSS'Z'）；
  * 数据库层与内部模型中则统一使用标准 Unix Epoch 毫秒长整型（long）。
  *

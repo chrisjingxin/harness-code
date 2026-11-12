@@ -10,8 +10,9 @@ import com.baomidou.mybatisplus.annotation.TableName;
  *
  * <p>【功能定义】
  * 映射 TDSQL 表 wb_device 的持久化实体。
- * 严格记录 Electron Daemon 的注册备案信息与凭据摘要（SHA-256），
- * 设备实时在线心跳与 WebSocket 长连接路由存储于 Redis，绝不写入本表。
+ * 严格记录本机设备的注册备案信息与凭据摘要（SHA-256），
+ * 设备在线心跳存储于 Redis（wb:device:hb:*），绝不写入本表。
+ * HC-211 起设备属于用户本人，表内不再保留 workspace_id。
  *
  * <p>【协作边界】
  * - 上游调用方：DeviceMapper、DeviceConverter、DeviceRepositoryImpl。
@@ -27,10 +28,6 @@ public class DevicePO {
     /** 设备全局唯一业务标识 (UUID) */
     @TableField("id")
     private String id;
-
-    /** 所属工作区标识 */
-    @TableField("workspace_id")
-    private String workspaceId;
 
     /** 设备所属用户标识 */
     @TableField("owner_user_id")
@@ -86,14 +83,6 @@ public class DevicePO {
 
     public void setId(String id) {
         this.id = id;
-    }
-
-    public String getWorkspaceId() {
-        return workspaceId;
-    }
-
-    public void setWorkspaceId(String workspaceId) {
-        this.workspaceId = workspaceId;
     }
 
     public String getOwnerUserId() {

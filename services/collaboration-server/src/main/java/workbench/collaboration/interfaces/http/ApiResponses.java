@@ -92,12 +92,7 @@ public final class ApiResponses {
             case "PAYLOAD_TOO_LARGE" -> "请求体过大";
             case "DEVICE_AUTHENTICATION_REQUIRED" -> "设备凭据已失效";
             case "REQUEST_ID_CONFLICT" -> "请求编号已用于其他操作";
-            case "CURSOR_AHEAD" -> "事件位置超出已提交范围";
-            case "PROJECT_NOT_SHARED" -> "项目未共享或已停止共享";
-            case "TARGET_UNAVAILABLE" -> "目标设备或执行配置不可用";
-            case "EXECUTION_STATE_CONFLICT" -> "执行状态已变化，请刷新";
             case "REGISTRATION_CONFLICT" -> "设备标识已被占用";
-            case "SHARE_VERSION_CONFLICT" -> "共享版本已变化，请刷新后重试";
             case "DEVICE_ACTION_REJECTED" -> "当前账号不能管理该设备";
             case "INVALID_REQUEST" -> "请求参数无效";
             default -> "服务暂时无法处理请求";

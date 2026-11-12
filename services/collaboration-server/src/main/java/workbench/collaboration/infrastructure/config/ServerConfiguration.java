@@ -20,7 +20,7 @@ import java.util.Map;
  *
  * <p>【功能定义】
  * 装配服务全局单例 Contracts 契约校验中心、高性能 HikariCP 物理数据源，
- * 并依据命令行引导参数驱动 Foundation 执行迁移（migrate）、初始化演示数据（init-demo）或仅校验结构启动（start）。
+ * 并依据命令行引导参数驱动 Foundation 初始化演示数据（init-demo）或仅校验结构启动（start）。
  *
  * <p>【数据库连接池调优设计 (Why)】
  * - 启用 MySQL 服务端预编译缓存（cachePrepStmts=true、prepStmtCacheSize=250、prepStmtCacheSqlLimit=2048）；
@@ -80,7 +80,6 @@ public class ServerConfiguration {
     ) {
         Foundation foundation = new Foundation(source, transactions, identity);
         switch (env.getRequiredProperty("workbench.command")) {
-            case "migrate" -> foundation.migrate();
             case "init-demo" -> {
                 foundation.validate();
                 foundation.initializeDemo();

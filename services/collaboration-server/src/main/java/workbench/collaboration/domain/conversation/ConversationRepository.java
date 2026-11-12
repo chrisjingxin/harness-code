@@ -8,10 +8,10 @@ import java.util.Optional;
  *
  * <p>【功能定义】
  * 定义对 TDSQL 中会话头（wb_conversation）的持久化与并发访问契约。
- * 核心提供会话读取、插入、状态变更以及防并发序号错乱的悲观锁行锁查询。
+ * 提供会话读取、插入、简报与水位更新，以及防并发推进的悲观行锁查询。
  *
  * <p>【协作边界】
- * - 上游调用方：ConversationAppService、ExecutionAppService、DeviceAppService。
+ * - 上游调用方：ConversationSyncAppService。
  * - 下游实现方：infrastructure/persistence/ConversationRepositoryImpl（基于 MyBatis-Plus）。
  */
 public interface ConversationRepository {
@@ -28,8 +28,8 @@ public interface ConversationRepository {
      * 根据会话标识加悲观行锁查询（SELECT ... FOR UPDATE）。
      *
      * <p>【并发控制动机 (Why)】
-     * 当多个协作成员在极短时间内对同一会话发送指令或推进流时，必须避免两个请求并发分配出相同的递增序号 (sequence)。
-     * 必须在外部短事务中调用本方法锁定该行记录，保证序号递增与状态变迁的原子性与串行性。
+     * 同步上传推进 synced_sequence 水位时必须在外部短事务中锁定该行，
+     * 保证水位校验与推进的原子性，杜绝并发批次互相覆盖水位。
      *
      * @param id 会话全局唯一标识
      * @return 锁定后的 Conversation 实例
@@ -44,20 +44,20 @@ public interface ConversationRepository {
     void insert(Conversation conversation);
 
     /**
-     * 全量更新会话头状态（如递增 nextSequence、切换 activeExecutionId 或更新当前用户）。
+     * 全量更新会话头状态（状态、简报、水位与时间戳）。
      *
      * @param conversation 待更新的会话聚合根实体
      */
     void update(Conversation conversation);
 
     /**
-     * 按工作区游标分页列出会话列表（按创建时间倒序）。
+     * 按项目游标分页列出会话列表（按最近更新时间倒序，供简报看板）。
      *
-     * @param workspaceId 所属工作区标识
-     * @param beforeCreatedAtMs 游标时间戳（毫秒），为 null 表示从最新记录开始查
+     * @param projectId 所属业务项目标识
+     * @param beforeUpdatedAtMs 游标时间戳（毫秒），为 null 表示从最新记录开始查
      * @param beforeId 游标辅助标识，解决同一毫秒下的翻页确定性排序
      * @param limit 本次查询的最大条数
      * @return 会话头列表
      */
-    List<Conversation> list(String workspaceId, Long beforeCreatedAtMs, String beforeId, int limit);
+    List<Conversation> listByProject(String projectId, Long beforeUpdatedAtMs, String beforeId, int limit);
 }

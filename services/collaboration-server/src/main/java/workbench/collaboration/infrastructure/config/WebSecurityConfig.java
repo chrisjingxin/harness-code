@@ -41,10 +41,10 @@ import java.util.List;
  *
  * <p>【功能定义】
  * 配置基于 Spring Security 的 HTTP 核心安全过滤链。
- * 针对“人类用户浏览器会话”与“物理设备 Electron Daemon 自动化通信”实行通道隔离：
+ * 针对“人类用户浏览器会话”与“本机设备凭据自动化通信”实行通道隔离：
  * - 人类用户（SESSION 认证）：受 Cookie 会话持久化、登录切换 SessionId、跨站请求伪造 (CSRF) 防护；
- * - 物理设备（DEVICE 认证）：走 Bearer Token 签名凭证，免除 CSRF 检查但受到严格的报文指纹与边界校验；
- * - 迁移/自检模式：通过 @ConditionalOnWebApplication 约束，命令行模式下完全不拉起 Web 安全链，极速执行。
+ * - 本机设备（DEVICE 认证）：走 Bearer Token 签名凭证，免除 CSRF 检查但受到严格的报文指纹与边界校验；
+ * - 一次性命令模式：通过 @ConditionalOnWebApplication 约束，命令行模式下完全不拉起 Web 安全链，极速执行。
  *
  * <p>【安全设计原则 (Why)】
  * 1. 登录会话重置（ChangeSessionIdAuthenticationStrategy）：登录成功后必须强制轮换 SessionId，杜绝会话固定攻击；

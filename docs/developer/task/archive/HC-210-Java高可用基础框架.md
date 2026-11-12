@@ -5,16 +5,16 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: Codex
 priority: P0
-status: 待认领
-owner: 未认领
-branch: -
+status: 已完成
+owner: Codex
+branch: harness_lody
 scope: 基于标准 Spring Boot 4.0.6、DDD 四层架构与 TDSQL、Redis、Kafka、ES 7.6.0 重构 Java 协作服务端，落地 Electron Daemon Push 定稿消息模型、TDSQL 零分表精简状态表、MyBatis-Plus 持久层与完整 JUnit 5 单元测试体系。
 acceptance: 11 项指定技术栈版本对齐；改造为标准 @SpringBootApplication 工程并支持 application.yml 自动装配；严格遵循 DDD 四层架构；TDSQL 不存海量消息与事件流水表，Message 全量经 Redis 热滑窗与 Kafka 落入 ES 7.6.0；SSE 与 Daemon 指令改为事件驱动推送；新增 src/test/java 完整单元测试并全部通过。
 user_docs: 实现阶段按需同步更新服务部署与中间件配置说明；当前不改变桌面端用户操作入口
 developer_docs: docs/developer/architecture/多人协作工作台顶层设计.md；docs/developer/spec/HC-210-Java高可用基础框架.md；docs/developer/plan/HC-210-Java高可用基础框架.md；docs/developer/todo/HC-210-Java高可用基础框架.md
 test_evidence: 2026-11-11 完成 Code Review 8 项问题（2 Critical + 6 Required）闭环修复；mvn test package 30 个 JUnit 5 单元测试全部通过；server:contracts 69 例契约自检通过；check:boundaries --self-check 与 project:check 全部通过；隔离 MySQL 8.4 上 smoke-identity 14 项与 smoke-conversations 15 项通过。
 references: docs/developer/task/HC-192-协作工作台与会话交接.md；docs/developer/task/HC-198-会话交接与内容引用.md
-completed_at: -
+completed_at: 2026-11-12
 ---
 
 # HC-210 Java高可用基础框架
@@ -35,7 +35,7 @@ completed_at: -
    - Electron 客户端作为本机 Daemon 服务，在本地运行 ACP Agent 并 **100% 在客户端内存处理流式渲染**；
    - 等模型**真正产出完整定稿消息（或执行终态）后，由 Electron Daemon 主动异步 Push 到远端 Java 服务**。Java 服务端彻底告别流式 Token 碎片拼接与高频 `UPDATE`。
 2. **四大中间件存算分离（TDSQL 零分表、永不爆表）**：
-   - **TDSQL（MySQL 8 模拟）**：**彻底移除 `wb_message`、`wb_execution_event`、`wb_execution`、`wb_request_receipt`、`wb_outbox_event` 等海量膨胀流水表**！只保留高价值的**控制面与协作契约小表**（账号 `wb_user`、工作区 `wb_workspace`、成员 `wb_workspace_member`、设备 `wb_device`、共享项目 `wb_device_project`、会话头 `wb_conversation`、以及 [HC-198](./HC-198-会话交接与内容引用.md) 的交接单 `wb_handoff` 和正式引用快照 `wb_message_reference`）。所有表采用自增 `BIGINT UNSIGNED` 物理聚簇主键 + 业务 UUID 唯一索引，无需任何 MySQL 分库分表即可长期稳定运行。
+   - **TDSQL（MySQL 8 模拟）**：**彻底移除 `wb_message`、`wb_execution_event`、`wb_execution`、`wb_request_receipt`、`wb_outbox_event` 等海量膨胀流水表**！只保留高价值的**控制面与协作契约小表**（账号 `wb_user`、工作区 `wb_workspace`、成员 `wb_workspace_member`、设备 `wb_device`、共享项目 `wb_device_project`、会话头 `wb_conversation`、以及 [HC-198](../HC-198-会话交接与内容引用.md) 的交接单 `wb_handoff` 和正式引用快照 `wb_message_reference`）。所有表采用自增 `BIGINT UNSIGNED` 物理聚簇主键 + 业务 UUID 唯一索引，无需任何 MySQL 分库分表即可长期稳定运行。
    - **Redis（Spring Data Redis + Jedis）**：承接所有带 TTL 的分布式热状态——分布式登录 Session/CSRF、成员权限热缓存、全局 Electron Daemon 在线路由表（`wb:daemon:presence:{deviceId}`）、1 小时请求幂等防重（替代 `wb_request_receipt`）、当前活跃执行状态（替代 `wb_execution` 热态）、发送前的临时引用草稿（替代 `wb_reference_draft`），以及**活跃会话最近 100 条定稿消息热滑窗（`wb:conv:msgs:{conversationId}`，消除 ES 1s 刷新延迟，保障打开会话 `< 1ms` 零延迟读取）**。
    - **Kafka**：作为高可靠异步事件与指令总动脉——承接 Daemon Push 定稿消息削峰填谷异步入 ES、驱动跨节点 SSE 实时广播（`wb.conversation.events`，彻底取代 200ms 数据库轮询）、驱动跨节点向目标 Daemon 下发执行/取消指令（`wb.daemon.commands`，彻底取代 1000ms 扫库轮询）。
    - **Elasticsearch 7.6.0**：作为**全量定稿 Message 的持久化分片存储与全文检索引擎**（`wb_message_v1` 与 `wb_conversation_handoff_v1`，统一设置 `_routing = workspaceId` 单分片路由与 `rest_total_hits_as_int=true` 兼容参数），同时承接：
@@ -70,7 +70,7 @@ completed_at: -
 ## DDD 四层架构与模块范围
 
 1. **`interfaces`（用户接口层）**：
-   - `rest`：`IdentityController`、`DeviceController`（含 Electron Daemon Push 完整定稿消息接口）、`ConversationController`（后续由 [HC-198](./HC-198-会话交接与内容引用.md) 扩展 `HandoffController` 与 `ReferenceController`）；
+   - `rest`：`IdentityController`、`DeviceController`（含 Electron Daemon Push 完整定稿消息接口）、`ConversationController`（后续由 [HC-198](../HC-198-会话交接与内容引用.md) 扩展 `HandoffController` 与 `ReferenceController`）；
    - `stream`：`ConversationSseController`（事件驱动 SSE）、`DaemonWebSocketHandler`（Daemon 指令与心跳通道）；
    - `consumer`：`ConversationEventKafkaListener`、`DaemonCommandKafkaListener`、`MessageIndexKafkaListener`；
    - `filter`、`dto`、`assembler`：安全边界过滤、契约校验与 DTO 转换。
@@ -79,7 +79,7 @@ completed_at: -
    - 负责事务编排、Redis 幂等拦截（`IdempotencyGuard`）、跨领域协调与 Kafka 事件发布。
 3. **`domain`（领域层）**：
    - 纯粹 Java 领域模型，零中间件注解污染；
-   - 包含 `identity`、`device`、`conversation`、`execution`（及后续 [HC-198](./HC-198-会话交接与内容引用.md) 的 `handoff`、`reference`）聚合根、实体、值对象、领域服务与仓储/端口接口（`*Repository`、`MessageStorePort`、`DaemonPresencePort`、`EventBusPort`）。
+   - 包含 `identity`、`device`、`conversation`、`execution`（及后续 [HC-198](../HC-198-会话交接与内容引用.md) 的 `handoff`、`reference`）聚合根、实体、值对象、领域服务与仓储/端口接口（`*Repository`、`MessageStorePort`、`DaemonPresencePort`、`EventBusPort`）。
 4. **`infrastructure`（基础设施层）**：
    - `persistence`：基于 MyBatis-Plus `3.5.16` 的 `*PO`、`*Mapper`、`*Converter` 与 TDSQL 仓储实现；
    - `cache`：基于 Jedis `4.4.8` 的分布式 Session、Daemon 在线路由表、1h 请求幂等池、当前活跃执行状态与会话最近 100 条热消息滑窗实现；
@@ -90,9 +90,9 @@ completed_at: -
 
 ## 依赖与推进顺序
 
-- 本任务属于 [HC-192 总任务](./HC-192-协作工作台与会话交接.md) 下新增的 Java 服务端底座重构任务，优先于 [HC-198 会话交接与内容引用](./HC-198-会话交接与内容引用.md) 实施。
-- `HC-210` 完成后，[HC-198](./HC-198-会话交接与内容引用.md) 直接在 DDD 四层结构上新增 `handoff` 与 `reference` 领域包、TDSQL `wb_handoff` / `wb_message_reference` 表、Redis 引用草稿缓存与 ES `7.6.0` 引用检索。
-- 继续遵守 [协作任务并行开发约定](../project/协作任务并行开发约定.md#0-当前调度等待同事交付-acp2026-11-10) 第 0 节：本任务不涉及 ACP 协议改动。
+- 本任务属于 [HC-192 总任务](../HC-192-协作工作台与会话交接.md) 下新增的 Java 服务端底座重构任务，优先于 [HC-198 会话交接与内容引用](../HC-198-会话交接与内容引用.md) 实施。
+- `HC-210` 完成后，[HC-198](../HC-198-会话交接与内容引用.md) 直接在 DDD 四层结构上新增 `handoff` 与 `reference` 领域包、TDSQL `wb_handoff` / `wb_message_reference` 表、Redis 引用草稿缓存与 ES `7.6.0` 引用检索。
+- 继续遵守 [协作任务并行开发约定](../../project/协作任务并行开发约定.md#0-当前调度等待同事交付-acp2026-11-10) 第 0 节：本任务不涉及 ACP 协议改动。
 
 ---
 
@@ -110,34 +110,34 @@ completed_at: -
 
 ## 后续流程
 
-本 Task 确认后，按 `Spec → Plan → Todo → implement → review` 顺序推进 `HC-210-Java高可用基础框架`，验收通过后再启动 [HC-198 会话交接与内容引用](./HC-198-会话交接与内容引用.md)。
+本 Task 确认后，按 `Spec → Plan → Todo → implement → review` 顺序推进 `HC-210-Java高可用基础框架`，验收通过后再启动 [HC-198 会话交接与内容引用](../HC-198-会话交接与内容引用.md)。
 
 ---
 
 ## Code Review 结论（2026-11-11）
 
-依据 `code-review-and-quality` 五维审查标准（正确性、可读性与简洁性、架构、安全、性能）及 [HC-210 Spec](../spec/HC-210-Java高可用基础框架.md) 检视当前 `services/collaboration-server` 实现与测试：
+依据 `code-review-and-quality` 五维审查标准（正确性、可读性与简洁性、架构、安全、性能）及 [HC-210 Spec](../../spec/HC-210-Java高可用基础框架.md) 检视当前 `services/collaboration-server` 实现与测试：
 
 ### 总体结论：**Approved（初审 2 Critical + 6 Required 已全部修复并通过复验）**
 
-本轮实现已完成标准 `@SpringBootApplication` 改造、[pom.xml](../../../services/collaboration-server/pom.xml) 11 项依赖锁定、Flyway 6 张 `pk_id` 控制面表迁移、MyBatis-Plus 仓储、SSE 零数据库轮询改造以及 12 个测试类（30 个 JUnit 5 用例）。初审发现的 **2 项 Critical（阻断）** 与 **6 项 Required（必改）** 问题已全部闭环修复：
+本轮实现已完成标准 `@SpringBootApplication` 改造、[pom.xml](../../../../services/collaboration-server/pom.xml) 11 项依赖锁定、Flyway 6 张 `pk_id` 控制面表迁移、MyBatis-Plus 仓储、SSE 零数据库轮询改造以及 12 个测试类（30 个 JUnit 5 用例）。初审发现的 **2 项 Critical（阻断）** 与 **6 项 Required（必改）** 问题已全部闭环修复：
 
 1. **Critical（已修复）— Daemon Push 定稿消息与执行状态闭环，对齐 `runner-core` WebSocket 协议**：
-   - 在 [ConversationAppService.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/application/service/ConversationAppService.java) 新增 `recordDaemonPush(...)`，支持接收 Electron Daemon 推送的 Agent 定稿消息（`authorKind="agent"`）与执行状态流转（`accepted / running / succeeded / failed / cancelled / rejected`），落入 `MessageStorePort`（Redis 热滑窗）、广播 `message.created / execution.changed` 至 `EventWindowPort` 与 SSE，并异步投递 `wb.search.index`（ES 7.6.0）。
-   - [DaemonWebSocketHandler.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/interfaces/stream/DaemonWebSocketHandler.java) 实现 `SubProtocolCapable`（`workbench.device.v1`），生成 UUID `connectionId`，以 `DeviceEnvelope`（`{connectionId, message}`）包装 `DeviceWelcomeMessage`、`DeviceReadyMessage`、`ExecutionEventsAckMessage` 与下发命令，并在断连/吊销时调用 `presence.remove(deviceId)` 即时驱逐在线状态。
+   - 在 ConversationAppService.java（已随 HC-211 拆除） 新增 `recordDaemonPush(...)`，支持接收 Electron Daemon 推送的 Agent 定稿消息（`authorKind="agent"`）与执行状态流转（`accepted / running / succeeded / failed / cancelled / rejected`），落入 `MessageStorePort`（Redis 热滑窗）、广播 `message.created / execution.changed` 至 `EventWindowPort` 与 SSE，并异步投递 `wb.search.index`（ES 7.6.0）。
+   - DaemonWebSocketHandler.java（已随 HC-211 拆除） 实现 `SubProtocolCapable`（`workbench.device.v1`），生成 UUID `connectionId`，以 `DeviceEnvelope`（`{connectionId, message}`）包装 `DeviceWelcomeMessage`、`DeviceReadyMessage`、`ExecutionEventsAckMessage` 与下发命令，并在断连/吊销时调用 `presence.remove(deviceId)` 即时驱逐在线状态。
 2. **Critical（已修复）— 收窄数据库短事务边界，消除跨网络 I/O 行锁**：
-   - [ConversationAppService.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/application/service/ConversationAppService.java) 改为通过 `TransactionTemplate`（`inShortTransaction`）仅在锁读并更新 `wb_conversation` 序号与元数据行时开启短事务；事务提交后再执行 Redis 热窗口写入、SSE 推送、Kafka 发布与 Daemon WebSocket 下发。
+   - ConversationAppService.java（已随 HC-211 拆除） 改为通过 `TransactionTemplate`（`inShortTransaction`）仅在锁读并更新 `wb_conversation` 序号与元数据行时开启短事务；事务提交后再执行 Redis 热窗口写入、SSE 推送、Kafka 发布与 Daemon WebSocket 下发。
 3. **Required（已修复）— `cluster` 模式严格 `fail closed`**：
-   - [MiddlewareConfig.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/MiddlewareConfig.java) 移除 `cluster` 模式下捕获 Redis/Kafka 异常后静默回退单机内存的逻辑，集群中间件不可用时直接失败关闭。
+   - [MiddlewareConfig.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/MiddlewareConfig.java) 移除 `cluster` 模式下捕获 Redis/Kafka 异常后静默回退单机内存的逻辑，集群中间件不可用时直接失败关闭。
 4. **Required（已修复）— 补齐 Redis `MessageStorePort` 读接口与 ES 7.6.0 安全 JSON 查询**：
-   - [JedisCollaborationState.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/cache/JedisCollaborationState.java) 实现 `Messages.recent`（`zrevrange` 倒序读取再翻转为正序）与 `Messages.find`（委派 ES 点查）；[ElasticsearchMessageStoreAdapter.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/search/ElasticsearchMessageStoreAdapter.java) 与 [EsMessageRequests.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/search/EsMessageRequests.java) 改用 Jackson `JsonMapper` 构造查询 JSON，支持 `wb_conversation_handoff_v1` 会话索引及游标/关键词检索。
+   - [JedisCollaborationState.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/cache/JedisCollaborationState.java) 实现 `Messages.recent`（`zrevrange` 倒序读取再翻转为正序）与 `Messages.find`（委派 ES 点查）；[ElasticsearchMessageStoreAdapter.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/search/ElasticsearchMessageStoreAdapter.java) 与 [EsMessageRequests.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/search/EsMessageRequests.java) 改用 Jackson `JsonMapper` 构造查询 JSON，支持 `wb_conversation_handoff_v1` 会话索引及游标/关键词检索。
 5. **Required（已修复）— `WorkbenchProperties.Pool` 接入 `ServerConfiguration.dataSource`**：
-   - [ServerConfiguration.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/ServerConfiguration.java) 已读取 [WorkbenchProperties.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/WorkbenchProperties.java) 的 `pool` 配置。
+   - [ServerConfiguration.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/ServerConfiguration.java) 已读取 [WorkbenchProperties.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/config/WorkbenchProperties.java) 的 `pool` 配置。
 6. **Required（已修复）— 补齐 `ExecutionState.commandFingerprint`**：
    - `ConversationAppService.sendInput` 通过 `ExecutionAppService.createStart(...)` 预先生成签名后的 `ExecutionStartMessage`，将 64 位 SHA-256 `bodySha256` 存入 `ExecutionState.commandFingerprint`。
 7. **Required（已修复）— 消除 `IdentityRepositoryImpl` 的 `1 + N` 查询**：
-   - [IdentityRepositoryImpl.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/persistence/IdentityRepositoryImpl.java) 的 `listWorkspacesForUser` 与 `listMembers` 改为 `IN` 批量查询并保持 `slug / username` 稳定升序与启用过滤。
+   - [IdentityRepositoryImpl.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/infrastructure/persistence/IdentityRepositoryImpl.java) 的 `listWorkspacesForUser` 与 `listMembers` 改为 `IN` 批量查询并保持 `slug / username` 稳定升序与启用过滤。
 8. **Required（已修复）— 清理死代码、补齐 `MDC` 日志追踪与修复文档断链**：
-   - [BoundaryFilter.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/interfaces/filter/BoundaryFilter.java) 写入并在 `finally` 清理 `MDC.put("requestId", requestId)`；
+   - [BoundaryFilter.java](../../../../services/collaboration-server/src/main/java/workbench/collaboration/interfaces/filter/BoundaryFilter.java) 写入并在 `finally` 清理 `MDC.put("requestId", requestId)`；
    - 删除未使用的 `Execution.java`、`ExecutionDecision.java`、`ConversationEvent.java` 及 `.DS_Store`；
    - 更新 `docs/developer/research/198-会话交接与内容引用.md` 与 `199-文件与Git服务迁移.md` 中的新 DDD 类路径链接，`npm run project:check` 通过。

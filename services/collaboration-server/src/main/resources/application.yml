@@ -1,7 +1,7 @@
 spring:
   application:
     name: collaboration-server
-  # 依赖已在 classpath 上，但停点一的 migrate / init-demo 不能去连 Redis 或 Kafka。
+  # 依赖已在 classpath 上，但 contracts / init-demo 一次性命令不能去连 Redis 或 Kafka。
   autoconfigure:
     exclude:
       - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
@@ -12,8 +12,6 @@ spring:
       - org.springframework.boot.data.redis.autoconfigure.observation.LettuceObservationAutoConfiguration
       - org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration
       - org.springframework.boot.kafka.autoconfigure.metrics.KafkaMetricsAutoConfiguration
-  flyway:
-    enabled: false
   sql:
     init:
       mode: never

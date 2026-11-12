@@ -16,7 +16,7 @@ import java.util.Map;
  * 模块：Elasticsearch 7.6.0 REST 请求构造器 (EsMessageRequests)
  *
  * <p>【功能定义】
- * 统一定义协作定稿消息（wb_message_v1）与会话索引（wb_conversation_handoff_v1）在 ES 7.6.0 中的 RESTful 请求规范。
+ * 统一定义协作定稿消息（wb_message_v1）与会话索引（wb_conversation_v1）在 ES 7.6.0 中的 RESTful 请求规范。
  *
  * <p>【架构不变量与兼容性约束 (Invariants)】
  * 1. 单分片路由隔离（routing=workspaceId）：所有文档写入、点查与检索必须显式携带 routing 参数，
@@ -60,11 +60,11 @@ public final class EsMessageRequests {
     }
 
     /**
-     * 构造会话交接索引写入请求。
+     * 构造会话简报索引写入请求。
      */
     public Request indexConversation(String workspaceId, String conversationId, String documentJson) {
         return new Request.Builder()
-                .url(baseUrl + "/wb_conversation_handoff_v1/_doc/" + encode(conversationId) + "?routing=" + encode(workspaceId))
+                .url(baseUrl + "/wb_conversation_v1/_doc/" + encode(conversationId) + "?routing=" + encode(workspaceId))
                 .put(RequestBody.create(documentJson, JSON))
                 .build();
     }

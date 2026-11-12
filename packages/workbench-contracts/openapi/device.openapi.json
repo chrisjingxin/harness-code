@@ -50,28 +50,6 @@
         }
       }
     },
-    "/api/v1/workspaces/{workspaceId}/devices/{deviceId}/projects": {
-      "get": {
-        "operationId": "get__device_projects",
-        "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "deviceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeCreatedAt", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeProjectId", "in": "query", "required": false, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "200": {
-            "description": "项目列表",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/ProjectListResponse" } } }
-          },
-          "default": {
-            "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
-          }
-        }
-      }
-    },
     "/api/v1/workspaces/{workspaceId}/devices/{deviceId}/revoke": {
       "post": {
         "operationId": "post__device_revoke",
@@ -87,74 +65,6 @@
           "200": {
             "description": "设备撤销",
             "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRevokedResponse" } } }
-          },
-          "default": {
-            "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
-          }
-        }
-      }
-    },
-    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/stop-sharing": {
-      "post": {
-        "operationId": "post__project_stop_sharing",
-        "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/ProjectStopSharingRequest" } } }
-        },
-        "responses": {
-          "200": {
-            "description": "停止共享",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/ProjectSavedResponse" } } }
-          },
-          "default": {
-            "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
-          }
-        }
-      }
-    },
-    "/api/v1/device/projects": {
-      "post": {
-        "operationId": "post__device_project_publication",
-        "parameters": [
-          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceProjectPublishRequest" } } }
-        },
-        "responses": {
-          "201": {
-            "description": "首次发布",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/ProjectSavedResponse" } } }
-          },
-          "200": {
-            "description": "相同请求重试",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/ProjectSavedResponse" } } }
-          },
-          "default": {
-            "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
-          }
-        }
-      }
-    },
-    "/api/v1/device/channel": {
-      "get": {
-        "operationId": "get__device_channel",
-        "parameters": [
-          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
-          { "name": "Sec-WebSocket-Protocol", "in": "header", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": {
-          "101": {
-            "description": "设备通道升级",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceEnvelope" } } }
           },
           "default": {
             "description": "安全错误",

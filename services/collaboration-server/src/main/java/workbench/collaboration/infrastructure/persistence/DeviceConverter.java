@@ -1,18 +1,17 @@
 package workbench.collaboration.infrastructure.persistence;
 
 import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.device.SharedProject;
 
 /**
- * 模块：设备与项目持久化对象与领域模型转换器 (DeviceConverter)
+ * 模块：设备持久化对象与领域模型转换器 (DeviceConverter)
  *
  * <p>【功能定义】
- * 提供 Device、SharedProject 领域实体与 DevicePO、DeviceProjectPO 表持久化对象之间的双向转换。
+ * 提供 Device 领域实体与 DevicePO 表持久化对象之间的双向转换。
  * 负责布尔属性与数据库 TINYINT(1) 整型之间的确定性映射。
  *
  * <p>【协作边界】
  * - 上游调用方：DeviceRepositoryImpl。
- * - 下游依赖方：Device、SharedProject、DevicePO、DeviceProjectPO。
+ * - 下游依赖方：Device、DevicePO。
  */
 final class DeviceConverter {
 
@@ -21,7 +20,6 @@ final class DeviceConverter {
     static DevicePO toPo(Device device) {
         DevicePO po = new DevicePO();
         po.setId(device.id());
-        po.setWorkspaceId(device.workspaceId());
         po.setOwnerUserId(device.ownerUserId());
         po.setInstallationId(device.installationId());
         po.setLedgerId(device.ledgerId());
@@ -38,7 +36,6 @@ final class DeviceConverter {
     static Device toDevice(DevicePO po) {
         return new Device(
                 po.getId(),
-                po.getWorkspaceId(),
                 po.getOwnerUserId(),
                 po.getInstallationId(),
                 po.getLedgerId(),
@@ -48,32 +45,6 @@ final class DeviceConverter {
                 po.getRegistrationBodySha256(),
                 Integer.valueOf(1).equals(po.getRevoked()),
                 po.getCreatedAtMs(),
-                po.getUpdatedAtMs()
-        );
-    }
-
-    static DeviceProjectPO toPo(SharedProject project) {
-        DeviceProjectPO po = new DeviceProjectPO();
-        po.setWorkspaceId(project.workspaceId());
-        po.setDeviceId(project.deviceId());
-        po.setProjectId(project.projectId());
-        po.setName(project.name());
-        po.setShareEnabled(project.shareEnabled() ? 1 : 0);
-        po.setShareVersion(project.shareVersion());
-        po.setAgentConfigsJson(project.agentConfigsJson());
-        po.setUpdatedAtMs(project.updatedAtMs());
-        return po;
-    }
-
-    static SharedProject toProject(DeviceProjectPO po) {
-        return new SharedProject(
-                po.getWorkspaceId(),
-                po.getDeviceId(),
-                po.getProjectId(),
-                po.getName(),
-                Integer.valueOf(1).equals(po.getShareEnabled()),
-                po.getShareVersion(),
-                po.getAgentConfigsJson(),
                 po.getUpdatedAtMs()
         );
     }

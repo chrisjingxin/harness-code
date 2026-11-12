@@ -1,10 +1,8 @@
 package workbench.collaboration.infrastructure.cache;
 
-import workbench.collaboration.domain.conversation.EventWindowPort;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.domain.conversation.MessageStorePort;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
@@ -13,23 +11,21 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
- * 模块：进程内消息与事件热滑窗实现 (MemoryHotWindow)
+ * 模块：进程内消息热滑窗实现 (MemoryHotWindow)
  *
  * <p>【功能定义】
- * 单机内存模式下同时实现 MessageStorePort（消息存储）与 EventWindowPort（事件热滑窗）。
+ * 单机内存模式下实现 MessageStorePort（定稿消息存储）。
  * 采用并发跳表（ConcurrentSkipListMap）以会话连续序号 sequence 作为键，实现天然按时序自排序：
  * - 消息热滑窗：最多保留最近 100 条定稿消息；
- * - 事件热滑窗：最多保留最近 200 条实时事件（用于断线补齐 range 查询）；
  * - 超过容量上限时自动淘汰最小序号元素（pollFirstEntry），确保内存不泄漏。
  *
  * <p>【协作边界】
- * - 上游调用方：MiddlewareConfig (standalone 模式)、ConversationAppService。
+ * - 上游调用方：MiddlewareConfig (standalone 模式)、ConversationSyncAppService。
  * - 下游依赖方：CacheKeys。
  */
-public final class MemoryHotWindow implements MessageStorePort, EventWindowPort {
+public final class MemoryHotWindow implements MessageStorePort {
 
     private final ConcurrentHashMap<String, NavigableMap<Long, Message>> messages = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, NavigableMap<Long, String>> events = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Message> byId = new ConcurrentHashMap<>();
 
     @Override
@@ -58,33 +54,6 @@ public final class MemoryHotWindow implements MessageStorePort, EventWindowPort 
         }
     }
 
-    @Override
-    public void append(String conversationId, long sequence, String eventJson) {
-        NavigableMap<Long, String> window = events.computeIfAbsent(conversationId, ignored -> new ConcurrentSkipListMap<>());
-        synchronized (window) {
-            window.put(sequence, eventJson);
-            trim(window, CacheKeys.EVENT_LIMIT);
-        }
-    }
-
-    @Override
-    public List<StoredEvent> range(String conversationId, long afterSequence, long throughSequence, int limit) {
-        NavigableMap<Long, String> window = events.get(conversationId);
-        if (window == null || limit <= 0 || afterSequence >= throughSequence) {
-            return List.of();
-        }
-        synchronized (window) {
-            List<StoredEvent> found = new ArrayList<>();
-            for (var entry : window.subMap(afterSequence, false, throughSequence, true).entrySet()) {
-                found.add(new StoredEvent(entry.getKey(), entry.getValue()));
-                if (found.size() == limit) {
-                    break;
-                }
-            }
-            return List.copyOf(found);
-        }
-    }
-
     private static <T> void trim(NavigableMap<Long, T> window, int limit) {
         while (window.size() > limit) {
             window.pollFirstEntry();
@@ -93,11 +62,6 @@ public final class MemoryHotWindow implements MessageStorePort, EventWindowPort 
 
     public int messageCount(String conversationId) {
         NavigableMap<Long, Message> window = messages.get(conversationId);
-        return window == null ? 0 : window.size();
-    }
-
-    public int eventCount(String conversationId) {
-        NavigableMap<Long, String> window = events.get(conversationId);
         return window == null ? 0 : window.size();
     }
 

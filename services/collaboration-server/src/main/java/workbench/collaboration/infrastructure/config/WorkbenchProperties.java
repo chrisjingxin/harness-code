@@ -17,7 +17,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "workbench")
 public class WorkbenchProperties {
 
-    /** 运行命令：start（默认常驻启动）、contracts（契约自检）、migrate（表结构迁移）、init-demo（演示数据初始化） */
+    /** 运行命令：start（默认常驻启动）、contracts（契约自检）、init-demo（演示数据初始化） */
     private String command = "start";
 
     /** 浏览器允许跨域交互与回调的白名单源（Origin），例如 "http://127.0.0.1:18084" */

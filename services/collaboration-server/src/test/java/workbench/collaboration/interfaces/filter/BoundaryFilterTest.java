@@ -34,7 +34,7 @@ class BoundaryFilterTest {
 
   @Test
   void duplicateQueryUnknownRouteAndWrongMethodAreRejected() throws Exception {
-    mvc.perform(get("/api/v1/workspaces/" + WORKSPACE + "/conversations?limit=1&limit=1").headers(ok()))
+    mvc.perform(get("/api/v1/workspaces/" + WORKSPACE + "/devices?limit=1&limit=1").headers(ok()))
       .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
     mvc.perform(get("/api/v1/missing").headers(ok()))
       .andExpect(status().isNotFound()).andExpect(jsonPath("$.error.code").value("RESOURCE_NOT_FOUND"));
@@ -48,7 +48,7 @@ class BoundaryFilterTest {
       .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("REQUEST_SOURCE_REJECTED"));
     mvc.perform(get("/api/v1/meta").header("Host", "127.0.0.1:18084").header("Origin", ORIGIN))
       .andExpect(status().is(426)).andExpect(jsonPath("$.error.code").value("PROTOCOL_VERSION_UNSUPPORTED"));
-    mvc.perform(post("/api/v1/workspaces/" + WORKSPACE + "/conversations").headers(ok()).contentType("application/json").content("x".repeat(17000)))
+    mvc.perform(post("/api/v1/workspaces/" + WORKSPACE + "/devices").headers(ok()).contentType("application/json").content("x".repeat(17000)))
       .andExpect(status().is(413)).andExpect(jsonPath("$.error.code").value("PAYLOAD_TOO_LARGE"))
       .andExpect(jsonPath("$.error.retryable").value(false))
       .andExpect(jsonPath("$.error.requestId").exists())
@@ -76,7 +76,7 @@ class BoundaryFilterTest {
     @GetMapping("/api/v1/meta")
     ResponseEntity<String> meta() { return ApiResponses.json(200, "{\"productVersion\":\"0.2.0\",\"protocolVersion\":1,\"loginMode\":\"demo\"}"); }
 
-    @PostMapping("/api/v1/workspaces/{workspaceId}/conversations")
+    @PostMapping("/api/v1/workspaces/{workspaceId}/devices")
     ResponseEntity<String> create() { return ApiResponses.json(201, "{}"); }
   }
 }

@@ -16,6 +16,10 @@ import java.util.regex.Pattern;
  * 最大允许请求体字节上限（maxBody）以及 URL Query 参数严格正则校验规则。
  * 遵循严格白名单原则：未在此目录声明的路径一律视为 404；已知路径上的未知或非法格式参数一律视为 400。
  *
+ * <p>【HC-211 边界变化】
+ * 远程输入、执行登记/取消、会话级 SSE、设备共享项目与 Daemon WSS 下行通道已全部拆除；
+ * 项目组织层与会话只读同步路由随对应控制器落地后再行登记。
+ *
  * <p>【协作边界】
  * - 上游调用方：BoundaryFilter、WebSecurityConfig。
  * - 下游依赖方：无外部依赖。
@@ -37,14 +41,10 @@ public final class RouteCatalog {
     }
 
     private static final Pattern ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
-    private static final Pattern SEQUENCE = Pattern.compile("(?:0|[1-9][0-9]{0,18})");
     private static final Pattern TIME = Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z");
     private static final Pattern LIMIT = Pattern.compile("[1-9][0-9]{0,2}");
-    private static final Pattern OPERATION = Pattern.compile("conversation\\.create|input\\.send|execution\\.cancel");
     private static final Map<String, Pattern> NONE = Map.of();
-    private static final Map<String, Pattern> PAGE = Map.of("limit", LIMIT, "beforeCreatedAt", TIME, "beforeId", ID);
     private static final Map<String, Pattern> DEVICE_PAGE = Map.of("limit", LIMIT, "beforeCreatedAt", TIME, "beforeDeviceId", ID);
-    private static final Map<String, Pattern> PROJECT_PAGE = Map.of("limit", LIMIT, "beforeCreatedAt", TIME, "beforeProjectId", ID);
 
     private final List<Route> routes = List.of(
             new Route("/health", Set.of("GET"), Auth.PUBLIC, 0, NONE),
@@ -56,20 +56,8 @@ public final class RouteCatalog {
             new Route("/api/v1/auth/me", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/members", Set.of("GET"), Auth.USER, 0, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations", Set.of("GET", "POST"), Auth.USER, 16384, PAGE),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}", Set.of("GET"), Auth.USER, 0, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/inputs", Set.of("POST"), Auth.USER, 65536, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/requests/{requestId}", Set.of("GET"), Auth.USER, 0, Map.of("operation", OPERATION)),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/executions/{executionId}", Set.of("GET"), Auth.USER, 0, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/executions/{executionId}/cancel", Set.of("POST"), Auth.USER, 16384, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/history", Set.of("GET"), Auth.USER, 0, Map.of("afterSequence", SEQUENCE, "throughSequence", SEQUENCE, "limit", LIMIT)),
-            new Route("/api/v1/workspaces/{workspaceId}/conversations/{conversationId}/events", Set.of("GET"), Auth.USER, 0, Map.of("afterSequence", SEQUENCE)),
             new Route("/api/v1/workspaces/{workspaceId}/devices", Set.of("GET", "POST"), Auth.USER, 16384, DEVICE_PAGE),
-            new Route("/api/v1/workspaces/{workspaceId}/devices/{deviceId}/projects", Set.of("GET"), Auth.USER, 0, PROJECT_PAGE),
-            new Route("/api/v1/workspaces/{workspaceId}/devices/{deviceId}/revoke", Set.of("POST"), Auth.USER, 16384, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/stop-sharing", Set.of("POST"), Auth.USER, 16384, NONE),
-            new Route("/api/v1/device/projects", Set.of("POST"), Auth.DEVICE, 16384, NONE),
-            new Route("/api/v1/device/channel", Set.of("GET"), Auth.DEVICE, 0, NONE)
+            new Route("/api/v1/workspaces/{workspaceId}/devices/{deviceId}/revoke", Set.of("POST"), Auth.USER, 16384, NONE)
     );
 
     public RouteCatalog() {

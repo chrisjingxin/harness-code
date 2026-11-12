@@ -1,8 +1,6 @@
 package workbench.collaboration.infrastructure.contract;
 
-import workbench.collaboration.interfaces.dto.ConversationDtos;
 import workbench.collaboration.interfaces.dto.DeviceDtos;
-import workbench.collaboration.interfaces.dto.ExecutionDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
 
 import com.networknt.schema.*;
@@ -18,7 +16,7 @@ import java.util.*;
  *
  * <p>【功能定义】
  * 统一加载并编译打包在类路径下的平台标准 JSON Schema（platform/resources.json 清单定义）。
- * 提供对 HTTP 请求体、WebSocket 指令以及对外输出响应的强类型 Schema 校验与反序列化保护。
+ * 提供对 HTTP 请求体、设备上传报文以及对外输出响应的强类型 Schema 校验与反序列化保护。
  *
  * <p>【安全与高可用不变量 (Why)】
  * - 离线沙箱闭环：严禁在校验过程中发起外部网络请求下载 $ref 引用，所有 $ref 只能落到本地打包的已知 Schema 清单中；
@@ -26,7 +24,7 @@ import java.util.*;
  * - 跨端一致性夹具自检：提供 smoke() 方法，运行与 Node.js 测试套件完全一致的 JSON 夹具，核对 Java Record 双端序列化形态。
  *
  * <p>【协作边界】
- * - 上游调用方：Application (contracts 模式)、BoundaryFilter、DeviceAppService、ConversationAppService。
+ * - 上游调用方：Application (contracts 模式)、BoundaryFilter、DeviceAppService 及后续协作应用服务。
  * - 下游依赖方：NetworkNT JSON Schema Validator、Jackson JsonMapper。
  */
 public final class Contracts {
@@ -188,42 +186,13 @@ public final class Contracts {
                 Map.entry("HealthResponse", PlatformDtos.HealthResponse.class),
                 Map.entry("ErrorResponse", PlatformDtos.ErrorResponse.class),
                 Map.entry("PlatformMessageHeader", PlatformDtos.PlatformMessageHeader.class),
-                Map.entry("ConversationSummary", ConversationDtos.ConversationSummary.class),
-                Map.entry("Message", ConversationDtos.Message.class),
-                Map.entry("ExecutionView", ConversationDtos.ExecutionView.class),
-                Map.entry("CreateConversationRequest", ConversationDtos.CreateConversationRequest.class),
-                Map.entry("CreateConversationResponse", ConversationDtos.CreateConversationResponse.class),
-                Map.entry("SendInputRequest", ConversationDtos.SendInputRequest.class),
-                Map.entry("InputSavedResponse", ConversationDtos.InputSavedResponse.class),
-                Map.entry("CancelExecutionRequest", ConversationDtos.CancelExecutionRequest.class),
-                Map.entry("CancelExecutionResponse", ConversationDtos.CancelExecutionResponse.class),
-                Map.entry("HistoryResponse", ConversationDtos.HistoryResponse.class),
                 Map.entry("DeviceSummary", DeviceDtos.DeviceSummary.class),
-                Map.entry("ProjectSummary", DeviceDtos.ProjectSummary.class),
                 Map.entry("DeviceRegistrationRequest", DeviceDtos.DeviceRegistrationRequest.class),
                 Map.entry("DeviceRegistrationResponse", DeviceDtos.DeviceRegistrationResponse.class),
                 Map.entry("DeviceListResponse", DeviceDtos.DeviceListResponse.class),
-                Map.entry("DeviceRevokedResponse", DeviceDtos.DeviceRevokedResponse.class),
-                Map.entry("ProjectListResponse", DeviceDtos.ProjectListResponse.class),
-                Map.entry("ProjectSavedResponse", DeviceDtos.ProjectSavedResponse.class),
-                Map.entry("ExecutionStartMessage", ExecutionDtos.ExecutionStartMessage.class),
-                Map.entry("ExecutionCancelMessage", ExecutionDtos.ExecutionCancelMessage.class),
-                Map.entry("ExecutionStartDecisionMessage", ExecutionDtos.ExecutionStartDecisionMessage.class),
-                Map.entry("ExecutionAcceptedMessage", ExecutionDtos.ExecutionAcceptedMessage.class),
-                Map.entry("ExecutionNativeBoundMessage", ExecutionDtos.ExecutionNativeBoundMessage.class),
-                Map.entry("ExecutionRunningMessage", ExecutionDtos.ExecutionRunningMessage.class),
-                Map.entry("ExecutionOutputMessage", ExecutionDtos.ExecutionOutputMessage.class),
-                Map.entry("ExecutionTerminalMessage", ExecutionDtos.ExecutionTerminalMessage.class),
-                Map.entry("ExecutionCancelReceivedMessage", ExecutionDtos.ExecutionCancelReceivedMessage.class),
-                Map.entry("RecordBatchResult", ExecutionDtos.RecordBatchResult.class),
-                Map.entry("ReconcileResult", ExecutionDtos.ReconcileResult.class),
-                Map.entry("DeviceWelcomeMessage", DeviceDtos.DeviceWelcomeMessage.class),
-                Map.entry("DeviceReadyMessage", DeviceDtos.DeviceReadyMessage.class),
-                Map.entry("DeviceProblemMessage", DeviceDtos.DeviceProblemMessage.class),
-                Map.entry("DeviceProjectChangedMessage", DeviceDtos.DeviceProjectChangedMessage.class)
+                Map.entry("DeviceRevokedResponse", DeviceDtos.DeviceRevokedResponse.class)
         );
 
-        ExecutionCodec codec = new ExecutionCodec();
         for (JsonNode file : catalog.get("fixtures")) {
             for (JsonNode fixture : mapper.readTree(resource("platform/fixtures/" + safeName(file.asText())))) {
                 String type = fixture.get("schema").asText();
@@ -234,15 +203,6 @@ public final class Contracts {
                 if (valid && records.containsKey(type)) {
                     Object record = mapper.treeToValue(fixture.get("data"), records.get(type));
                     encode(type, record);
-                    // 同一份夹具的确定性正文/指纹必须两端一致；Java 端不另存私有预期值
-                    if (fixture.has("canonical")) {
-                        if (!codec.body(record).equals(fixture.get("canonical").asText())) {
-                            throw new IllegalStateException("确定性正文不一致: " + fixture.get("name").asText());
-                        }
-                        if (!codec.sha256(record).equals(fixture.get("bodySha256").asText())) {
-                            throw new IllegalStateException("确定性指纹不一致: " + fixture.get("name").asText());
-                        }
-                    }
                 }
                 results.add(Map.of("name", fixture.get("name").asText(), "valid", valid));
             }

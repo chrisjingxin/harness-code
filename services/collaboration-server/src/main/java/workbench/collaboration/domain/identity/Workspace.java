@@ -5,7 +5,7 @@ package workbench.collaboration.domain.identity;
  *
  * <p>【功能定义】
  * 表示协作工作台的多租户隔离边界——工作区（Workspace）。
- * 所有的会话（Conversation）、设备（Device）、共享项目（SharedProject）与消息均挂载于工作区下。
+ * 团队仓库目录（Repository）、业务项目（Project）与其下的会话（Conversation）均挂载于工作区下。
  *
  * <p>【协作边界】
  * - 上游调用方：IdentityAppService、IdentityRepository、IdentityConverter。

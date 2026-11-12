@@ -1,7 +1,7 @@
 package workbench.collaboration.application.service;
 
 import workbench.collaboration.application.port.IdempotencyPort;
-import workbench.collaboration.infrastructure.contract.ExecutionCodec;
+import workbench.collaboration.infrastructure.contract.Digests;
 import workbench.collaboration.interfaces.ApiProblem;
 
 import java.util.Optional;
@@ -15,8 +15,8 @@ import java.util.function.Supplier;
  * 实现“首次执行记录、并发冲突拦截、错误自动放行、重复重放缓存”的高可靠执行闭环。
  *
  * <p>【协作边界】
- * - 上游调用方：ConversationAppService、DeviceAppService。
- * - 下游依赖方：IdempotencyPort、ExecutionCodec、ApiProblem。
+ * - 上游调用方：DeviceAppService 及后续协作应用服务。
+ * - 下游依赖方：IdempotencyPort、Digests、ApiProblem。
  *
  * <p>【幂等调用流水线时序】
  * <pre>
@@ -49,7 +49,7 @@ public final class IdempotentCalls {
      * @return 64 位十六进制 SHA-256 字符串
      */
     public static String fingerprint(String... parts) {
-        return ExecutionCodec.hex(String.join("\n", parts));
+        return Digests.sha256Hex(String.join("\n", parts));
     }
 
     /**

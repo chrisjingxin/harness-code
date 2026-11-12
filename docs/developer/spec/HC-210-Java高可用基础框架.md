@@ -1,6 +1,6 @@
 # HC-210 Java高可用基础框架：行为规格与技术契约
 
-入口：[Task](../task/HC-210-Java高可用基础框架.md)、[Plan](../plan/HC-210-Java高可用基础框架.md)、[Todo](../todo/HC-210-Java高可用基础框架.md)。
+入口：[Task](../task/archive/HC-210-Java高可用基础框架.md)、[Plan](../plan/HC-210-Java高可用基础框架.md)、[Todo](../todo/HC-210-Java高可用基础框架.md)。
 
 ---
 
