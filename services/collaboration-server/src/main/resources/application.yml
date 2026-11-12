@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: collaboration-server
+  # 依赖已在 classpath 上，但停点一的 migrate / init-demo 不能去连 Redis 或 Kafka。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisRepositoriesAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.health.DataRedisHealthContributorAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.health.DataRedisReactiveHealthContributorAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.observation.LettuceObservationAutoConfiguration
+      - org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration
+      - org.springframework.boot.kafka.autoconfigure.metrics.KafkaMetricsAutoConfiguration
+  flyway:
+    enabled: false
+  sql:
+    init:
+      mode: never
+  main:
+    banner-mode: off
+
+server:
+  address: 127.0.0.1
+  port: 18084
+  servlet:
+    session:
+      cookie:
+        name: WBSESSION
+        http-only: true
+        same-site: strict
+      timeout: 30m
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+workbench:
+  # 命令行 --workbench.command= 会盖过这里。不带参数时就是普通启动。
+  command: start
+  origin: http://127.0.0.1:18084
+  pool:
+    maximum-size: 4
+    minimum-idle: 0
+    connection-timeout-ms: 3000
+    validation-timeout-ms: 1000
+    initialization-fail-timeout-ms: 5000
+  # 冒烟和本机启动默认不连接 Redis、Kafka、ES。生产改成 cluster。
+  middleware:
+    mode: standalone
+    node-id: local
+    redis:
+      host: 127.0.0.1
+      port: 6379
+    kafka:
+      bootstrap-servers: 127.0.0.1:9092
+    elasticsearch:
+      url: http://127.0.0.1:9200

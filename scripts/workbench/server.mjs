@@ -38,7 +38,7 @@ if (command === "build") {
   await mkdir(join(service, "target/generated-resources"), { recursive: true })
   await writeFile(join(service, "target/generated-resources/build.properties"), `productVersion=${version}\n`)
   const maven = process.env.MAVEN_EXECUTABLE ?? (process.platform === "win32" ? "mvn.cmd" : "mvn")
-  await run(maven, ["-B", "-f", join(service, "pom.xml"), `-Drevision=${version}`, "-DskipTests", "package"])
+  await run(maven, ["-B", "-f", join(service, "pom.xml"), `-Drevision=${version}`, "package"])
   const sqlDir = join(service, "src/main/resources/db/migration")
   const { readdir } = await import("node:fs/promises")
   const release = join(service, "target/release")

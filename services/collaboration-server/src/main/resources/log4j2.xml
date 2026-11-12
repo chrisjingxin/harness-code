@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 诊断走 stderr，避免污染 contracts 命令的 stdout JSON。不打印 SQL 参数，避免带上密钥或正文。 -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_ERR">
+      <PatternLayout pattern="%d{yyyy-MM-dd'T'HH:mm:ss.SSS}{UTC} %-5level [%t] %c{1.} requestId=%X{requestId} %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Logger name="com.zaxxer.hikari" level="warn"/>
+    <Root level="info">
+      <AppenderRef ref="Console"/>
+    </Root>
+  </Loggers>
+</Configuration>
