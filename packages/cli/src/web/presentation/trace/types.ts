@@ -8,6 +8,17 @@ export type TraceTreeNode = {
   readonly children: readonly TraceTreeNode[]
 }
 
+/** 主 Run 根节点承载服务端冻结的总耗时，不能用采集跨度代替。 */
+export function isRunRoot(span: TraceSpanEvent): boolean {
+  return span.name === "run.root" || (span.type?.toUpperCase() === "ROOT" && span.name === "run")
+}
+
+/** 旧日志缺少权威值时返回未知，不从子节点或墙钟包络猜测。 */
+export function runDurationMs(span: TraceSpanEvent): number | null {
+  const value = span.metadata?.run_duration_ms
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 /**
  * 按 parent_span_id 建树：parent="0"/自环/父不在当前集合时挂根；子节点与根均按
  * startTime 升序（对齐 trace_viewer.py TraceGroup.build_tree）。
@@ -29,12 +40,13 @@ export function isNoiseNode(node: TraceTreeNode): boolean {
 export function isModelShell(node: TraceTreeNode): boolean {
   const kind = String(node.span.type ?? "").toUpperCase()
   const name = String(node.span.name ?? "")
-  return kind === "NODE" && name === "model"
+  return kind === "NODE" && (name === "model" || (name === "graph.node" && node.span.metadata?.node === "model"))
 }
 
 /** 判断节点是否为 tools NODE（name=tools 的 LangGraph 工具聚合外壳）。 */
 export function isToolsNode(node: TraceTreeNode): boolean {
-  return String(node.span.name ?? "") === "tools"
+  const name = String(node.span.name ?? "")
+  return name === "tools" || (name === "graph.node" && node.span.metadata?.node === "tools")
 }
 
 /** 把树按简化模式过滤：噪声节点丢弃、其子节点递归提升到可见父下；model NODE 外壳
@@ -45,6 +57,10 @@ export function simplifyTree(nodes: readonly TraceTreeNode[]): readonly TraceTre
   const out: TraceTreeNode[] = []
   for (const node of nodes ?? []) {
     const kids = simplifyTree(node.children)
+    if (node.span.raw.schema_version === 2) {
+      out.push({ ...node, children: kids })
+      continue
+    }
     if (isNoiseNode(node)) {
       out.push(...kids)
       continue
@@ -76,8 +92,10 @@ export function ganttLanes(nodes: readonly TraceTreeNode[]): ReadonlyMap<string,
   const laneOf = (node: TraceTreeNode): number | null => {
     const type = String(node.span.type ?? "").toUpperCase()
     const name = node.span.name ?? ""
-    if (type === "TOOL" || name === "tools") return 2
-    if (type === "LLM" || name === "model") return 1
+    if (node.span.raw.schema_version === 2 && type === "ROOT") return 0
+    if (node.span.raw.schema_version === 2 && type === "INTERACTION") return null
+    if (type === "TOOL" || isToolsNode(node)) return 2
+    if (type === "LLM" || name === "model" || isModelShell(node)) return 1
     if (name === "run.accept" || type === "INTERACTION") return 0
     return null
   }
@@ -123,6 +141,12 @@ export function buildTree(spans: readonly TraceSpanEvent[]): readonly TraceTreeN
   const sortSpan = (a: TraceSpanEvent, b: TraceSpanEvent) => a.startTime - b.startTime
   const build = (span: TraceSpanEvent): TraceTreeNode => {
     const kids = (childrenOf.get(span.spanId) ?? []).sort(sortSpan).map(build)
+    const persists = kids.filter(child => child.span.name === "db.persist")
+    if (span.name === "step" && persists.length > 1) {
+      const first = persists[0]!.span
+      const group: TraceTreeNode = { span: { ...first, spanId: `${span.spanId}:db-group`, name: `数据库事务（${persists.length}）`, metadata: { transactions: persists.length }, raw: { schema_version: 2 }, durationMs: persists.reduce((sum, child) => sum + (child.span.durationMs ?? 0), 0) }, children: persists }
+      return { span, children: [...kids.filter(child => child.span.name !== "db.persist"), group].sort((a, b) => a.span.startTime - b.span.startTime) }
+    }
     return { span, children: kids }
   }
   return roots.sort(sortSpan).map(build)
@@ -169,15 +193,16 @@ function unescapeMessage(raw: string): string {
 
 /** 从 metadata.input.command 提取 StartRun 的 mode 参数（如 build）+ requested_approval_mode（如 auto）。 */
 export function extractRunMode(span: TraceSpanEvent): { mode?: string; requestedApprovalMode?: string } {
+  const result: { mode?: string; requestedApprovalMode?: string } = {}
+  if (typeof span.metadata?.mode === "string") result.mode = span.metadata.mode
+  if (typeof span.metadata?.requested_approval_mode === "string") result.requestedApprovalMode = span.metadata.requested_approval_mode
   const input = span.metadata?.input
   if (typeof input === "object" && input !== null && !Array.isArray(input)) {
     const fields = startRunFields((input as Record<string, unknown>).command)
-    const result: { mode?: string; requestedApprovalMode?: string } = {}
     if (fields.mode) result.mode = fields.mode
     if (fields.requested_approval_mode) result.requestedApprovalMode = fields.requested_approval_mode
-    return result
   }
-  return {}
+  return result
 }
 
 /** 一组 span 内首个 run.accept 的 mode 参数（mode/requested_approval_mode），用于 run 根节点展示。
@@ -192,9 +217,25 @@ export function extractRunModes(spans: readonly TraceSpanEvent[]): { mode?: stri
   return {}
 }
 
-/** 从 metadata.input.command / AGENT input.messages 提取本轮用户原话（对齐 trace_viewer.extract_user_message）。
- *  优先 run.accept.command 里的 message，其次 AGENT 的 input.messages[0].content。 */
-export function extractUserMessage(spans: readonly TraceSpanEvent[]): string {
+/** 当前对话时间线中按 Run 身份索引的用户输入；仅用于展示，不写入 Trace 日志。 */
+export type TraceUserMessages = Readonly<Record<string, string>>
+
+/** 优先通过统一 JSONL 的 run_id 关联当前对话用户输入；旧日志再按原有安全字段提取。
+ *  新日志不采集 prompt，因此不会因标题展示扩大 Trace 的记录范围。 */
+export function extractUserMessage(
+  spans: readonly TraceSpanEvent[],
+  userMessages: TraceUserMessages = {},
+): string {
+  for (const span of spans) {
+    const input = span.metadata?.input
+    const inputRunId = typeof input === "object" && input !== null && !Array.isArray(input)
+      ? (input as Record<string, unknown>).run_id
+      : undefined
+    const runId = typeof span.raw.run_id === "string" ? span.raw.run_id : inputRunId
+    if (typeof runId !== "string") continue
+    const message = userMessages[runId]
+    if (typeof message === "string" && message.trim()) return message.trim()
+  }
   for (const span of spans) {
     const input = span.metadata?.input
     if (typeof input === "object" && input !== null && !Array.isArray(input)) {

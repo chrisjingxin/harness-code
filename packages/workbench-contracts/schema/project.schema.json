@@ -1,0 +1,793 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.invalid/schema/project.schema.json",
+  "$defs": {
+    "ProjectListAction": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "listDirectory"
+        },
+        "directory": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "kind",
+        "directory"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectSearchAction": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "searchCandidates"
+        },
+        "directory": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "query": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "kind",
+        "directory",
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectPreviewAction": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "readPreview"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectStatusAction": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "gitStatus"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectDiffAction": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "gitDiff"
+        },
+        "snapshot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "kind",
+        "snapshot",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectReadAction": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ProjectListAction"
+        },
+        {
+          "$ref": "#/$defs/ProjectSearchAction"
+        },
+        {
+          "$ref": "#/$defs/ProjectPreviewAction"
+        },
+        {
+          "$ref": "#/$defs/ProjectStatusAction"
+        },
+        {
+          "$ref": "#/$defs/ProjectDiffAction"
+        }
+      ]
+    },
+    "ProjectReadEntry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "directory",
+            "file",
+            "symlink"
+          ]
+        },
+        "expandable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "expandable"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectReadCandidate": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "directory",
+            "file",
+            "symlink"
+          ]
+        },
+        "expandable": {
+          "type": "boolean"
+        },
+        "matchRanges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "expandable",
+        "matchRanges"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectDirectoryValue": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectReadEntry"
+          },
+          "maxItems": 2000
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "entries",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectCandidatesValue": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectReadCandidate"
+          },
+          "maxItems": 1000
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "items",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectPreviewValue": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "content": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 262144
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "displayedBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lineCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "content",
+        "language",
+        "sizeBytes",
+        "displayedBytes",
+        "lineCount",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectGitFileValue": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "oldPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "path",
+        "status",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectGitUpstreamValue": {
+      "type": "object",
+      "properties": {
+        "remote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "ahead": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "behind": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "remote",
+        "branch",
+        "ahead",
+        "behind"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectGitStatusValue": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "head": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectGitFileValue"
+          },
+          "maxItems": 1000
+        },
+        "snapshot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "upstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectGitUpstreamValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blockedReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "branch",
+        "head",
+        "files",
+        "snapshot",
+        "upstream",
+        "blockedReason"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectGitDiffValue": {
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 98304
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "snapshot",
+        "path",
+        "text",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectReadResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "listDirectory"
+            },
+            "value": {
+              "$ref": "#/$defs/ProjectDirectoryValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "searchCandidates"
+            },
+            "value": {
+              "$ref": "#/$defs/ProjectCandidatesValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "readPreview"
+            },
+            "value": {
+              "$ref": "#/$defs/ProjectPreviewValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "gitStatus"
+            },
+            "value": {
+              "$ref": "#/$defs/ProjectGitStatusValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "gitDiff"
+            },
+            "value": {
+              "$ref": "#/$defs/ProjectGitDiffValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ProjectReadFailureCode": {
+      "type": "string",
+      "enum": [
+        "PROJECT_NOT_SHARED",
+        "SHARE_VERSION_CONFLICT",
+        "PROJECT_ROOT_CHANGED",
+        "PROJECT_BUSY",
+        "PROJECT_PATH_INVALID",
+        "PROJECT_FILE_NOT_FOUND",
+        "PROJECT_FILE_DENIED",
+        "PROJECT_FILE_UNSUPPORTED",
+        "PROJECT_FILE_CHANGED",
+        "PROJECT_CURSOR_EXPIRED",
+        "PROJECT_LIMIT_EXCEEDED",
+        "PROJECT_GIT_UNAVAILABLE",
+        "PROJECT_GIT_ROOT_REQUIRED",
+        "PROJECT_GIT_STALE",
+        "PROJECT_READ_FAILED"
+      ]
+    },
+    "ProjectReadCommand": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "messageId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "type": {
+          "type": "string",
+          "const": "project.read"
+        },
+        "occurredAt": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "deviceId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "projectId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "shareVersion": {
+              "$ref": "#/$defs/ShareVersion"
+            },
+            "action": {
+              "$ref": "#/$defs/ProjectReadAction"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "deviceId",
+            "projectId",
+            "shareVersion",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "type",
+        "occurredAt",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectReadReply": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "messageId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "type": {
+          "type": "string",
+          "const": "project.read.result"
+        },
+        "occurredAt": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "requestMessageId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "workspaceId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "deviceId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "projectId": {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            "shareVersion": {
+              "$ref": "#/$defs/ShareVersion"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "listDirectory",
+                "searchCandidates",
+                "readPreview",
+                "gitStatus",
+                "gitDiff"
+              ]
+            },
+            "result": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ok"
+                    },
+                    "response": {
+                      "$ref": "#/$defs/ProjectReadResponse"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "response"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "error"
+                    },
+                    "code": {
+                      "$ref": "#/$defs/ProjectReadFailureCode"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "code"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "requestMessageId",
+            "workspaceId",
+            "deviceId",
+            "projectId",
+            "shareVersion",
+            "kind",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "type",
+        "occurredAt",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "ShareVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+    },
+    "DeviceEnvelope": {
+      "type": "object",
+      "properties": {
+        "connectionId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProjectReadCommand"
+            },
+            {
+              "$ref": "#/$defs/ProjectReadReply"
+            }
+          ]
+        }
+      },
+      "required": [
+        "connectionId",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

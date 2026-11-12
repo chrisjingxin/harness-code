@@ -66,6 +66,8 @@ from langchain_core.messages import (
 
 from harness_agent.diagnostic_log.runtime import ensure_log
 from harness_agent.threads.prompting import estimate_tokens
+from harness_agent.tracing import FunctionCall, func_monitor
+from harness_agent.tracing.context import current_span
 
 if TYPE_CHECKING:
     from harness_agent.threads.thread_persistence import ThreadPersistence, TranscriptRecord
@@ -152,6 +154,28 @@ class ModelProjection:
     source_record_sequence: int
 
 
+def _projection_attributes(call: FunctionCall) -> Mapping[str, object]:
+    """只投影真实缓存命中与消息数；异常结果不虚构匹配状态。"""
+    if call.error is not None or not isinstance(call.result, ModelProjection):
+        return {}
+    attributes: dict[str, object] = {
+        "matched": call.result.checkpoint is not None,
+        "count": len(call.result.messages),
+        "tokens_before": _projected_tokens(call.result.messages),
+        "source_seq": call.result.source_record_sequence,
+    }
+    if call.result.checkpoint is not None:
+        attributes["checkpoint_id"] = call.result.checkpoint.checkpoint_id
+    return attributes
+
+
+def _projection_idempotency_key(call: FunctionCall) -> str:
+    """按 Thread 与排除记录识别投影重放，不记录消息正文。"""
+    identity = repr((call.args[1:], sorted(call.kwargs.items())))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"context.project:{digest}"
+
+
 class ContextProjector:
     """从最新有效检查点和 Transcript tail 构造唯一模型历史。"""
 
@@ -159,6 +183,13 @@ class ContextProjector:
         """绑定已经 project-scoped 的持久化领域入口。"""
         self._persistence = persistence
 
+    @func_monitor(
+        name="context.project",
+        kind="CONTEXT",
+        attributes=_projection_attributes,
+        idempotency_key=_projection_idempotency_key,
+        enabled=lambda: current_span() is None or current_span().name != "run.prepare",
+    )
     async def project(
         self,
         thread_id: str,
@@ -185,6 +216,10 @@ class ContextProjector:
                 },
             )
             raise
+        finally:
+            span = current_span()
+            if span is not None and span.name == "run.prepare":
+                span.attributes["projection_ms"] = max(0, round((time.monotonic() - started) * 1000))
         log.info(
             "context.build.completed",
             {

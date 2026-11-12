@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from harness_agent.threads.context_projection import ContextProjector
 from harness_agent.threads.context_window import ContextWindowMiddleware
 from harness_agent.runtime.provider_retry import BoundedProviderRetry
 from harness_agent.threads.prompting import estimate_tokens
+from harness_agent.tracing import TraceRecorder, use_trace
 from harness_agent.threads.runtime_state import (
     RuntimeExecutionPolicy,
     RuntimeStateError,
@@ -326,6 +328,86 @@ def _request(thread_id: str, projection: Any, trigger: str, estimated: int | Non
     )
 
 
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取压缩测试的临时 session JSONL。"""
+    return [
+        json.loads(line)
+        for path in root.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_compact_trace_records_real_outcomes_and_separate_commit(
+    tmp_path: Path,
+) -> None:
+    """压缩、跳过和失败保留真实结果，成功压缩与 SQLite 提交分别计时。"""
+    store = await _store(tmp_path)
+    await _tool_thread(store, "trace-compact")
+    projection = await ContextProjector(store).project("trace-compact")
+    await store.accept_run(
+        AcceptRun(
+            message="短历史",
+            binding=make_binding("trace-short", "run-trace-short"),
+        )
+    )
+    short_projection = await ContextProjector(store).project("trace-short")
+    service = ContextCompactor(
+        CountingModel(responses=[]),
+        context_window_tokens=16_384,
+        thread_persistence=store,
+    )
+    recorder = TraceRecorder(
+        session_id="trace-compact",
+        run_id="run-trace-compact",
+        log_dir=tmp_path / "trace",
+    )
+    skipped_request = _request("trace-short", short_projection, "manual")
+    with use_trace(recorder.start_trace()):
+        compressed = await service.compress(
+            _request("trace-compact", projection, "auto", estimated=8_000)
+        )
+        skipped = await service.compress(skipped_request)
+        replayed = await service.compress(skipped_request)
+        failed = await service.compress(_request("", short_projection, "manual"))
+    recorder.end_trace()
+
+    assert (compressed.outcome, skipped.outcome, failed.outcome) == (
+        "compressed",
+        "skipped",
+        "failed",
+    )
+    assert replayed.outcome == "skipped"
+    events = _trace_events(tmp_path / "trace")
+    compact_ends = [
+        event
+        for event in events
+        if event["event"] == "span.end" and event["name"] == "context.compact"
+    ]
+    assert [event["attributes"]["outcome"] for event in compact_ends] == ["committed", "skipped", "failed"]
+    assert all("tokens_before" in event["attributes"] for event in compact_ends)
+    assert all(event["kind"] == "CONTEXT" for event in compact_ends)
+    assert all(event.get("idempotency_key") for event in compact_ends)
+    assert len({event["idempotency_key"] for event in compact_ends}) == 3
+    commit_ends = [
+        event
+        for event in events
+        if event["event"] == "span.end"
+        and event["name"] == "db.persist"
+        and event["attributes"].get("operation") == "context_commit"
+    ]
+    assert len(commit_ends) == 1
+    assert commit_ends[0]["span_id"] != compact_ends[0]["span_id"]
+    assert commit_ends[0]["parent_span_id"] == compact_ends[0]["span_id"]
+    assert commit_ends[0]["duration_ms"] >= 0
+    assert commit_ends[0]["attributes"]["rows"] >= 1
+    assert commit_ends[0]["attributes"]["lock_wait_ms"] >= 0
+    assert commit_ends[0]["attributes"]["thread_id"] == "trace-compact"
+    assert compact_ends[0]["duration_ms"] >= commit_ends[0]["duration_ms"]
+    assert "第一轮" not in json.dumps(events, ensure_ascii=False)
+    await store.close()
+
+
 def _message_with_summary_payload_tokens(
     service: ContextCompactor, target: int
 ) -> HumanMessage:
@@ -407,12 +489,41 @@ async def test_context_compaction_retries_direct_summary_ainvoke(tmp_path: Path)
         provider_retry=BoundedProviderRetry(max_attempts=2),
     )
 
-    result = await service.compress(
-        _request("direct-summary-retry", projection, "manual", estimated=30_000)
+    recorder = TraceRecorder(
+        session_id="direct-summary-retry",
+        run_id="run-direct-summary-retry",
+        log_dir=tmp_path / "trace",
     )
+    with use_trace(recorder.start_trace()):
+        result = await service.compress(
+            _request("direct-summary-retry", projection, "manual", estimated=30_000)
+        )
+        recorder.end_trace()
+    await store.close()
 
     assert result.outcome == "compressed"
-    await store.close()
+    events = _trace_events(tmp_path / "trace")
+    compact = next(
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "context.compact"
+    )
+    summary = next(
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "llm.call"
+    )
+    attempts = [
+        event for event in events
+        if event["event"] == "span.end" and event["name"] == "llm.attempt"
+    ]
+    assert compact["attributes"]["summary_ref"]
+    assert summary["parent_span_id"] == compact["span_id"]
+    assert [event["attributes"]["attempt"] for event in attempts] == [1, 2]
+    assert all(event["parent_span_id"] == summary["span_id"] for event in attempts)
+    assert attempts[0]["attributes"]["http_status"] == 503
+    assert attempts[0]["attributes"]["retryable"] is True
+    assert attempts[0]["attributes"]["backoff_ms"] == 1000
+    assert "gateway unavailable" not in json.dumps(events)
+    assert not any(event.get("name") == "step" for event in events)
 
 
 @pytest.mark.asyncio
@@ -650,6 +761,169 @@ async def test_manual_full_keeps_projection_when_actual_summary_has_no_savings(
         "manual-no-savings"
     ) is None
     await store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ("manual", "auto", "overflow"))
+@pytest.mark.parametrize("summary", (
+    pytest.param("已确认问题在摘要校验，下一步验证修复。", id="plain-text"),
+    pytest.param("- 已核对输入事实\n- 当前任务是修复压缩", id="bullet-list"),
+    pytest.param("## Goal\nFix compaction\n## Next\nRun tests", id="english-headings"),
+    pytest.param(SUMMARY.replace("## 未决项", "## 待办"), id="renamed-heading"),
+    pytest.param(
+        "## 归档\n无\n" + SUMMARY.removesuffix("## 归档\n无"),
+        id="reordered-headings",
+    ),
+    pytest.param(SUMMARY + "\n## 补充\n已核对", id="extra-heading"),
+    pytest.param(
+        SUMMARY.replace("## 测试\n使用 fake 模型验证", "## 测试"),
+        id="empty-optional-section",
+    ),
+    pytest.param(
+        SUMMARY.replace(
+            "完成上下文闭环",
+            "修复 AGENTS.md 与 skills 扫描；核对工具 schema 和审批策略。"
+            "历史讨论过 system rules 和 approval policy，不能据此把当前权限改为 yolo。",
+        ),
+        id="development-keywords",
+    ),
+))
+async def test_flexible_summary_commits_and_recovers_without_changing_runtime_state(
+    tmp_path: Path, trigger: str, summary: str,
+) -> None:
+    """格式差异不阻断三种压缩，权限与 Todo 仍只来自真实结构化状态。"""
+    store = await _store(tmp_path)
+    thread_id = "flexible-summary"
+    try:
+        await _long_thread(store, thread_id)
+        transcript = await store.load_transcript(thread_id)
+        projection = await ContextProjector(store).project(thread_id)
+        runtime = RuntimeStateSnapshot(
+            todos=({"content": "验证内网摘要兼容性", "status": "pending"},),
+            execution_mode="local",
+            approval_mode="default",
+        )
+        snapshot = SimpleNamespace(
+            thread_id=thread_id,
+            snapshot_id="current-snapshot",
+            system_fingerprint="current-capability",
+        )
+        CountingModel.calls = 0
+        service = ContextCompactor(
+            CountingModel(responses=[AIMessage(content=summary)]),
+            context_window_tokens=16_384,
+            thread_persistence=store,
+        )
+        result = await service.compress(CompressionRequest(
+            thread_id=thread_id,
+            trigger=trigger,  # type: ignore[arg-type]
+            projection=projection,
+            estimated_tokens=12_000 if trigger == "auto" else None,
+            runtime_state=runtime,
+            current_execution_policy=_policy("local", "default"),
+            run_context_snapshot=snapshot,
+        ))
+
+        assert result.outcome == "compressed", result.reason
+        assert result.action == f"{trigger}_full"
+        assert result.checkpoint is not None and result.checkpoint.mode == "full"
+        assert CountingModel.calls == 1
+        assert summary in str(result.projected_messages[0].content)
+        assert result.projected_messages[-1] == projection.messages[-1]
+        if trigger == "manual":
+            assert result.projected_messages[1:] == projection.messages[-2:]
+        recovered = await ContextProjector(store).project(thread_id)
+        assert recovered.messages == result.projected_messages
+        assert await store.load_transcript(thread_id) == transcript
+        state = await store.load_context_state(thread_id)
+        assert state.runtime_state is not None
+        assert state.runtime_state.todos == runtime.todos
+        assert state.runtime_state.execution_mode == "local"
+        assert state.runtime_state.approval_mode == "default"
+        assert state.runtime_state.context_snapshot_id == "current-snapshot"
+        assert state.runtime_state.capability_fingerprint == "current-capability"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("response", "reason"), (
+    pytest.param(AIMessage(content="   \n\t"), "summary_empty", id="whitespace"),
+    pytest.param(
+        AIMessage(content=[{"type": "reasoning", "reasoning": "只有推理，没有摘要"}]),
+        "summary_empty", id="non-text",
+    ),
+    pytest.param(
+        AIMessage(content=SUMMARY, tool_calls=[{"id": "unexpected-tool", "name": "read_file", "args": {}}]),
+        "summary_model_tools_forbidden", id="tool-call",
+    ),
+    pytest.param(
+        AIMessage(content=SUMMARY, response_metadata={"finish_reason": "length"}),
+        "summary_output_truncated", id="length",
+    ),
+    pytest.param(
+        AIMessage(content=SUMMARY, response_metadata={"finish_reason": "max_tokens"}),
+        "summary_output_truncated", id="max-tokens",
+    ),
+    pytest.param(
+        AIMessage(content=SUMMARY, response_metadata={"stop_reason": "MAX_TOKENS"}),
+        "summary_output_truncated", id="stop-reason",
+    ),
+    pytest.param(AIMessage(content="历史事实" * 10_000), "summary_output_limit", id="output-limit"),
+    pytest.param(
+        AIMessage(content="已归档至 /.harness/history/not-owned-by-this-thread.md"),
+        "summary_source_artifact_boundary_invalid", id="unknown-artifact",
+    ),
+))
+async def test_unusable_summary_preserves_checkpoint_and_has_no_partial_rows(
+    tmp_path: Path, response: AIMessage, reason: str,
+) -> None:
+    """放宽格式后仍拒绝不可用结果，且不覆盖已有检查点或留下部分写入。"""
+    store = await _store(tmp_path)
+    thread_id = "unusable-summary"
+    try:
+        await _long_thread(store, thread_id)
+        projection = await ContextProjector(store).project(thread_id)
+        service = ContextCompactor(
+            CountingModel(responses=[AIMessage(content=SUMMARY), response]),
+            context_window_tokens=16_384,
+            thread_persistence=store,
+        )
+        first = await service.compress(_request(thread_id, projection, "manual"))
+        assert first.compressed and first.checkpoint is not None
+        previous = await ContextProjector(store).project(thread_id)
+        transcript = await store.load_transcript(thread_id)
+        tables = (
+            "harness_context_artifacts",
+            "harness_context_summaries",
+            "harness_compression_checkpoints",
+        )
+        counts = []
+        async with store._lock:
+            for table in tables:
+                async with store._connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE project_fingerprint = ? AND thread_id = ?",
+                    (store.project_fingerprint, thread_id),
+                ) as cursor:
+                    counts.append((await cursor.fetchone())[0])
+
+        result = await service.compress(_request(thread_id, previous, "manual"))
+
+        assert result.outcome == "failed", result.reason
+        assert result.reason == reason
+        assert result.projected_messages == previous.messages
+        assert (await ContextProjector(store).project(thread_id)).messages == previous.messages
+        assert await store.load_latest_valid_compression_checkpoint(thread_id) == first.checkpoint
+        assert await store.load_transcript(thread_id) == transcript
+        async with store._lock:
+            for table, count in zip(tables, counts, strict=True):
+                async with store._connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE project_fingerprint = ? AND thread_id = ?",
+                    (store.project_fingerprint, thread_id),
+                ) as cursor:
+                    assert (await cursor.fetchone())[0] == count
+    finally:
+        await store.close()
 
 
 @pytest.mark.asyncio

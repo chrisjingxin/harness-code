@@ -11,13 +11,14 @@ import platform from "@workbench/contracts/schema/platform" with { type: "json" 
 import conversationSchema from "@workbench/contracts/schema/conversation" with { type: "json" }
 import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
 import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
+import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
 import type {
   BeeResponseEntity, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
   MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
   CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
   CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
   DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, ProjectListResponse,
-  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse,
+  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse, ProjectReadAction, ProjectReadResponse,
 } from "@workbench/contracts"
 
 type Transport = typeof fetch
@@ -31,17 +32,31 @@ const messages: Record<CollaborationError["code"], string> = {
   INVALID_SERVER_RESPONSE: "服务响应不符合契约", REQUEST_ID_CONFLICT: "请求编号已用于其他操作",
   REGISTRATION_CONFLICT: "设备标识已被占用",
   DEVICE_AUTHENTICATION_REQUIRED: "设备凭据已失效", DEVICE_ACTION_REJECTED: "当前账号不能管理该设备",
+  CURSOR_AHEAD: "事件位置超出已提交范围", PROJECT_NOT_SHARED: "项目未共享或已停止共享",
+  TARGET_UNAVAILABLE: "目标设备或执行配置不可用", EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新",
+  SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
   WORKSPACE_MEMBER_REQUIRED: "请先加入该团队", PROJECT_OWNER_REQUIRED: "仅项目负责人可执行该操作",
   DEVICE_FORBIDDEN: "设备无权执行该操作", REPOSITORY_CONFLICT: "仓库地址已被登记",
   VERSION_CONFLICT: "数据已被他人修改，请刷新后重试", PROJECT_ARCHIVED: "项目已归档",
   REPOSITORY_ARCHIVED: "仓库已归档", OWNER_CANNOT_LEAVE: "项目负责人不能移出自己",
   SEQUENCE_CONFLICT: "消息序号与服务端水位不一致，请按 expectedSequence 续传",
+  PROJECT_READ_UNAVAILABLE: "设备尚未接入项目读取", PROJECT_READ_BUSY: "项目读取繁忙，请稍后重试",
+  PROJECT_READ_TIMEOUT: "项目读取超时，请重试", PROJECT_SOURCE_UNKNOWN: "项目来源尚未确认",
+  PROJECT_REPOSITORY_DENIED: "当前账号没有仓库读取权限", PROJECT_IDENTITY_UNBOUND: "当前账号尚未绑定 Git 身份",
+  PROJECT_AUTH_UNAVAILABLE: "仓库权限暂时无法核验", PROJECT_ROOT_CHANGED: "原设备项目目录已变化",
+  PROJECT_BUSY: "原设备项目繁忙", PROJECT_PATH_INVALID: "项目路径无效",
+  PROJECT_FILE_NOT_FOUND: "项目文件不存在", PROJECT_FILE_DENIED: "原设备没有文件读取权限",
+  PROJECT_FILE_UNSUPPORTED: "项目文件暂不支持预览", PROJECT_FILE_CHANGED: "项目文件已变化，请刷新",
+  PROJECT_CURSOR_EXPIRED: "目录已变化，请重新加载", PROJECT_LIMIT_EXCEEDED: "项目内容超出读取限制",
+  PROJECT_GIT_UNAVAILABLE: "Git 状态暂不可用", PROJECT_GIT_ROOT_REQUIRED: "请登记完整仓库根目录",
+  PROJECT_GIT_STALE: "Git 状态已变化，请刷新", PROJECT_READ_FAILED: "项目读取失败",
 }
 class ClientProblem extends Error {
-  constructor(readonly code: CollaborationError["code"]) { super(code) }
+  constructor(readonly code: CollaborationError["code"], readonly rebuildProjection = false) { super(code) }
 }
 interface CallOptions { body?: unknown; inputSchema?: string; query?: Record<string, string>; session?: Session }
 interface StreamHandle { close(): void }
+type StreamConnection = "connecting" | "connected" | "reconnecting" | "stopped"
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
 export class CollaborationClient {
@@ -61,7 +76,7 @@ export class CollaborationClient {
     this.#origin = origin
     this.#transport = transport
     formats.default(this.#ajv)
-    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema]) {
+    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema, projectSchema]) {
       this.#ajv.addSchema(schema)
       for (const name of Object.keys(schema.$defs)) this.#types.set(name, `${schema.$id}#/$defs/${name}`)
     }
@@ -241,14 +256,29 @@ export class CollaborationClient {
     return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/history`, "HistoryResponse", "GET", { query })
   }
 
-  /** 重连只携带已应用的连续位置。退出、换账号或关闭订阅会使旧流立即失效。 */
+  /** 请求与响应均校验项目 schema，服务从会话确定原设备及项目。 */
+  async readProject(workspaceId: string, conversationId: string, action: ProjectReadAction): Promise<CollaborationResult<ProjectReadResponse>> {
+    const result = await this.#write<ProjectReadResponse>(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/project/read`,
+      "ProjectReadResponse", { body: action, inputSchema: "ProjectReadAction" })
+    if (!result.ok) return result
+    const value = result.value
+    if (value.kind !== action.kind || (value.kind === "readPreview" && action.kind === "readPreview" && value.value.path !== action.path)
+      || (value.kind === "gitDiff" && action.kind === "gitDiff" && (value.value.path !== action.path || value.value.snapshot !== action.snapshot))) {
+      return this.#error("INVALID_SERVER_RESPONSE")
+    }
+    return result
+  }
+
+  /** 网络重连携带已交给调用方的连续位置；调用方负责保留未确认的事件。 */
   subscribeConversation(workspaceId: string, conversationId: string, afterSequence: string,
-                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string }) => void): StreamHandle {
+                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string; rebuildProjection?: boolean }) => void,
+                        onStatus?: (status: StreamConnection) => void): StreamHandle {
     const controller = new AbortController()
     const session = this.#session
     const signal = AbortSignal.any([controller.signal, session.abort.signal])
     const live = () => !signal.aborted && !this.#disposed && session === this.#session
-    const emitProblem = (code: string) => { if (live()) onProblem({ code }) }
+    const emitProblem = (code: string, rebuildProjection = false) => { if (live()) onProblem({ code, ...(rebuildProjection ? { rebuildProjection: true } : {}) }) }
+    const emitStatus = (status: StreamConnection) => { if (live()) onStatus?.(status) }
     let cursor = afterSequence
     let retry = 0
     let lastEvent: string | undefined
@@ -292,6 +322,7 @@ export class CollaborationClient {
           void response.body?.cancel().catch(() => {})
           throw new ClientProblem("INVALID_SERVER_RESPONSE")
         }
+        emitStatus("connected")
         reader = response.body.getReader()
         const decoder = new TextDecoder("utf-8", { fatal: true })
         let pending = ""
@@ -331,7 +362,10 @@ export class CollaborationClient {
                 if (event.sequence === cursor && content === lastEvent) {
                   // 当前连接末尾的相同事件可安全忽略。无法核对的重复必须停止。
                 } else {
-                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) {
+                    // 旧位置的正文无法核对时不能当成相同事件，需要从头重建投影。
+                    throw new ClientProblem("INVALID_SERVER_RESPONSE", BigInt(event.sequence) <= BigInt(cursor))
+                  }
                   onEvent(event)
                   if (!live()) return
                   cursor = event.sequence
@@ -365,8 +399,10 @@ export class CollaborationClient {
       catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
     }
     const run = async () => {
+      emitStatus("connecting")
       if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(conversationId)
         || !/^(0|[1-9][0-9]{0,18})$/.test(cursor) || BigInt(cursor) > 9_223_372_036_854_775_807n) {
+        emitStatus("stopped")
         emitProblem("INVALID_REQUEST")
         return
       }
@@ -375,18 +411,26 @@ export class CollaborationClient {
         catch (failure) {
           if (!live()) return
           const code = failure instanceof ClientProblem ? failure.code : "NETWORK_UNAVAILABLE"
-          emitProblem(code)
-          if (code === "AUTHENTICATION_REQUIRED" && live()) this.#discardSession()
+          if (code === "AUTHENTICATION_REQUIRED") {
+            // 先清除旧 Cookie，再通知窗口；通知可能同步关闭该订阅。
+            this.#discardSession()
+            onProblem({ code })
+            return
+          }
+          if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") emitStatus("stopped")
+          emitProblem(code, failure instanceof ClientProblem && failure.rebuildProjection)
           if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") return
         }
         if (!live()) return
+        // 正常流结束也要立刻显示重连，成功握手时再切回已连接。
+        emitStatus("reconnecting")
         reconnect = true
         const wait = [1000, 2000, 5000][Math.min(retry++, 2)]
         try { await delay(wait, undefined, { signal }) } catch { return }
       }
     }
     void run()
-    return { close: () => controller.abort() }
+    return { close: () => { if (live()) { emitStatus("stopped"); controller.abort() } } }
   }
 
   registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {

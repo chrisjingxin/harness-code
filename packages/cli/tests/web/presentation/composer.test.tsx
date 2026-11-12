@@ -64,10 +64,11 @@ const DISABLED_COMMAND: CommandMenuItem = {
 }
 
 describe("Composer", () => {
-  test("不显示没有独立交互的指令 Tab；Slash 命令仍由输入菜单提供", () => {
+  test("不显示装饰性聊天页签；Slash 命令仍由输入菜单提供", () => {
     const handle = mountComposer(makeSnapshot(), [])
     try {
-      expect(handle.container.querySelector(".composer-tab")?.textContent).toBe("聊天")
+      expect(handle.container.querySelector(".composer-tabs")).toBeNull()
+      expect(handle.container.querySelector(".composer-tab")).toBeNull()
       expect(handle.container.textContent).not.toContain("指令")
     } finally {
       handle.unmount()

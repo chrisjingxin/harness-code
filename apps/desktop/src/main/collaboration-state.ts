@@ -4,7 +4,10 @@
  */
 import { randomUUID } from "node:crypto"
 import type { CollaborationError, CollaborationResult, CurrentUserResponse, DemoUsersResponse, IdentityState, MembersResponse } from "@workbench/contracts"
+import type { ConversationEventBatch, ConversationHistoryPage, ConversationListResponse, ConversationPageCursor, ConversationResponse, ConversationSubscription, HistoryResponse } from "@workbench/contracts"
+import type { ProjectReadAction, ProjectReadResponse } from "@workbench/contracts"
 import { CollaborationClient } from "./collaboration-client.js"
+import { ConversationDelivery } from "./conversation-delivery.js"
 
 /** IPC和生命周期边界统一生成可序列化错误，不返回原生异常。 */
 export function identityError(code: CollaborationError["code"], message: string): { ok: false; error: CollaborationError } {
@@ -13,6 +16,7 @@ export function identityError(code: CollaborationError["code"], message: string)
 
 export class CollaborationState {
   #client: CollaborationClient | null = null
+  #delivery: ConversationDelivery | null = null
   #state: IdentityState = { status: "signedOut" }
   #generation = 0
   #disposed = false
@@ -24,6 +28,9 @@ export class CollaborationState {
     try {
       if (!origin) throw new Error("未配置")
       this.#client = new CollaborationClient(origin, transport)
+      this.#delivery = new ConversationDelivery(this.#client, identityError, () => {
+        this.#failure(identityError("AUTHENTICATION_REQUIRED", "登录已失效，请重新登录。").error)
+      })
     } catch {
       this.#state = { status: "connectionError", lastKnownUser: null, error: identityError("NETWORK_UNAVAILABLE", "协作服务地址未配置或无效，请配置后重启。").error }
     }
@@ -32,6 +39,7 @@ export class CollaborationState {
   #cancelled() { return identityError("AUTHENTICATION_REQUIRED", "身份操作已结束，请确认当前账号。") }
   #unavailable() { return identityError("NETWORK_UNAVAILABLE", "协作服务不可用，请检查连接后重试。") }
   #publish(state: IdentityState) {
+    if (state.status !== "signedIn") this.#delivery?.closeAll()
     this.#state = state
     for (const listener of this.#listeners) listener(structuredClone(state))
   }
@@ -109,12 +117,70 @@ export class CollaborationState {
     if (!result.ok) this.#failure(result.error)
     return result
   }
+  /** 所有会话读取共享窗口身份代次，退出或切换账号后的回包不再送给页面。 */
+  async #readWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>): Promise<CollaborationResult<T>> {
+    if (this.#disposed || this.#state.status !== "signedIn") return this.#cancelled()
+    if (!this.#state.workspaces.some(workspace => workspace.id === workspaceId)) return identityError("RESOURCE_NOT_FOUND", "工作区不可用。")
+    if (!this.#client) return this.#unavailable()
+    const generation = this.#generation
+    const result = await request(this.#client)
+    if (!this.#current(generation)) return this.#cancelled()
+    if (!result.ok) this.#failure(result.error)
+    return result
+  }
+
+  /** 列表和历史的分页使用服务已有的同源响应契约。 */
+  async listConversations(workspaceId: string, cursor: ConversationPageCursor | null): Promise<CollaborationResult<ConversationListResponse>> {
+    const query: Record<string, string> = { limit: "50" }
+    if (cursor) { query.beforeCreatedAt = cursor.beforeCreatedAt; query.beforeId = cursor.beforeId }
+    return this.#readWorkspace(workspaceId, client => client.listConversations(workspaceId, query))
+  }
+
+  async getConversation(workspaceId: string, conversationId: string): Promise<CollaborationResult<ConversationResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.getConversation(workspaceId, conversationId))
+  }
+
+  async readHistory(workspaceId: string, conversationId: string, page: ConversationHistoryPage): Promise<CollaborationResult<HistoryResponse>> {
+    const query: Record<string, string> = { afterSequence: page.afterSequence }
+    if (page.throughSequence !== undefined) query.throughSequence = page.throughSequence
+    if (page.limit !== undefined) query.limit = String(page.limit)
+    return this.#readWorkspace(workspaceId, client => client.history(workspaceId, conversationId, query))
+  }
+
+  /** 项目读取使用同一窗口身份，网络往返后再次确认身份代次。 */
+  async readProject(workspaceId: string, conversationId: string, action: ProjectReadAction): Promise<CollaborationResult<ProjectReadResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.readProject(workspaceId, conversationId, action))
+  }
+
+  /** 订阅绑定当前窗口身份代次与工作区，切换身份或关窗会立即释放。 */
+  subscribeConversation(workspaceId: string, conversationId: string, afterSequence: string): CollaborationResult<ConversationSubscription> {
+    if (this.#disposed || this.#state.status !== "signedIn") return this.#cancelled()
+    if (!this.#state.workspaces.some(workspace => workspace.id === workspaceId)) return identityError("RESOURCE_NOT_FOUND", "工作区不可用。")
+    if (!this.#delivery) return this.#unavailable()
+    const generation = this.#generation
+    return this.#delivery.open(workspaceId, conversationId, afterSequence, () => this.#current(generation)
+      && this.#state.status === "signedIn" && this.#state.workspaces.some(workspace => workspace.id === workspaceId))
+  }
+
+  readConversationEvents(subscriptionId: string, afterSequence: string): Promise<CollaborationResult<ConversationEventBatch>> {
+    return this.#delivery ? this.#delivery.read(subscriptionId, afterSequence) : Promise.resolve(this.#unavailable())
+  }
+
+  unsubscribeConversation(subscriptionId: string): CollaborationResult<null> {
+    return this.#delivery?.close(subscriptionId) ?? { ok: true, value: null }
+  }
   /** 仅主进程内部组合使用；调用方仍要按当前代次核对自己的异步结果。 */
   network(): CollaborationClient | null { return this.#client }
 
+  /** 个人视图存储只读取当前窗口已确认的账号与工作区，并用代次隔离旧请求。 */
+  personalIdentity(): { generation: number; accountId: string; workspaces: readonly string[] } | null {
+    if (this.#disposed || this.#state.status !== "signedIn") return null
+    return { generation: this.#generation, accountId: this.#state.user.id, workspaces: this.#state.workspaces.map(item => item.id) }
+  }
+
   /** 销毁后不再发通知/接受业务；同一窗口重开将创建全新客户端。 */
   dispose(): void {
-    this.#disposed = true; this.#generation++; this.#listeners.clear()
+    this.#disposed = true; this.#generation++; this.#delivery?.closeAll(); this.#listeners.clear()
     this.#client?.dispose(); this.#state = { status: "signedOut" }
   }
 }

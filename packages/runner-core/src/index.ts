@@ -11,3 +11,5 @@ export type { ExecutionPort } from "./command-handler.js"
 export { DeviceConnection } from "./device-connection.js"
 export type { DeviceConnectionOptions } from "./device-connection.js"
 export * from "./execution-codec.js"
+
+export type { ProjectReadPort, ProjectReadOutcome } from "./project-read.js"

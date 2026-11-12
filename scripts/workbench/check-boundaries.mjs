@@ -16,7 +16,7 @@ const allowed = {
   "packages/acp-runtime": ["@workbench/contracts"],
   "packages/project-service": ["@workbench/contracts"],
   "packages/workbench-ui": ["@workbench/contracts"],
-  "apps/runner": ["@workbench/runner-core"],
+  "apps/runner": ["@workbench/runner-core", "@workbench/project-service"],
   "apps/desktop": ["@workbench/contracts", "@workbench/ui"],
 }
 const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|harness-provider|deepagents)/

@@ -1,11 +1,11 @@
-/** 内网 SDK 日志消费宿主：解析 stderr 成对 marker，串行落盘索引并发布实时 Span。 */
+/** Trace 消费宿主：解析内网 stderr marker，并轮询工作区 session JSONL 发布实时 Span。 */
 import { constants } from "node:fs"
 import { mkdir, open, type FileHandle } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { TraceSpanEvent } from "../presentation-coordinator/contracts/trace"
-import { createTraceHistorySource, type TraceHistorySource } from "./history"
+import { createTraceHistorySource, createWorkspaceTraceReader, type TraceHistorySource, type WorkspaceTraceReader } from "./history"
 import { parseTraceText } from "./parser"
 
 const MARKER = "[[za38-log]]"
@@ -21,7 +21,7 @@ export interface TraceRuntime extends TraceHistorySource, TraceLiveSource {
   flush(): Promise<void>
   close(): Promise<void>
 }
-export type TraceRuntimeOptions = { root?: string; file?: string; startedAtMs?: number; onError?: (message: string) => void }
+export type TraceRuntimeOptions = { root?: string; file?: string; workspace?: string; startedAtMs?: number; onError?: (message: string) => void }
 
 /** 沿用内网日期目录、秒级文件名与 HARNESS_ZA38_TRACE_LOG 开关。 */
 export function createTraceRuntime(options: TraceRuntimeOptions = {}): TraceRuntime {
@@ -31,7 +31,8 @@ export function createTraceRuntime(options: TraceRuntimeOptions = {}): TraceRunt
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   const stamp = `${day.replaceAll("-", "")}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
   const target = options.file ?? (process.env.HARNESS_ZA38_TRACE_LOG || join(root, day, `za38-trace-${stamp}.log`))
-  return new TraceRuntimeImpl(root, target, options.onError)
+  const workspaceReader = options.workspace ? createWorkspaceTraceReader(options.workspace, root) : undefined
+  return new TraceRuntimeImpl(root, target, options.onError, workspaceReader)
 }
 
 class TraceRuntimeImpl implements TraceRuntime {
@@ -53,9 +54,22 @@ class TraceRuntimeImpl implements TraceRuntime {
   private readonly indexed = new Set<string>()
   private readonly listeners = new Set<(span: TraceSpanEvent) => void>()
   private readonly history: TraceHistorySource
+  private readonly sessionSpans = new Map<string, TraceSpanEvent>()
+  private sessionPending: Promise<void> | undefined
+  private readonly sessionTimer: ReturnType<typeof setInterval> | undefined
 
-  constructor(private readonly root: string, private readonly file: string, private readonly onError?: (message: string) => void) {
-    this.history = createTraceHistorySource({ root, configuredFile: file === "off" ? undefined : file })
+  constructor(
+    private readonly root: string,
+    private readonly file: string,
+    private readonly onError?: (message: string) => void,
+    private readonly workspaceReader?: WorkspaceTraceReader,
+  ) {
+    this.history = createTraceHistorySource({ root, configuredFile: file === "off" ? undefined : file, workspaceReader })
+    if (workspaceReader) {
+      // Windows 上 fs.watch 对追加写的通知不稳定；短轮询只重读大小或 mtime 变化的文件。
+      this.sessionTimer = setInterval(() => { void this.refreshSessions() }, 500)
+      this.sessionTimer.unref()
+    }
   }
 
   /** stderr 可能拆分 UTF-8 和 marker，只有完整 JSON 记录才进入写队列。 */
@@ -86,24 +100,53 @@ class TraceRuntimeImpl implements TraceRuntime {
     }
   }
 
-  /** 等待此前完整记录落盘，历史回读不越过写入队列。 */
-  async flush(): Promise<void> { await this.pending }
-  /** 保留内网既有历史格式，并将失败显式交给网关终态处理。 */
+  /** 等待此前完整记录落盘，并主动刷新一次工作区 JSONL。 */
+  async flush(): Promise<void> { await this.pending; await this.refreshSessions() }
+  /** 历史回读不越过写入队列或本次工作区刷新。 */
   async loadThread(threadId: string, signal?: AbortSignal) { await this.flush(); return this.history.loadThread(threadId, signal) }
-  /** 当前进程快照包含未归属节点，Browser 按 threadId 过滤。 */
-  snapshot(): readonly TraceSpanEvent[] { return [...this.spans.values()] }
+  /** 当前进程快照包含未归属节点，Browser 按 threadId 过滤；同键以 session JSONL 为准。 */
+  snapshot(): readonly TraceSpanEvent[] {
+    const merged = new Map(this.spans)
+    for (const [key, span] of this.sessionSpans) merged.set(key, span)
+    return [...merged.values()]
+  }
   /** 返回精确解绑函数，Gateway 关闭时必须调用。 */
   subscribe(listener: (span: TraceSpanEvent) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   /** 停止接受新字节，完成已入队记录，然后释放文件和订阅；重复调用复用同一 Promise。 */
   close(): Promise<void> {
     if (this.closing) return this.closing
     this.accepting = false
+    if (this.sessionTimer) clearInterval(this.sessionTimer)
     this.closing = this.flush().finally(async () => {
       await Promise.allSettled([this.log?.close(), this.index?.close()])
-      this.listeners.clear(); this.buffer = ""; this.records.clear(); this.rawSpans.clear(); this.spans.clear(); this.traceKeys.clear(); this.owners.clear(); this.indexed.clear()
+      this.listeners.clear(); this.buffer = ""; this.records.clear(); this.rawSpans.clear(); this.spans.clear(); this.sessionSpans.clear(); this.traceKeys.clear(); this.owners.clear(); this.indexed.clear()
       this.cacheBytes = 0
     })
     return this.closing
+  }
+
+  /** 合并同一轮刷新，只有 Span 内容变化时才发布，避免甘特和树无意义重渲染。 */
+  private refreshSessions(): Promise<void> {
+    if (!this.workspaceReader) return Promise.resolve()
+    if (this.sessionPending) return this.sessionPending
+    const pending = this.workspaceReader.read().then(history => {
+      if (!this.accepting) return
+      const next = new Map(history.spans.map(span => [JSON.stringify([span.traceId, span.spanId]), span]))
+      for (const key of this.sessionSpans.keys()) if (!next.has(key)) this.sessionSpans.delete(key)
+      for (const [key, span] of next) {
+        if (JSON.stringify(this.sessionSpans.get(key)) === JSON.stringify(span)) continue
+        this.sessionSpans.set(key, span)
+        for (const listener of [...this.listeners]) {
+          try { listener(span) } catch { /* 观察者失败不影响后续轨迹刷新。 */ }
+        }
+      }
+    }).catch(() => {
+      // 文件仍在追加或暂时不可读时保留上一帧，历史入口会按需报告固定读取错误。
+    }).finally(() => {
+      if (this.sessionPending === pending) this.sessionPending = undefined
+    })
+    this.sessionPending = pending
+    return pending
   }
 
   private fail(): void {

@@ -1,4 +1,4 @@
-/** Span 树：对齐 trace_viewer 原型——run 分组头（idx 徽章 + 用户输入 + meta，整体可折叠）+
+/** Span 树：对齐 trace_viewer 原型——run 分组头（用户输入 + meta，整体可折叠）+
  *  节点行（toggle ▾/· + 类型 badge + name + dur + status-dot + run.root 的 mode chips）；
  *  children 缩进带左边线，点击选中高亮。 */
 /** @jsxImportSource react */
@@ -6,8 +6,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { TraceSpanEvent } from "../../../presentation-coordinator/contracts/trace"
+import { formatElapsed } from "../../../presentation-shared/formatters"
 import { displayColor, displayName, displayType, outcomeChipText, shownStatus } from "./simple"
-import { buildTree, extractRunModes, extractUserMessage, simplifyTree, type TraceTreeNode } from "./types"
+import { buildTree, extractRunModes, extractUserMessage, isRunRoot, runDurationMs, simplifyTree, type TraceTreeNode, type TraceUserMessages } from "./types"
 
 /** 树组件外向回调：选中某个 span（详情面板展示）。 */
 export type TraceTreeHandlers = {
@@ -23,12 +24,14 @@ export function TraceTree({
   externalSelectedKey = null,
   selectionRevision = 0,
   mode = "dev",
+  userMessages = {},
 }: {
   spans: readonly TraceSpanEvent[]
   handlers: TraceTreeHandlers
   externalSelectedKey?: string | null
   selectionRevision?: number
   mode?: "dev" | "simple"
+  userMessages?: TraceUserMessages
 }): React.ReactElement {
   const [collapsedRuns, setCollapsedRuns] = useState<ReadonlySet<string>>(new Set())
   const [collapsedNodes, setCollapsedNodes] = useState<ReadonlySet<string>>(new Set())
@@ -122,10 +125,10 @@ export function TraceTree({
     () =>
       groups.map(group => ({
         group,
-        userMessage: extractUserMessage(getGroupSpans(group.trees)),
+        userMessage: extractUserMessage(getGroupSpans(group.trees), userMessages),
         modes: extractRunModes(getGroupSpans(group.trees)),
       })),
-    [groups],
+    [groups, userMessages],
   )
 
   return (
@@ -134,6 +137,7 @@ export function TraceTree({
         const collapsed = collapsedRuns.has(group.traceId)
         const total = group.trees.reduce((n, tree) => n + countNodes(tree), 0)
         const countBit = mode === "simple" ? `${total} 个关键节点` : `${total} spans`
+        const label = userMessage || "用户输入不可用"
         return (
           <section className="trace-run-section" key={group.traceId}>
             <button
@@ -142,8 +146,8 @@ export function TraceTree({
               onClick={() => toggleRun(group.traceId)}
               aria-expanded={!collapsed}
             >
-              <span className="trace-run-label" title={userMessage || group.traceId}>{userMessage || group.traceId.slice(0, 12)}</span>
-              <span className="trace-run-meta">{countBit} · {Math.round(groupTotalDuration(group.trees))}ms</span>
+              <span className="trace-run-label" title={label}>{label}</span>
+              <span className="trace-run-meta">{countBit} · {formatRunDuration(groupRunDuration(group.trees))}</span>
             </button>
             {!collapsed ? (
               <div className="trace-run-body">
@@ -210,7 +214,7 @@ function TraceNodeRow({
   const selected = selectedKey === `${span.traceId}:${span.spanId}`
   const externalTarget = externalSelectedKey === `${span.traceId}:${span.spanId}`
   const rowRef = useRef<HTMLDivElement | null>(null)
-  const isRunRoot = (span.name ?? "") === "run.root"
+  const showRunModes = isRunRoot(span)
 
   useLayoutEffect(() => {
     if (externalTarget && rowRef.current) {
@@ -235,14 +239,14 @@ function TraceNodeRow({
         }}>
           {hasChildren ? (collapsed ? "▸" : "▾") : "·"}
         </span>
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         <span className="trace-name" title={span.name}>{displayName(node)}</span>
-        {isRunRoot && modes.mode ? <span className="trace-mode-chip kind-mode">{modes.mode}</span> : null}
-        {isRunRoot && modes.requestedApprovalMode ? (
+        {showRunModes && modes.mode ? <span className="trace-mode-chip kind-mode">{modes.mode}</span> : null}
+        {showRunModes && modes.requestedApprovalMode ? (
           <span className={`trace-mode-chip ${approvalChipClass(modes.requestedApprovalMode)}`}>{modes.requestedApprovalMode}</span>
         ) : null}
         {outcomeChipText(span) !== null ? <span className="trace-outcome-chip">{outcomeChipText(span)}</span> : null}
-        <span className="trace-dur">{span.durationMs !== null ? `${Math.round(span.durationMs)}ms` : "—"}</span>
+        <span className="trace-dur">{isRunRoot(span) ? formatRunDuration(runDurationMs(span)) : span.durationMs !== null ? `${Math.round(span.durationMs)}ms` : "—"}</span>
         <span className="trace-status-dot" data-status={shownStatus(span).toLowerCase()} />
       </div>
       {hasChildren && !collapsed ? (
@@ -266,7 +270,7 @@ function TraceNodeRow({
   )
 }
 
-/** requested_approval_mode 的 chip 视觉类：auto→绿、yolo→橙，其余默认。 */
+/** requested_approval_mode 的样式类只用于标记取值；颜色与工作模式标签相同。 */
 function approvalChipClass(value: string): string {
   const safe = value.replace(/[^a-zA-Z0-9_-]/g, "")
   return safe === "auto" || safe === "yolo" ? `appr-${safe}` : ""
@@ -283,18 +287,13 @@ function countNodes(tree: TraceTreeNode): number {
   return 1 + tree.children.reduce((sum, child) => sum + countNodes(child), 0)
 }
 
-/** run 总耗时 = 根 span 中最大 endTime - 最小 startTime（无 end 按 start）。 */
-function groupTotalDuration(trees: readonly TraceTreeNode[]): number {
-  let min = Infinity
-  let max = -Infinity
-  const walk = (node: TraceTreeNode) => {
-    const s = node.span.startTime
-    const e = node.span.endTime ?? node.span.startTime
-    if (s < min) min = s
-    if (e > max) max = e
-    node.children.forEach(walk)
-  }
-  trees.forEach(walk)
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return 0
-  return Math.max(0, max - min)
+/** 分组只读主 Run 权威值，不从整棵树的诊断时间包络重新计算。 */
+function groupRunDuration(trees: readonly TraceTreeNode[]): number | null {
+  const root = trees.find(node => isRunRoot(node.span))
+  return root ? runDurationMs(root.span) : null
+}
+
+/** 与对话共用同一秒数格式，旧记录不伪造总耗时。 */
+function formatRunDuration(value: number | null): string {
+  return value === null ? "未记录" : formatElapsed(value)
 }

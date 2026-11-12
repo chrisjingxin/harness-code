@@ -77,16 +77,16 @@ test("连续拖动按增量位移计算，重复同坐标不继续放大，取�
     const height = () => handle.container.querySelector<HTMLElement>(".trace-gantt-wrap")!.style.height
     act(() => divider.dispatchEvent(new PointerEvent("pointerdown", { clientY: 100, bubbles: true })))
     act(() => window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140 })))
-    expect(height()).toBe("160px")
+    expect(height()).toBe("116px")
     act(() => window.dispatchEvent(new PointerEvent("pointermove", { clientY: 160 })))
-    expect(height()).toBe("170px")
+    expect(height()).toBe("126px")
     act(() => window.dispatchEvent(new PointerEvent("pointermove", { clientY: 160 })))
-    expect(height()).toBe("170px")
+    expect(height()).toBe("126px")
     expect(document.body.classList.contains("trace-resizing-h")).toBe(true)
     act(() => window.dispatchEvent(new PointerEvent("pointercancel")))
     expect(document.body.classList.contains("trace-resizing-h")).toBe(false)
     act(() => window.dispatchEvent(new PointerEvent("pointermove", { clientY: 200 })))
-    expect(height()).toBe("170px")
+    expect(height()).toBe("126px")
   } finally { handle.unmount() }
 })
 
@@ -103,6 +103,34 @@ test("Trace 模块不导入整个 adapter、网络或文件系统；颜色统一
   for (const [, token] of (css + colors).matchAll(/var\((--trace-[\w-]+)/g)) {
     expect(theme).toContain(`${token}:`)
   }
+})
+
+test("轨迹采用 DeepSeek 紧凑密度，树标签使用浅色底与类型色文字", () => {
+  const dir = resolve(import.meta.dir, "../../../src/web/presentation/trace")
+  const css = readFileSync(resolve(dir, "trace.css"), "utf8")
+  const rule = (selector: string) => css.split(`${selector} {`)[1]?.split("}")[0] ?? ""
+  expect(rule(".trace-gantt-plot")).toContain("height: 50px")
+  expect(rule(".trace-gantt-plot")).toContain("min-height: 50px")
+  expect(rule(".trace-gantt-bar")).toContain("top: calc(7px + var(--lane) * 14px)")
+  expect(rule(".trace-gantt-bar")).toContain("height: 8px")
+  expect(rule(".trace-node-row")).toContain("min-height: 30px")
+  expect(rule(".trace-run-header")).toContain("min-height: 30px")
+  expect(rule(".trace-detail")).toContain("padding: 12px 14px")
+  expect(rule(".trace-section")).toContain("margin: 14px 0")
+  expect(rule(".trace-json")).toContain("line-height: 1.55")
+  expect(rule(".trace-badge")).toContain("color-mix(in srgb, var(--trace-kind) 64%, var(--text))")
+  expect(rule(".trace-badge")).toContain("color-mix(in srgb, var(--trace-kind) 18%, var(--surface))")
+  const workbench = readFileSync(resolve(dir, "../workbench-views.css"), "utf8")
+  expect(workbench).toMatch(/\.workbench-view-toolbar\s*\{[^}]*min-height: 36px/)
+  expect(workbench).toMatch(/\.workbench-view-toolbar\s*\{[^}]*box-sizing: border-box/)
+  expect(workbench).toMatch(/\.workbench-view-toolbar \.workbench-tab-item\s*\{[^}]*min-height: 35px/)
+
+  const handle = render(<TraceView state={state([span()])} />)
+  try {
+    const badge = handle.container.querySelector<HTMLElement>(".trace-badge")!
+    expect(badge.style.getPropertyValue("--trace-kind")).toBe("var(--trace-llm)")
+    expect(badge.style.backgroundColor).toBe("")
+  } finally { handle.unmount() }
 })
 
 test("200 轮的全部节点和图表分界保持完整，两种模式切换后最后一轮仍可定位", () => {

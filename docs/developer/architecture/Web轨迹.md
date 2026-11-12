@@ -29,3 +29,13 @@ CLI `startAgent` 在 stderr 监听处将字节同时送入既有 drain 和 Trace
 ## 内网迁移
 
 按 [HC-191 实施计划](../plan/HC-191-Web轨迹集成与模块化.md) 的迁移清单执行。内网 SDK 启用、装饰器、Run/Thread 生命周期挂载以及 `pyproject.toml` 保留，不复制主仓库 Python 去覆盖。旧 CLI 的 trace-tailer/index 接线应被本 Runtime 消费入口替换，不能让同一个 stderr 写入两份日志或重复推送。若内网选择继续使用已有 Tailer，应适配同一 `TraceLiveSource`/`TraceHistorySource` 端口并移除重复消费入口；一次迁移只能保留一条生产路径，不长期双写。
+
+## HC-192：v2 读取与载荷展示
+
+Agent 将 schema v2 JSONL 写到用户目录的工作区指纹子目录。CLI 用 `realpath(workspace)` 的 UTF-8 SHA-256 定位相同目录，历史和实时刷新共享该读取器。根目录的内网 marker 索引保持原读取规则，v1 JSONL 被跳过。
+
+读取一轮的全部轮转文件后，单个 TraceLogParser 合并 span 开始/结束和按 trace_id 隔离的 payload 表，避免跨文件引用缺失。64MiB 单文件、128MiB 总量、256 文件和 10 万 span 上限继续失败关闭；取消、路径穿越和符号链接的检查保持在文件边界。
+
+Browser 保留实际 Step 父子关系，同一 Step 的多条 db.persist 展示为可展开的事务组；六区详情按 payload_id 展开正文，缺失引用显示固定提示。v2 耗时只读 duration_ms。窗口按 session_id 隔离 Thread，引用不跨 trace 解析。
+
+受理阶段延续同一个 run.prepare span，准备函数成功返回后交给 RunCoordinator 在受理成功、重复或失败时关闭；执行阶段显式绑定 Run 的 TraceContext。子代理分支按父 tool.call 隔离 Step，避免关闭父代理当前轮次。

@@ -44,6 +44,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import logging
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -314,6 +315,19 @@ class FileMutationService:
             "" if plan.current is None else plan.current.content,
             "" if actual_content is None else actual_content,
         )
+        # 只采提交后重读的真实增删行数，不把审批预览当成实际结果。
+        from harness_agent.tracing import current_trace
+        from harness_agent.tracing.context import current_span
+
+        trace, span = current_trace(), current_span()
+        if trace is not None and span is not None and span.name == "tool.call":
+            try:
+                trace.recorder.annotate_span(span, {
+                    "path": plan.metadata.path, "operation": plan.metadata.operation,
+                    "diff_added": changed_range.added_lines, "diff_removed": changed_range.removed_lines,
+                })
+            except Exception:
+                logging.getLogger(__name__).warning("文件变更 trace 采集失败", exc_info=True)
         if actual_content == expected_content:
             return CommittedFileMutation(actual=actual, drift=None, changed_range=changed_range)
         return CommittedFileMutation(

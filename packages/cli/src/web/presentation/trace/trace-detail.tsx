@@ -1,11 +1,11 @@
 /** 详情面板：对齐 4.html 原型——h2（badge + name + status-dot + 时长meta）、
- *  sub（span_id/parent/trace_id）、分节（关于/时间/metadata）、pre.json 语法着色（details 折叠）。
+ *  分节（关于/时间/metadata）、pre.json 语法着色（details 折叠）。
  *  长字符串展示统一走 FoldText 折叠：开发者模式 200 字、简化模式 500 字（对齐 4.html applyFolds 的
  *  FOLD_LIMIT=200 与简化详情少而精的 500 字），点击「展开 N 字 / 收起」切换。 */
 /** @jsxImportSource react */
 
 import type { TraceSpanEvent } from "../../../presentation-coordinator/contracts/trace"
-import type { TraceTreeNode } from "./types"
+import { isRunRoot, runDurationMs, type TraceTreeNode } from "./types"
 import { FoldText } from "./fold-text"
 import { displayColor, displayName, displayType, replyQuote, shownStatus, shownStatusLabel, simpleFacts, summarizeStep, toolPayloadFailure } from "./simple"
 
@@ -30,11 +30,37 @@ export function TraceDetail({
   if (node === null) {
     return <div className="trace-detail trace-detail-empty">选择左侧节点或时间线查看详情</div>
   }
+  if (node.span.raw.schema_version === 2) return <V2Detail node={node} />
   if (mode === "simple") return <SimpleDetail node={node} modes={modes} />
   return <DevDetail node={node} />
 }
 
-/** 开发者模式：h2 + sub 定位行，分节「关于（raw JSON）/时间/metadata」（对齐 4.html renderDevDetail：
+/** v2 详情按六区展示；引用只从当前 trace 已读取的载荷表解析。 */
+function V2Detail({ node }: { node: TraceTreeNode }): React.ReactElement {
+  const span = node.span
+  const attributes = span.metadata ?? {}
+  const payloads = (span.raw.payloads ?? {}) as Record<string, { bytes?: number; kind?: string; body?: unknown }>
+  const renderValue = (key: string, value: unknown): React.ReactNode => {
+    if (key.endsWith("_refs") && Array.isArray(value)) return value.map((ref, index) => <div key={index}>{renderValue("item_ref", ref)}</div>)
+    if (key.endsWith("_ref") && typeof value === "string") {
+      const payload = Object.hasOwn(payloads, value) ? payloads[value] : undefined
+      return payload ? <details><summary>{payload.kind} · {payload.bytes ?? 0} 字节</summary><pre>{JSON.stringify(payload.body, null, 2)}</pre></details>
+        : <p>载荷不在当前读取范围内</p>
+    }
+    return <pre>{JSON.stringify(value, null, 2)}</pre>
+  }
+  const sections: readonly [string, Record<string, unknown>][] = [
+    ["参数", Object.fromEntries(Object.entries(attributes).filter(([key]) => !key.endsWith("_ref") && !key.endsWith("_refs") && !["usage", "cache_hit_ratio", "run_duration_ms"].includes(key)))],
+    ["输入", Object.fromEntries(Object.entries(attributes).filter(([key]) => ["user_input", "args_ref", "command_ref", "system_ref", "message_refs", "tools_ref"].includes(key)))],
+    ["输出", Object.fromEntries(Object.entries(attributes).filter(([key]) => ["result_ref", "output_ref", "summary_ref"].includes(key)))],
+    ["用量", { usage: attributes.usage, cache_hit_ratio: attributes.cache_hit_ratio }],
+    ["耗时", { ...(isRunRoot(span) ? { "本轮总耗时（ms）": runDurationMs(span), "轨迹采集耗时（ms）": span.durationMs } : { duration_ms: span.durationMs }), first_token_ms: attributes.first_token_ms, wait_ms: attributes.wait_ms }],
+    ["错误", { status: span.status, error_type: span.raw.error_type, status_message: span.raw.status_message }],
+  ]
+  return <div className="trace-detail" data-selected="true"><h2>{span.name}</h2>{sections.map(([title, values]) => <section key={title}><h3>{title}</h3>{Object.entries(values).filter(([, value]) => value !== undefined).map(([key, value]) => <div key={key}><strong>{key}</strong>{renderValue(key, value)}</div>)}</section>)}</div>
+}
+
+/** 开发者模式：h2 + 分节「关于（raw JSON）/时间/metadata」（对齐 4.html renderDevDetail：
  *  无顶层字段节；mode/requested_approval_mode 值高亮；metadata 跳过一个空的 sessionId 键）。 */
 function DevDetail({ node }: { node: TraceTreeNode }): React.ReactElement {
   const span = node.span
@@ -45,16 +71,13 @@ function DevDetail({ node }: { node: TraceTreeNode }): React.ReactElement {
   return (
     <div className="trace-detail" data-selected="true">
       <h2 className="trace-detail-title">
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         {displayName(node)}
         <span className="trace-status-dot" data-status={shownStatus(span).toLowerCase()} />
         <span className={`trace-detail-meta${failed ? " is-failed" : ""}`}>
           {span.durationMs !== null ? `${Math.round(span.durationMs)}ms` : "—"} · {shownStatusLabel(span)}
         </span>
       </h2>
-      <div className="trace-detail-sub">
-        span_id: {span.spanId} | parent_span_id: {span.parentSpanId ?? "—"} | trace_id: {span.traceId}
-      </div>
 
       <div className="trace-section">
         <h3>关于 <span className="trace-section-note">（raw JSON 完整保留，未做任何裁剪）</span></h3>
@@ -69,7 +92,8 @@ function DevDetail({ node }: { node: TraceTreeNode }): React.ReactElement {
         <div className="trace-kv">
           <span className="trace-kv-row"><span className="trace-k">start_time</span><span className="trace-v">{span.startTime}</span></span>
           <span className="trace-kv-row"><span className="trace-k">end_time</span><span className="trace-v">{span.endTime ?? "—"}</span></span>
-          <span className="trace-kv-row"><span className="trace-k">duration_ms</span><span className="trace-v">{span.durationMs ?? "—"}</span></span>
+          <span className="trace-kv-row"><span className="trace-k">duration_ms</span><span className="trace-v">{isRunRoot(span) ? runDurationMs(span) ?? "未记录" : span.durationMs ?? "—"}</span></span>
+          {isRunRoot(span) ? <span className="trace-kv-row"><span className="trace-k">采集耗时 trace_duration_ms</span><span className="trace-v">{span.durationMs ?? "—"}</span></span> : null}
         </div>
       </div>
 
@@ -164,7 +188,7 @@ function SimpleDetail({ node, modes }: { node: TraceTreeNode; modes?: { mode?: s
   return (
     <div className="trace-detail trace-detail-simple" data-selected="true">
       <h2 className="trace-detail-title">
-        <span className="trace-badge" style={{ backgroundColor: displayColor(span) }}>{displayType(span)}</span>
+        <span className="trace-badge" style={{ "--trace-kind": displayColor(span) } as React.CSSProperties}>{displayType(span)}</span>
         {displayName(node)}
         <span className="trace-status-dot" data-status={shownStatus(span).toLowerCase()} />
         <span className="trace-detail-meta">

@@ -187,7 +187,7 @@ function firstTokenOf(node: TraceTreeNode): number | null {
 /** 节点耗时：node 自身 durationMs，缺失时回退子树内首个有耗时的 span（LLM/TOOL 只有 start 日志时兜底）。 */
 function nodeDurationMs(node: TraceTreeNode): number | null {
   const own = node.span.durationMs
-  if (own != null) return own
+  if (own != null || node.span.raw.schema_version === 2) return own
   for (const child of node.children) {
     const hit = nodeDurationMs(child)
     if (hit != null) return hit
@@ -410,7 +410,7 @@ export function summarizeStep(node: TraceTreeNode, modes?: { mode?: string; requ
   const failed = span.status === "FAILED" || span.status === "ERROR"
   const lead = failed ? "这一步失败了。" : ""
 
-  if (name === "run.root") {
+  if (name === "run.root" || (name === "run" && type === "ROOT")) {
     let s = "这是这一轮运行的起点。"
     const mode = modes?.mode ?? modeOf(node)
     const appr = modes?.requestedApprovalMode ?? approvalOf(node)
@@ -496,7 +496,7 @@ export function simpleFacts(node: TraceTreeNode, modes?: { mode?: string; reques
     const ft = firstTokenOf(node)
     if (ft != null) rows.push(["首字", formatMs(ft)])
   }
-  if (name === "run.root" || name === "run.accept") {
+  if (name === "run.root" || (name === "run" && span.type === "ROOT") || name === "run.accept") {
     const mode = modes?.mode ?? modeOf(node)
     const appr = modes?.requestedApprovalMode ?? approvalOf(node)
     if (mode) rows.push(["模式", mode])
@@ -541,7 +541,7 @@ function approvalOf(node: TraceTreeNode): string {
 /** LangGraph 把每次工具执行记成名叫 tools 的 NODE（原型 isLangGraphTools）。
  *  这类节点显示上按 TOOL 处理，badge 用 TOOL 色、名称用实际工具名。 */
 export function isLangGraphTools(span: TraceSpanEvent): boolean {
-  return (span.name ?? "") === "tools"
+  return (span.name ?? "") === "tools" || ((span.name ?? "") === "graph.node" && span.metadata?.node === "tools")
 }
 
 /** 节点应展示的类型：tools 聚合 NODE → TOOL；否则原始 type（原型 displayType）。 */
@@ -609,7 +609,7 @@ export function displayName(node: TraceTreeNode): string {
   for (const c of logicalTools(node)) {
     if (c && c.name && names.indexOf(c.name) < 0) names.push(c.name)
   }
-  return names.length ? names.join("、") : (span.name || "tools")
+  return names.length ? names.join("、") : (span.name === "graph.node" ? "tools" : (span.name || "tools"))
 }
 
 /** 是否可判定工具失败（tools 聚合节点或 TOOL 类型，原型 isToolish）。 */

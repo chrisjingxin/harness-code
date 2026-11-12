@@ -4,7 +4,8 @@
  */
 import WebSocket from "ws"
 import { randomUUID } from "node:crypto"
-import type { DeviceEnvelope, DeviceMessage, ExecutionRunnerMessage, ResumeRecord } from "@workbench/contracts"
+import type { DeviceEnvelope, DeviceMessage, ExecutionRunnerMessage, ProjectReadCommand, ProjectReadReply, ResumeRecord } from "@workbench/contracts"
+import { fitProjectReply, isProjectReadAction, type ProjectReadPort } from "./project-read.js"
 import type { Ledger } from "./ledger.js"
 import type { CommandHandler } from "./command-handler.js"
 
@@ -16,6 +17,7 @@ export interface DeviceConnectionOptions {
   ledgerId: string
   ledger: Ledger
   handler: CommandHandler
+  projectRead?: ProjectReadPort
   onState?: (state: "reconciling" | "ready" | "offline") => void
 }
 
@@ -31,6 +33,8 @@ export class DeviceConnection {
   #reconnectTimer: NodeJS.Timeout | null = null
   #deadline: NodeJS.Timeout | null = null
   #flush: NodeJS.Timeout | null = null
+  #projectReads = 0
+  #projectReadIds = new Set<string>()
 
   constructor(options: DeviceConnectionOptions) {
     this.#options = options
@@ -66,7 +70,7 @@ export class DeviceConnection {
     const url = this.#origin.replace(/^http/, "ws") + "/api/v1/device/channel"
     const socket = new WebSocket(url, "workbench.device.v1", {
       headers: { Authorization: `Bearer ${this.#options.deviceId}.${this.#options.secret}`, Origin: this.#origin,
-        "X-Workbench-Protocol-Version": "1" },
+        "X-Workbench-Protocol-Version": "1", ...(this.#options.projectRead ? { "X-Workbench-Device-Capabilities": "project.read" } : {}) },
       followRedirects: false, perMessageDeflate: false, maxPayload: 1024 * 1024, handshakeTimeout: 10_000,
     })
     this.#socket = socket
@@ -167,6 +171,9 @@ export class DeviceConnection {
           result: existing ? "applied" : "notRegistered" })
         return
       }
+      case "project.read":
+        this.handleProjectRead(message)
+        return
       case "execution.events.ack":
         this.#options.ledger.acknowledge(message.payload.executionId, message.payload.lastCommittedRunnerSequence)
         return
@@ -189,6 +196,43 @@ export class DeviceConnection {
         return
       default: throw new Error("INVALID_CONTROL_FRAME")
     }
+  }
+
+  /** 项目只读即时执行，连接切换或超过时限后丢弃旧结果。 */
+  private handleProjectRead(message: ProjectReadCommand): void {
+    const { workspaceId, deviceId, projectId, shareVersion, action } = message.payload
+    const port = this.#options.projectRead
+    if (!this.#ready || !port || deviceId !== this.#options.deviceId || workspaceId !== this.#options.workspaceId
+      || !isId(projectId) || !/^(?:0|[1-9][0-9]{0,18})$/.test(shareVersion) || !isProjectReadAction(action)) {
+      throw new Error("INVALID_CONTROL_FRAME")
+    }
+    if (this.#projectReadIds.has(message.messageId)) throw new Error("INVALID_CONTROL_FRAME")
+    const socket = this.#socket
+    const connectionId = this.#connectionId
+    const startedAt = Date.now()
+    const reply = (result: ProjectReadReply["payload"]["result"]) => {
+      if (!socket || this.#socket !== socket || !connectionId || connectionId !== this.#connectionId
+        || !this.#ready || Date.now() - startedAt >= 8000) return
+      const answer: ProjectReadReply = {
+        protocolVersion: 1, messageId: randomUUID(), type: "project.read.result", occurredAt: new Date().toISOString(),
+        payload: { requestMessageId: message.messageId, workspaceId, deviceId, projectId, shareVersion, kind: action.kind, result },
+      }
+      this.sendEnvelope({ message: fitProjectReply(connectionId, answer) })
+    }
+    if (this.#projectReads >= 4) {
+      reply({ status: "error", code: "PROJECT_BUSY" })
+      return
+    }
+    this.#projectReads++
+    this.#projectReadIds.add(message.messageId)
+    void port.read(projectId, shareVersion, action)
+      .then(result => {
+        if (result.status === "ok" && result.response.kind !== action.kind) {
+          reply({ status: "error", code: "PROJECT_READ_FAILED" })
+        } else reply(result)
+      })
+      .catch(() => reply({ status: "error", code: "PROJECT_READ_FAILED" }))
+      .finally(() => { this.#projectReads--; this.#projectReadIds.delete(message.messageId) })
   }
 
   private verifyTarget(message: Extract<DeviceMessage, { type: "execution.start" | "execution.cancel" | "execution.start.decision" }>): void {

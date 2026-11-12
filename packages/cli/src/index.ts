@@ -273,7 +273,7 @@ async function startAgent(command: Exclude<Command, { kind: "logs" } | { kind: "
     await lifecycle.close()
     throw new Error("Unable to create agent stdio pipes")
   }
-  const trace = createTraceRuntime({ startedAtMs, onError: () => log.error("logging.writer_failed", { failure_stage: "trace.capture", error_type: "TraceCaptureError", summary_code: "trace_capture_stopped", retryable: false }) })
+  const trace = createTraceRuntime({ startedAtMs, workspace: command.cwd, onError: () => log.error("logging.writer_failed", { failure_stage: "trace.capture", error_type: "TraceCaptureError", summary_code: "trace_capture_stopped", retryable: false }) })
   const stderrDrain = new SidecarStderrDrain()
   child.stderr.on("data", chunk => {
     stderrDrain.push(chunk)

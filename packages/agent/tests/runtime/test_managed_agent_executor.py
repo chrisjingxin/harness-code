@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.usage_callbacks import model_request
 from langchain_core.messages import AIMessageChunk
 
 from harness_agent.runtime.execution_stream import ExecutionSignal, StreamSession
+from harness_agent.tracing import TraceRecorder, TraceStatus, use_trace
 from harness_agent.runtime.managed_agent_executor import (
     FailClosedManagedObserver,
     ManagedAgentExecutionError,
@@ -34,11 +38,14 @@ class _FakeAgent:
     async def astream(self, stream_input: object, **kwargs: object):
         """记录调用参数，并产出当前模型回合的事件。"""
         self.calls.append({"input": stream_input, **kwargs})
-        outcome = self._rounds.pop(0)
-        if isinstance(outcome, BaseException):
-            raise outcome
-        for event in outcome:
-            yield event
+        with model_request(kwargs.get("config", {})) as request:
+            outcome = self._rounds.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            for event in outcome:
+                if len(event) == 2 and event[0] == "messages" and isinstance(event[1], tuple) and type(event[1][0]).__name__ in {"AIMessage", "AIMessageChunk"}:
+                    request["message"] = event[1][0]
+                yield event
 
 
 class _Lifecycle:
@@ -567,7 +574,7 @@ async def test_pooled_runtime_hides_engine_graph_and_releases_run_then_engine() 
 
     assert result.final_content == "完成"
     assert events == ["run", "engine", "finalize"]
-    assert graph.calls[0]["config"] == {"configurable": {"thread_id": "thread-1"}}
+    assert graph.calls[0]["config"]["configurable"] == {"thread_id": "thread-1"}
 
 
 @pytest.mark.asyncio
@@ -741,6 +748,58 @@ def test_managed_child_observers_keep_sibling_event_ports_isolated() -> None:
     assert destinations["b"] == [("tool.started", "child-b", "root-parent", "same-agent-id")]
 
 
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取 executor 测试产生的统一 JSONL 事件。"""
+    return [
+        json.loads(line)
+        for path in root.glob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+def test_executor_trace_covers_acquire_stream_and_finally_release(tmp_path: Path) -> None:
+    """无 I/O 的 echo 路径可内联驱动；资源正常释放且不生成记账节点。"""
+    recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
+    context = recorder.start_trace()
+    runtime = _Runtime(None)
+    with use_trace(context):
+        # fake 的所有 await 均立即完成；若引入真实挂起，此测试会直接失败。
+        coroutine = ManagedAgentExecutor().execute(_request(runtime), _Observer())
+        with pytest.raises(StopIteration) as completed:
+            coroutine.send(None)
+        result = completed.value.value
+    context.recorder.end_trace()
+
+    assert result.final_content == "修复当前问题"
+    events = _trace_events(tmp_path)
+    names = [event["name"] for event in events if event["event"] == "span.start"]
+    assert names == []
+    assert runtime.release_calls == 1
+    assert events[-1]["attributes"]["source"] == "reused"
+
+
+@pytest.mark.asyncio
+async def test_executor_acquire_failure_does_not_fake_release(tmp_path: Path) -> None:
+    """runtime 获取失败仍传播原异常，不制造记账或 release 节点。"""
+    recorder = TraceRecorder(session_id="thread-1", run_id="run-1", log_dir=tmp_path)
+    context = recorder.start_trace()
+    request = _request(_Runtime(None))
+
+    async def fail_acquire():
+        raise RuntimeError("acquire failed")
+
+    object.__setattr__(request, "runtime_provider", fail_acquire)
+    with use_trace(context), pytest.raises(RuntimeError, match="acquire failed"):
+        await ManagedAgentExecutor().execute(request, _Observer())
+    context.recorder.end_trace(TraceStatus.FAILED)
+
+    events = _trace_events(tmp_path)
+    assert [event for event in events if event["event"] == "span.start"] == []
+    ends = [event for event in events if event["event"] == "span.end"]
+    assert ends == []
+    assert events[-1]["status"] == "FAILED"
+
+
 @pytest.mark.asyncio
 async def test_executor_owns_runtime_release_checkpoint_and_passthrough_stream() -> None:
     """成功路径由 executor 创建 checkpoint 配置、转发 stream 并释放 lease。"""
@@ -786,7 +845,7 @@ async def test_executor_owns_runtime_release_checkpoint_and_passthrough_stream()
     assert usage == {"input_tokens": 3, "output_tokens": 2}
     first_input = agent.calls[0]["input"]
     assert first_input["messages"][0].content == "修复当前问题"
-    assert agent.calls[0]["config"] == {"configurable": {"thread_id": "thread-1"}}
+    assert agent.calls[0]["config"]["configurable"] == {"thread_id": "thread-1"}
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 /** 共享会话、消息、执行视图与展示事件的线上类型；字段顺序与 schema 一致，供确定性编码消费。 */
-import type { ServerErrorCode } from "./identity.js"
+import type { CollaborationResult, ServerErrorCode } from "./identity.js"
 
 export type Uuid = string
 /** 十进制字符串，禁用 Number 承载。 */
@@ -82,6 +82,35 @@ export interface HistoryResponse {
   events: ConversationEvent[]
   nextAfterSequence: Sequence
   hasMore: boolean
+}
+
+/** 桌面分页只接受已登记的历史游标，首读不传固定上界。 */
+export interface ConversationHistoryPage {
+  afterSequence: Sequence
+  throughSequence?: Sequence
+  limit?: number
+}
+
+/** 实时状态由主进程连接事实产生；需要补历史时不能把网络接收位置当作已应用位置。 */
+export type ConversationConnection = "connecting" | "connected" | "reconnecting" | "recovering"
+export interface ConversationSubscription { subscriptionId: Uuid }
+export interface ConversationEventBatch {
+  subscriptionId: Uuid
+  workspaceId: Uuid
+  conversationId: Uuid
+  connection: ConversationConnection
+  events: ConversationEvent[]
+  recoveryReason?: "cursorAhead" | "projectionUnverified" | "deliveryInterrupted"
+}
+
+/** 会话端口；身份和凭据由同一窗口的主进程管理，事件只在下一次读取确认后释放。 */
+export interface ConversationReadHost {
+  listConversations(workspaceId: Uuid, cursor: ConversationPageCursor | null): Promise<CollaborationResult<ConversationListResponse>>
+  getConversation(workspaceId: Uuid, conversationId: Uuid): Promise<CollaborationResult<ConversationResponse>>
+  readHistory(workspaceId: Uuid, conversationId: Uuid, page: ConversationHistoryPage): Promise<CollaborationResult<HistoryResponse>>
+  subscribeConversation(workspaceId: Uuid, conversationId: Uuid, afterSequence: Sequence): Promise<CollaborationResult<ConversationSubscription>>
+  readConversationEvents(subscriptionId: Uuid, afterSequence: Sequence): Promise<CollaborationResult<ConversationEventBatch>>
+  unsubscribeConversation(subscriptionId: Uuid): Promise<CollaborationResult<null>>
 }
 export type RequestOperation = "conversation.create" | "input.send" | "execution.cancel"
 export interface RequestReceiptResponse {

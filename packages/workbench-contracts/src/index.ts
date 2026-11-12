@@ -45,3 +45,4 @@ export type {
   ProjectRepositoryListResponse, ProjectDetailResponse,
 } from "./organization.js"
 export * from "./deterministic.js"
+export type * from "./project.js"

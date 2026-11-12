@@ -89,14 +89,26 @@ test("浅深主题必要文字达到 AA，暗色选中与未选中侧栏有明�
   expect(contrast(color("--thread-selected-bg", dark), color("--sidebar-bg", dark))).toBeGreaterThanOrEqual(1.8)
 })
 
-test("Trace 类型标签在双主题下可读，运行根节点随品牌变化而状态色独立", () => {
+test("每种 Trace 类型使用不同色相，浅色标签在双主题下可读且不随品牌漂移", () => {
+  const light = theme("light")
+  expect(color("--trace-root", light)).toEqual([26, 115, 147])
+  expect(color("--trace-run", light)).toEqual([65, 118, 230])
+  expect(color("--trace-func", light)).toEqual([165, 29, 156])
+  expect(color("--trace-agent", light)).toEqual([156, 28, 88])
+  expect(color("--trace-llm", light)).toEqual([120, 104, 201])
+  const kinds = ["root", "run", "func", "agent", "node", "llm", "tool", "retriever", "rerank", "embedding", "interaction", "policy", "db", "context", "unknown"]
   for (const mode of ["light", "dark"] as const) {
     const tokens = theme(mode)
-    for (const kind of ["run", "func", "agent", "node", "llm", "tool", "retriever", "rerank", "embedding", "interaction", "policy", "db", "context", "unknown"]) {
-      expect(contrast(color("--trace-badge-text", tokens), color(`--trace-${kind}`, tokens))).toBeGreaterThanOrEqual(4.5)
+    const seen = new Set<string>()
+    for (const kind of kinds) {
+      seen.add(color(`--trace-${kind}`, tokens).join(","))
+      const foreground = `color-mix(in srgb, var(--trace-${kind}) 64%, var(--text))`
+      const background = `color-mix(in srgb, var(--trace-${kind}) 18%, var(--surface))`
+      expect(contrast(color(foreground, tokens), color(background, tokens))).toBeGreaterThanOrEqual(4.5)
     }
+    expect(seen.size).toBe(kinds.length)
     const changed = theme(mode, "#1468d4")
-    expect(color("--trace-run", tokens)).not.toEqual(color("--trace-run", changed))
+    expect(color("--trace-run", tokens)).toEqual(color("--trace-run", changed))
     for (const status of ["success", "failed", "error", "running"]) {
       expect(color(`--trace-${status}`, tokens)).toEqual(color(`--trace-${status}`, changed))
     }

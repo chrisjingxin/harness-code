@@ -52,6 +52,9 @@ from harness_agent.runtime.execution_binding import (
 )
 from harness_agent.threads.context_lifecycle import RunContextSnapshot, snapshot_from_legacy_prompt_epoch
 from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION, canonical_json
+from harness_agent.tracing import FunctionCall, func_monitor
+from harness_agent.tracing.context import current_span
+from harness_agent.tracing.persistence import observe_transaction
 from harness_agent.runtime.agent_engine_profile import AGENT_ENGINE_PROFILE_VERSION, AgentEngineProfile
 from harness_agent.threads.context_projection import (
     CompressionCheckpoint,
@@ -113,7 +116,7 @@ from harness_agent.threads.thread_records import (
     workspace_fingerprint,
 )
 
-_SCHEMA_VERSION = 20
+_SCHEMA_VERSION = 21
 _MIGRATION_STATE_VERSION = 2
 _MIGRATION_STATE_VERSION_LEGACY = 1
 _MIGRATION_LOCK_SUFFIX = ".migration.lock"
@@ -2754,6 +2757,75 @@ class ProjectScopedAsyncSqliteSaver(AsyncSqliteSaver):
         }
 
 
+def _persist_attributes(operation: str):
+    """生成指定事务的安全字段提供器，失败时不虚构提交序号或数量。"""
+    def attributes(call: FunctionCall) -> Mapping[str, object]:
+        if call.error is not None:
+            return {"operation": operation, "outcome": "failed"}
+        projected: dict[str, object] = {
+            "operation": operation,
+            "outcome": "committed",
+        }
+        result = call.result
+        if isinstance(result, RunAcceptance):
+            projected.update(
+                outcome="committed" if result.created else "duplicate",
+                thread_id=result.binding.thread_id, run_id=result.binding.run_id,
+                tables=["harness_threads", "harness_run_execution_bindings"],
+            )
+            command = call.args[1]
+            if isinstance(command, AcceptRun):
+                projected["tables"].append("harness_thread_modes")
+                if command.record_user_message:
+                    projected["tables"].append("harness_thread_transcript")
+                    projected["record_ids"] = [_user_record_id(result.binding.run_id)]
+                if command.context_snapshot is not None:
+                    projected["tables"].append("harness_run_context_snapshots")
+        elif isinstance(result, TranscriptRecord):
+            projected.update(rows=1, seq_from=result.sequence, seq_to=result.sequence,
+                             bytes=result.byte_length, record_ids=[result.record_id],
+                             thread_id=result.thread_id)
+            if result.run_id is not None:
+                projected["run_id"] = result.run_id
+        elif isinstance(result, tuple) and all(
+            isinstance(item, TranscriptRecord) for item in result
+        ):
+            projected["rows"] = len(result)
+            projected["bytes"] = sum(item.byte_length for item in result)
+            projected["record_ids"] = [item.record_id for item in result]
+            projected["tables"] = ["harness_thread_transcript", "harness_threads"]
+            if result:
+                projected.update(seq_from=result[0].sequence, seq_to=result[-1].sequence,
+                                 thread_id=result[0].thread_id)
+                if result[0].run_id is not None:
+                    projected["run_id"] = result[0].run_id
+        elif isinstance(result, ContextCommit):
+            projected["rows"] = len(result.artifacts) + int(result.summary is not None) + int(result.checkpoint is not None)
+            if result.checkpoint is not None:
+                projected["seq_to"] = result.checkpoint.source_record_sequence
+            projected["tables"] = [
+                table for table, present in (
+                    ("harness_context_artifacts", bool(result.artifacts)),
+                    ("harness_context_summaries", result.summary is not None),
+                    ("harness_context_state", result.state is not None),
+                    ("harness_compression_checkpoints", result.checkpoint is not None),
+                ) if present
+            ]
+            projected["bytes"] = sum(item.byte_length for item in result.artifacts)
+            projected["thread_id"] = call.args[1].thread_id
+        elif operation == "run_complete":
+            projected.update(thread_id=call.args[1], tables=["harness_threads"])
+        # 事务锁内的真实 SQL 写入计数优先于结果对象中的记录数。
+        span = current_span()
+        if span is not None and span.name == "db.persist":
+            for key in ("rows", "lock_wait_ms"):
+                if key in span.attributes:
+                    projected[key] = span.attributes[key]
+        return projected
+
+    return attributes
+
+
 class ThreadPersistence:
     """会话历史与事实账本持久化管理器。
 
@@ -3088,6 +3160,11 @@ class ThreadPersistence:
             except ValueError:
                 return None
 
+    @func_monitor(
+        name="db.persist",
+        kind="DB",
+        attributes=_persist_attributes("accept_run"),
+    )
     async def accept_run(self, command: AcceptRun) -> RunAcceptance:
         """原子受理一次新的 AI 对话回合（Run）。
 
@@ -3139,7 +3216,7 @@ class ThreadPersistence:
         encoded_selection = canonical_json(binding.requested_selection_record())
         encoded_primary = canonical_json(binding.actual_primary_record())
         message_digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
-        async with self._lock:
+        async with observe_transaction(self._lock, self._connection):
             try:
                 await self._connection.execute("BEGIN IMMEDIATE")
                 cursor = await self._connection.execute(
@@ -3450,6 +3527,11 @@ class ThreadPersistence:
         records = await self.append_transcript_batch((command,))
         return records[0]
 
+    @func_monitor(
+        name="db.persist",
+        kind="DB",
+        attributes=_persist_attributes("transcript_batch"),
+    )
     async def append_transcript_batch(
             self, commands: tuple[TranscriptAppend, ...]
     ) -> tuple[TranscriptRecord, ...]:
@@ -3474,7 +3556,7 @@ class ThreadPersistence:
             raise ThreadPersistenceError("TRANSCRIPT_TOOL_CALL_KIND_INVALID")
         if any(command.legacy_invalid_fields for command in commands):
             raise ThreadPersistenceError("TRANSCRIPT_LEGACY_MARKER_FORBIDDEN")
-        async with self._lock:
+        async with observe_transaction(self._lock, self._connection):
             try:
                 await self._connection.execute("BEGIN IMMEDIATE")
                 records_list: list[TranscriptRecord] = []
@@ -3907,12 +3989,17 @@ class ThreadPersistence:
             has_legacy_runtime=await self._has_legacy_runtime_binding(thread_id),
         )
 
+    @func_monitor(
+        name="db.persist",
+        kind="DB",
+        attributes=_persist_attributes("run_complete"),
+    )
     async def complete_run(self, thread_id: str) -> None:
         """在 Run 终态刷新活动时间；消息数量由 Transcript 追加事务维护。"""
         started = time.monotonic()
         self._ensure_open()
         try:
-            async with self._lock:
+            async with observe_transaction(self._lock, self._connection):
                 await self._connection.execute(
                     """
                     UPDATE harness_threads
@@ -3928,6 +4015,64 @@ class ThreadPersistence:
             self._log_operation("complete_run", started, None, error)
             raise error from exc
         self._log_operation("complete_run", started, 1)
+
+    async def save_run_summary(
+        self, thread_id: str, run_id: str, outcome: str, usage: Mapping[str, object], duration_ms: int,
+    ) -> None:
+        """把唯一终态及用量与 Thread 活动时间原子提交，重复相同结果幂等。"""
+        self._ensure_open()
+        if outcome not in {"completed", "failed", "cancelled"}:
+            raise ThreadPersistenceError("RUN_SUMMARY_OUTCOME_INVALID")
+        from harness_agent.protocol.runtime import validate_ref
+        value = {"run_id": run_id, "outcome": outcome, "usage": dict(usage), "duration_ms": duration_ms}
+        validate_ref("#/$defs/runSummary", value)
+        summary = _strict_json(value)
+        async with observe_transaction(self._lock, self._connection):
+            try:
+                cursor = await self._connection.execute(
+                    "SELECT terminal_summary FROM harness_run_execution_bindings "
+                    "WHERE project_fingerprint = ? AND thread_id = ? AND run_id = ?",
+                    (self._project_fingerprint, thread_id, run_id),
+                )
+                row = await cursor.fetchone()
+                await cursor.close()
+                if row is None:
+                    raise ThreadPersistenceError("RUN_SUMMARY_BINDING_NOT_FOUND")
+                if row[0] is not None and row[0] != summary:
+                    raise ThreadPersistenceError("RUN_SUMMARY_CONFLICT")
+                cursor = await self._connection.execute(
+                    "UPDATE harness_run_execution_bindings SET terminal_summary = ? "
+                    "WHERE project_fingerprint = ? AND thread_id = ? AND run_id = ? "
+                    "AND (terminal_summary IS NULL OR terminal_summary = ?)",
+                    (summary, self._project_fingerprint, thread_id, run_id, summary),
+                )
+                changed = cursor.rowcount
+                await cursor.close()
+                if changed != 1:
+                    raise ThreadPersistenceError("RUN_SUMMARY_CONFLICT")
+                await self._connection.execute(
+                    "UPDATE harness_threads SET updated_at_ms = ? WHERE project_fingerprint = ? AND thread_id = ?",
+                    (_now_ms(), self._project_fingerprint, thread_id),
+                )
+                await self._connection.commit()
+            except Exception:
+                await self._connection.rollback()
+                raise
+
+    async def load_run_summaries(self, thread_id: str) -> list[dict[str, object]]:
+        """读取已保存的终态；旧轮次没有统计时不回填零或依赖日志。"""
+        self._ensure_open()
+        async with self._lock:
+            cursor = await self._connection.execute(
+                "SELECT terminal_summary FROM harness_run_execution_bindings "
+                "WHERE project_fingerprint = ? AND thread_id = ? AND terminal_summary IS NOT NULL "
+                "AND run_id IN (SELECT run_id FROM harness_thread_transcript "
+                "WHERE project_fingerprint = ? AND thread_id = ?) ORDER BY created_at_ms, run_id",
+                (self._project_fingerprint, thread_id, self._project_fingerprint, thread_id),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+        return [json.loads(row[0]) for row in rows]
 
     async def load_context(self, thread_id: str) -> ContextSnapshot:
         """读取 LangGraph 缓存和 Context 状态，仅供诊断与兼容测试。"""
@@ -4197,6 +4342,11 @@ class ThreadPersistence:
             legacy_incomplete=legacy_incomplete,
         )
 
+    @func_monitor(
+        name="db.persist",
+        kind="DB",
+        attributes=_persist_attributes("context_commit"),
+    )
     async def commit_context(self, command: CommitContextRewrite) -> ContextCommit:
         """原子提交 Artifact、摘要、状态和模型投影检查点。"""
         started = time.monotonic()
@@ -4293,7 +4443,7 @@ class ThreadPersistence:
 
         checkpoint: CompressionCheckpoint | None = None
         try:
-            async with self._lock:
+            async with observe_transaction(self._lock, self._connection):
                 await self._connection.execute("BEGIN IMMEDIATE")
                 existing_checkpoint: aiosqlite.Row | None = None
                 if checkpoint_draft is not None:
@@ -5897,6 +6047,10 @@ class ThreadPersistence:
                 # v20：线程标题列（title / title_origin）。
                 await self._add_thread_title_columns()
                 version = 20
+            if version < 21:
+                # v21：Run 终态与用量共存，历史默认 NULL 而非伪造零值。
+                await self._connection.execute("ALTER TABLE harness_run_execution_bindings ADD COLUMN terminal_summary TEXT")
+                version = 21
             await self._connection.execute(f"PRAGMA user_version={version}")
             final_fingerprint = await self._database_fingerprint_async()
             await self._validate_final_database_async(final_fingerprint)
@@ -6759,6 +6913,8 @@ class ThreadPersistence:
                 )
             )
 
+        if version >= 21:
+            required.append(("harness_run_execution_bindings", ("terminal_summary",)))
         for table_name, expected_columns in required:
             actual_columns = await self._table_columns_async(table_name)
             if not actual_columns or any(column not in actual_columns for column in expected_columns):
@@ -9077,6 +9233,7 @@ def _migration_validate_final_schema_sync(connection: sqlite3.Connection) -> Non
             "message_digest",
             "created_at_ms",
             "context_snapshot_id",
+            "terminal_summary",
         ),
         "harness_thread_transcript": (
             "project_fingerprint",

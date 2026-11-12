@@ -5,7 +5,7 @@ import { act } from "react"
 import { WorkbenchViews } from "../../../src/web/presentation/workbench-views"
 import { CodePanel } from "../../../src/web/presentation/context-dock/code/code-panel"
 import type { WebIntent } from "../../../src/web/application/adapter"
-import { makeSnapshot } from "./fixtures"
+import { makeInteractive, makeSnapshot } from "./fixtures"
 import { registerTestDom, render } from "./render"
 const unregister = registerTestDom()
 afterAll(unregister)
@@ -44,5 +44,44 @@ test("文件标签显示完整路径提示，关闭不触发打开；箭头和 D
     intents.length = 0
     act(() => handle.container.querySelector<HTMLButtonElement>('[aria-label="关闭文件 src/a.ts"]')!.click())
     expect(intents).toEqual([{ type: "workbench-file-close", path: "src/a.ts" }])
+  } finally { handle.unmount() }
+})
+
+test("轨迹固定开发者展示且无模式切换，并关联时间线用户输入", () => {
+  const snapshot = makeSnapshot({
+    viewMode: "trace",
+    interactive: makeInteractive({
+      timeline: [{
+        type: "message",
+        message: { id: "m1", role: "user", content: "时间线里的用户输入", runId: "run-1" },
+      }],
+    }),
+    trace: {
+      threadId: "thread-1",
+      spans: [{
+        traceId: "trace-number-must-not-show",
+        spanId: "span-1",
+        parentSpanId: null,
+        name: "run.accept",
+        type: "ROOT",
+        startTime: 1,
+        endTime: 2,
+        durationMs: 1,
+        status: "SUCCESS",
+        metadata: { mode: "build", requested_approval_mode: "auto" },
+        threadId: "thread-1",
+        raw: { run_id: "run-1" },
+      }],
+      loading: false,
+      loaded: true,
+      hasAnyTrace: true,
+    },
+  })
+  const handle = render(<WorkbenchViews snapshot={snapshot} dispatch={() => {}} disabled={false}><div /></WorkbenchViews>)
+  try {
+    const modes = handle.container.querySelectorAll(".trace-mode-switch button")
+    expect(modes.length).toBe(0)
+    expect(handle.container.querySelector(".trace-run-label")?.textContent).toBe("时间线里的用户输入")
+    expect(handle.container.querySelector(".trace-run-label")?.textContent).not.toContain("trace-number-must-not-show")
   } finally { handle.unmount() }
 })

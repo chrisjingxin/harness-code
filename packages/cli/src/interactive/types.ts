@@ -227,6 +227,7 @@ export type InteractiveSnapshot = {
   readonly interaction: InteractiveInteraction | null
   readonly confirmation: InteractiveConfirmation | null
   readonly lastRun: RunSummary | null
+  readonly runSummaries: Record<string, RunSummary>
   readonly runtime: InteractiveRuntime
   readonly connection: InteractiveConnectionState
   readonly commands: readonly InteractiveCommandItem[]

@@ -186,6 +186,7 @@ export function createFallbackNoopGateway(): AgentGateway {
       return {
         thread: { thread_id: id, created_at_ms: 0, updated_at_ms: 0, first_message: "", latest_message: "", message_count: 0, title: null },
         messages: [],
+        run_summaries: [],
         plan: { has_plan: false, plan_markdown: "", plan_virtual_path: "/.harness/plan.md" as const, plan_display_path: `~/.harness/plans/${id}.md` },
         goal: null,
         goal_pending: null,

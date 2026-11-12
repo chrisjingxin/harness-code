@@ -17,6 +17,7 @@
     "./schema/conversation": "./schema/conversation.schema.json",
     "./schema/execution": "./schema/execution.schema.json",
     "./schema/device": "./schema/device.schema.json",
+    "./schema/project": "./schema/project.schema.json",
     "./resources": "./resources.json"
   }
 }

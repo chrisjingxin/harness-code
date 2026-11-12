@@ -8,10 +8,10 @@ import type { TraceViewState } from "./view-state"
 import { GanttChart } from "./gantt"
 import { TraceDetail } from "./trace-detail"
 import { TraceTree } from "./trace-tree"
-import { buildTree, extractRunModes, type TraceTreeNode } from "./types"
+import { buildTree, extractRunModes, extractUserMessage, type TraceTreeNode, type TraceUserMessages } from "./types"
 
 /** 甘特区请求高度；可视高度由 CSS 按可用空间约束，三条泳道始终完整。 */
-const INITIAL_GANTT_HEIGHT = 140
+const INITIAL_GANTT_HEIGHT = 96
 /** 甘特区高度下限。 */
 const MIN_GANTT_HEIGHT = 84
 /** 详情列初始宽度。 */
@@ -27,6 +27,7 @@ export function TraceView(props: {
   state: TraceViewState
   disabled?: boolean
   mode?: "dev" | "simple"
+  userMessages?: TraceUserMessages
 }): React.ReactElement {
   return <ThreadTraceView key={props.state.threadId} {...props} />
 }
@@ -36,6 +37,7 @@ function ThreadTraceView(props: {
   state: TraceViewState
   disabled?: boolean
   mode?: "dev" | "simple"
+  userMessages?: TraceUserMessages
 }): React.ReactElement {
   const { state, disabled = false } = props
   const mode = props.mode ?? "dev"
@@ -43,7 +45,11 @@ function ThreadTraceView(props: {
   const [selectionRevision, setSelectionRevision] = useState(0)
   const [ganttHeight, setGanttHeight] = useState(INITIAL_GANTT_HEIGHT)
   const [detailWidth, setDetailWidth] = useState(INITIAL_DETAIL_WIDTH)
-  const allSpans = state.spans
+  const allSpans = useMemo(() => state.spans.map(span => {
+    if (span.raw.schema_version !== 2 || span.type !== "ROOT") return span
+    const input = extractUserMessage([span], props.userMessages)
+    return input ? { ...span, metadata: { ...span.metadata, user_input: input } } : span
+  }), [state.spans, props.userMessages])
   const hasAnyTrace = state.hasAnyTrace
   // spanKey → 完整子树节点索引（simple 详情需要 children 提取模型/工具；对齐原型 selectNode(node)）。
   const nodeIndex = useMemo(() => {
@@ -83,17 +89,17 @@ function ThreadTraceView(props: {
           {!hasAnyTrace && !threadLoading && !threadLoaded ? (
             <>
               <p className="trace-view-empty-title">当前会话未开启链路追踪</p>
-              <p className="trace-view-empty-hint">链路数据来自 CLI 增量读取的 za38-trace-*.log；确认 trace 已开启后刷新。</p>
+              <p className="trace-view-empty-hint">链路数据来自当前工作区 log/*.jsonl；与 Agent 对话后会自动生成并实时刷新。</p>
             </>
           ) : threadLoading ? (
             <>
               <p className="trace-view-empty-title">正在加载该线程的历史轨迹…</p>
-              <p className="trace-view-empty-hint">按索引反查 trace 日志文件并解析中。</p>
+              <p className="trace-view-empty-hint">正在读取当前工作区的 session JSONL 并合并调用节点。</p>
             </>
           ) : (
             <>
               <p className="trace-view-empty-title">该线程暂无链路数据</p>
-              <p className="trace-view-empty-hint">该线程尚未产生 span，或索引中没有它对应的 trace 日志文件。</p>
+              <p className="trace-view-empty-hint">该线程尚未产生 Span；完成一次对话后可重新进入轨迹查看。</p>
             </>
           )}
         </div>
@@ -104,7 +110,7 @@ function ThreadTraceView(props: {
   return (
     <div className="trace-view" aria-label="链路轨迹">
       <div className="trace-gantt-wrap" style={{ height: `${ganttHeight}px` }}>
-        <GanttChart spans={allSpans} onSelect={selectSpan} mode={mode} />
+        <GanttChart spans={allSpans} onSelect={selectSpan} mode={mode} userMessages={props.userMessages} />
       </div>
       <TraceResizeHandle
         orientation="horizontal"
@@ -129,6 +135,7 @@ function ThreadTraceView(props: {
             mode={mode}
             externalSelectedKey={selectedKey}
             selectionRevision={selectionRevision}
+            userMessages={props.userMessages}
           />
         </div>
         <TraceResizeHandle

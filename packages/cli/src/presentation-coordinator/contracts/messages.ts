@@ -14,7 +14,7 @@ import type { TraceLoadRequest, TraceHistoryMessage, TraceLiveMessage } from "./
 import type { PresentationState } from "../state"
 
 /** UI 契约版本：网关与 Browser 共享同一常量，消息形状变更时递增。 */
-export const UI_CONTRACT_VERSION = 10
+export const UI_CONTRACT_VERSION = 11
 
 /** 单帧上限与跨进程协议一致；replace 需承载完整 Timeline，因此不用旧 lifecycle 的 16 KiB。 */
 export const MAX_UI_FRAME_BYTES = MAX_FRAME_BYTES

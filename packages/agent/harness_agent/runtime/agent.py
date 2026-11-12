@@ -73,6 +73,7 @@ from harness_agent.policy.approval_policy import (
     PlanModeMiddleware,
     approval_mode_prompt,
     classify_plan_shell_command,
+    emit_policy_decision,
     interrupt_on_for_approval_mode,
 )
 from harness_agent.policy.auto_mode import evaluate_auto_mode
@@ -383,10 +384,16 @@ def _create_controlled_inline_subagents(
         child_middleware.append(
             ConcurrencyGuardMiddleware(concurrency_lock or RuntimeAsyncRWLock())
         )
+        from harness_agent.tracing.tool import TraceToolMiddleware
+
+        child_middleware.append(TraceToolMiddleware())
         if file_tool_contract is not None:
             from harness_agent.tools.file_tools import HarnessFileToolsMiddleware
 
             child_middleware.append(HarnessFileToolsMiddleware(file_tool_contract))
+        from harness_agent.tracing.model import TraceModelMiddleware
+
+        child_middleware.append(TraceModelMiddleware())
         prompt = record.prompt
         if workspace is not None:
             prompt = f"{prompt}{_LOCAL_SUBAGENT_BOUNDARY_PROMPT}"
@@ -653,14 +660,28 @@ def _make_approval_preflight(
             if dynamic
             else approval_mode
         ) or approval_mode
+
+        def finish(show: bool, decision: str, layer: str) -> bool:
+            """记录父代理这次预检决定。True 表示弹窗。"""
+            emit_policy_decision(
+                tool=tool_name,
+                tool_args=tool_args,
+                approval_mode=str(mode),
+                decision=decision,
+                layer=layer,
+                call_id=str(tool_call.get("id") or "") or None,
+            )
+            return show
+
         if (mode == "plan" or runtime_plan_active) and tool_name == "execute":
             rules = rules_provider() if rules_provider is not None else []
             if rules and evaluate_tool_rules(tool_name, tool_args, rules) == "deny":
-                return False
-            return classify_plan_shell_command(tool_args.get("command")) == "ask"
+                return finish(False, "deny", "L2")
+            classified = classify_plan_shell_command(tool_args.get("command"))
+            return finish(classified == "ask", classified, "L5")
         if mode == "yolo":
             # YOLO 图的 execute HITL 平时休眠，只为同一 Run 动态进入 Plan 预留。
-            return False
+            return finish(False, "allow", "L5")
 
         # 动态 Plan 下其它非只读工具跳过普通审批，由执行边界硬拒绝。
         # 工作区外只读访问仍保留目录信任卡片，与初始 plan 图一致。
@@ -671,20 +692,20 @@ def _make_approval_preflight(
             "grep",
             "lsp",
         }:
-            return False
+            return finish(False, "deny", "L5")
 
         if tool_name == "task":
             target = str(tool_args.get("subagent_type") or tool_args.get("agent") or "")
             if target == "explore":
-                return not explore_task_readonly
+                return finish(not explore_task_readonly, "allow" if explore_task_readonly else "ask", "L3" if explore_task_readonly else "L5")
 
         # 可信任的外部路径：弹目录信任卡片（须先于非法路径短路，避免误吞）。
         if directory_trust_check is not None and directory_trust_check(request):
-            return True
+            return finish(True, "ask", "L5")
 
         # 非法路径（..、UNC、不可注册目录）不弹窗，由执行层硬拒绝。
         if original_preflight is not None and not original_preflight(request):
-            return False
+            return finish(False, "deny", "L1")
 
         rules = rules_provider() if rules_provider is not None else []
         effect = (
@@ -696,18 +717,18 @@ def _make_approval_preflight(
         # L2：deny 规则命中不弹窗，跳过审批中断，
         # 由 DenyRulesMiddleware 在执行层硬拒绝。
         if effect == "deny":
-            return False
+            return finish(False, "deny", "L2")
 
         # 只读工具在工作区内不弹窗（仅目录信任需要审批）。
         if tool_name in {"ls", "read_file", "glob", "grep", "lsp"}:
-            return False
+            return finish(False, "allow", "L3")
 
         # 文件 mutation 只有在 Snapshot、唯一匹配和 proposed content 全部可
         # 安全 prepare 时才允许进入 HITL。此处只决定是否弹窗；实际 dispatch
         # 仍会重用同一计划或返回稳定 ToolMessage，规则 allow 不能绕过它。
         if mutation_preflight is not None and tool_name in {"write_file", "edit_file", "delete_file"}:
             if not mutation_preflight(request):
-                return False
+                return finish(False, "deny", "L1")
 
         sensitive = requires_safety_check(tool_name, tool_args)
 
@@ -716,7 +737,7 @@ def _make_approval_preflight(
         # Shell 命令按规则前缀的剩余部分复核安全底线（ZC-117 约束 B）。
         if effect == "allow":
             if sensitive:
-                return True
+                return finish(True, "ask", "L3.5")
             if tool_name == "execute":
                 command = str(tool_args.get("command", "")).strip()
                 if command and allow_remainder_triggers_floor(command, rules):
@@ -724,8 +745,8 @@ def _make_approval_preflight(
                         "allow 规则命中但剩余部分触发安全底线，强制审批: %s",
                         command,
                     )
-                    return True
-            return False
+                    return finish(True, "ask", "L4")
+            return finish(False, "allow", "L4")
 
         # L3.1：Shell 安全命令白名单（非 plan 模式下自动放行只读安全的命令）。
         # 预检阶段直接跳过审批弹窗，与 evaluate_permission 的 L3.1 逻辑保持一致。
@@ -734,16 +755,16 @@ def _make_approval_preflight(
             command = str(tool_args.get("command", "")).strip()
             if command:
                 segments = extract_segments(command)
-                if segments and all(is_safe_command(segment) for segment in segments):
-                    floors = evaluate_safety_floors(command)
-                    if not floors["any_floor_triggered"]:
-                        return False
-                    logger.info("安全命令白名单命中但底线触发，强制审批: %s", command)
+            if segments and all(is_safe_command(segment) for segment in segments):
+                floors = evaluate_safety_floors(command)
+                if not floors["any_floor_triggered"]:
+                    return finish(False, "allow", "L3.1")
+                logger.info("安全命令白名单命中但底线触发，强制审批: %s", command)
 
         # L5 auto 模式：进入四层过滤器（设计规定 ask 规则命中同样进入过滤器）。
         if mode == "auto":
             if sensitive:
-                return True  # L3.5 敏感路径强制确认
+                return finish(True, "ask", "L3.5")  # L3.5 敏感路径强制确认
             # F4 分类器缓存命中时按其结论裁决：allow/deny 均不弹窗
             # （deny 由执行层守卫硬拒绝），ask 回退弹窗人工审批。
             if classifier is not None:
@@ -754,22 +775,22 @@ def _make_approval_preflight(
                     namespace=classifier_namespace_for_context(runtime_context),
                 )
                 if cached is not None:
-                    return cached[0] == "ask"
+                    return finish(cached[0] == "ask", str(cached[0]), "L5")
             decision, _reason = evaluate_auto_mode(tool_name, tool_args, workspace_root)
             # allow → 自动执行；deny → 不弹窗，AutoDestructiveGuardMiddleware 硬拒绝；
             # ask → 弹窗人工审批。
-            return decision == "ask"
+            return finish(decision == "ask", decision, "L5")
 
         # default / auto-edit 模式：ask 规则或敏感路径 → 弹窗。
         if effect == "ask" or sensitive:
-            return True
+            return finish(True, "ask", "L3.5" if sensitive else "L4")
 
         # auto-edit：工作区内非敏感编辑与删除自动执行；越界调用已由边界预检拒绝。
         if (
             mode == "auto-edit"
             and get_tool_kind(tool_name) in (ToolKind.EDIT, ToolKind.DELETE)
         ):
-            return False
+            return finish(False, "allow", "L5")
 
         # default：进入 HITL 集合的工具默认弹窗。
         if rules and tool_name == "execute":
@@ -787,7 +808,7 @@ def _make_approval_preflight(
                         command,
                         allow_resources,
                     )
-        return True
+        return finish(True, "ask", "L5")
 
     def composite(request: ToolCallRequest) -> bool:
         """装饰 `decide`：只有确定要弹窗的调用才登记 provider tool_call_id。"""
@@ -955,6 +976,9 @@ def create_harness_agent(
             workspace_root_registry,
             env=_local_tool_environment() if execution_context is None else None,
         )
+    from harness_agent.tracing.execution import TraceExecutionBackend
+
+    backend = TraceExecutionBackend(backend, cwd=prompt_workspace)
     if capability_view is not None:
         tools = tuple(
             tool
@@ -1387,6 +1411,9 @@ def create_harness_agent(
     if plugin_runtime is not None:
         agent_middleware.append(plugin_runtime.middleware)
     agent_middleware.append(ConcurrencyGuardMiddleware(concurrency_lock or AsyncRWLock()))
+    from harness_agent.tracing.tool import TraceToolMiddleware
+
+    agent_middleware.append(TraceToolMiddleware())
     # 必须位于 WorkspaceBoundary 和并发守卫之后：边界先完成 canonical
     # path/virtual route 校验，并发锁再覆盖实际 dispatch，最后由 seam 短路
     # DeepAgents builtin handler。
@@ -1411,6 +1438,10 @@ def create_harness_agent(
     agent_middleware.append(context_middleware)
     if rubric_middleware is not None:
         agent_middleware.append(rubric_middleware)
+    # 最后追加，使它成为最靠近模型的一层，才能看到真正发出去的请求。
+    from harness_agent.tracing.model import TraceModelMiddleware
+
+    agent_middleware.append(TraceModelMiddleware())
 
     # DeepAgents 的内建压缩会抢先改写历史，且与本机归档语义不兼容。构图时
     # 临时排除它，确保 ContextWindowMiddleware 是唯一的历史重写入口。

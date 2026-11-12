@@ -31,6 +31,7 @@ from harness_agent.runtime.execution_stream import (
     execute as execute_stream,
 )
 from harness_agent.diagnostic_log.runtime import DiagnosticLog, ensure_log
+from harness_agent.tracing import current_trace
 from harness_agent.runtime.provider_retry import (
     is_provider_error,
     is_provider_rate_limited,
@@ -364,6 +365,16 @@ class ManagedAgentExecutor:
                 )
                 try:
                     runtime = await request.runtime_provider()
+                    trace = current_trace()
+                    if trace is not None:
+                        try:
+                            trace.recorder.annotate_root({
+                                "source": getattr(runtime, "acquire_source", "reused"),
+                                "queue_ms": max(0, int(getattr(runtime, "queue_ms", 0))),
+                                "build_ms": max(0, int(getattr(runtime, "build_ms", 0))),
+                            })
+                        except Exception:
+                            logger.warning("运行时 trace 采集失败", exc_info=True)
                 except BaseException as exc:
                     request.diagnostic_log.error(
                         "runtime.acquire.failed",

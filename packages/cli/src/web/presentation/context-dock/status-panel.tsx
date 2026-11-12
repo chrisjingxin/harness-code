@@ -44,8 +44,14 @@ export function StatusPanel({
   const inputTokens = lastRun?.usage?.inputTokens ?? 0
   const outputTokens = lastRun?.usage?.outputTokens ?? 0
   const totalTokens = inputTokens + outputTokens
+  const usage = lastRun?.usage
+  const totalKnown = usage?.inputTokens != null || usage?.outputTokens != null
+  const totalComplete = usage?.inputComplete === true && usage?.outputComplete === true
+  const totalLabel = totalKnown
+    ? `${totalComplete ? "" : "≥"}${totalTokens.toLocaleString()} tokens${totalComplete ? "" : "（统计不完整）"}`
+    : interactive.timeline.length > 0 ? "未知" : "0 tokens (新会话)"
   const cachedTokens = lastRun?.usage?.cachedTokens
-  const cacheHitRate = cachedTokens !== undefined && inputTokens > 0
+  const cacheHitRate = usage?.inputComplete === true && cachedTokens !== undefined && inputTokens > 0
     ? Math.round((cachedTokens / inputTokens) * 100)
     : null
 
@@ -97,15 +103,15 @@ export function StatusPanel({
           <dd>{interactive.currentThreadId ? interactive.currentThreadId.slice(0, 16) : "新会话"}</dd>
           <dt>对话统计</dt>
           <dd>{messagesCount} 条消息 · {toolCallsCount} 次工具调用</dd>
-          {totalTokens > 0 ? (
+          {totalKnown ? (
             <>
               <dt>本轮用量</dt>
-              <dd>{totalTokens.toLocaleString()} tokens {cacheHitRate !== null ? `(${cacheHitRate}% 缓存命中)` : ""}</dd>
+              <dd>{totalLabel} {cacheHitRate !== null ? `(${cacheHitRate}% 缓存命中)` : ""}</dd>
             </>
           ) : (
             <>
               <dt>本轮用量</dt>
-              <dd>0 tokens (新会话)</dd>
+              <dd>{totalLabel}</dd>
             </>
           )}
         </dl>

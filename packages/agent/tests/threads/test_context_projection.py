@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +20,7 @@ from harness_agent.threads.context_projection import (
     tail_user_exclude_id,
 )
 from harness_agent.threads.prompting import HISTORY_REWRITE_VERSION
+from harness_agent.tracing import TraceRecorder, use_trace
 from harness_agent.threads.thread_persistence import (
     CommitContextRewrite,
     ContextArtifactDraft,
@@ -44,6 +46,99 @@ async def _store(tmp_path, name: str = "project") -> ThreadPersistence:
     project = tmp_path / name
     project.mkdir()
     return await ThreadPersistence.open(project=project, home=tmp_path / "home")
+
+
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取 Context 测试的临时 session JSONL。"""
+    return [
+        json.loads(line)
+        for path in root.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+async def test_context_project_trace_records_checkpoint_match_and_message_count(
+    tmp_path: Path,
+) -> None:
+    """缓存命中与未命中只记录真实 matched/count，不带消息正文。"""
+    store = await _store(tmp_path)
+    await accept_thread(store, "project-miss", "CANARY_CONTEXT_PROJECT_MISS")
+    await accept_thread(store, "project-hit", "CANARY_CONTEXT_PROJECT_HIT")
+    await store.commit_context(
+        CommitContextRewrite(
+            thread_id="project-hit",
+            checkpoint=CompressionCheckpointDraft(
+                checkpoint_id="checkpoint-project-trace",
+                mode="full",
+                rewrite_version=HISTORY_REWRITE_VERSION,
+                projected_messages=(HumanMessage(content="summary"),),
+            ),
+        )
+    )
+    projector = ContextProjector(store)
+    recorder = TraceRecorder(
+        session_id="project-trace",
+        run_id="run-project-trace",
+        log_dir=tmp_path / "trace",
+    )
+    with use_trace(recorder.start_trace()):
+        missed = await projector.project("project-miss")
+        replayed = await projector.project("project-miss")
+        matched = await projector.project("project-hit")
+    recorder.end_trace()
+
+    assert missed.checkpoint is None and matched.checkpoint is not None
+    assert replayed.messages == missed.messages
+    events = _trace_events(tmp_path / "trace")
+    ends = [
+        event
+        for event in events
+        if event["event"] == "span.end" and event["name"] == "context.project"
+    ]
+    assert [{key: event["attributes"][key] for key in ("matched", "count")} for event in ends] == [
+        {"matched": False, "count": 1},
+        {"matched": True, "count": 1},
+    ]
+    assert all(event["kind"] == "CONTEXT" for event in ends)
+    assert all(event.get("idempotency_key") for event in ends)
+    assert len({event["idempotency_key"] for event in ends}) == 2
+    assert "CANARY_CONTEXT_PROJECT" not in json.dumps(events, ensure_ascii=False)
+    await store.close()
+
+
+async def test_context_project_trace_failure_does_not_invent_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """投影异常以 FAILED 结束，不虚构 matched 或消息数量。"""
+    store = await _store(tmp_path)
+    await accept_thread(store, "project-failed", "request")
+    projector = ContextProjector(store)
+
+    async def fail_projection(*_args, **_kwargs):
+        raise ContextProjectionError("PROJECTION_TRACE_INJECTED")
+
+    monkeypatch.setattr(projector, "_project_unchecked", fail_projection)
+    recorder = TraceRecorder(
+        session_id="project-failed",
+        run_id="run-project-failed",
+        log_dir=tmp_path / "trace-failed",
+    )
+    with use_trace(recorder.start_trace()):
+        with pytest.raises(ContextProjectionError, match="PROJECTION_TRACE_INJECTED"):
+            await projector.project("project-failed")
+    recorder.end_trace()
+
+    events = _trace_events(tmp_path / "trace-failed")
+    end = next(
+        event
+        for event in events
+        if event["event"] == "span.end" and event["name"] == "context.project"
+    )
+    assert end["kind"] == "CONTEXT"
+    assert end["status"] == "FAILED"
+    assert end["attributes"] == {}
+    await store.close()
 
 
 async def test_projector_rebuilds_transcript_and_rehydrates_large_tool_artifact(tmp_path):

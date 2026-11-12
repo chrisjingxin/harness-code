@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
+import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.outputs import LLMResult
 
+from harness_agent.host.agent_host import AgentHost
+from harness_agent.host.run_execution import AdapterOutcome
 from harness_agent.host.run_coordinator import (
     ConnectionRef,
     InteractionResult,
@@ -22,6 +28,13 @@ from harness_agent.host.run_coordinator import (
     UserRunInput,
 )
 from harness_agent.runtime.interactions import InteractionRequest
+from harness_agent.tracing import (
+    TraceRecorder,
+    TraceStatus,
+    current_trace,
+    func_monitor,
+    use_trace,
+)
 from harness_agent.runtime.model_output_guard import MalformedToolCallError
 
 
@@ -924,6 +937,434 @@ async def test_run_coordinator_allows_multithread_connection_runs() -> None:
     second = await second_task
     await coordinator.cancel(second.ref, owner)
     await _events(second)
+
+
+def _trace_events(root: Path) -> list[dict[str, object]]:
+    """读取临时 session JSONL，供生命周期关联与顺序断言使用。"""
+    return [
+        json.loads(line)
+        for path in root.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pending_transcript_does_not_emit_sqlite_span(tmp_path: Path) -> None:
+    """执行期记录只进入 pending 队列，尚未 flush 时不得伪造写库 Span。"""
+    coordinator = _coordinator([])
+    run = RunState(
+        start=StartRun(
+            mode="build",
+            thread_id="thread-pending-trace",
+            run_id="run-pending-trace",
+            input=UserRunInput(message="hello"),
+        ),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+    )
+    recorder = TraceRecorder(
+        session_id=run.ref.thread_id,
+        run_id=run.ref.run_id,
+        log_dir=tmp_path,
+    )
+    with use_trace(recorder.start_trace()):
+        coordinator._lifecycle_port.append_transcript(
+            run,
+            TranscriptAppend(
+                thread_id=run.ref.thread_id,
+                run_id=run.ref.run_id,
+                record_id="assistant-pending-trace",
+                kind="assistant",
+                content="CANARY_PENDING_TRANSCRIPT",
+            ),
+        )
+    recorder.end_trace()
+
+    assert len(run.pending_transcript) == 1
+    events = _trace_events(tmp_path)
+    assert not [event for event in events if event.get("name") == "db.persist"]
+    assert "CANARY_PENDING_TRANSCRIPT" not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_agent_host_preparation_failure_closes_root_trace(tmp_path: Path) -> None:
+    """准备失败时 run.prepare 与根 Trace 都以 FAILED 恰好收尾一次。"""
+    host = object.__new__(AgentHost)
+    host._workspace = tmp_path
+    host._config_home = tmp_path
+
+    async def fail_reservation():
+        raise RuntimeError("prepare failed")
+
+    host._reserve_agent_engine_snapshot = fail_reservation
+    command = StartRun(
+        mode="build",
+        thread_id="thread-prepare-failed",
+        run_id="run-prepare-failed",
+        input=UserRunInput(message="hello"),
+    )
+
+    with pytest.raises(RuntimeError, match="prepare failed"):
+        await host._prepare_run(command, None)
+
+    events = _trace_events(tmp_path)
+    assert [event["event"] for event in events] == [
+        "trace.start",
+        "span.start",
+        "span.end",
+        "trace.end",
+    ]
+    assert events[1]["name"] == "run.prepare"
+    assert events[2]["status"] == events[3]["status"] == "FAILED"
+    assert len({event["trace_id"] for event in events}) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal", "trace_status"),
+    [("completed", "SUCCESS"), ("failed", "FAILED"), ("cancelled", "CANCELLED")],
+)
+async def test_run_trace_maps_terminal_and_inherits_background_context(
+    tmp_path: Path, terminal: str, trace_status: str
+) -> None:
+    """后台 adapter 使用同一 Trace，准备跨到受理，终态只写根结束记录。"""
+    inherited = []
+    executed_runs = []
+
+    class _OutcomeAdapter:
+        async def execute(self, run, _port):
+            inherited.append(current_trace())
+            executed_runs.append(run)
+            return AdapterOutcome(status=terminal, code="TEST_FAILED", message="terminal")
+
+    coordinator = _coordinator([])
+    coordinator._execution_adapters["build"] = _OutcomeAdapter()
+    coordinator._preparation_provider = func_monitor(
+        name="run.prepare", manual=True,
+        idempotency_key=lambda call: f"run.prepare:{call.args[0].run_id}",
+    )(coordinator._preparation_provider)
+    recorder = TraceRecorder(session_id="thread", run_id=f"run-{terminal}", log_dir=tmp_path)
+    context = recorder.start_trace()
+    with use_trace(context):
+        execution = await coordinator.start(
+            StartRun(
+                mode="build",
+                thread_id="thread",
+                run_id=f"run-{terminal}",
+                input=UserRunInput(message="hello"),
+                requested_approval_mode="yolo",
+            ),
+            ConnectionRef("owner"),
+        )
+    await _events(execution)
+    coordinator._complete_trace(executed_runs[0])
+    coordinator._complete_trace(executed_runs[0])
+
+    assert inherited == [context]
+    events = _trace_events(tmp_path)
+    accept = [event for event in events if event["name"] == "run.prepare"]
+    assert [event["event"] for event in accept] == ["span.start", "span.end"]
+    assert accept[0]["idempotency_key"] == f"run.prepare:run-{terminal}"
+    assert accept[-1]["attributes"]["requested_approval_mode"] == "yolo"
+    complete = [event for event in events if event["name"] == "run.complete"]
+    assert complete == []
+    assert events[-1]["attributes"]["status"] == terminal
+    assert events[-1]["event"] == "trace.end"
+    assert events[-1]["status"] == trace_status
+    assert len({event["trace_id"] for event in events}) == 1
+
+
+@pytest.mark.asyncio
+async def test_mock_run_combines_lifecycle_and_graph_callbacks_in_one_trace(
+    tmp_path: Path,
+) -> None:
+    """最小 Build Run 的图外执行边界与 LLM/NODE/TOOL 共用身份和父子关系。"""
+    agent_run_id = uuid.uuid4()
+    node_run_id = uuid.uuid4()
+    llm_run_id = uuid.uuid4()
+    tool_run_id = uuid.uuid4()
+
+    class _CallbackAgent:
+        async def astream(self, _stream_input, **kwargs):
+            callbacks = kwargs["config"]["callbacks"]
+            recorder = next(
+                callback for callback in callbacks if isinstance(callback, TraceRecorder)
+            )
+            await recorder.on_chain_start(
+                {"name": "main-agent"}, {}, run_id=agent_run_id
+            )
+            await recorder.on_chain_start(
+                {"name": "model-node"},
+                {},
+                run_id=node_run_id,
+                parent_run_id=agent_run_id,
+            )
+            await recorder.on_chat_model_start(
+                {"name": "mock-model"}, [[]], run_id=llm_run_id, parent_run_id=node_run_id
+            )
+            await recorder.on_llm_end(
+                LLMResult(generations=[], llm_output={"token_usage": {"total_tokens": 1}}),
+                run_id=llm_run_id,
+                parent_run_id=node_run_id,
+            )
+            await recorder.on_tool_start(
+                {"name": "read_file"},
+                '{"file_path":"a.py"}',
+                run_id=tool_run_id,
+                parent_run_id=node_run_id,
+            )
+            await recorder.on_tool_end(
+                "file body", run_id=tool_run_id, parent_run_id=node_run_id
+            )
+            await recorder.on_chain_end({}, run_id=node_run_id, parent_run_id=agent_run_id)
+            await recorder.on_chain_end({}, run_id=agent_run_id)
+            yield ("messages", (AIMessageChunk(content="完成"), {}))
+
+    agent = _CallbackAgent()
+
+    @func_monitor(name="run.prepare", idempotency_key="run.prepare:run-mock", manual=True)
+    async def prepare(_command, _persistence):
+        return RunPreparation()
+
+    async def runtime_provider(_run):
+        async def release():
+            return None
+
+        return RunRuntime(
+            agent=agent,
+            run_context=None,
+            graph_config=lambda thread_id: {"configurable": {"thread_id": thread_id}},
+            release=release,
+        )
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=prepare,
+        runtime_provider=runtime_provider,
+        interaction_port=_NoopInteraction(),
+    )
+    recorder = TraceRecorder(session_id="thread", run_id="run-mock", log_dir=tmp_path)
+    context = recorder.start_trace()
+    with use_trace(context):
+        execution = await coordinator.start(
+            StartRun(
+                mode="build",
+                thread_id="thread",
+                run_id="run-mock",
+                input=UserRunInput(message="hello"),
+            ),
+            ConnectionRef("owner"),
+        )
+    await _events(execution)
+
+    events = _trace_events(tmp_path)
+    starts = [event for event in events if event["event"] == "span.start"]
+    assert [event["name"] for event in starts] == [
+        "run.prepare",
+    ]
+    lifecycle_names = {
+        "run.prepare",
+    }
+    assert all(
+        event.get("idempotency_key")
+        for event in starts
+        if event["name"] in lifecycle_names
+    )
+    assert events[-1]["event"] == "trace.end"
+    assert events[-1]["status"] == "SUCCESS"
+    assert len({event["trace_id"] for event in events}) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_acceptance_failure_closes_prepared_trace(tmp_path: Path) -> None:
+    """准备完成后受理失败也必须关链，不能把手动 Trace 留在内存中。"""
+    coordinator = _coordinator([])
+    coordinator._preparation_provider = func_monitor(
+        name="run.prepare", idempotency_key="run.prepare:run-accept", manual=True,
+    )(coordinator._preparation_provider)
+
+    async def fail_accept(_binding):
+        raise RuntimeError("accept failed")
+
+    coordinator.execution_registry.accept = fail_accept
+    recorder = TraceRecorder(session_id="thread", run_id="run-accept", log_dir=tmp_path)
+    context = recorder.start_trace()
+    with use_trace(context), pytest.raises(RuntimeError, match="accept failed"):
+        await coordinator.start(
+            StartRun(
+                mode="build",
+                thread_id="thread",
+                run_id="run-accept",
+                input=UserRunInput(message="hello"),
+            ),
+            ConnectionRef("owner"),
+        )
+
+    events = _trace_events(tmp_path)
+    assert [event["name"] for event in events if event["event"] == "span.start"] == [
+        "run.prepare"
+    ]
+    assert events[-1]["event"] == "trace.end"
+    assert events[-1]["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_active_acceptance_does_not_start_another_trace(tmp_path: Path) -> None:
+    """相同活动 Run 的重复受理复用原执行，不重复准备或开链。"""
+    gate = asyncio.Event()
+    preparations = 0
+
+    class _BlockingAdapter:
+        async def execute(self, run, _port):
+            run.status = "running"
+            await gate.wait()
+
+    @func_monitor(name="run.prepare", idempotency_key="run.prepare:run-duplicate", manual=True)
+    async def prepare(_command, _persistence):
+        nonlocal preparations
+        preparations += 1
+        return RunPreparation()
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=prepare,
+        runtime_provider=_noop_runtime,
+        interaction_port=_NoopInteraction(),
+    )
+    coordinator._execution_adapters["build"] = _BlockingAdapter()
+    command = StartRun(
+        mode="build",
+        thread_id="thread",
+        run_id="run-duplicate",
+        input=UserRunInput(message="hello"),
+    )
+    recorder = TraceRecorder(session_id="thread", run_id="run-duplicate", log_dir=tmp_path)
+    context = recorder.start_trace()
+    with use_trace(context):
+        first = await coordinator.start(command, ConnectionRef("owner"))
+        await asyncio.sleep(0)
+        duplicate = await coordinator.start(command, ConnectionRef("owner"))
+    assert duplicate.accepted is True
+    assert preparations == 1
+    await coordinator.cancel(first.ref, ConnectionRef("owner"))
+    await _events(first)
+    gate.set()
+
+    events = _trace_events(tmp_path)
+    assert [event["event"] for event in events].count("trace.start") == 1
+    assert [event["event"] for event in events].count("trace.end") == 1
+    accept = [event for event in events if event["name"] == "run.prepare"]
+    assert [event["event"] for event in accept] == ["span.start", "span.end"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("expired", "expected"), [(False, "reject"), (True, "expired")])
+async def test_interaction_wait_records_outcome_without_payload(
+    tmp_path: Path, expired: bool, expected: str
+) -> None:
+    """响应与过期 Interaction 只记录阶段和结果，并覆盖真实等待区间。"""
+    class _ResultInteraction:
+        async def request(self, _owner, _run, _interaction):
+            return InteractionResult({"decision": "reject"}, expired=expired)
+
+    recorder = TraceRecorder(session_id="thread", run_id="run-interaction", log_dir=tmp_path)
+    context = recorder.start_trace()
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_ResultInteraction(),
+    )
+    run = RunState(
+        start=StartRun(
+            mode="build",
+            thread_id="thread",
+            run_id="run-interaction",
+            input=UserRunInput(message="hello"),
+        ),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        trace_context=context,
+    )
+    with use_trace(context):
+        result = await coordinator._lifecycle_port.request_interaction(
+            run,
+            InteractionRequest(
+                request_id="approval-trace",
+                type="approval",
+                payload={"secret": "CANARY_TRACE_INTERACTION"},
+                interrupt_id="interrupt-trace",
+            ),
+        )
+    context.recorder.end_trace()
+
+    assert result.value == {"decision": "reject"}
+    assert result.expired is expired
+    events = [event for event in _trace_events(tmp_path) if event["name"] == "interaction.wait"]
+    assert [event["event"] for event in events] == ["span.start", "span.end"]
+    assert events[0]["kind"] == "INTERACTION"
+    assert events[0]["attributes"]["request_id"] == "approval-trace"
+    assert events[0]["attributes"]["interaction_type"] == "approval"
+    assert events[1]["attributes"]["outcome"] == expected
+    assert events[1]["attributes"]["wait_ms"] >= 0
+    assert events[1]["duration_ms"] >= 0
+    assert "CANARY_TRACE_INTERACTION" not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_interaction_wait_ends_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """取消与重复结束回调叠加时，等待 Span 仍以 CANCELLED 恰好收尾一次。"""
+    class _CancelledInteraction:
+        async def request(self, _owner, _run, _interaction):
+            raise asyncio.CancelledError
+
+    coordinator = RunCoordinator(
+        persistence_provider=_noop_persistence,
+        preparation_provider=lambda _command, _persistence: _noop_preparation(),
+        runtime_provider=_noop_runtime,
+        interaction_port=_CancelledInteraction(),
+    )
+    recorder = TraceRecorder(session_id="thread", run_id="run-int-cancel", log_dir=tmp_path)
+    original_end_span = recorder.end_span
+
+    def end_span_twice(span, *args, **kwargs) -> None:
+        original_end_span(span, *args, **kwargs)
+        original_end_span(span, *args, **kwargs)
+
+    monkeypatch.setattr(recorder, "end_span", end_span_twice)
+    context = recorder.start_trace()
+    run = RunState(
+        start=StartRun(
+            mode="build",
+            thread_id="thread",
+            run_id="run-int-cancel",
+            input=UserRunInput(message="hello"),
+        ),
+        owner=ConnectionRef("owner"),
+        persistence=None,
+        preparation=RunPreparation(),
+        trace_context=context,
+    )
+    with use_trace(context), pytest.raises(asyncio.CancelledError):
+        await coordinator._lifecycle_port.request_interaction(
+            run,
+            InteractionRequest(
+                request_id="approval-cancel",
+                type="approval",
+                payload={},
+                interrupt_id="interrupt-cancel",
+            ),
+        )
+    context.recorder.end_trace(TraceStatus.CANCELLED)
+
+    events = [event for event in _trace_events(tmp_path) if event["name"] == "interaction.wait"]
+    assert [event["event"] for event in events] == ["span.start", "span.end"]
+    assert events[-1]["status"] == "CANCELLED"
+    assert events[-1]["attributes"]["outcome"] == "cancelled"
 
 
 async def _noop_persistence():
@@ -1982,6 +2423,9 @@ async def test_failed_run_flushes_completed_semantics_but_discards_partial_assis
         async def append_transcript_batch(self, records):
             self.records.extend(records)
 
+        async def save_run_summary(self, _thread_id, _run_id, _outcome, _usage, _duration_ms):
+            pass
+
         async def complete_run(self, _thread_id: str) -> None:
             self.completed = True
 
@@ -2124,6 +2568,9 @@ async def test_provider_retry_drops_failed_build_output_before_transcript_commit
 
         async def append_transcript_batch(self, records) -> None:
             self.records.extend(records)
+
+        async def save_run_summary(self, _thread_id, _run_id, _outcome, _usage, _duration_ms):
+            pass
 
         async def complete_run(self, _thread_id: str) -> None:
             self.completed = True

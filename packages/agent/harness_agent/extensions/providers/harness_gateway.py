@@ -96,6 +96,8 @@ def create_openai_compatible_model(
         "base_url": settings.base_url,
         "api_key": settings.resolve_api_key(),
         "use_responses_api": False,
+        # 自定义网关不会默认打开 usage；显式请求 SSE 的最终用量块。
+        "stream_usage": True,
         "timeout": settings.timeout_seconds,
         # SDK 不再持有 retry budget；root、Compose、Inline child 与 Plugin
         # 都由 ManagedAgentExecutor 统一按 Run 配置重试，避免双重退避。

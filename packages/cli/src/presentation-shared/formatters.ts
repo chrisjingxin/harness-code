@@ -15,9 +15,10 @@ export function formatElapsed(durationMs: number): string {
 }
 
 /** 将 token 用量格式化为 in/out 摘要；缺失不展示。 */
-export function formatUsage(usage: { inputTokens: number; outputTokens: number } | undefined): string | undefined {
+export function formatUsage(usage: { inputTokens: number | null; outputTokens: number | null; inputComplete?: boolean; outputComplete?: boolean } | undefined): string | undefined {
   if (!usage) return undefined
-  return `${compactNumber(usage.inputTokens)} in · ${compactNumber(usage.outputTokens)} out`
+  const count = (value: number | null, complete?: boolean): string => value === null ? "未知" : `${complete === false ? "≥" : ""}${compactNumber(value)}`
+  return `${count(usage.inputTokens, usage.inputComplete)} in · ${count(usage.outputTokens, usage.outputComplete)} out`
 }
 
 /** 将上下文预算格式化为 estimated/cap 摘要；缺失或零预算不展示。 */
