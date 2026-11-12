@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "react": ["../../../../apps/desktop/node_modules/@types/react/index.d.ts"],
+      "react/*": ["../../../../apps/desktop/node_modules/@types/react/*"]
+    },
+    "typeRoots": ["../../../../apps/desktop/node_modules/@types", "../../../../node_modules/@types"],
+    "types": ["react", "react-dom"]
+  },
+  "include": ["main.tsx", "../../../../node_modules/vite/client.d.ts"]
+}

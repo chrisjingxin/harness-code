@@ -1,6 +1,8 @@
 # 独立桌面协作工作台
 
-本分支以 Electron + React/TypeScript 建立独立桌面产品。正式窗口提供三栏工作台、主题与缩放，登录后可查看工作区的共享会话、已保存历史和当前会话的实时更新，以及当前账号的设备与项目，并管理本机项目登记、共享和执行器。选择有权访问的共享会话后，可只读查看其原设备项目的文件和 Git 变更。Java 协作服务支持共享会话持久保存、排队、历史与 SSE 同步，通过设备通道连接本机 Runner。真实 ACP Agent、Git 提交推送与 Trace 由后续任务接入。服务和数据库需显式配置、启动。
+本分支以 Electron + React/TypeScript 建立独立桌面产品，保留已实现的三栏、主题、对话和文件组件。2026-11-12 远端 Java 服务已改为 Project 成员制、HTTPS 上传定稿消息/工具摘要、简报与按需历史读取；旧远端执行、WSS、正文 SSE 及实时文件/Git 路由已移除。桌面和 Runner 的旧业务装配仍需适配，不能把既有界面冒烟当作新版端到端已通。轻量 SSE、Task、知识和看板由 HC-212 承接；后端与 ACP 以当前远端为准。见[顶层设计](docs/developer/architecture/多人协作工作台顶层设计.md)及[任务衔接](docs/developer/project/项目协作设计任务衔接.md)。
+
+前端已登记四张待认领任务：HC-217 项目导航、HC-218 会话只读与主动同步、HC-219 引用/任务/知识、HC-220 看板与轻量通知。职责、依赖和并行接点见[前端任务分工](docs/developer/project/项目协作设计任务衔接.md#3-前端任务与并行顺序)，外观对照见[保留的视觉预览](docs/developer/previews/project-collaboration/README.md)。当前仅完成设计与建卡，生产实现按各卡 Spec → Plan → Todo 推进，服务端和 ACP 由同事负责。
 
 ## 从源码启动
 
@@ -24,18 +26,17 @@ npm --workspace @workbench/desktop run preview
 
 ## 显式启动 Java 数据基础
 
-只有下列命令需要完整 JDK 21、Maven 3.9.11 和已准备的 MySQL 兼容数据库；原桌面安装/构建/启动不会自动安装这些工具或启动数据库。通过 `JAVA_HOME` 指定可用 JDK，必要时用 `MAVEN_EXECUTABLE` 指定 Maven；已有工具均可复用，不依赖某个 IDE 或开发机路径。
+只有下列服务命令需要完整 JDK 21、Maven 和已准备的 MySQL 兼容数据库；桌面构建不会自动安装这些工具或启动数据库。通过 `JAVA_HOME` 指定 JDK，必要时用 `MAVEN_EXECUTABLE` 指定 Maven。首次准备数据库需由 DBA 或开发者显式执行[唯一 schema.sql](services/collaboration-server/src/main/resources/db/schema.sql)，之后再初始化演示数据和启动；应用只核对结构，不建表。
 
 ```sh
 npm run server:build
 npm run contracts:smoke
 npm run server:contracts
-npm run server:migrate
 npm run server:init-demo
 npm run server:start
 ```
 
-构建与共同契约检查不连接数据库。迁移/初始化/启动前需通过受限外部配置提供 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 和对应 TLS 信任，不在源码或命令参数写入真实密码；迁移与普通运行使用各自所需权限。迁移和演示初始化是显式操作，普通启动不会建表或补回账号/成员。示例服务地址为 `http://127.0.0.1:18084`，`GET /health` 返回就绪状态，`GET /api/v1/meta` 还需匹配的 Origin 和 `X-Workbench-Protocol-Version: 1`；身份HTTP、宿主main客户端和最小桌面身份区域已通过本机真实冒烟；未经认证的受保护接口拒绝访问。研发可显式提供本机隔离环境配置后运行 `node scripts/workbench/run-identity-smoke.mjs`，该入口只复用已初始化实例；准备方式和真实结果见Task/Plan。
+构建与契约检查不连接数据库。初始化/启动前通过受限配置提供 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 及 TLS 信任，不在源码或命令参数写真实密码。当前已移除 Flyway、V001～V003 和 server:migrate，不使用旧建库步骤。示例服务地址为 `http://127.0.0.1:18084`，业务响应采用当前 BeeResponseEntity 包络；组织和同步接口见 [HC-211 Spec](docs/developer/spec/HC-211-协作模型重构与只读同步.md)。standalone 开发模式不代表 Redis/Kafka/ES 集群已验证，部署配置以[Java 中继方案](docs/developer/project/Java中继调整方案.md)及当前 application.yml 为准。
 
 桌面只从宿主启动环境变量 `WORKBENCH_SERVICE_ORIGIN` 读取一个固定服务origin。研发先显式启动前述Java/MySQL，再运行：
 
@@ -43,11 +44,11 @@ npm run server:start
 WORKBENCH_SERVICE_ORIGIN=http://127.0.0.1:18084 npm run dev
 ```
 
-远程服务使用 HTTPS，本机允许上述 loopback HTTP。点左侧「登录」，在「演示身份」选择 user01～user03。确认工作区后可在「共享会话」打开已保存历史，或展开设备与项目选择会话；选中会话后查看实时连接状态，也可手动「刷新历史」。原项目可访问时，可在右侧展开目录、预览文件和查看 Git Diff，也可在中央打开文件页签。「设置」中可查看成员或登记、共享和管理本机设备。关窗保留已启动的执行器，重开需重新登录；经权限确认后恢复个人草稿、文件页签与阅读位置。「停止」或应用退出会等待执行器收尾。未配置服务时窗口仍可打开，并显示连接提示。Cookie 和 CSRF 留在 main 内存，设备凭据和执行记录保存在原设备的受限 SQLite 账本中。完整使用边界见用户指南。
+远程服务使用 HTTPS，本机允许上述 loopback HTTP。桌面可按源码入口打开；现有 shared-conversation/设备 UI 尚有旧接口调用，不能按旧指南期待其已适配新版后端。后续装配将提供 Project 导航、简报/Task 轻量通知和主动正文同步；所有跨机器只读，包括同账号其他设备，继续工作需基于快照新建本机会话。目录可以不是 Git，文件阅读组件用于本机；Git 写入口暂缓。
 
-当前文件读取只对服务端明确绑定的纯本地演示项目开放；项目共享本身不会自动建立可信来源。托管仓库与真实内网身份、仓库权限接入仍待后续完成。[只读服务范围](docs/developer/task/HC-199-文件与Git服务迁移.md#原设备只读路由实施证据2026-11-11复核通过)
+远端 D10 已取消跨机器实时文件/Git 访问。HC-199 原设备读取的[历史证据](docs/developer/task/HC-199-文件与Git服务迁移.md#原设备只读路由实施证据2026-11-11复核通过)保留，但不代表当前服务还开放该路由；查看者只读云端已上传内容。
 
-工具按各设备的 OS/CPU/系统版本选择。当前数据迁移为V001身份三表、V002设备三表与V003会话执行六表，普通启动只校验已有迁移。准备方法见 [HC-194 Plan](docs/developer/plan/HC-194-协作契约与云端基础.md)，本轮本机冒烟与覆盖范围见 [HC-195 Task](docs/developer/task/HC-195-共享会话与实时同步.md) 和 [HC-196 Task](docs/developer/task/HC-196-设备接入与本机执行.md)。Windows、目标TDSQL和真实ACP的整体验证留HC-204。
+当前 schema.sql 声明 11 张服务端基础表，组织模型和只读同步停点见 [HC-211 Todo](docs/developer/todo/HC-211-协作模型重构与只读同步.md)，实库全链路冒烟仍待补齐。HC-195/196/198 已由远端标过时，原阶段证据继续保留。Windows、TDSQL、真实中间件与新版桌面整体验证另行完成。
 
 ## 工程检查
 

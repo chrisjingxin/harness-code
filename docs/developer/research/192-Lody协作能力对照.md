@@ -1,14 +1,24 @@
 # Lody 协作能力对照
 
-更新：2026-11-06。服务于 [HC-192](../task/HC-192-协作工作台与会话交接.md) 与 [顶层设计草案](../architecture/多人协作工作台顶层设计.md)。本版按独立 Windows/macOS 桌面项目设计，本机执行、云端共享；原 TUI/独立 Web 退出目标产品，平台与 Harness 通过 ACP 解耦。下文区分参考事实、适配建议与未验证结果。
+源码调研基线：2026-11-06；使用决策更新：2026-11-12。服务于 [HC-192](../task/HC-192-协作工作台与会话交接.md) 与[顶层设计](../architecture/多人协作工作台顶层设计.md)。本版保留独立桌面、本机执行和 Java/TDSQL；协作改为同 Project 只读共享、主动拉取及 Task 分派，不采用同会话跨机器接管。下文区分固定源码事实、历史基线和本项目适配建议。
+
+| 参考能力 | 2026-11-12 本项目采用方式 |
+| --- | --- |
+| 一个会话一个工作目录 | 以 cwd 建立会话，目录可非 Git；Agent 可访问范围按能力、OS 和本机授权处理 |
+| 会话 mentions、引用与作者 | 参考选择、预览、固定材料和展示；引用范围限定同 Project，Workspace 知识单独按版本引用 |
+| 同一会话交接/远端控制 | 只作参考产品事实；本项目所有跨机器访问均只读，同账号换机也新建本机会话 |
+| 历史/传输及恢复 | 参考持久化、去重和补传；本机异步上传，其他成员仅在明确点击后拉取正文，不默认订阅他人输出 |
+| 团队/项目、Task、知识与看板 | Java 平台业务自行实现，不要求 Agent 配合，也不声称已找到完整对应托管后端 |
 
 用户后续明确中间对话和右侧文件/变更沿用本仓库组件；Lody 主要用于新增协作能力/导航参考，不能因参考其消息组件而重写已完成 UI。当前源码的可复用点、旧依赖和 HC-205～208 主责见[既有界面复用边界](192-既有界面复用边界.md)，团队并行与未来云端认领见[并行开发约定](../project/协作任务并行开发约定.md)。
+
+本次拉取远端后，用户明确后端与 ACP 以远端 HC-210/211/212、正式契约和实际实现为准，Lody 仅提供参考，不能覆盖这些约束。设备采用 HTTPS 上传/心跳，轻量 SSE 更新简报和 Task，正文主动拉取；消息正文走 Redis/Kafka/ES，数据库按单文件 schema.sql 建表。跨机器不提供实时文件/Git，原读取路由只作历史成果。
 
 ## 引用基线与复核方式
 
 外部源码均使用公开仓库的固定提交链接，发布包使用固定版本。任何开发者可直接查看下列链接，或自行克隆仓库后检出表中提交；不要求具有研究者的本机目录、缓存、提取文件或下载清单。第三方代码只作为研究材料，不因引用而成为项目依赖。
 
-主仓库生产源码阅读基线为 `bbb9adc0b8a632587a760faf78d4232b043e832a`；协作设计文档尚未对应生产实现。Lody 本地参考仍为下表固定提交，没有为本轮调研刷新参考仓库。
+2026-11-06 原稿的主仓库源码基线为 `bbb9adc0b8a632587a760faf78d4232b043e832a`。此后已有桌面、Java、Runner 与 UI 阶段实现，不能用下文旧基线推断当前仍无这些模块；实际证据在各 Task。Lody 参考仍为下表固定提交，没有为本轮刷新参考仓库。
 
 | 项目 | 固定提交 | 验证边界 |
 | --- | --- | --- |
@@ -24,9 +34,9 @@
 
 Lody 的其余 ACP 子模块版本可从 [.gitmodules](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/.gitmodules) 和固定提交中的 gitlink 查看，不按各适配器当前主分支推断行为。包版本以 [锁文件](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/pnpm-lock.yaml) 为准。可自行取得所需文件，不依赖预先复制整套参考工程；本项目没有安装或运行这些参考项目。
 
-## 主仓库当前行为
+## 主仓库迁移前源码基线
 
-本节是尚未迁移的源码基线，以下旧路径不是新产品依赖清单。后续迁出组件并删除旧入口时，应同步移除失效链接或将必要历史证据固定到原提交，不为保留文档链接而保留旧运行代码。
+本节保留 2026-11-06 原稿的迁移前基线，以下旧路径不是新产品依赖清单，也不代表 2026-11-12 当前进度。迁出组件并删除旧入口时，应同步移除失效链接或固定历史证据，不为文档链接保留旧运行代码。
 
 - [Web server](../../../packages/cli/src/web/server.ts) 绑定本机地址，提供当前接管页面。
 - [PresentationCoordinator](../../../packages/cli/src/presentation-coordinator/coordinator.ts) 在 TUI 与一个 Web 窗口之间转移输入权，拒绝第二个活动渲染连接。
@@ -34,22 +44,22 @@ Lody 的其余 ACP 子模块版本可从 [.gitmodules](https://github.com/LodyAI
 - [RunCoordinator](../../../packages/agent/harness_agent/host/run_coordinator.py) 已有 Thread busy、请求幂等、运行与取消边界，可作为 Harness ACP 入口的业务基础。
 - [ThreadPersistence](../../../packages/agent/harness_agent/threads/thread_persistence.py) 保管本机 Transcript 与模型检查点；平台多人历史不能通过共享该数据库文件实现。
 - [提及搜索](../../../packages/cli/src/presentation-shared/mention-filter-policy.ts) 当前面向文件、目录与符号链接，需要增加平台会话/消息引用。
-- 当前通用入口是本项目 JSON-RPC v3，没有现成的 ACP server。需要独立适配，不能仅更换方法名。
-- 当前没有独立 Electron 桌面与多人云服务。双平台安装脚本和源码中的 Windows 分支不能作为桌面安装/打包已验收的证据；现有 CLI 的 Bun/OpenTUI 不应成为桌面 Runner 的依赖。
+- 原稿当时的通用入口是 JSON-RPC v3，没有现成 ACP server；后续 Agent 侧 ACP 结果见 [HC-200](../task/HC-200-Harness独立ACP接入.md)，不能仅更换方法名。
+- 原稿当时尚无独立 Electron 桌面与多人云服务；后续成果见 [HC-193](../task/HC-193-独立桌面工程与分包.md)、[HC-194](../task/HC-194-协作契约与云端基础.md)及相关任务。任何单平台源码或构建都不能证明双平台整体通过。
 
 ## 独立产品与复用落点
 
-用户明确本分支可作为与 master 独立演进的新项目；本项目不再沿用原 TUI/Web 产品入口。参考 Lody 表示借鉴其有用模块和职责，不是整体嵌入 Lody CLI，也不是把新增逻辑放进 Harness 内核。目标包名见顶层设计第 4 节，目前均未建立。
+用户明确本分支可作为与 master 独立演进的新项目；本项目不再沿用原 TUI/Web 产品入口。参考 Lody 表示借鉴其有用模块和职责，不整体嵌入 Lody CLI，也不把新增逻辑放进 Harness 内核。已有包和新增目标职责见顶层设计第 4 节，以下目标表不代表所有业务均已完成。
 
 | 参考或迁移内容 | 目标归属建议 | 解耦要求 |
 | --- | --- | --- |
 | 桌面窗口、preload、原生能力与托管 | apps/desktop、apps/runner 装配入口 | 入口负责组合，React 视图不依赖 Electron 主进程或旧 CLI |
-| 主题、会话/工具、mentions、共享/交接交互 | packages/workbench-ui | 只消费新平台契约，旧 InteractiveSnapshot/Thread/Run 不成为公共类型 |
-| 平台 HTTP/SSE 与设备命令/事件 | packages/workbench-contracts | 新独立包，不扩展或重导出旧 Harness packages/protocol |
+| 主题、会话/工具、mentions、只读共享和 Task 展示 | packages/workbench-ui | 只消费新平台契约，旧 InteractiveSnapshot/Thread/Run 不成为公共类型 |
+| 平台业务、主动查询与设备上传/确认 | packages/workbench-contracts | 独立包，不扩展或重导出旧 Harness packages/protocol；不沿用团队远端执行语义 |
 | 本机受理/补传、ACP 会话与进程 | packages/runner-core、packages/acp-runtime | 不导入 Harness/旧 CLI；SDK 与适配器固定版本，不混用其内部状态类型 |
 | 本机文件与 Git | packages/project-service | 从旧宿主提取后不回引原 Controller，所有 ACP 后端共用 |
-| Harness 专有 Trace 与设置 | packages/harness-provider 的 runtime/ui 导出 | 通过通用接口注册，平台不解析 SDK marker，也不按 Agent 名称硬编码专有功能 |
-| Harness 推理、工具与上下文 | 独立 Python ACP Agent，现 packages/agent | 只加入接入适配所需变更；用户、设备、交接和引用不进入内核 |
+| Harness 专有 Trace 与设置 | packages/providers/harness 的 runtime/ui 导出 | 按 Agent 接入架构通过通用接口注册，平台不解析 SDK marker，也不按 Agent 名称硬编码专有功能 |
+| Harness 推理、工具与上下文 | 独立 Python ACP Agent，现 packages/agent | 只加入接入适配所需变更；成员、Project、Task 和引用业务不进入内核 |
 
 同一仓库保留 Harness 源码仅是维护位置选择，不代表它是桌面/Java/通用 Runner 的必需依赖。验收应包含不安装 Harness/Python 的平台启动和第二 ACP 后端互通，Harness 集成另验；通用包不能依赖可选集成包。新逻辑按功能落包并记录固定来源/许可，不创建同时包含 UI、云业务和内核代码的混合目录。
 
@@ -62,9 +72,11 @@ Lody 的其余 ACP 子模块版本可从 [.gitmodules](https://github.com/LodyAI
 | 渲染器到原生接口 | [preload/index.ts](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/apps/electron/src/preload/index.ts)、[ipc-bridge.ts](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/apps/electron/src/preload/ipc-bridge.ts) | 通过 contextBridge 暴露 IPC，而非 React 直接操作文件与子进程；实际隔离配置由本产品 Spec 验证，不整份照抄 |
 | 目标平台打包 | [electron-builder.yml](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/apps/electron/electron-builder.yml) | Windows NSIS、Mac 产物/原生资源与签名配置组织；不继承 Lody 品牌、更新地址、渠道或证书 |
 
-官方 [快速开始](https://lody.ai/zh/docs/quickstart/) 说明桌面默认启动本机 CLI daemon，用户也可将桌面作为其他机器的控制端；[交接指南](https://lody.ai/zh/docs/session-handoff/) 描述接手同一会话、工作树和分支。本项目采用原设备执行、共享历史的方向，不把交接解释为自动迁移代码和 Agent 检查点。
+原稿阅读的官方快速开始和[固定版交接指南](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/site-docs/content/docs/zh/%28guides%29/session-handoff.mdx)描述本机 daemon、控制其他机器及同会话续接。这些是参考产品行为，不是本项目新版需求；本项目保留本机执行，共享只读历史，继续工作时在当前设备另建会话。
 
-上述代码有真实的 Electron 与进程分层可参考，但公开桌面是 local-only 组合。完整云端业务仍不在公开源码内；本项目需自行实现 Java/TDSQL 服务及设备命令协议，不能把开启原有云标志当作已具备多人能力。原机器离线后可读本项目已同步的云端历史，继续执行等待原机器恢复；这是本项目的明确边界。
+上述代码有真实的 Electron 与进程分层可参考，但固定公开桌面是 local-only 组合。完整托管业务不在该公开源码内；本项目需实现自己的 Java/TDSQL 服务和上传/读取契约。原机器离线后可读已上传历史；基于快照在自己电脑开展新工作不等待原机器恢复，也不继承其原生检查点。
+
+固定 [acp-runner.ts](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/apps/cli/src/agent/acp-runner.ts) 接收 workdir；[agent-client.ts](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/apps/cli/src/agent/agent-client.ts) 用 cwd 建立会话，并在 Agent 宣告时处理额外目录。可借鉴单工作目录与能力分离，不据此承诺所有后端无限制访问任意路径，也不要求该目录是 Git 仓库。
 
 ## Lody 的已确认机制
 
@@ -105,9 +117,9 @@ Lody 对 [streams-crdt 0.19.2](https://github.com/LodyAI/Lody/blob/58f594a27da52
 
 [Cloud API 契约](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/cloud-api/AGENTS.md) 明确只包含公开操作名和 DTO，不包含 Convex schema、handler、业务实现或部署配置。本轮检查的公开仓库和发布物没有提供完整托管业务后端。同步开发服务与完整云端业务服务应分别描述。
 
-## 用户与交接场景
+## 用户与只读协作场景
 
-官方 [同一会话交接指南](https://lody.ai/blog/handoff-claude-code-session/) 描述同事打开已有 live session，沿用原 Agent 配置、工作树与分支后继续操作，与本项目用户间接续目标接近。本版采用本机执行，增加设备/项目登记与明确共享；首版按项目共享，不照搬其全部机器与组织授权模型，也不引入岗位角色。
+固定版交接指南中的同会话接管与本项目最初设想接近，但 2026-11-12 用户已明确改变协作方向。新版以 Workspace 组织团队，以 Project 限定成员共享；@会话读取固定快照，@人发布 Task，被指派人在本机主动开始。跨机器只读也适用于同一账号，不采用原会话控制权转移。
 
 | 参考入口 | 已核对的实现 | 本项目采用方式 |
 | --- | --- | --- |
@@ -115,11 +127,11 @@ Lody 对 [streams-crdt 0.19.2](https://github.com/LodyAI/Lody/blob/58f594a27da52
 | [平台 React 订阅](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/platform/src/react.ts) | 页面通过接口读取身份与工作区，不直接依赖特定认证服务 | Java API 接在工作台入口，组件不按账号名或岗位分支 |
 | [本地身份与目录注入](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/platform/src/local.ts) | 宿主可注入身份和隐式工作区，本地模式关闭云能力 | 参考注入方式，不把单用户本地模式作为多人平台 |
 | [平台测试](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/platform/test/platform.test.ts) | 合成用户与目录验证状态变化及能力边界 | 借鉴用户加载、切换与范围测试；本轮未运行 |
-| [消息作者模型](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/shared/src/message-author.ts) | 人类消息按 userId 记录，Agent 展示作者不承担人类授权 | 作者与交接人关联内部用户 ID，不因切换账号改写历史 |
+| [消息作者模型](https://github.com/LodyAI/Lody/blob/58f594a27da5262cb51164daf8b6bbd0333c4541/packages/shared/src/message-author.ts) | 人类消息按 userId 记录，Agent 展示作者不承担人类授权 | 作者、Task 发布人和被指派人关联内部用户 ID，不因切换账号改写历史 |
 
 默认预置 `user01`、`user02`、`user03` 普通账号，成员能力相同，不绑定岗位或业务角色。Java 按预置用户名查询启用用户并建立演示会话，成员关系同样来自初始化数据；内网真实登录到内网阶段开发。
 
-Lody 代码支持“身份与登录来源分离”的借鉴，但不证明存在可直接复制的预置账号后端。本项目的交接确认状态、预览时固定引用草稿、Java/TDSQL 数据模型是适配设计，不能描述为 Lody 已交付的相同实现。后续真实账号与内部用户 ID 明确绑定，不按显示名自动合并。
+Lody 代码支持“身份与登录来源分离”的借鉴，但不证明存在可直接复制的预置账号后端。本项目的 Task 接收、服务端引用快照、按需下载和 Java/TDSQL 模型是适配设计，不能描述为 Lody 已交付的相同实现。后续真实账号与内部用户 ID 明确绑定，不按显示名自动合并。
 
 ## 复用方式与 Java / TDSQL 取舍
 
@@ -130,8 +142,8 @@ Lody 代码支持“身份与登录来源分离”的借鉴，但不证明存在
 | Lody mentions、平台身份与会话职责 | 优先提取纯逻辑、接口组织与行为测试 | 清理托管云依赖，不直接搬入整个产品入口或样式体系 |
 | Lody ACP Runner 与适配器 | 标准生命周期归 acp-runtime，设备协作归 runner-core，专有能力注册集成 | 不通过旧 Harness CLI 或 JSON-RPC 充当通用 ACP；各后端 Win/Mac 能力分别验收 |
 | 会话作者、去重、恢复模型 | Java 管理共享业务，Runner 记录实际执行和待补传事件 | 服务端身份/事务、有序事件、设备绑定、本机受理与结果未知边界 |
-| Streams / CRDT 与同步示例 | 保留为研究与场景参考 | 首版在线共享采用 TDSQL + SSE，不增加另一套同步业务服务或重写 CRDT 引擎 |
-| 现有文件、Git 与 Trace | 按 [功能迁移表](../architecture/多人协作工作台顶层设计.md#101-当前功能迁移与复用清单) 分别迁到 project-service 与 harness-provider | 迁出后删除旧消费者；Java 路由/存共享结果，不解析 marker；保留原功能/测试与内网 SDK 逻辑 |
+| Streams / CRDT 与同步示例 | 保留为研究与场景参考 | 消费远端 Java/TDSQL + Redis/Kafka/ES 通路；轻量通知可自动更新，正文仍主动拉取，不新增 CRDT 后端 |
+| 现有文件、Git 与 Trace | 按[功能复用表](../architecture/多人协作工作台顶层设计.md#101-当前功能迁移与复用清单)保留现有包成果 | 本期隐藏 Git 写入口，文件/只读 Diff 保留；专有解析不进入 Java，内网 SDK 逻辑继续按原来源保留 |
 
 具体需要移植的纯函数与依赖闭包在 Spec/Plan 逐项登记，注明固定来源、原许可证、项目适配和验证方式。源码链接本身不代表完成依赖审查、已构建或互通。
 
@@ -146,4 +158,4 @@ Lody 代码支持“身份与登录来源分离”的借鉴，但不证明存在
 
 ## 未验证项
 
-没有运行参考项目、Electron、Runner、Java 服务、真实 Agent、模型请求、TDSQL 或部署。独立分包、TUI/Web 删除、无 Harness/Python 启动、第二 ACP 后端、Win/Mac 安装/休眠、跨设备续聊、数据库与内网 Trace 均是后续目标，没有实现或通过结论。普通 MySQL 测试不能代替 TDSQL 验收。
+本次修订没有运行参考项目或新版协作产品，也没有验证新的 Project、Task、知识和主动同步流程。既有桌面、Java、Runner 和 UI 的实际证据保留在各 Task；历史调研本身不证明产品已接通。目标 TDSQL、完整双平台和新版多设备协作另验，普通 MySQL 测试不能代替 TDSQL。
