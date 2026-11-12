@@ -35,23 +35,24 @@ class BoundaryFilterTest {
   @Test
   void duplicateQueryUnknownRouteAndWrongMethodAreRejected() throws Exception {
     mvc.perform(get("/api/v1/workspaces/" + WORKSPACE + "/devices?limit=1&limit=1").headers(ok()))
-      .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+      .andExpect(status().isBadRequest()).andExpect(jsonPath("$.body.code").value("INVALID_REQUEST"));
     mvc.perform(get("/api/v1/missing").headers(ok()))
-      .andExpect(status().isNotFound()).andExpect(jsonPath("$.error.code").value("RESOURCE_NOT_FOUND"));
+      .andExpect(status().isNotFound()).andExpect(jsonPath("$.body.code").value("RESOURCE_NOT_FOUND"));
     mvc.perform(post("/api/v1/meta").headers(ok()))
-      .andExpect(status().isMethodNotAllowed()).andExpect(jsonPath("$.error.code").value("METHOD_NOT_ALLOWED"));
+      .andExpect(status().isMethodNotAllowed()).andExpect(jsonPath("$.body.code").value("METHOD_NOT_ALLOWED"));
   }
 
   @Test
   void originProtocolAndPayloadAreRejectedBeforeTheController() throws Exception {
     mvc.perform(get("/api/v1/meta").header("Host", "127.0.0.1:18084").header("Origin", "https://rejected.invalid").header("X-Workbench-Protocol-Version", "1"))
-      .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("REQUEST_SOURCE_REJECTED"));
+      .andExpect(status().isForbidden()).andExpect(jsonPath("$.body.code").value("REQUEST_SOURCE_REJECTED"));
     mvc.perform(get("/api/v1/meta").header("Host", "127.0.0.1:18084").header("Origin", ORIGIN))
-      .andExpect(status().is(426)).andExpect(jsonPath("$.error.code").value("PROTOCOL_VERSION_UNSUPPORTED"));
+      .andExpect(status().is(426)).andExpect(jsonPath("$.body.code").value("PROTOCOL_VERSION_UNSUPPORTED"));
     mvc.perform(post("/api/v1/workspaces/" + WORKSPACE + "/devices").headers(ok()).contentType("application/json").content("x".repeat(17000)))
-      .andExpect(status().is(413)).andExpect(jsonPath("$.error.code").value("PAYLOAD_TOO_LARGE"))
-      .andExpect(jsonPath("$.error.retryable").value(false))
-      .andExpect(jsonPath("$.error.requestId").exists())
+      .andExpect(status().is(413)).andExpect(jsonPath("$.body.code").value("PAYLOAD_TOO_LARGE"))
+      .andExpect(jsonPath("$.returnCode").value("CLB0003"))
+      .andExpect(jsonPath("$.body.retryable").value(false))
+      .andExpect(jsonPath("$.body.requestId").exists())
       .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("stack"))));
   }
 
@@ -60,7 +61,8 @@ class BoundaryFilterTest {
     mvc.perform(get("/api/v1/meta").headers(ok()))
       .andExpect(status().isOk())
       .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("application/json")))
-      .andExpect(jsonPath("$.loginMode").value("demo"));
+      .andExpect(jsonPath("$.returnCode").value("SUC0000"))
+      .andExpect(jsonPath("$.body.loginMode").value("demo"));
   }
 
   private static org.springframework.http.HttpHeaders ok() {

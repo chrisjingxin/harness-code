@@ -225,73 +225,6 @@
       ],
       "additionalProperties": false
     },
-    "ErrorResponse": {
-      "type": "object",
-      "properties": {
-        "error": {
-          "type": "object",
-          "properties": {
-            "code": {
-              "type": "string",
-              "enum": [
-                "INVALID_REQUEST",
-                "AUTHENTICATION_REQUIRED",
-                "DEMO_LOGIN_REJECTED",
-                "CSRF_INVALID",
-                "REQUEST_SOURCE_REJECTED",
-                "RESOURCE_NOT_FOUND",
-                "METHOD_NOT_ALLOWED",
-                "UNSUPPORTED_MEDIA_TYPE",
-                "ALREADY_AUTHENTICATED",
-                "PAYLOAD_TOO_LARGE",
-                "PROTOCOL_VERSION_UNSUPPORTED",
-                "SERVICE_UNAVAILABLE",
-                "INTERNAL_ERROR",
-                "REQUEST_ID_CONFLICT",
-                "REGISTRATION_CONFLICT",
-                "DEVICE_AUTHENTICATION_REQUIRED",
-                "DEVICE_ACTION_REJECTED",
-                "WORKSPACE_MEMBER_REQUIRED",
-                "PROJECT_OWNER_REQUIRED",
-                "DEVICE_FORBIDDEN",
-                "REPOSITORY_CONFLICT",
-                "VERSION_CONFLICT",
-                "PROJECT_ARCHIVED",
-                "REPOSITORY_ARCHIVED",
-                "OWNER_CANNOT_LEAVE",
-                "SEQUENCE_CONFLICT"
-              ]
-            },
-            "message": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 240
-            },
-            "requestId": {
-              "$ref": "#/$defs/Id"
-            },
-            "retryable": {
-              "type": "boolean"
-            },
-            "expectedSequence": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          "required": [
-            "code",
-            "message",
-            "requestId",
-            "retryable"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "error"
-      ],
-      "additionalProperties": false
-    },
     "PlatformMessageHeader": {
       "type": "object",
       "properties": {
@@ -316,6 +249,102 @@
         "messageId",
         "type",
         "occurredAt"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorDetail": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "INVALID_REQUEST",
+            "AUTHENTICATION_REQUIRED",
+            "DEMO_LOGIN_REJECTED",
+            "CSRF_INVALID",
+            "REQUEST_SOURCE_REJECTED",
+            "RESOURCE_NOT_FOUND",
+            "METHOD_NOT_ALLOWED",
+            "UNSUPPORTED_MEDIA_TYPE",
+            "ALREADY_AUTHENTICATED",
+            "PAYLOAD_TOO_LARGE",
+            "PROTOCOL_VERSION_UNSUPPORTED",
+            "SERVICE_UNAVAILABLE",
+            "INTERNAL_ERROR",
+            "REQUEST_ID_CONFLICT",
+            "REGISTRATION_CONFLICT",
+            "DEVICE_AUTHENTICATION_REQUIRED",
+            "DEVICE_ACTION_REJECTED",
+            "WORKSPACE_MEMBER_REQUIRED",
+            "PROJECT_OWNER_REQUIRED",
+            "DEVICE_FORBIDDEN",
+            "REPOSITORY_CONFLICT",
+            "VERSION_CONFLICT",
+            "PROJECT_ARCHIVED",
+            "REPOSITORY_ARCHIVED",
+            "OWNER_CANNOT_LEAVE",
+            "SEQUENCE_CONFLICT"
+          ]
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "expectedSequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "code",
+        "requestId",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "description": "统一响应包络（失败）：returnCode 为 CLB 分段平台码，body 为错误明细",
+      "properties": {
+        "returnCode": {
+          "type": "string",
+          "pattern": "^CLB[0-9]{4}$"
+        },
+        "errorMsg": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "body": {
+          "$ref": "#/$defs/ErrorDetail"
+        }
+      },
+      "required": [
+        "returnCode",
+        "errorMsg",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "BeeResponseEntity": {
+      "type": "object",
+      "description": "统一响应包络：成功 returnCode=SUC0000、errorMsg=''，body 为业务报文",
+      "properties": {
+        "returnCode": {
+          "type": "string"
+        },
+        "errorMsg": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "body": {}
+      },
+      "required": [
+        "returnCode",
+        "errorMsg",
+        "body"
       ],
       "additionalProperties": false
     }

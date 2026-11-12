@@ -6,7 +6,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.web.servlet.ServletContextInitializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -136,7 +135,7 @@ public class WebSecurityConfig {
                 .logout(logout -> logout
                         .logoutRequestMatcher(request -> "POST".equals(request.getMethod()) && "/api/v1/auth/logout".equals(request.getRequestURI()))
                         .deleteCookies("WBSESSION")
-                        .logoutSuccessHandler((request, response, auth) -> response.setStatus(204))
+                        .logoutSuccessHandler((request, response, auth) -> ApiResponses.success(response, "null"))
                 )
                 .addFilterBefore(new BoundaryFilter(contracts, catalog, origin, uri.getRawAuthority()), SecurityContextHolderFilter.class)
                 .addFilterBefore(login, UsernamePasswordAuthenticationFilter.class)
@@ -186,10 +185,7 @@ public class WebSecurityConfig {
         }
 
         private void signedIn(HttpServletRequest request, HttpServletResponse response, Authentication auth) throws java.io.IOException {
-            response.setStatus(200);
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding("UTF-8");
-            response.getWriter().write(contracts.encode("CurrentUserResponse", identity.current(auth.getName())));
+            ApiResponses.success(response, contracts.encode("CurrentUserResponse", identity.current(auth.getName())));
         }
     }
 }

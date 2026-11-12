@@ -14,8 +14,13 @@ export interface MetaResponse { productVersion: string; protocolVersion: 1; logi
 export interface HealthResponse { status: "UP" | "DOWN" }
 export type ServerErrorCode = "INVALID_REQUEST" | "AUTHENTICATION_REQUIRED" | "DEMO_LOGIN_REJECTED" | "CSRF_INVALID" | "REQUEST_SOURCE_REJECTED" | "RESOURCE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "UNSUPPORTED_MEDIA_TYPE" | "ALREADY_AUTHENTICATED" | "PAYLOAD_TOO_LARGE" | "PROTOCOL_VERSION_UNSUPPORTED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "REQUEST_ID_CONFLICT" | "REGISTRATION_CONFLICT" | "DEVICE_AUTHENTICATION_REQUIRED" | "DEVICE_ACTION_REJECTED" | "WORKSPACE_MEMBER_REQUIRED" | "PROJECT_OWNER_REQUIRED" | "DEVICE_FORBIDDEN" | "REPOSITORY_CONFLICT" | "VERSION_CONFLICT" | "PROJECT_ARCHIVED" | "REPOSITORY_ARCHIVED" | "OWNER_CANNOT_LEAVE" | "SEQUENCE_CONFLICT"
 /** 安全错误不包含响应头、Cookie、数据库诊断或原生 Error 对象。 */
-export interface CollaborationError { code: ServerErrorCode | "NETWORK_UNAVAILABLE" | "TLS_ERROR" | "INVALID_SERVER_RESPONSE"; message: string; requestId: string; retryable: boolean }
-export interface ErrorResponse { error: CollaborationError & { code: ServerErrorCode } }
+export interface CollaborationError { code: ServerErrorCode | "NETWORK_UNAVAILABLE" | "TLS_ERROR" | "INVALID_SERVER_RESPONSE"; message: string; requestId: string; retryable: boolean; expectedSequence?: number }
+/** 统一响应包络：所有 HTTP 接口报文最外层结构；成功 returnCode=SUC0000。 */
+export interface BeeResponseEntity<T> { returnCode: string; errorMsg: string; body: T }
+/** 失败包络 body 的错误明细；文案由顶层 errorMsg 承载。 */
+export interface ErrorDetail { code: ServerErrorCode; requestId: string; retryable: boolean; expectedSequence?: number }
+/** 失败响应包络：returnCode 为 CLB 分段平台码。 */
+export interface ErrorEnvelope { returnCode: string; errorMsg: string; body: ErrorDetail }
 export type CollaborationResult<T> = { ok: true; value: T } | { ok: false; error: CollaborationError }
 /** 连接故障保留上次身份提示，不能据此继续发送业务请求。 */
 export type IdentityState = { status: "signedOut" } | { status: "loading" } | { status: "signedIn"; user: UserSummary; workspaces: WorkspaceSummary[] } | { status: "connectionError"; lastKnownUser: UserSummary | null; error: CollaborationError }

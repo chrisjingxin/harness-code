@@ -9,36 +9,104 @@
       "get": {
         "operationId": "get__projects",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "调用者以活跃成员身份参与的项目列表",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__projects",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectCreateRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/ProjectCreateRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "项目已创建",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -47,38 +115,120 @@
       "get": {
         "operationId": "get__project",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "项目详情（成员与仓库引用）",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectDetailResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectDetailResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "patch": {
         "operationId": "patch__project",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectPatchRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/ProjectPatchRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "项目已更新（版本+1）",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -87,38 +237,120 @@
       "get": {
         "operationId": "get__project_members",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "项目成员列表（含已移出）",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__project_members",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberAddRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberAddRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "成员已加入或已存在",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberChangeResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberChangeResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -127,18 +359,63 @@
       "delete": {
         "operationId": "delete__project_member",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "成员已置为 removed",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberChangeResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectMemberChangeResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -147,37 +424,112 @@
       "get": {
         "operationId": "get__repositories",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "status", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "团队仓库目录",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositoryListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/RepositoryListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__repositories",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositoryCreateRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/RepositoryCreateRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "仓库已登记",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositorySummary" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/RepositorySummary"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -186,38 +538,120 @@
       "get": {
         "operationId": "get__repository",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "仓库详情与引用它的项目",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositoryDetailResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/RepositoryDetailResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "patch": {
         "operationId": "patch__repository",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositoryPatchRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/RepositoryPatchRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "仓库已更新",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/RepositorySummary" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/RepositorySummary"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -226,17 +660,55 @@
       "get": {
         "operationId": "get__project_repositories",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "项目仓库引用与调用者本机克隆",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ProjectRepositoryListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ProjectRepositoryListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -245,30 +717,88 @@
       "put": {
         "operationId": "put__project_repository",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "204": { "description": "引用已建立或已存在" },
+          "204": {
+            "description": "引用已建立或已存在"
+          },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "delete": {
         "operationId": "delete__project_repository",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "204": { "description": "引用已移除" },
+          "204": {
+            "description": "引用已移除"
+          },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -277,40 +807,136 @@
       "get": {
         "operationId": "get__conversations",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "ownerId", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "status", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ownerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "项目内会话简报列表",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ConversationListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__conversations",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ConversationRegisterRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/ConversationRegisterRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "会话已登记",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ConversationDetailResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationDetailResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -319,18 +945,63 @@
       "get": {
         "operationId": "get__conversation",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "会话简报详情",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ConversationDetailResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationDetailResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -339,20 +1010,79 @@
       "get": {
         "operationId": "get__conversation_history",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "afterSequence", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "序号增量定稿消息",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/ConversationHistoryResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationHistoryResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -361,26 +1091,56 @@
       "put": {
         "operationId": "put__repo_binding",
         "parameters": [
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "204": { "description": "本机仓库已登记" },
+          "204": {
+            "description": "本机仓库已登记"
+          },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "delete": {
         "operationId": "delete__repo_binding",
         "parameters": [
-          { "name": "repositoryId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "repositoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "204": { "description": "本机仓库登记已移除" },
+          "204": {
+            "description": "本机仓库登记已移除"
+          },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }

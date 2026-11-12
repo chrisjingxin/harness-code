@@ -7,11 +7,13 @@ import java.util.List;
  *
  * <p>【功能定义】
  * 统一定义协作服务在平台基础层面的通用传输对象：
- * 用户展示信息、工作区摘要、演示登录、CSRF 令牌、系统元信息、健康检查以及全局统一受控错误结构（ErrorResponse）。
+ * 用户展示信息、工作区摘要、演示登录、CSRF 令牌、系统元信息、健康检查以及全局统一响应包络（BeeResponseEntity）。
  *
  * <p>【安全与防御原则 (Why)】
- * 统一错误返回对象（ErrorResponse / ErrorDetail）只携带脱敏业务编码 code、人类可读提示 message、
- * 用于全链路跟踪的 requestId 以及是否可重试标志 retryable，严禁包含任何 Java 异常堆栈、SQL 语句或凭据信息。
+ * 统一响应包络（BeeResponseEntity）以 returnCode 表达调用结果（成功固定 SUC0000，失败为 CLB 分段平台码），
+ * errorMsg 承载人类可读提示，body 在失败时携带 ErrorDetail 明细（脱敏业务编码 code、
+ * 用于全链路跟踪的 requestId、是否可重试标志 retryable 与断点续传 expectedSequence），
+ * 严禁包含任何 Java 异常堆栈、SQL 语句或凭据信息。
  *
  * <p>【协作边界】
  * - 上游调用方：IdentityController、BoundaryFilter、ApiResponses、WebSecurityConfig。
@@ -54,18 +56,20 @@ public final class PlatformDtos {
     /** 服务健康探测响应 */
     public record HealthResponse(String status) {}
 
-    /** 统一业务错误详情 */
+    /**
+     * 统一响应包络：所有 HTTP 接口报文的最外层结构。
+     * returnCode 成功固定 "SUC0000"，失败为 CLB 分段平台码；body 为业务报文或错误明细。
+     */
+    public record BeeResponseEntity<T>(String returnCode, String errorMsg, T body) {}
+
+    /** 失败时 body 携带的错误明细（文案由顶层 errorMsg 承载，此处只留机器可分支字段） */
     public record ErrorDetail(
             String code,
-            String message,
             String requestId,
             boolean retryable,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             Long expectedSequence
     ) {}
-
-    /** 统一业务错误响应顶层封包 */
-    public record ErrorResponse(ErrorDetail error) {}
 
     /** 平台通用消息协议头 */
     public record PlatformMessageHeader(int protocolVersion, String messageId, String type, String occurredAt) {}

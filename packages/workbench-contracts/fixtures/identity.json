@@ -99,13 +99,14 @@
     }
   },
   {
-    "name": "valid-ErrorResponse",
-    "schema": "ErrorResponse",
+    "name": "valid-ErrorEnvelope",
+    "schema": "ErrorEnvelope",
     "valid": true,
     "data": {
-      "error": {
+      "returnCode": "CLB1001",
+      "errorMsg": "请先登录",
+      "body": {
         "code": "AUTHENTICATION_REQUIRED",
-        "message": "请先登录",
         "requestId": "11111111-1111-4111-8111-111111111111",
         "retryable": false
       }
@@ -207,14 +208,41 @@
   },
   {
     "name": "unknown-error",
-    "schema": "ErrorResponse",
+    "schema": "ErrorEnvelope",
     "valid": false,
     "data": {
-      "error": {
+      "returnCode": "CLB9999",
+      "errorMsg": "未知错误",
+      "body": {
         "code": "UNREGISTERED",
-        "message": "请先登录",
         "requestId": "11111111-1111-4111-8111-111111111111",
         "retryable": false
+      }
+    }
+  },
+  {
+    "name": "invalid-ErrorEnvelope-bad-returnCode",
+    "schema": "ErrorEnvelope",
+    "valid": false,
+    "data": {
+      "returnCode": "BAD",
+      "errorMsg": "请先登录",
+      "body": {
+        "code": "AUTHENTICATION_REQUIRED",
+        "requestId": "11111111-1111-4111-8111-111111111111",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "name": "valid-BeeResponseEntity",
+    "schema": "BeeResponseEntity",
+    "valid": true,
+    "data": {
+      "returnCode": "SUC0000",
+      "errorMsg": "",
+      "body": {
+        "status": "UP"
       }
     }
   }

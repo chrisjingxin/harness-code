@@ -9,43 +9,150 @@
       "get": {
         "operationId": "get__devices",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeCreatedAt", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeDeviceId", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeCreatedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeDeviceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "设备列表",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/device.schema.json#/$defs/DeviceListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__devices",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "首次登记",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "200": {
             "description": "相同请求重试",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/device.schema.json#/$defs/DeviceRegistrationResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -54,21 +161,65 @@
       "post": {
         "operationId": "post__device_revoke",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "deviceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRevokeRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/device.schema.json#/$defs/DeviceRevokeRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "设备撤销",
-            "content": { "application/json": { "schema": { "$ref": "../schema/device.schema.json#/$defs/DeviceRevokedResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/device.schema.json#/$defs/DeviceRevokedResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -77,20 +228,57 @@
       "post": {
         "operationId": "post__conversation_sync",
         "parameters": [
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "服务端确认水位",
-            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -99,10 +287,18 @@
       "post": {
         "operationId": "post__device_heartbeat",
         "responses": {
-          "204": { "description": "心跳已记录（仅在线展示）" },
+          "204": {
+            "description": "心跳已记录（仅在线展示）"
+          },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }

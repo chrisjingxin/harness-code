@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import workbench.collaboration.application.service.RepoBindingAppService;
+import workbench.collaboration.interfaces.http.ApiResponses;
 
 /**
  * 模块：设备本机仓库登记 REST 控制器 (DeviceRepoBindingController)
@@ -34,7 +35,7 @@ public class DeviceRepoBindingController {
     public ResponseEntity<String> bind(
             @RequestHeader("Authorization") String authorization, @PathVariable String repositoryId) {
         bindings.bind(authorization, repositoryId);
-        return ResponseEntity.noContent().build();
+        return ApiResponses.json(200, "null");
     }
 
     /** 解除本机仓库登记。 */
@@ -42,6 +43,6 @@ public class DeviceRepoBindingController {
     public ResponseEntity<String> unbind(
             @RequestHeader("Authorization") String authorization, @PathVariable String repositoryId) {
         bindings.unbind(authorization, repositoryId);
-        return ResponseEntity.noContent().build();
+        return ApiResponses.json(200, "null");
     }
 }

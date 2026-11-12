@@ -15,7 +15,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/HealthResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/HealthResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -35,7 +47,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -63,7 +75,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/MetaResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/MetaResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -73,7 +97,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -101,7 +125,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/CsrfResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/CsrfResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -111,7 +147,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -139,7 +175,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/DemoUsersResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/DemoUsersResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -149,7 +197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -185,7 +233,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/CurrentUserResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/CurrentUserResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -195,7 +255,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -233,7 +293,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/CurrentUserResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/CurrentUserResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -243,7 +315,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -282,7 +354,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -310,7 +382,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/WorkspaceListResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceListResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -320,7 +404,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }
@@ -356,7 +440,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/MembersResponse"
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/MembersResponse"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -366,7 +462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse"
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
               }
             }

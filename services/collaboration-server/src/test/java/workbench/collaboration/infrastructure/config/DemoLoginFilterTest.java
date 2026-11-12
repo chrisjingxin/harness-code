@@ -51,18 +51,18 @@ class DemoLoginFilterTest {
     when(identity.authenticate("user01")).thenReturn(USER);
     when(identity.current(USER)).thenReturn(new PlatformDtos.CurrentUserResponse(new PlatformDtos.UserSummary(USER, "user01", "用户 01"), List.of()));
     mvc.perform(post("/api/v1/auth/demo-login").session(new MockHttpSession()).headers(headers()).contentType("application/json").content("{\"username\":\"user01\"}"))
-      .andExpect(status().isOk()).andExpect(jsonPath("$.user.username").value("user01"));
+      .andExpect(status().isOk()).andExpect(jsonPath("$.body.user.username").value("user01"));
   }
 
   @Test
   void secondLoginAndUnknownUserAreRejected() throws Exception {
     SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(USER, null, List.of()));
     mvc.perform(post("/api/v1/auth/demo-login").session(new MockHttpSession()).headers(headers()).contentType("application/json").content("{\"username\":\"user02\"}"))
-      .andExpect(status().is(409)).andExpect(jsonPath("$.error.code").value("ALREADY_AUTHENTICATED"));
+      .andExpect(status().is(409)).andExpect(jsonPath("$.body.code").value("ALREADY_AUTHENTICATED"));
     SecurityContextHolder.clearContext();
     when(identity.authenticate("missing01")).thenThrow(new workbench.collaboration.interfaces.ApiProblem(401, "DEMO_LOGIN_REJECTED"));
     mvc.perform(post("/api/v1/auth/demo-login").session(new MockHttpSession()).headers(headers()).contentType("application/json").content("{\"username\":\"missing01\"}"))
-      .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("DEMO_LOGIN_REJECTED"));
+      .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.body.code").value("DEMO_LOGIN_REJECTED"));
   }
 
   private static org.springframework.http.HttpHeaders headers() {

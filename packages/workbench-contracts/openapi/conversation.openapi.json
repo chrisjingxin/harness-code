@@ -9,43 +9,150 @@
       "get": {
         "operationId": "get__conversations",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeCreatedAt", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "beforeId", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeCreatedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "会话列表",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/ConversationListResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/ConversationListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "operationId": "post__conversations",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "首次创建",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "200": {
             "description": "相同请求重试",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/CreateConversationResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -54,17 +161,55 @@
       "get": {
         "operationId": "get__conversation",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "会话概要",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/ConversationResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/ConversationResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -73,25 +218,87 @@
       "post": {
         "operationId": "post__conversation_inputs",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/SendInputRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/conversation.schema.json#/$defs/SendInputRequest"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "首次保存",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/InputSavedResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/InputSavedResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "200": {
             "description": "相同请求重试",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/InputSavedResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/InputSavedResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -100,18 +307,63 @@
       "get": {
         "operationId": "get__request_receipt",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "operation", "in": "query", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "首次回执",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/RequestReceiptResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/RequestReceiptResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -120,18 +372,63 @@
       "get": {
         "operationId": "get__execution",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "executionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "executionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "执行事实",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/ExecutionResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/ExecutionResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -140,22 +437,73 @@
       "post": {
         "operationId": "post__execution_cancel",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "executionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "executionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/CancelExecutionRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/conversation.schema.json#/$defs/CancelExecutionRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "取消事实",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/CancelExecutionResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/CancelExecutionResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -164,20 +512,79 @@
       "get": {
         "operationId": "get__conversation_history",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "afterSequence", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "throughSequence", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "throughSequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "已提交历史",
-            "content": { "application/json": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/HistoryResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/conversation.schema.json#/$defs/HistoryResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -186,19 +593,59 @@
       "get": {
         "operationId": "get__conversation_events",
         "parameters": [
-          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "afterSequence", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "Last-Event-ID", "in": "header", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "SSE 事件流",
-            "content": { "text/event-stream": { "schema": { "$ref": "../schema/conversation.schema.json#/$defs/ConversationEvent" } } }
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "../schema/conversation.schema.json#/$defs/ConversationEvent"
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",
-            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }

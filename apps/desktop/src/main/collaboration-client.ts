@@ -12,7 +12,7 @@ import conversationSchema from "@workbench/contracts/schema/conversation" with {
 import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
 import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
 import type {
-  CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorResponse,
+  BeeResponseEntity, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
   MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
   CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
   CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
@@ -28,11 +28,14 @@ const messages: Record<CollaborationError["code"], string> = {
   METHOD_NOT_ALLOWED: "请求方法不支持", UNSUPPORTED_MEDIA_TYPE: "请求正文必须使用 JSON", ALREADY_AUTHENTICATED: "请先退出当前账号",
   PAYLOAD_TOO_LARGE: "请求体过大", PROTOCOL_VERSION_UNSUPPORTED: "协议版本不支持", SERVICE_UNAVAILABLE: "服务连接暂不可用",
   INTERNAL_ERROR: "服务暂时无法处理请求", NETWORK_UNAVAILABLE: "无法确认服务连接，请重试读取", TLS_ERROR: "服务证书校验失败",
-  INVALID_SERVER_RESPONSE: "服务响应不符合契约", REQUEST_ID_CONFLICT: "请求编号已用于其他操作", CURSOR_AHEAD: "事件位置超出已提交范围",
-  PROJECT_NOT_SHARED: "项目未共享或已停止共享", TARGET_UNAVAILABLE: "目标设备或执行配置不可用",
-  EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新", REGISTRATION_CONFLICT: "设备标识已被占用",
+  INVALID_SERVER_RESPONSE: "服务响应不符合契约", REQUEST_ID_CONFLICT: "请求编号已用于其他操作",
+  REGISTRATION_CONFLICT: "设备标识已被占用",
   DEVICE_AUTHENTICATION_REQUIRED: "设备凭据已失效", DEVICE_ACTION_REJECTED: "当前账号不能管理该设备",
-  SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
+  WORKSPACE_MEMBER_REQUIRED: "请先加入该团队", PROJECT_OWNER_REQUIRED: "仅项目负责人可执行该操作",
+  DEVICE_FORBIDDEN: "设备无权执行该操作", REPOSITORY_CONFLICT: "仓库地址已被登记",
+  VERSION_CONFLICT: "数据已被他人修改，请刷新后重试", PROJECT_ARCHIVED: "项目已归档",
+  REPOSITORY_ARCHIVED: "仓库已归档", OWNER_CANNOT_LEAVE: "项目负责人不能移出自己",
+  SEQUENCE_CONFLICT: "消息序号与服务端水位不一致，请按 expectedSequence 续传",
 }
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
@@ -134,18 +137,22 @@ export class CollaborationClient {
         await session.jar.setCookie(parsed, this.#origin, { http: true })
         if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
       }
-      if (response.status === 204 && schema === null) return { ok: true, value: null as T }
       const data = await this.#readJson(response)
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (!response.ok) {
-        if (!this.#validator("ErrorResponse")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        const error = (data as ErrorResponse).error
+        if (!this.#validator("ErrorEnvelope")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        const envelope = data as ErrorEnvelope
+        const error = envelope.body
         if (error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
         if (error.code === "CSRF_INVALID") session.csrf = null
-        return { ok: false, error: { ...error, message: messages[error.code] ?? error.message } }
+        return { ok: false, error: { ...error, message: messages[error.code] ?? envelope.errorMsg } }
       }
-      if ((response.status !== 200 && response.status !== 201) || !schema || !this.#validator(schema)(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-      return { ok: true, value: data as T }
+      if ((response.status !== 200 && response.status !== 201) || !this.#validator("BeeResponseEntity")(data)
+        || (data as BeeResponseEntity<unknown>).returnCode !== "SUC0000") throw new ClientProblem("INVALID_SERVER_RESPONSE")
+      const value = (data as BeeResponseEntity<unknown>).body
+      if (schema === null) return { ok: true, value: null as T }
+      if (!this.#validator(schema)(value)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+      return { ok: true, value: value as T }
     } catch (e) {
       if (e instanceof ClientProblem) return this.#error(e.code, requestId)
       let cause: unknown = e
@@ -278,8 +285,8 @@ export class CollaborationClient {
           }
           const body = await this.#readJson(response)
           if (!live()) return
-          if (!this.#validator("ErrorResponse")(body)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-          throw new ClientProblem((body as ErrorResponse).error.code)
+          if (!this.#validator("ErrorEnvelope")(body)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          throw new ClientProblem((body as ErrorEnvelope).body.code)
         }
         if (!response.body || response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "text/event-stream") {
           void response.body?.cancel().catch(() => {})
@@ -311,8 +318,8 @@ export class CollaborationClient {
             if (!line) {
               if (name === "stream.problem" && id === undefined) {
                 const problem = parse(data.join("\n"))
-                if (!this.#validator("ErrorResponse")(problem)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-                throw new ClientProblem((problem as ErrorResponse).error.code)
+                if (!this.#validator("ErrorEnvelope")(problem)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+                throw new ClientProblem((problem as ErrorEnvelope).body.code)
               }
               if (name === "conversation.event") {
                 const content = data.join("\n")

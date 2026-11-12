@@ -39,10 +39,10 @@ public class DeviceSyncController {
         return ApiResponses.json(200, sync.sync(authorization, conversationId, body));
     }
 
-    /** 设备心跳：刷新在线展示键，返回 204。 */
+    /** 设备心跳：刷新在线展示键，包络返回空 body。 */
     @PostMapping("/api/v1/device/heartbeat")
     public ResponseEntity<String> heartbeat(@RequestHeader("Authorization") String authorization) {
         sync.heartbeat(authorization);
-        return ResponseEntity.noContent().build();
+        return ApiResponses.json(200, "null");
     }
 }
