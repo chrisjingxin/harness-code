@@ -145,5 +145,208 @@
     "data": {
       "status": "active"
     }
+  },
+  {
+    "name": "valid-ConversationRegisterRequest",
+    "schema": "ConversationRegisterRequest",
+    "valid": true,
+    "data": {
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "title": "账单服务联调",
+      "repositoryIds": ["77777777-7777-4777-8777-777777777777"],
+      "requestId": "66666666-6666-4666-8666-666666666666"
+    }
+  },
+  {
+    "name": "valid-ConversationRegisterRequest-minimal",
+    "schema": "ConversationRegisterRequest",
+    "valid": true,
+    "data": {
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "requestId": "66666666-6666-4666-8666-666666666666"
+    }
+  },
+  {
+    "name": "invalid-ConversationRegisterRequest-bad-repo-id",
+    "schema": "ConversationRegisterRequest",
+    "valid": false,
+    "data": {
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "repositoryIds": ["not-a-uuid"],
+      "requestId": "66666666-6666-4666-8666-666666666666"
+    }
+  },
+  {
+    "name": "valid-ConversationSummary",
+    "schema": "ConversationSummary",
+    "valid": true,
+    "data": {
+      "conversationId": "88888888-8888-4888-8888-888888888888",
+      "projectId": "55555555-5555-4555-8555-555555555555",
+      "ownerUserId": "11111111-1111-4111-8111-111111111111",
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "title": "账单服务联调",
+      "status": "running",
+      "briefText": "正在核对对账接口",
+      "briefSource": "rule",
+      "briefUpdatedAtMs": 1762560000000,
+      "syncedSequence": 5,
+      "updatedAt": "2026-11-08T02:03:04.005Z",
+      "repositories": [
+        { "repositoryId": "77777777-7777-4777-8777-777777777777", "name": "中台服务" }
+      ]
+    }
+  },
+  {
+    "name": "valid-ConversationSummary-empty-brief",
+    "schema": "ConversationSummary",
+    "valid": true,
+    "data": {
+      "conversationId": "88888888-8888-4888-8888-888888888888",
+      "projectId": "55555555-5555-4555-8555-555555555555",
+      "ownerUserId": "11111111-1111-4111-8111-111111111111",
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "title": "未命名会话",
+      "status": "idle",
+      "briefText": null,
+      "briefSource": "rule",
+      "briefUpdatedAtMs": null,
+      "syncedSequence": 0,
+      "updatedAt": "2026-11-08T02:03:04.005Z",
+      "repositories": []
+    }
+  },
+  {
+    "name": "invalid-ConversationSummary-bad-status",
+    "schema": "ConversationSummary",
+    "valid": false,
+    "data": {
+      "conversationId": "88888888-8888-4888-8888-888888888888",
+      "projectId": "55555555-5555-4555-8555-555555555555",
+      "ownerUserId": "11111111-1111-4111-8111-111111111111",
+      "deviceId": "33333333-3333-4333-8333-333333333333",
+      "title": "x",
+      "status": "paused",
+      "briefText": null,
+      "briefSource": "rule",
+      "briefUpdatedAtMs": null,
+      "syncedSequence": 0,
+      "updatedAt": "2026-11-08T02:03:04.005Z",
+      "repositories": []
+    }
+  },
+  {
+    "name": "valid-ConversationListResponse",
+    "schema": "ConversationListResponse",
+    "valid": true,
+    "data": {
+      "projectId": "55555555-5555-4555-8555-555555555555",
+      "conversations": [
+        {
+          "conversationId": "88888888-8888-4888-8888-888888888888",
+          "projectId": "55555555-5555-4555-8555-555555555555",
+          "ownerUserId": "11111111-1111-4111-8111-111111111111",
+          "deviceId": "33333333-3333-4333-8333-333333333333",
+          "title": "账单服务联调",
+          "status": "running",
+          "briefText": "正在核对对账接口",
+          "briefSource": "rule",
+          "briefUpdatedAtMs": 1762560000000,
+          "syncedSequence": 5,
+          "updatedAt": "2026-11-08T02:03:04.005Z",
+          "repositories": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid-ConversationDetailResponse",
+    "schema": "ConversationDetailResponse",
+    "valid": true,
+    "data": {
+      "conversation": {
+        "conversationId": "88888888-8888-4888-8888-888888888888",
+        "projectId": "55555555-5555-4555-8555-555555555555",
+        "ownerUserId": "11111111-1111-4111-8111-111111111111",
+        "deviceId": "33333333-3333-4333-8333-333333333333",
+        "title": "账单服务联调",
+        "status": "idle",
+        "briefText": null,
+        "briefSource": "rule",
+        "briefUpdatedAtMs": null,
+        "syncedSequence": 0,
+        "updatedAt": "2026-11-08T02:03:04.005Z",
+        "repositories": [
+          { "repositoryId": "77777777-7777-4777-8777-777777777777", "name": "中台服务" }
+        ]
+      }
+    }
+  },
+  {
+    "name": "valid-ConversationHistoryResponse",
+    "schema": "ConversationHistoryResponse",
+    "valid": true,
+    "data": {
+      "conversationId": "88888888-8888-4888-8888-888888888888",
+      "syncedSequence": 5,
+      "messages": [
+        { "sequence": 4, "type": "assistant", "occurredAtMs": 1762559999000, "payload": "{\"text\":\"已定位\"}" },
+        { "sequence": 5, "type": "tool_summary", "occurredAtMs": 1762560000000, "payload": "{\"tool\":\"edit\",\"changedLines\":12}" }
+      ]
+    }
+  },
+  {
+    "name": "invalid-HistoryMessage-bad-type",
+    "schema": "HistoryMessage",
+    "valid": false,
+    "data": {
+      "sequence": 1,
+      "type": "stream",
+      "occurredAtMs": 1762559999000,
+      "payload": "{}"
+    }
+  },
+  {
+    "name": "valid-DeviceSyncRequest",
+    "schema": "DeviceSyncRequest",
+    "valid": true,
+    "data": {
+      "messages": [
+        { "sequence": 1, "type": "user", "occurredAtMs": 1762559990000, "payload": "{\"text\":\"请核对对账\"}" },
+        { "sequence": 2, "type": "assistant", "occurredAtMs": 1762559999000, "payload": "{\"text\":\"收到\"}" }
+      ],
+      "brief": {
+        "status": "running",
+        "briefText": "正在核对对账接口",
+        "briefSource": "rule"
+      }
+    }
+  },
+  {
+    "name": "valid-DeviceSyncRequest-brief-only",
+    "schema": "DeviceSyncRequest",
+    "valid": true,
+    "data": {
+      "messages": [],
+      "brief": { "briefText": "阶段性结论：接口已通" }
+    }
+  },
+  {
+    "name": "invalid-DeviceSyncRequest-bad-type",
+    "schema": "DeviceSyncRequest",
+    "valid": false,
+    "data": {
+      "messages": [
+        { "sequence": 1, "type": "stream", "occurredAtMs": 1762559990000, "payload": "{}" }
+      ]
+    }
+  },
+  {
+    "name": "valid-DeviceSyncResponse",
+    "schema": "DeviceSyncResponse",
+    "valid": true,
+    "data": {
+      "syncedSequence": 5
+    }
   }
 ]

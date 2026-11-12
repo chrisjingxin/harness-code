@@ -225,6 +225,153 @@
       },
       "required": ["project", "members", "repositories"],
       "additionalProperties": false
+    },
+    "ConversationStatus": {
+      "type": "string",
+      "enum": ["idle", "running", "waiting_approval", "error"]
+    },
+    "ConversationBriefSource": {
+      "type": "string",
+      "enum": ["rule", "agent"]
+    },
+    "ConversationMessageType": {
+      "type": "string",
+      "enum": ["user", "assistant", "tool_summary", "status"]
+    },
+    "ConversationRepositoryItem": {
+      "type": "object",
+      "properties": {
+        "repositoryId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" }
+      },
+      "required": ["repositoryId", "name"],
+      "additionalProperties": false
+    },
+    "ConversationSummary": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "title": { "type": "string" },
+        "status": { "$ref": "#/$defs/ConversationStatus" },
+        "briefText": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string" }
+          ]
+        },
+        "briefSource": { "$ref": "#/$defs/ConversationBriefSource" },
+        "briefUpdatedAtMs": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0 }
+          ]
+        },
+        "syncedSequence": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/ConversationRepositoryItem" } }
+      },
+      "required": ["conversationId", "projectId", "ownerUserId", "deviceId", "title", "status", "briefText", "briefSource", "briefUpdatedAtMs", "syncedSequence", "updatedAt", "repositories"],
+      "additionalProperties": false
+    },
+    "ConversationRegisterRequest": {
+      "type": "object",
+      "properties": {
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "repositoryIds": {
+          "type": "array",
+          "items": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+          "maxItems": 32
+        },
+        "taskId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["deviceId", "requestId"],
+      "additionalProperties": false
+    },
+    "ConversationListResponse": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "conversations": { "type": "array", "items": { "$ref": "#/$defs/ConversationSummary" } }
+      },
+      "required": ["projectId", "conversations"],
+      "additionalProperties": false
+    },
+    "ConversationDetailResponse": {
+      "type": "object",
+      "properties": {
+        "conversation": { "$ref": "#/$defs/ConversationSummary" }
+      },
+      "required": ["conversation"],
+      "additionalProperties": false
+    },
+    "HistoryMessage": {
+      "type": "object",
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "type": { "$ref": "#/$defs/ConversationMessageType" },
+        "occurredAtMs": { "type": "integer", "minimum": 0 },
+        "payload": { "type": "string" }
+      },
+      "required": ["sequence", "type", "occurredAtMs", "payload"],
+      "additionalProperties": false
+    },
+    "ConversationHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "syncedSequence": { "type": "integer", "minimum": 0 },
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/HistoryMessage" } }
+      },
+      "required": ["conversationId", "syncedSequence", "messages"],
+      "additionalProperties": false
+    },
+    "SyncMessage": {
+      "type": "object",
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "type": { "$ref": "#/$defs/ConversationMessageType" },
+        "occurredAtMs": { "type": "integer", "minimum": 0 },
+        "payload": { "type": "string" }
+      },
+      "required": ["sequence", "type", "occurredAtMs", "payload"],
+      "additionalProperties": false
+    },
+    "SyncBrief": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "status": { "$ref": "#/$defs/ConversationStatus" },
+        "briefText": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "maxLength": 8192 }
+          ]
+        },
+        "briefSource": { "$ref": "#/$defs/ConversationBriefSource" }
+      },
+      "additionalProperties": false
+    },
+    "DeviceSyncRequest": {
+      "type": "object",
+      "properties": {
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/SyncMessage" }, "maxItems": 500 },
+        "brief": { "$ref": "#/$defs/SyncBrief" }
+      },
+      "required": ["messages"],
+      "additionalProperties": false
+    },
+    "DeviceSyncResponse": {
+      "type": "object",
+      "properties": {
+        "syncedSequence": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["syncedSequence"],
+      "additionalProperties": false
     }
   }
 }

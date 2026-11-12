@@ -72,6 +72,40 @@
           }
         }
       }
+    },
+    "/api/v1/device/conversations/{conversationId}/sync": {
+      "post": {
+        "operationId": "post__conversation_sync",
+        "parameters": [
+          { "name": "conversationId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "服务端确认水位",
+            "content": { "application/json": { "schema": { "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncResponse" } } }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/device/heartbeat": {
+      "post": {
+        "operationId": "post__device_heartbeat",
+        "responses": {
+          "204": { "description": "心跳已记录（仅在线展示）" },
+          "default": {
+            "description": "安全错误",
+            "content": { "application/json": { "schema": { "$ref": "../schema/platform.schema.json#/$defs/ErrorResponse" } } }
+          }
+        }
+      }
     }
   }
 }

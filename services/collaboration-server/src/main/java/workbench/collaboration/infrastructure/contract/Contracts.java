@@ -1,5 +1,6 @@
 package workbench.collaboration.infrastructure.contract;
 
+import workbench.collaboration.interfaces.dto.ConversationDtos;
 import workbench.collaboration.interfaces.dto.DeviceDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
 import workbench.collaboration.interfaces.dto.ProjectDtos;
@@ -199,7 +200,14 @@ public final class Contracts {
                 Map.entry("RepositoryCreateRequest", RepositoryDtos.RepositoryCreateRequest.class),
                 Map.entry("ProjectSummary", ProjectDtos.ProjectSummary.class),
                 Map.entry("ProjectMemberListResponse", ProjectDtos.ProjectMemberListResponse.class),
-                Map.entry("ProjectRepositoryListResponse", ProjectDtos.ProjectRepositoryListResponse.class)
+                Map.entry("ProjectRepositoryListResponse", ProjectDtos.ProjectRepositoryListResponse.class),
+                Map.entry("ConversationRegisterRequest", ConversationDtos.ConversationRegisterRequest.class),
+                Map.entry("ConversationSummary", ConversationDtos.ConversationSummary.class),
+                Map.entry("ConversationListResponse", ConversationDtos.ConversationListResponse.class),
+                Map.entry("ConversationDetailResponse", ConversationDtos.ConversationDetailResponse.class),
+                Map.entry("ConversationHistoryResponse", ConversationDtos.ConversationHistoryResponse.class),
+                Map.entry("DeviceSyncRequest", ConversationDtos.DeviceSyncRequest.class),
+                Map.entry("DeviceSyncResponse", ConversationDtos.DeviceSyncResponse.class)
         );
 
         for (JsonNode file : catalog.get("fixtures")) {

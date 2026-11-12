@@ -8,6 +8,8 @@ import tools.jackson.databind.json.JsonMapper;
 import workbench.collaboration.domain.conversation.Message;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -84,6 +86,24 @@ public final class ElasticsearchMessageStoreAdapter {
 
     public Optional<String> search(String workspaceId, String conversationId, Long beforeSequence, String keyword, int limit) {
         return execute(requests.search(workspaceId, conversationId, beforeSequence, keyword, limit));
+    }
+
+    /**
+     * ES 回源：读取序号大于 afterSequence 的定稿消息（升序，热窗缺段兜底）。
+     */
+    public List<Message> listAfter(String workspaceId, String conversationId, long afterSequence, int limit) {
+        return execute(requests.after(workspaceId, conversationId, afterSequence, limit))
+                .map(raw -> {
+                    List<Message> found = new ArrayList<>();
+                    for (JsonNode hit : json.readTree(raw).path("hits").path("hits")) {
+                        JsonNode source = hit.path("_source");
+                        if (source.isObject()) {
+                            found.add(json.treeToValue(source, Message.class));
+                        }
+                    }
+                    return found;
+                })
+                .orElse(List.of());
     }
 
     public EsMessageRequests requests() {

@@ -57,6 +57,20 @@ public final class ApiResponses {
             int status,
             String code
     ) throws IOException {
+        failure(contracts, request, response, status, code, null);
+    }
+
+    /**
+     * 带序号期望值的受控错误渲染（仅 SEQUENCE_CONFLICT 使用非空 expectedSequence）。
+     */
+    public static void failure(
+            Contracts contracts,
+            HttpServletRequest request,
+            HttpServletResponse response,
+            int status,
+            String code,
+            Long expectedSequence
+    ) throws IOException {
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
         response.setHeader("Cache-Control", "no-store");
@@ -102,6 +116,7 @@ public final class ApiResponses {
             case "PROJECT_ARCHIVED" -> "项目已归档";
             case "REPOSITORY_ARCHIVED" -> "仓库已归档";
             case "OWNER_CANNOT_LEAVE" -> "项目负责人不能移出自己";
+            case "SEQUENCE_CONFLICT" -> "消息序号与服务端水位不一致，请按 expectedSequence 续传";
             case "INVALID_REQUEST" -> "请求参数无效";
             default -> "服务暂时无法处理请求";
         };
@@ -109,7 +124,7 @@ public final class ApiResponses {
         String body;
         try {
             body = contracts.encode("ErrorResponse", new PlatformDtos.ErrorResponse(
-                    new PlatformDtos.ErrorDetail(code, message, id, status == 503)
+                    new PlatformDtos.ErrorDetail(code, message, id, status == 503, expectedSequence)
             ));
         } catch (RuntimeException e) {
             response.setStatus(500);
@@ -131,7 +146,7 @@ public final class ApiResponses {
 
         @ExceptionHandler(ApiProblem.class)
         public void problem(ApiProblem problem, HttpServletRequest request, HttpServletResponse response) throws IOException {
-            failure(contracts, request, response, problem.status, problem.code);
+            failure(contracts, request, response, problem.status, problem.code, problem.expectedSequence);
         }
 
         @ExceptionHandler({DataAccessException.class, CannotCreateTransactionException.class})

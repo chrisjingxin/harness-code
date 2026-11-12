@@ -51,13 +51,30 @@ public interface ConversationRepository {
     void update(Conversation conversation);
 
     /**
-     * 按项目游标分页列出会话列表（按最近更新时间倒序，供简报看板）。
+     * 按项目列出会话简报列表（按最近更新时间倒序）。
      *
      * @param projectId 所属业务项目标识
-     * @param beforeUpdatedAtMs 游标时间戳（毫秒），为 null 表示从最新记录开始查
-     * @param beforeId 游标辅助标识，解决同一毫秒下的翻页确定性排序
+     * @param ownerId 可选：只看某成员的会话（看板按人分组），null 表示全部
+     * @param status 可选：按运行状态过滤，null 表示全部
      * @param limit 本次查询的最大条数
      * @return 会话头列表
      */
-    List<Conversation> listByProject(String projectId, Long beforeUpdatedAtMs, String beforeId, int limit);
+    List<Conversation> listByProject(String projectId, String ownerId, String status, int limit);
+
+    /**
+     * 登记会话涉及的团队仓库关联（wb_conversation_repository，登记时一次性写入）。
+     *
+     * @param conversationId 会话标识
+     * @param repositoryIds 项目已引用仓库标识集合（调用方保证 ⊆ 项目引用）
+     * @param createdAtMs 写入时间戳（毫秒）
+     */
+    void insertRepositoryRefs(String conversationId, List<String> repositoryIds, long createdAtMs);
+
+    /**
+     * 列出会话涉及的仓库标识（注册时的快照，不随项目引用变化）。
+     *
+     * @param conversationId 会话标识
+     * @return 仓库标识列表
+     */
+    List<String> listRepositoryIds(String conversationId);
 }

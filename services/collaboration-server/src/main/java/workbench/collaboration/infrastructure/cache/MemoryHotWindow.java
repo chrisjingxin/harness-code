@@ -54,6 +54,18 @@ public final class MemoryHotWindow implements MessageStorePort {
         }
     }
 
+    @Override
+    public List<Message> after(String workspaceId, String conversationId, long afterSequence, int limit) {
+        NavigableMap<Long, Message> window = messages.get(conversationId);
+        if (window == null || limit <= 0) {
+            return List.of();
+        }
+        synchronized (window) {
+            // standalone 无 ES 回源：窗口外被淘汰的历史按空处理（开发态取舍）
+            return window.tailMap(afterSequence, false).values().stream().limit(limit).toList();
+        }
+    }
+
     private static <T> void trim(NavigableMap<Long, T> window, int limit) {
         while (window.size() > limit) {
             window.pollFirstEntry();

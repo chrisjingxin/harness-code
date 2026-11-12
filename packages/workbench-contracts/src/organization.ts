@@ -143,3 +143,87 @@ export interface ProjectDetailResponse {
   members: ProjectMemberSummary[]
   repositories: RepositorySummary[]
 }
+
+/** 会话运行状态（由主人 Runner 随同步批次上送） */
+export type ConversationStatus = "idle" | "running" | "waiting_approval" | "error"
+/** 简报来源：rule 规则生成；agent 预留给后续 Agent 摘要 */
+export type ConversationBriefSource = "rule" | "agent"
+/** 定稿消息类型；tool_summary 只含摘要字段，不含完整输出 */
+export type ConversationMessageType = "user" | "assistant" | "tool_summary" | "status"
+
+export interface ConversationRepositoryItem {
+  repositoryId: string
+  name: string
+}
+
+export interface ConversationSummary {
+  conversationId: string
+  projectId: string
+  ownerUserId: string
+  deviceId: string
+  title: string
+  status: ConversationStatus
+  briefText: string | null
+  briefSource: ConversationBriefSource
+  briefUpdatedAtMs: number | null
+  /** 服务端已确认的最大已上传消息序号（单调水位） */
+  syncedSequence: number
+  updatedAt: string
+  /** 登记时的仓库快照，不随项目引用变化 */
+  repositories: ConversationRepositoryItem[]
+}
+
+export interface ConversationRegisterRequest {
+  /** 必须是调用者本人未吊销设备 */
+  deviceId: string
+  title?: string
+  /** 必须是项目已引用仓库的子集，否则 400 */
+  repositoryIds?: string[]
+  taskId?: string
+  requestId: string
+}
+
+export interface ConversationListResponse {
+  projectId: string
+  conversations: ConversationSummary[]
+}
+
+export interface ConversationDetailResponse {
+  conversation: ConversationSummary
+}
+
+export interface HistoryMessage {
+  sequence: number
+  type: ConversationMessageType
+  occurredAtMs: number
+  payload: string
+}
+
+export interface ConversationHistoryResponse {
+  conversationId: string
+  syncedSequence: number
+  messages: HistoryMessage[]
+}
+
+export interface SyncMessage {
+  sequence: number
+  type: ConversationMessageType
+  occurredAtMs: number
+  payload: string
+}
+
+export interface SyncBrief {
+  status?: ConversationStatus
+  briefText?: string | null
+  briefSource?: ConversationBriefSource
+}
+
+/** 设备上传通道：序号必须从水位+1 起连续；整批 ≤ 水位时幂等回执 */
+export interface DeviceSyncRequest {
+  messages: SyncMessage[]
+  brief?: SyncBrief
+}
+
+export interface DeviceSyncResponse {
+  syncedSequence: number
+}

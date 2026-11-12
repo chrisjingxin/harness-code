@@ -248,14 +248,18 @@
                 "SERVICE_UNAVAILABLE",
                 "INTERNAL_ERROR",
                 "REQUEST_ID_CONFLICT",
-                "CURSOR_AHEAD",
-                "PROJECT_NOT_SHARED",
-                "TARGET_UNAVAILABLE",
-                "EXECUTION_STATE_CONFLICT",
                 "REGISTRATION_CONFLICT",
                 "DEVICE_AUTHENTICATION_REQUIRED",
                 "DEVICE_ACTION_REJECTED",
-                "SHARE_VERSION_CONFLICT"
+                "WORKSPACE_MEMBER_REQUIRED",
+                "PROJECT_OWNER_REQUIRED",
+                "DEVICE_FORBIDDEN",
+                "REPOSITORY_CONFLICT",
+                "VERSION_CONFLICT",
+                "PROJECT_ARCHIVED",
+                "REPOSITORY_ARCHIVED",
+                "OWNER_CANNOT_LEAVE",
+                "SEQUENCE_CONFLICT"
               ]
             },
             "message": {
@@ -268,6 +272,10 @@
             },
             "retryable": {
               "type": "boolean"
+            },
+            "expectedSequence": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [

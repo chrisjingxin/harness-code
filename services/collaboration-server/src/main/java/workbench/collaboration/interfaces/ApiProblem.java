@@ -21,9 +21,17 @@ public final class ApiProblem extends RuntimeException {
     /** 平台统一业务错误码（如 "REQUEST_ID_CONFLICT", "RESOURCE_NOT_FOUND"） */
     public final String code;
 
+    /** 序号冲突时服务端期望的下一个序号（仅 SEQUENCE_CONFLICT 使用） */
+    public final Long expectedSequence;
+
     public ApiProblem(int status, String code) {
+        this(status, code, null);
+    }
+
+    public ApiProblem(int status, String code, Long expectedSequence) {
         super(code);
         this.status = status;
         this.code = code;
+        this.expectedSequence = expectedSequence;
     }
 }

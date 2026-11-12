@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.conversation.ConversationRepository;
 import workbench.collaboration.infrastructure.persistence.mapper.ConversationMapper;
+import workbench.collaboration.infrastructure.persistence.mapper.ConversationRepoRefMapper;
 
 import java.util.List;
 import java.util.Optional;
@@ -29,9 +30,11 @@ import java.util.Optional;
 public class ConversationRepositoryImpl implements ConversationRepository {
 
     private final ConversationMapper conversations;
+    private final ConversationRepoRefMapper refs;
 
-    public ConversationRepositoryImpl(ConversationMapper conversations) {
+    public ConversationRepositoryImpl(ConversationMapper conversations, ConversationRepoRefMapper refs) {
         this.conversations = conversations;
+        this.refs = refs;
     }
 
     @Override
@@ -48,16 +51,39 @@ public class ConversationRepositoryImpl implements ConversationRepository {
     }
 
     @Override
-    public List<Conversation> listByProject(String projectId, Long beforeUpdatedAtMs, String beforeId, int limit) {
+    public List<Conversation> listByProject(String projectId, String ownerId, String status, int limit) {
         QueryWrapper<ConversationPO> query = new QueryWrapper<ConversationPO>().eq("project_id", projectId);
-        // 游标过滤条件：(updated_at_ms < beforeUpdatedAtMs) OR (updated_at_ms = beforeUpdatedAtMs AND id < beforeId)
-        if (beforeUpdatedAtMs != null && beforeId != null) {
-            query.and(wrapper -> wrapper.lt("updated_at_ms", beforeUpdatedAtMs)
-                    .or(inner -> inner.eq("updated_at_ms", beforeUpdatedAtMs).lt("id", beforeId)));
+        if (ownerId != null) {
+            query.eq("owner_user_id", ownerId);
+        }
+        if (status != null) {
+            query.eq("status", status);
         }
         query.orderByDesc("updated_at_ms").orderByDesc("id").last("LIMIT " + limit);
         return conversations.selectList(query).stream()
                 .map(ConversationConverter::toConversation)
+                .toList();
+    }
+
+    @Override
+    public void insertRepositoryRefs(String conversationId, List<String> repositoryIds, long createdAtMs) {
+        for (String repositoryId : repositoryIds) {
+            ConversationRepoRefPO po = new ConversationRepoRefPO();
+            po.setConversationId(conversationId);
+            po.setRepositoryId(repositoryId);
+            po.setCreatedAtMs(createdAtMs);
+            // (conversation_id, repository_id) 唯一键兜底去重，重复登记幂等
+            if (refs.insert(po) != 1) {
+                throw new IllegalStateException("会话仓库关联没有写入");
+            }
+        }
+    }
+
+    @Override
+    public List<String> listRepositoryIds(String conversationId) {
+        return refs.selectList(new QueryWrapper<ConversationRepoRefPO>().eq("conversation_id", conversationId))
+                .stream()
+                .map(ConversationRepoRefPO::getRepositoryId)
                 .toList();
     }
 

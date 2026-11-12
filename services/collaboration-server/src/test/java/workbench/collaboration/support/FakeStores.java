@@ -1,5 +1,7 @@
 package workbench.collaboration.support;
 
+import workbench.collaboration.domain.conversation.Conversation;
+import workbench.collaboration.domain.conversation.ConversationRepository;
 import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.identity.IdentityRepository;
@@ -144,6 +146,37 @@ public final class FakeStores {
         }
         @Override public List<LocalRepoBinding> listByRepository(String repositoryId) {
             return items.values().stream().filter(b -> b.repositoryId().equals(repositoryId)).toList();
+        }
+    }
+
+    public static final class FakeConversations implements ConversationRepository {
+        public final Map<String, Conversation> items = new HashMap<>();
+        public final Map<String, List<String>> refs = new HashMap<>();
+
+        @Override public Optional<Conversation> findById(String id) { return Optional.ofNullable(items.get(id)); }
+        @Override public Optional<Conversation> lockById(String id) { return Optional.ofNullable(items.get(id)); }
+        @Override public void insert(Conversation conversation) { items.put(conversation.id(), conversation); }
+        @Override public void update(Conversation conversation) { items.put(conversation.id(), conversation); }
+        @Override public List<Conversation> listByProject(String projectId, String ownerId, String status, int limit) {
+            return items.values().stream()
+                    .filter(c -> c.projectId().equals(projectId))
+                    .filter(c -> ownerId == null || c.ownerUserId().equals(ownerId))
+                    .filter(c -> status == null || c.status().equals(status))
+                    .sorted(Comparator.comparing(Conversation::updatedAtMs).reversed()
+                            .thenComparing(Conversation::id, Comparator.reverseOrder()))
+                    .limit(limit)
+                    .toList();
+        }
+        @Override public void insertRepositoryRefs(String conversationId, List<String> repositoryIds, long createdAtMs) {
+            List<String> stored = refs.computeIfAbsent(conversationId, key -> new ArrayList<>());
+            for (String repositoryId : repositoryIds) {
+                if (!stored.contains(repositoryId)) {
+                    stored.add(repositoryId);
+                }
+            }
+        }
+        @Override public List<String> listRepositoryIds(String conversationId) {
+            return refs.getOrDefault(conversationId, List.of());
         }
     }
 

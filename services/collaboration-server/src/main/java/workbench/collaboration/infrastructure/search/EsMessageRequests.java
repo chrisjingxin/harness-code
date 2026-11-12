@@ -113,6 +113,28 @@ public final class EsMessageRequests {
                 .build();
     }
 
+    /**
+     * 构造按序号正向翻页（sequence > afterSequence）的只读增量历史请求。
+     * 热窗缺段时由 MessageStorePort.after 回源调用。
+     */
+    public Request after(String workspaceId, String conversationId, long afterSequence, int limit) {
+        List<Object> filters = new ArrayList<>();
+        filters.add(Map.of("term", Map.of("workspaceId", workspaceId)));
+        filters.add(Map.of("term", Map.of("conversationId", conversationId)));
+        filters.add(Map.of("range", Map.of("sequence", Map.of("gt", afterSequence))));
+
+        Map<String, Object> dsl = new LinkedHashMap<>();
+        dsl.put("timeout", "800ms");
+        dsl.put("size", Math.max(1, Math.min(limit, 500)));
+        dsl.put("sort", List.of(Map.of("sequence", Map.of("order", "asc"))));
+        dsl.put("query", Map.of("bool", Map.of("filter", filters)));
+
+        return new Request.Builder()
+                .url(baseUrl + "/wb_message_v1/_search?routing=" + encode(workspaceId) + "&rest_total_hits_as_int=true")
+                .post(RequestBody.create(MAPPER.writeValueAsString(dsl), JSON))
+                .build();
+    }
+
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }

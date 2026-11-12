@@ -45,4 +45,20 @@ public interface MessageStorePort {
      * @return 最近定稿消息列表
      */
     List<Message> recent(String conversationId, int limit);
+
+    /**
+     * 读取序号大于 afterSequence 的定稿消息（按序号升序，供只读增量历史）。
+     *
+     * <p>【契约约束】
+     * 集群实现先查 Redis 热窗；热窗覆盖该区间则直接返回，存在缺段（窗口最老序号
+     * 仍大于 afterSequence+1，说明更早消息已淘汰）时回源 Elasticsearch 补齐。
+     * standalone 内存实现无 ES 回源，窗口外历史不可读（开发态取舍）。
+     *
+     * @param workspaceId 所属工作区标识（ES 路由隔离键）
+     * @param conversationId 会话标识
+     * @param afterSequence 起点序号（不含）
+     * @param limit 最大返回条数
+     * @return 序号升序的增量消息列表
+     */
+    List<Message> after(String workspaceId, String conversationId, long afterSequence, int limit);
 }

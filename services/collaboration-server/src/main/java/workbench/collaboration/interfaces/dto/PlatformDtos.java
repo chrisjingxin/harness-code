@@ -55,7 +55,14 @@ public final class PlatformDtos {
     public record HealthResponse(String status) {}
 
     /** 统一业务错误详情 */
-    public record ErrorDetail(String code, String message, String requestId, boolean retryable) {}
+    public record ErrorDetail(
+            String code,
+            String message,
+            String requestId,
+            boolean retryable,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            Long expectedSequence
+    ) {}
 
     /** 统一业务错误响应顶层封包 */
     public record ErrorResponse(ErrorDetail error) {}

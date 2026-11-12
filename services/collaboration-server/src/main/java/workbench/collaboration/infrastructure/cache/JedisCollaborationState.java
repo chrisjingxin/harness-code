@@ -192,6 +192,28 @@ public final class JedisCollaborationState {
                 return raw.stream().map(item -> json.readValue(item, Message.class)).toList();
             }
         }
+
+        @Override
+        public List<Message> after(String workspaceId, String conversationId, long afterSequence, int limit) {
+            if (limit <= 0) {
+                return List.of();
+            }
+            // 热窗优先：窗口覆盖区间（最老序号 <= afterSequence+1）即整段可信；
+            // 否则说明窗口下沿有淘汰缺段，直接回源 ES 保证完整性
+            try (Jedis jedis = pool.getResource()) {
+                String key = CacheKeys.messages(conversationId);
+                Long oldest = null;
+                var range = jedis.zrangeWithScores(key, 0, 0);
+                if (range != null && !range.isEmpty()) {
+                    oldest = (long) range.getFirst().getScore();
+                }
+                if (oldest != null && oldest <= afterSequence + 1) {
+                    List<String> raw = jedis.zrangeByScore(key, String.valueOf(afterSequence + 1), "+inf", 0, limit);
+                    return raw.stream().map(item -> json.readValue(item, Message.class)).toList();
+                }
+            }
+            return search == null ? List.of() : search.listAfter(workspaceId, conversationId, afterSequence, limit);
+        }
     }
 
     private Receipt read(String raw) {

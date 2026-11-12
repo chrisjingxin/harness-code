@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.support.JdbcTransactionManager;
+import workbench.collaboration.application.port.NotificationPort;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.identity.IdentityRepository;
 import workbench.collaboration.domain.project.ProjectRepository;
@@ -52,6 +53,15 @@ public class ServerConfiguration {
             RepositoryCatalog repositories
     ) {
         return new ProjectAccessPolicy(identity, projects, repositories);
+    }
+
+    /**
+     * 装配会话简报事件通知端口：现阶段仅写结构化日志，
+     * HC-212 看板通知流接入后替换为 Kafka 投递实现。
+     */
+    @Bean
+    NotificationPort notificationPort() {
+        return new workbench.collaboration.infrastructure.messaging.LoggingNotificationPort();
     }
 
     /**
