@@ -94,6 +94,14 @@ public final class ApiResponses {
             case "REQUEST_ID_CONFLICT" -> "请求编号已用于其他操作";
             case "REGISTRATION_CONFLICT" -> "设备标识已被占用";
             case "DEVICE_ACTION_REJECTED" -> "当前账号不能管理该设备";
+            case "WORKSPACE_MEMBER_REQUIRED" -> "请先加入该团队";
+            case "PROJECT_OWNER_REQUIRED" -> "仅项目负责人可执行该操作";
+            case "DEVICE_FORBIDDEN" -> "设备无权执行该操作";
+            case "REPOSITORY_CONFLICT" -> "仓库地址已被登记";
+            case "VERSION_CONFLICT" -> "数据已被他人修改，请刷新后重试";
+            case "PROJECT_ARCHIVED" -> "项目已归档";
+            case "REPOSITORY_ARCHIVED" -> "仓库已归档";
+            case "OWNER_CANNOT_LEAVE" -> "项目负责人不能移出自己";
             case "INVALID_REQUEST" -> "请求参数无效";
             default -> "服务暂时无法处理请求";
         };

@@ -10,7 +10,6 @@
       "type": "object",
       "properties": {
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
-        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
@@ -28,7 +27,7 @@
           ]
         }
       },
-      "required": ["deviceId", "workspaceId", "ownerUserId", "name", "createdAt", "revokedAt", "connectionState", "lastSeenAt"],
+      "required": ["deviceId", "ownerUserId", "name", "createdAt", "revokedAt", "connectionState", "lastSeenAt"],
       "additionalProperties": false
     },
     "DeviceSecret": {

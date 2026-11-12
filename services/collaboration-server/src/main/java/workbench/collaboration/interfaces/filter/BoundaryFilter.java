@@ -110,7 +110,7 @@ public final class BoundaryFilter extends OncePerRequestFilter {
 
             validateQuery(request, route, method);
 
-            int maxBody = method.equals("POST") ? route.maxBody() : 0;
+            int maxBody = (method.equals("POST") || method.equals("PATCH")) ? route.maxBody() : 0;
             if (request.getContentLengthLong() > maxBody) {
                 throw new ApiProblem(413, "PAYLOAD_TOO_LARGE");
             }

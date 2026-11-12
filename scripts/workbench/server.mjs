@@ -11,7 +11,7 @@ import { loadContracts } from "./check-contracts.mjs"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const service = join(root, "services/collaboration-server")
 const command = process.argv[2]
-if (process.argv.length !== 3 || !["build", "migrate", "init-demo", "start", "contracts"].includes(command)) throw new Error("必须选择一个已登记的服务端命令")
+if (process.argv.length !== 3 || !["build", "init-demo", "start", "contracts"].includes(command)) throw new Error("必须选择一个已登记的服务端命令")
 const version = (await readFile(join(root, "VERSION"), "utf8")).trim()
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error("VERSION 无效")
 const jar = join(service, "target", `collaboration-server-${version}.jar`)
@@ -39,13 +39,13 @@ if (command === "build") {
   await writeFile(join(service, "target/generated-resources/build.properties"), `productVersion=${version}\n`)
   const maven = process.env.MAVEN_EXECUTABLE ?? (process.platform === "win32" ? "mvn.cmd" : "mvn")
   await run(maven, ["-B", "-f", join(service, "pom.xml"), `-Drevision=${version}`, "package"])
-  const sqlDir = join(service, "src/main/resources/db/migration")
-  const { readdir } = await import("node:fs/promises")
+  // HC-211：DDL 唯一来源是单文件 schema.sql（+演示夹具 demo-data.sql），随 jar 一并打包发版
+  const sqlDir = join(service, "src/main/resources/db")
   const release = join(service, "target/release")
   await mkdir(join(release, "sql"), { recursive: true })
   await copyFile(jar, join(release, `collaboration-server-${version}.jar`))
   const sums = []
-  for (const file of (await readdir(sqlDir)).filter(n => /^V\d+__[a-z0-9_]+\.sql$/.test(n)).sort()) {
+  for (const file of ["schema.sql", "demo-data.sql"]) {
     const bytes = await readFile(join(sqlDir, file))
     await writeFile(join(release, "sql", file), bytes)
     sums.push(`${createHash("sha256").update(bytes).digest("hex")}  sql/${file}`)

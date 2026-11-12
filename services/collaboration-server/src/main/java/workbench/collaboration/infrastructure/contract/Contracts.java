@@ -2,6 +2,8 @@ package workbench.collaboration.infrastructure.contract;
 
 import workbench.collaboration.interfaces.dto.DeviceDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
+import workbench.collaboration.interfaces.dto.ProjectDtos;
+import workbench.collaboration.interfaces.dto.RepositoryDtos;
 
 import com.networknt.schema.*;
 import tools.jackson.databind.JsonNode;
@@ -190,7 +192,14 @@ public final class Contracts {
                 Map.entry("DeviceRegistrationRequest", DeviceDtos.DeviceRegistrationRequest.class),
                 Map.entry("DeviceRegistrationResponse", DeviceDtos.DeviceRegistrationResponse.class),
                 Map.entry("DeviceListResponse", DeviceDtos.DeviceListResponse.class),
-                Map.entry("DeviceRevokedResponse", DeviceDtos.DeviceRevokedResponse.class)
+                Map.entry("DeviceRevokedResponse", DeviceDtos.DeviceRevokedResponse.class),
+                Map.entry("ProjectCreateRequest", ProjectDtos.ProjectCreateRequest.class),
+                Map.entry("ProjectPatchRequest", ProjectDtos.ProjectPatchRequest.class),
+                Map.entry("ProjectMemberAddRequest", ProjectDtos.ProjectMemberAddRequest.class),
+                Map.entry("RepositoryCreateRequest", RepositoryDtos.RepositoryCreateRequest.class),
+                Map.entry("ProjectSummary", ProjectDtos.ProjectSummary.class),
+                Map.entry("ProjectMemberListResponse", ProjectDtos.ProjectMemberListResponse.class),
+                Map.entry("ProjectRepositoryListResponse", ProjectDtos.ProjectRepositoryListResponse.class)
         );
 
         for (JsonNode file : catalog.get("fixtures")) {

@@ -18,7 +18,8 @@ import java.util.regex.Pattern;
  *
  * <p>【HC-211 边界变化】
  * 远程输入、执行登记/取消、会话级 SSE、设备共享项目与 Daemon WSS 下行通道已全部拆除；
- * 项目组织层与会话只读同步路由随对应控制器落地后再行登记。
+ * 项目组织面（项目/成员/仓库目录/引用）与设备本机仓库登记路由已登记，
+ * 会话只读同步路由随对应控制器落地后再行登记。
  *
  * <p>【协作边界】
  * - 上游调用方：BoundaryFilter、WebSecurityConfig。
@@ -45,6 +46,7 @@ public final class RouteCatalog {
     private static final Pattern LIMIT = Pattern.compile("[1-9][0-9]{0,2}");
     private static final Map<String, Pattern> NONE = Map.of();
     private static final Map<String, Pattern> DEVICE_PAGE = Map.of("limit", LIMIT, "beforeCreatedAt", TIME, "beforeDeviceId", ID);
+    private static final Map<String, Pattern> REPOSITORY_PAGE = Map.of("status", Pattern.compile("active|archived"));
 
     private final List<Route> routes = List.of(
             new Route("/health", Set.of("GET"), Auth.PUBLIC, 0, NONE),
@@ -57,7 +59,16 @@ public final class RouteCatalog {
             new Route("/api/v1/workspaces", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/members", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/devices", Set.of("GET", "POST"), Auth.USER, 16384, DEVICE_PAGE),
-            new Route("/api/v1/workspaces/{workspaceId}/devices/{deviceId}/revoke", Set.of("POST"), Auth.USER, 16384, NONE)
+            new Route("/api/v1/workspaces/{workspaceId}/devices/{deviceId}/revoke", Set.of("POST"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects", Set.of("GET", "POST"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}", Set.of("GET", "PATCH"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/members", Set.of("GET", "POST"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/members/{userId}", Set.of("DELETE"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/repositories", Set.of("GET"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/repositories/{repositoryId}", Set.of("PUT", "DELETE"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/repositories", Set.of("GET", "POST"), Auth.USER, 16384, REPOSITORY_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/repositories/{repositoryId}", Set.of("GET", "PATCH"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/device/repo-bindings/{repositoryId}", Set.of("PUT", "DELETE"), Auth.DEVICE, 0, NONE)
     );
 
     public RouteCatalog() {

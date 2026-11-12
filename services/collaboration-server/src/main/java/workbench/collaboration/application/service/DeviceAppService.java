@@ -82,7 +82,7 @@ public class DeviceAppService {
                 Device device = existing.get();
                 // 相同注册凭证的重放安全返回已有结果
                 if (device.registrationId().equals(request.registrationId()) && device.registrationBodySha256().equals(bodyHash)) {
-                    return encode(device, workspaceId, request.registrationId());
+                    return encode(device, request.registrationId());
                 }
                 throw new ApiProblem(409, "REGISTRATION_CONFLICT");
             }
@@ -106,7 +106,7 @@ public class DeviceAppService {
             } catch (DuplicateKeyException conflict) {
                 throw new ApiProblem(409, "REGISTRATION_CONFLICT");
             }
-            return encode(device, workspaceId, request.registrationId());
+            return encode(device, request.registrationId());
         });
     }
 
@@ -207,23 +207,22 @@ public class DeviceAppService {
                 : null;
         return contracts.encode("DeviceListResponse", new DeviceDtos.DeviceListResponse(
                 workspaceId,
-                found.stream().map(device -> summary(workspaceId, device)).toList(),
+                found.stream().map(this::summary).toList(),
                 cursor
         ));
     }
 
-    private String encode(Device device, String workspaceId, String registrationId) {
+    private String encode(Device device, String registrationId) {
         return contracts.encode(
                 "DeviceRegistrationResponse",
-                new DeviceDtos.DeviceRegistrationResponse(registrationId, summary(workspaceId, device))
+                new DeviceDtos.DeviceRegistrationResponse(registrationId, summary(device))
         );
     }
 
-    private DeviceDtos.DeviceSummary summary(String workspaceId, Device device) {
+    private DeviceDtos.DeviceSummary summary(Device device) {
         Optional<Long> seen = heartbeats.lastSeen(device.id());
         return new DeviceDtos.DeviceSummary(
                 device.id(),
-                workspaceId,
                 device.ownerUserId(),
                 device.name(),
                 TimeCodec.utc(device.createdAtMs()),

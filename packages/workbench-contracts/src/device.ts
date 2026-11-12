@@ -11,7 +11,6 @@ export type ConnectionState = "offline" | "reconciling" | "ready"
 export interface AgentConfigSummary { agentConfigId: Uuid; name: string; available: boolean }
 export interface DeviceSummary {
   deviceId: Uuid
-  workspaceId: Uuid
   ownerUserId: Uuid
   name: string
   createdAt: UtcTimestamp

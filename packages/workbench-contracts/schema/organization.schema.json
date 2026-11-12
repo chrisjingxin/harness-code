@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.invalid/schema/organization.schema.json",
+  "$defs": {
+    "ProjectStatus": {
+      "type": "string",
+      "enum": ["active", "archived"]
+    },
+    "MemberStatus": {
+      "type": "string",
+      "enum": ["active", "removed"]
+    },
+    "ProjectRole": {
+      "type": "string",
+      "enum": ["owner", "member"]
+    },
+    "ProjectCreateRequest": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["name", "description", "requestId"],
+      "additionalProperties": false
+    },
+    "ProjectPatchRequest": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["archived"] },
+        "expectedVersion": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["expectedVersion"],
+      "additionalProperties": false
+    },
+    "ProjectMemberAddRequest": {
+      "type": "object",
+      "properties": {
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["userId", "requestId"],
+      "additionalProperties": false
+    },
+    "RepositoryCreateRequest": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "remoteUrl": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "defaultBranch": { "type": "string", "maxLength": 128 },
+        "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
+      },
+      "required": ["name", "remoteUrl", "requestId"],
+      "additionalProperties": false
+    },
+    "RepositoryPatchRequest": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "defaultBranch": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["archived"] }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "ProjectSummary": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "status": { "$ref": "#/$defs/ProjectStatus" },
+        "role": { "$ref": "#/$defs/ProjectRole" },
+        "memberCount": { "type": "integer", "minimum": 0 },
+        "version": { "type": "integer", "minimum": 1 },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["projectId", "workspaceId", "name", "description", "ownerUserId", "status", "role", "memberCount", "version", "createdAt", "updatedAt"],
+      "additionalProperties": false
+    },
+    "ProjectResponse": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "status": { "$ref": "#/$defs/ProjectStatus" },
+        "version": { "type": "integer", "minimum": 1 },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["projectId", "workspaceId", "name", "description", "ownerUserId", "status", "version", "createdAt", "updatedAt"],
+      "additionalProperties": false
+    },
+    "ProjectListResponse": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "projects": { "type": "array", "items": { "$ref": "#/$defs/ProjectSummary" } }
+      },
+      "required": ["workspaceId", "projects"],
+      "additionalProperties": false
+    },
+    "ProjectMemberSummary": {
+      "type": "object",
+      "properties": {
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "status": { "$ref": "#/$defs/MemberStatus" },
+        "joinedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "leftAt": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+          ]
+        }
+      },
+      "required": ["userId", "status", "joinedAt", "leftAt"],
+      "additionalProperties": false
+    },
+    "ProjectMemberListResponse": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/ProjectMemberSummary" } }
+      },
+      "required": ["projectId", "members"],
+      "additionalProperties": false
+    },
+    "ProjectMemberChangeResponse": {
+      "type": "object",
+      "properties": {
+        "member": { "$ref": "#/$defs/ProjectMemberSummary" }
+      },
+      "required": ["member"],
+      "additionalProperties": false
+    },
+    "RepositorySummary": {
+      "type": "object",
+      "properties": {
+        "repositoryId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" },
+        "remoteUrl": { "type": "string" },
+        "defaultBranch": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "archived"] },
+        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["repositoryId", "workspaceId", "name", "remoteUrl", "defaultBranch", "status", "createdByUserId", "createdAt", "updatedAt"],
+      "additionalProperties": false
+    },
+    "RepositoryListResponse": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/RepositorySummary" } }
+      },
+      "required": ["workspaceId", "repositories"],
+      "additionalProperties": false
+    },
+    "ReferencingProjectSummary": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" }
+      },
+      "required": ["projectId", "name"],
+      "additionalProperties": false
+    },
+    "RepositoryDetailResponse": {
+      "type": "object",
+      "properties": {
+        "repository": { "$ref": "#/$defs/RepositorySummary" },
+        "projects": { "type": "array", "items": { "$ref": "#/$defs/ReferencingProjectSummary" } }
+      },
+      "required": ["repository", "projects"],
+      "additionalProperties": false
+    },
+    "ClonedDeviceSummary": {
+      "type": "object",
+      "properties": {
+        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "boundAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+      },
+      "required": ["deviceId", "boundAt"],
+      "additionalProperties": false
+    },
+    "ProjectRepositoryItem": {
+      "type": "object",
+      "properties": {
+        "repositoryId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "name": { "type": "string" },
+        "remoteUrl": { "type": "string" },
+        "defaultBranch": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "archived"] },
+        "referencedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
+        "clonedDevices": { "type": "array", "items": { "$ref": "#/$defs/ClonedDeviceSummary" } }
+      },
+      "required": ["repositoryId", "name", "remoteUrl", "defaultBranch", "status", "referencedAt", "clonedDevices"],
+      "additionalProperties": false
+    },
+    "ProjectRepositoryListResponse": {
+      "type": "object",
+      "properties": {
+        "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/ProjectRepositoryItem" } }
+      },
+      "required": ["projectId", "repositories"],
+      "additionalProperties": false
+    },
+    "ProjectDetailResponse": {
+      "type": "object",
+      "properties": {
+        "project": { "$ref": "#/$defs/ProjectSummary" },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/ProjectMemberSummary" } },
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/RepositorySummary" } }
+      },
+      "required": ["project", "members", "repositories"],
+      "additionalProperties": false
+    }
+  }
+}

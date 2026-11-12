@@ -30,7 +30,6 @@
     "release:check": "npm run project:tool -- release:check",
     "project:check": "npm run check:boundaries && npm run project:tool -- project:check",
     "server:build": "node scripts/workbench/server.mjs build",
-    "server:migrate": "node scripts/workbench/server.mjs migrate",
     "server:init-demo": "node scripts/workbench/server.mjs init-demo",
     "server:start": "node scripts/workbench/server.mjs start",
     "server:contracts": "node scripts/workbench/server.mjs contracts",

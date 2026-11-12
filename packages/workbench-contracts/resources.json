@@ -1,14 +1,17 @@
 {
   "schemas": [
     "platform.schema.json",
-    "device.schema.json"
+    "device.schema.json",
+    "organization.schema.json"
   ],
   "openapi": [
     "platform.openapi.json",
-    "device.openapi.json"
+    "device.openapi.json",
+    "organization.openapi.json"
   ],
   "fixtures": [
     "identity.json",
-    "device.json"
+    "device.json",
+    "organization.json"
   ]
 }

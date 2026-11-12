@@ -18,10 +18,9 @@ public final class DeviceDtos {
 
     private DeviceDtos() {}
 
-    /** 设备概要视图 */
+    /** 设备概要视图：设备属人（D11），不再携带 workspaceId */
     public record DeviceSummary(
             String deviceId,
-            String workspaceId,
             String ownerUserId,
             String name,
             String createdAt,
