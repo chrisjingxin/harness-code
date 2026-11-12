@@ -2,7 +2,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   height: 100%;
   min-height: 0;
   padding: 14px 12px 12px;
@@ -24,7 +24,7 @@
 .collaboration-navigation svg { flex: none; width: 16px; height: 16px; stroke-width: 1.8; }
 .navigation-account .wb-brand-mark { color: var(--accent); stroke-width: 2.5; }
 .navigation-account span, .navigation-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.navigation-account { min-height: 30px; padding: 0 6px; font-weight: 500; }
+.navigation-account { min-height: 30px; padding: 0 6px; font-size: 13px; font-weight: 500; }
 .navigation-account button, .navigation-row, .navigation-create {
   background: transparent;
   border: 0;
@@ -36,14 +36,16 @@
 .navigation-workspace select { flex: 1; min-width: 0; padding: 4px 2px; border: 0; background: transparent; color: var(--text); font-size: 12px; }
 .navigation-search { min-height: 32px; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; background: var(--sidebar-search-bg); color: var(--muted); }
 .navigation-search input { background: transparent; border: 0; outline: 0; min-width: 0; flex: 1; color: var(--text); font-size: 12px; }
+.navigation-search:focus-within { box-shadow: inset 0 0 0 1px var(--accent-border-strong); }
 .navigation-create { min-height: 34px; padding: 7px 10px; text-align: left; font-weight: 500; }
 .navigation-account button:hover, .navigation-row:hover, .navigation-create:not(:disabled):hover { background: var(--sidebar-search-bg); }
 .navigation-scroll { overflow: auto; min-height: 0; flex: 1; }
-.navigation-scroll h3 { margin: 15px 8px 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .3px; }
-.navigation-row { width: 100%; padding: 7px 8px; text-align: left; line-height: 1.35; }
+.navigation-scroll h3 { margin: 12px 8px 4px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .3px; }
+.navigation-row { width: 100%; min-height: 30px; padding: 5px 8px; text-align: left; line-height: 1.35; }
 .navigation-row[data-selected="true"] { background: var(--thread-selected-bg); color: var(--text); font-weight: 500; }
+.navigation-row[data-selected="true"]:hover { background: var(--thread-selected-bg); }
 .navigation-row[data-selected="true"] svg { color: var(--accent); }
 .navigation-row small { color: var(--muted); font-size: 11px; }
 .navigation-indent { padding-left: 12px; }
-.navigation-status { margin: 3px 8px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.navigation-status { margin: 2px 8px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .collaboration-navigation :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

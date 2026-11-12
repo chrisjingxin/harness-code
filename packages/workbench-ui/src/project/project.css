@@ -2,9 +2,9 @@
 .project-context-dock { position: relative; flex: 0 0 auto; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface); overflow: hidden; }
 .project-dock-resize { position: absolute; inset: 0 auto 0 0; z-index: 1; width: 4px; cursor: col-resize; }
 .project-dock-resize:hover, .project-dock-resize.is-dragging { background: var(--accent-border); }
-.project-dock-header { flex: 0 0 auto; display: flex; align-items: stretch; min-height: 54px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.project-dock-header { flex: 0 0 auto; display: flex; align-items: stretch; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .project-dock-tabs { min-width: 0; flex: 1 1 auto; display: flex; align-items: stretch; gap: 17px; overflow-x: auto; }
-.project-dock-tab { min-height: 54px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.project-dock-tab { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .project-dock-tab:hover { color: var(--text-soft); }
 .project-dock-tab.is-selected { border-bottom-color: var(--accent); color: var(--accent); }
 .project-dock-close { align-self: center; flex: 0 0 auto; margin-left: 8px; }
@@ -42,7 +42,7 @@
 .project-file-tab.is-active { border-bottom-color: var(--accent); color: var(--accent); }
 .project-file-tab-select { min-width: 0; align-self: stretch; display: flex; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
 .project-file-tab-name, .project-workbench-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-file-tab-close { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; display: inline-grid; place-items: center; border: 0; border-radius: 9999px; background: transparent; color: inherit; cursor: pointer; }
+.project-file-tab-close { width: 22px; height: 22px; padding: 0; flex: 0 0 22px; display: inline-grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; }
 .project-file-tab-close svg { display: block; width: 12px; height: 12px; }
 .project-file-tab-close:hover { background: var(--accent-soft-2); }
 .project-dock-file-panel, .project-workbench-file-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -63,7 +63,7 @@
 .project-line-numbers { flex: 0 0 auto; padding: 12px 9px; border-right: 1px solid var(--line); color: var(--subtle); background: var(--surface); font: 11px/1.7 var(--font-mono); text-align: right; user-select: none; white-space: pre; }
 .project-file-code-pre { margin: 0; padding: 12px 14px; color: var(--text); font: 11px/1.7 var(--font-mono); white-space: pre; }
 .project-file-code-pre code { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; word-break: normal; }
-.project-workbench-tab-item { flex: 0 0 auto; min-height: 42px; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; color: var(--muted); }
+.project-workbench-tab-item { flex: 0 0 auto; min-height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 12px; border-bottom: 2px solid transparent; color: var(--muted); }
 .project-workbench-tab-item[data-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
 .project-workbench-tab { min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 6px; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
 .project-workbench-tab svg { flex: 0 0 auto; }

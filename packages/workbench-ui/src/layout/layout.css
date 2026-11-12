@@ -40,20 +40,19 @@
   overflow: hidden;
 }
 .collaboration-header-context strong,
-.collaboration-header-context strong {
-  font-size: 14px;
-  font-weight: 500;
-}
 .collaboration-header-context span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .collaboration-header-context strong {
+  min-width: 0;
+  flex: 0 1 auto;
   font-size: 14px;
   font-weight: 500;
 }
 .collaboration-header-context span {
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -120,7 +119,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  padding: 24px;
+  padding: 18px;
   max-width: calc(100% - 32px);
   max-height: calc(100% - 32px);
   overflow: auto;
@@ -128,8 +127,8 @@
 }
 .collaboration-modal-close {
   position: absolute;
-  right: 12px;
-  top: 12px;
+  right: 10px;
+  top: 10px;
 }
 .collaboration-layout :focus-visible {
   outline: 2px solid var(--accent);

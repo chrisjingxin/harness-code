@@ -125,7 +125,7 @@
 .wb-composer-tabs { display: flex; align-items: center; height: 38px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 .wb-composer-tab { position: relative; color: var(--accent-hover); font-size: 12px; font-weight: 650; line-height: 38px; }
 .wb-composer-tab::after { position: absolute; inset-inline: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); content: ""; }
-.wb-composer-textarea { display: block; width: 100%; min-width: 0; min-height: 52px; resize: none; padding: 12px 16px 6px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.wb-composer-textarea { display: block; width: 100%; min-width: 0; min-height: 52px; max-height: max(52px, min(186px, 20dvh)); resize: none; padding: 12px 16px 6px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .wb-composer-textarea:focus-visible { outline: 0; }
 .wb-composer-rail { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px 11px; }
 .wb-composer-rail-left { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }

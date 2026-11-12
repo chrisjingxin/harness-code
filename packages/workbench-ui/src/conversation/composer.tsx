@@ -145,7 +145,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0)
     const maxHeight = lineHeight * 8 + padding
     textarea.style.height = `${Math.min(maxHeight, Math.max(52, textarea.scrollHeight))}px`
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
+    // 窗口变矮时 CSS 会进一步限制高度，长草稿仍须能在输入框内滚动。
+    textarea.style.overflowY = "auto"
   }, [draft.text])
 
   useLayoutEffect(() => {

@@ -21,23 +21,34 @@ html, body, #root { height: 100%; overflow: hidden; }
 .desktop-conversation { display: grid; place-content: center; justify-items: center; text-align: center; }
 .desktop-project { background: var(--surface); border-left: 1px solid var(--line); }
 .desktop-project header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.desktop-history { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 12px 20px 16px; }
-.desktop-history-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; color: var(--muted); font-size: 12px; }
+.desktop-history { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 10px 20px 12px; }
+.desktop-history-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-bottom: 10px; color: var(--muted); font-size: 12px; }
+.desktop-history-toolbar button { margin-left: auto; }
 .desktop-project-center { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.desktop-center-tabs { display: flex; flex: 0 0 auto; align-items: stretch; min-height: 38px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.desktop-center-tabs { display: flex; flex: 0 0 auto; align-items: stretch; min-height: 44px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
 .desktop-conversation-tab { display: flex; flex: 0 0 auto; border-bottom: 2px solid transparent; }
 .desktop-conversation-tab[data-selected="true"] { border-bottom-color: var(--accent); }
-.desktop-conversation-tab button { border: 0; background: transparent; color: var(--text); padding: 0 16px; font: inherit; cursor: pointer; }
+.desktop-conversation-tab button { border: 0; background: transparent; color: var(--muted); padding: 0 16px; font: inherit; font-size: 13px; cursor: pointer; }
+.desktop-conversation-tab[data-selected="true"] button { color: var(--accent); }
 .desktop-center-conversation, .desktop-project-center .project-workbench-file-panel { flex: 1 1 auto; min-height: 0; }
 .desktop-center-conversation[hidden] { display: none; }
 .desktop-project-dock { position: relative; height: 100%; min-height: 0; }
 .desktop-project-retry { position: absolute; z-index: 2; right: 48px; top: 12px; }
 
-.desktop-settings { width: min(530px, 100%); }
-.desktop-settings > h2 { padding-right: 32px; margin-bottom: 16px; }
-.desktop-settings .identity-panel, .desktop-settings .device-panel { margin-top: 16px; }
-.desktop-settings .identity-heading h2 { margin: 0; font-size: 15px; }
-.desktop-settings .hint { color: var(--muted); font-size: 13px; }
+.desktop-settings { width: min(530px, 100%); font-size: 12px; }
+.desktop-settings > h2 { padding-right: 32px; margin-bottom: 12px; }
+.desktop-settings .identity-panel, .desktop-settings .device-panel { margin-top: 12px; padding: 14px; border-radius: var(--radius-surface); }
+.desktop-settings .identity-heading { gap: 4px 12px; margin-bottom: 10px; }
+.desktop-settings .identity-heading h2, .desktop-settings .device-panel h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.desktop-settings .identity-panel p, .desktop-settings .device-panel p { margin: 8px 0; line-height: 1.5; }
+.desktop-settings .identity-panel h3 { margin: 12px 0 6px; font-size: 13px; }
+.desktop-settings .identity-panel ul { margin: 6px 0 0; line-height: 1.6; }
+.desktop-settings .identity-actions, .desktop-settings .identity-actions label, .desktop-settings .device-actions { gap: 6px 8px; }
+.desktop-settings .identity-actions select, .desktop-settings .device-row input { min-height: var(--control-standard); padding: 4px 8px; border-radius: var(--radius-control); }
+.desktop-settings .device-row { gap: 8px; margin-top: 10px; }
+.desktop-settings .device-actions button { min-height: var(--control-compact); padding: 4px 9px; border-radius: var(--radius-control); font-size: 12px; }
+.desktop-settings .wb-button { min-height: var(--control-compact); padding: 0 9px; font-size: 12px; }
+.desktop-settings .hint { color: var(--muted); font-size: 12px; }
 .desktop-settings .error, .desktop-empty .error { color: var(--danger); }
 .desktop-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 13px; }
 .desktop-preferences label, .desktop-zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -48,4 +59,13 @@ html, body, #root { height: 100%; overflow: hidden; }
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   padding: 0 8px;
+}
+
+@media (max-height: 560px) {
+  .desktop-history { padding: 8px 16px 10px; }
+  .desktop-history-toolbar { padding-bottom: 6px; }
+  .desktop-history .wb-composer-inner { padding-top: 6px; }
+  .desktop-history .wb-composer-tabs { height: 30px; }
+  .desktop-history .wb-composer-tab { line-height: 30px; }
+  .desktop-history .wb-composer-rail { padding-top: 2px; padding-bottom: 7px; }
 }
