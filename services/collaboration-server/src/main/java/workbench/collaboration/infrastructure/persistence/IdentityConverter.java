@@ -20,7 +20,7 @@ final class IdentityConverter {
 
     static UserPO toPo(User user) {
         UserPO po = new UserPO();
-        po.setId(user.id());
+        po.setUserId(user.id());
         po.setUsername(user.username());
         po.setDisplayName(user.displayName());
         po.setEnabled(user.enabled() ? 1 : 0);
@@ -30,7 +30,7 @@ final class IdentityConverter {
 
     static User toUser(UserPO po) {
         return new User(
-                po.getId(),
+                po.getUserId(),
                 po.getUsername(),
                 po.getDisplayName(),
                 Integer.valueOf(1).equals(po.getEnabled()),
@@ -40,7 +40,7 @@ final class IdentityConverter {
 
     static WorkspacePO toPo(Workspace workspace) {
         WorkspacePO po = new WorkspacePO();
-        po.setId(workspace.id());
+        po.setWorkspaceId(workspace.id());
         po.setSlug(workspace.slug());
         po.setName(workspace.name());
         po.setCreatedAt(Times.ofMs(workspace.createdAtMs()));
@@ -49,7 +49,7 @@ final class IdentityConverter {
 
     static Workspace toWorkspace(WorkspacePO po) {
         return new Workspace(
-                po.getId(),
+                po.getWorkspaceId(),
                 po.getSlug(),
                 po.getName(),
                 Times.ms(po.getCreatedAt())

@@ -15,7 +15,7 @@ import java.util.Optional;
  *
  * <p>【功能定义】
  * 基于 MyBatis-Plus 实现对 TDSQL 表 wb_device 的持久化。
- * 领域实体与底层自增主键 pk_id 严格隔离，所有查询与更新均按业务唯一标识进行。
+ * 领域实体与底层自增主键 id 严格隔离，所有查询与更新均按业务唯一标识 device_id 进行。
  * 设备列表按 owner_user_id 维度分页（设备属人，与工作区无关）。
  *
  * <p>【协作边界】
@@ -33,7 +33,7 @@ public class DeviceRepositoryImpl implements DeviceRepository {
 
     @Override
     public Optional<Device> findById(String id) {
-        return Optional.ofNullable(devices.selectOne(new QueryWrapper<DevicePO>().eq("id", id)))
+        return Optional.ofNullable(devices.selectOne(new QueryWrapper<DevicePO>().eq("device_id", id)))
                 .map(DeviceConverter::toDevice);
     }
 
@@ -47,7 +47,7 @@ public class DeviceRepositoryImpl implements DeviceRepository {
     @Override
     public void update(Device device) {
         DevicePO po = DeviceConverter.toPo(device);
-        int rows = devices.update(po, new UpdateWrapper<DevicePO>().eq("id", device.id()));
+        int rows = devices.update(po, new UpdateWrapper<DevicePO>().eq("device_id", device.id()));
         if (rows != 1) {
             throw new IllegalStateException("设备不存在");
         }
@@ -58,7 +58,7 @@ public class DeviceRepositoryImpl implements DeviceRepository {
         QueryWrapper<DevicePO> query = new QueryWrapper<DevicePO>().eq("owner_user_id", ownerUserId);
         if (beforeCreatedAtMs != null && beforeId != null) {
             query.and(wrapper -> wrapper.lt("created_at", Times.ofMs(beforeCreatedAtMs))
-                    .or(inner -> inner.eq("created_at", Times.ofMs(beforeCreatedAtMs)).lt("id", beforeId)));
+                    .or(inner -> inner.eq("created_at", Times.ofMs(beforeCreatedAtMs)).lt("device_id", beforeId)));
         }
         query.orderByDesc("created_at").orderByDesc("id").last("LIMIT " + limit);
         return devices.selectList(query).stream()

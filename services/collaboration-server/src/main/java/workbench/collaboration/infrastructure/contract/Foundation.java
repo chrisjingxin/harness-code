@@ -28,10 +28,11 @@ import java.util.UUID;
  *      wb_project、wb_project_member、wb_project_repository、wb_local_repo_binding、
  *      wb_conversation、wb_conversation_repository；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
- *    - 每张业务表必须拥有物理自增主键 bigint unsigned pk_id (PRI auto_increment)；
+ *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
+ *      业务标识列带实体前缀（wb_user.user_id、wb_project.project_id 等，CHAR(36) 唯一索引）；
  *    - 抽查新语义关键列：wb_device.owner_user_id、wb_repository.remote_url_sha256、
  *      wb_conversation 的 owner/status/brief/synced_sequence/brief_updated_at 等；
- *    - 团队规范落库形态：时间列 DATETIME(3)（*_at），状态列 TINYINT，全列 NOT NULL。
+ *    - 团队规范落库形态：时间列 DATETIME(3)（*_at，应用当前时区），状态列 TINYINT，全列 NOT NULL。
  * 2. 彻底移除旧模型残留：
  *    - 绝不允许出现历史流水表（wb_message、wb_execution 系列、wb_request_receipt、
  *      wb_device_request、wb_outbox_event）；
@@ -56,10 +57,12 @@ public final class Foundation {
 
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
     private static final Map<String, List<String>> REQUIRED_COLUMNS = Map.of(
-            "wb_device", List.of("owner_user_id"),
-            "wb_repository", List.of("remote_url", "remote_url_sha256", "status"),
-            "wb_project", List.of("owner_user_id", "version"),
-            "wb_conversation", List.of("project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence"),
+            "wb_user", List.of("user_id"),
+            "wb_workspace", List.of("workspace_id"),
+            "wb_device", List.of("device_id", "owner_user_id"),
+            "wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status"),
+            "wb_project", List.of("project_id", "owner_user_id", "version"),
+            "wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence"),
             "wb_local_repo_binding", List.of("device_id", "repository_id"),
             "wb_conversation_repository", List.of("conversation_id", "repository_id")
     );
@@ -73,18 +76,18 @@ public final class Foundation {
 
     /** 严禁残留的旧语义列：表 -> 禁止列 */
     private static final Map<String, List<String>> REMOVED_COLUMNS = Map.ofEntries(
-            Map.entry("wb_device", List.of("workspace_id", "created_at_ms", "updated_at_ms")),
-            Map.entry("wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence",
+            Map.entry("wb_device", List.of("workspace_id", "pk_id", "created_at_ms", "updated_at_ms")),
+            Map.entry("wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence", "pk_id",
                     "created_at_ms", "updated_at_ms", "brief_updated_at_ms")),
-            Map.entry("wb_user", List.of("created_at_ms")),
-            Map.entry("wb_workspace", List.of("created_at_ms")),
-            Map.entry("wb_workspace_member", List.of("created_at_ms")),
-            Map.entry("wb_repository", List.of("created_at_ms", "updated_at_ms")),
-            Map.entry("wb_project", List.of("created_at_ms", "updated_at_ms")),
-            Map.entry("wb_project_member", List.of("created_at_ms", "updated_at_ms")),
-            Map.entry("wb_project_repository", List.of("created_at_ms")),
-            Map.entry("wb_local_repo_binding", List.of("created_at_ms")),
-            Map.entry("wb_conversation_repository", List.of("created_at_ms"))
+            Map.entry("wb_user", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_workspace", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_workspace_member", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_repository", List.of("pk_id", "created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project", List.of("pk_id", "created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project_member", List.of("pk_id", "created_at_ms", "updated_at_ms")),
+            Map.entry("wb_project_repository", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_local_repo_binding", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_conversation_repository", List.of("pk_id", "created_at_ms"))
     );
 
     private final JdbcTemplate jdbc;
@@ -126,11 +129,11 @@ public final class Foundation {
             }
             Integer key = jdbc.queryForObject(
                     "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?"
-                            + " AND column_name = 'pk_id' AND column_type = 'bigint unsigned' AND column_key = 'PRI' AND extra LIKE '%auto_increment%'",
+                            + " AND column_name = 'id' AND column_type = 'bigint unsigned' AND column_key = 'PRI' AND extra LIKE '%auto_increment%'",
                     Integer.class, table
             );
             if (!Integer.valueOf(1).equals(key)) {
-                problems.add("表缺少自增物理主键 pk_id: " + table);
+                problems.add("表缺少自增物理主键 id: " + table);
             }
             for (String column : REQUIRED_COLUMNS.getOrDefault(table, List.of())) {
                 Integer columnOk = jdbc.queryForObject(

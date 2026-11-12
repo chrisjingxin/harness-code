@@ -21,13 +21,13 @@ import java.time.LocalDateTime;
 @TableName("wb_workspace")
 public class WorkspacePO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 工作区全局唯一业务标识 (UUID) */
-    @TableField("id")
-    private String id;
+    @TableField("workspace_id")
+    private String workspaceId;
 
     /** 工作区友好别名（URL Slug） */
     @TableField("slug")
@@ -41,20 +41,20 @@ public class WorkspacePO {
     @TableField("created_at")
     private LocalDateTime createdAt;
 
-    public Long getPkId() {
-        return pkId;
-    }
-
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
-    }
-
-    public String getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(String id) {
+    public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(String workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getSlug() {

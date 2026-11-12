@@ -23,13 +23,13 @@ import java.time.LocalDateTime;
 @TableName("wb_device")
 public class DevicePO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 设备全局唯一业务标识 (UUID) */
-    @TableField("id")
-    private String id;
+    @TableField("device_id")
+    private String deviceId;
 
     /** 设备所属用户标识 */
     @TableField("owner_user_id")
@@ -71,20 +71,20 @@ public class DevicePO {
     @TableField("updated_at")
     private LocalDateTime updatedAt;
 
-    public Long getPkId() {
-        return pkId;
-    }
-
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
-    }
-
-    public String getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(String id) {
+    public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public void setDeviceId(String deviceId) {
+        this.deviceId = deviceId;
     }
 
     public String getOwnerUserId() {

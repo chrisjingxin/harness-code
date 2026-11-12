@@ -41,14 +41,14 @@ public class ConversationRepositoryImpl implements ConversationRepository {
 
     @Override
     public Optional<Conversation> findById(String id) {
-        return Optional.ofNullable(conversations.selectOne(new QueryWrapper<ConversationPO>().eq("id", id)))
+        return Optional.ofNullable(conversations.selectOne(new QueryWrapper<ConversationPO>().eq("conversation_id", id)))
                 .map(ConversationConverter::toConversation);
     }
 
     @Override
     public Optional<Conversation> lockById(String id) {
         // 行级悲观锁：锁定会话记录行，必须处于外部短事务内
-        return Optional.ofNullable(conversations.selectOne(new QueryWrapper<ConversationPO>().eq("id", id).last("FOR UPDATE")))
+        return Optional.ofNullable(conversations.selectOne(new QueryWrapper<ConversationPO>().eq("conversation_id", id).last("FOR UPDATE")))
                 .map(ConversationConverter::toConversation);
     }
 
@@ -101,7 +101,7 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         // 架构防护动机 (Why)：MyBatis-Plus 实体更新默认忽略 null 属性；
         // 任务解绑、简报清空等场景必须显式写 '' 哨兵，因此使用 UpdateWrapper 显式 set
         int rows = conversations.update(null, new UpdateWrapper<ConversationPO>()
-                .eq("id", conversation.id())
+                .eq("conversation_id", conversation.id())
                 .set("workspace_id", conversation.workspaceId())
                 .set("project_id", conversation.projectId())
                 .set("owner_user_id", conversation.ownerUserId())

@@ -25,7 +25,7 @@ class FoundationTest {
         // 两参变长参数（表 + 列）：information_schema.columns 精确列核对
         when(jdbc.queryForObject(anyString(), any(Class.class), anyString(), anyString()))
                 .thenAnswer(invocation -> columns.contains(invocation.getArgument(2) + "." + invocation.getArgument(3)) ? 1 : 0);
-        // 单参变长参数（表）：表存在性/引擎/字符集 与 pk_id 主键核对
+        // 单参变长参数（表）：表存在性/引擎/字符集 与 id 主键核对
         when(jdbc.queryForObject(anyString(), any(Class.class), anyString()))
                 .thenAnswer(invocation -> tables.contains(invocation.getArgument(2, String.class)) ? 1 : 0);
         return new Foundation(jdbc, null, null);
@@ -38,10 +38,13 @@ class FoundationTest {
     }
 
     private static Set<String> compliantColumns() {
-        return Set.of("wb_device.owner_user_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
-                "wb_repository.status", "wb_project.owner_user_id", "wb_project.version",
-                "wb_conversation.project_id", "wb_conversation.owner_user_id", "wb_conversation.status",
-                "wb_conversation.brief_source", "wb_conversation.brief_updated_at", "wb_conversation.synced_sequence",
+        return Set.of("wb_user.user_id", "wb_workspace.workspace_id",
+                "wb_device.device_id", "wb_device.owner_user_id",
+                "wb_repository.repository_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
+                "wb_repository.status", "wb_project.project_id", "wb_project.owner_user_id", "wb_project.version",
+                "wb_conversation.conversation_id", "wb_conversation.project_id", "wb_conversation.owner_user_id",
+                "wb_conversation.status", "wb_conversation.brief_source", "wb_conversation.brief_updated_at",
+                "wb_conversation.synced_sequence",
                 "wb_local_repo_binding.device_id", "wb_local_repo_binding.repository_id",
                 "wb_conversation_repository.conversation_id", "wb_conversation_repository.repository_id");
     }

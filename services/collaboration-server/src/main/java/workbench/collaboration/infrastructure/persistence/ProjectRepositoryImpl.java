@@ -44,7 +44,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
 
     @Override
     public Optional<Project> findById(String id) {
-        return Optional.ofNullable(projects.selectOne(new QueryWrapper<ProjectPO>().eq("id", id)))
+        return Optional.ofNullable(projects.selectOne(new QueryWrapper<ProjectPO>().eq("project_id", id)))
                 .map(ProjectConverter::toProject);
     }
 
@@ -59,7 +59,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public boolean updateIfVersion(Project project, long expectedVersion) {
         // CAS 乐观锁：版本号已被并发请求推进时命中 0 行，调用方转 409 VERSION_CONFLICT
         return projects.update(null, new UpdateWrapper<ProjectPO>()
-                .eq("id", project.id())
+                .eq("project_id", project.id())
                 .eq("version", expectedVersion)
                 .set("name", project.name())
                 .set("description", project.description())
@@ -79,7 +79,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         }
         return projects.selectList(new QueryWrapper<ProjectPO>()
                         .eq("workspace_id", workspaceId)
-                        .in("id", projectIds)
+                        .in("project_id", projectIds)
                         .orderByDesc("updated_at").orderByDesc("id"))
                 .stream().map(ProjectConverter::toProject).toList();
     }

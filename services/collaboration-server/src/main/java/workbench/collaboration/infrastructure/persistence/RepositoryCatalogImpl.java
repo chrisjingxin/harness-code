@@ -33,7 +33,7 @@ public class RepositoryCatalogImpl implements RepositoryCatalog {
 
     @Override
     public Optional<Repository> findById(String id) {
-        return Optional.ofNullable(repositories.selectOne(new QueryWrapper<RepositoryPO>().eq("id", id)))
+        return Optional.ofNullable(repositories.selectOne(new QueryWrapper<RepositoryPO>().eq("repository_id", id)))
                 .map(RepositoryConverter::toRepository);
     }
 
@@ -47,7 +47,7 @@ public class RepositoryCatalogImpl implements RepositoryCatalog {
     @Override
     public void update(Repository repository) {
         int rows = repositories.update(null, new UpdateWrapper<RepositoryPO>()
-                .eq("id", repository.id())
+                .eq("repository_id", repository.id())
                 .set("name", repository.name())
                 .set("default_branch", repository.defaultBranch())
                 .set("status", repository.status().db())

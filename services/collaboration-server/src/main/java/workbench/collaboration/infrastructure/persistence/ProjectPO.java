@@ -21,13 +21,13 @@ import java.time.LocalDateTime;
 @TableName("wb_project")
 public class ProjectPO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 项目全局唯一业务标识 (UUID) */
-    @TableField("id")
-    private String id;
+    @TableField("project_id")
+    private String projectId;
 
     /** 所属团队标识 */
     @TableField("workspace_id")
@@ -61,20 +61,20 @@ public class ProjectPO {
     @TableField("updated_at")
     private LocalDateTime updatedAt;
 
-    public Long getPkId() {
-        return pkId;
-    }
-
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
-    }
-
-    public String getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(String id) {
+    public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(String projectId) {
+        this.projectId = projectId;
     }
 
     public String getWorkspaceId() {

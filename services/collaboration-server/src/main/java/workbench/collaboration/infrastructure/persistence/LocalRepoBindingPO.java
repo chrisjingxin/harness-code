@@ -21,9 +21,9 @@ import java.time.LocalDateTime;
 @TableName("wb_local_repo_binding")
 public class LocalRepoBindingPO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 登记设备标识 */
     @TableField("device_id")
@@ -37,12 +37,12 @@ public class LocalRepoBindingPO {
     @TableField("created_at")
     private LocalDateTime createdAt;
 
-    public Long getPkId() {
-        return pkId;
+    public Long getId() {
+        return id;
     }
 
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getDeviceId() {

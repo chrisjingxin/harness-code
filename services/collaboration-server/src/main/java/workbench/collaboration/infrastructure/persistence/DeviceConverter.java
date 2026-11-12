@@ -19,7 +19,7 @@ final class DeviceConverter {
 
     static DevicePO toPo(Device device) {
         DevicePO po = new DevicePO();
-        po.setId(device.id());
+        po.setDeviceId(device.id());
         po.setOwnerUserId(device.ownerUserId());
         po.setInstallationId(device.installationId());
         po.setLedgerId(device.ledgerId());
@@ -35,7 +35,7 @@ final class DeviceConverter {
 
     static Device toDevice(DevicePO po) {
         return new Device(
-                po.getId(),
+                po.getDeviceId(),
                 po.getOwnerUserId(),
                 po.getInstallationId(),
                 po.getLedgerId(),

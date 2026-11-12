@@ -22,9 +22,9 @@ import java.time.LocalDateTime;
 @TableName("wb_project_member")
 public class ProjectMemberPO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 所属项目标识 */
     @TableField("project_id")
@@ -46,12 +46,12 @@ public class ProjectMemberPO {
     @TableField("updated_at")
     private LocalDateTime updatedAt;
 
-    public Long getPkId() {
-        return pkId;
+    public Long getId() {
+        return id;
     }
 
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getProjectId() {

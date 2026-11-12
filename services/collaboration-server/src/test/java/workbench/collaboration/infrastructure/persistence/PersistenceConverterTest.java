@@ -24,7 +24,7 @@ class PersistenceConverterTest {
     User disabled = new User("u1", "user01", "用户 01", false, 10L);
     UserPO po = IdentityConverter.toPo(disabled);
     assertThat(po.getEnabled()).isZero();
-    assertThat(po.getPkId()).isNull();
+    assertThat(po.getId()).isNull();
     assertThat(IdentityConverter.toUser(po)).isEqualTo(disabled);
 
     po.setEnabled(null);
@@ -50,7 +50,7 @@ class PersistenceConverterTest {
     assertThat(po.getBriefText()).isEmpty();
     assertThat(po.getStatus()).isEqualTo(1);
     assertThat(po.getBriefSource()).isEqualTo(1);
-    assertThat(po.getPkId()).isNull();
+    assertThat(po.getId()).isNull();
     assertThat(ConversationConverter.toConversation(po)).isEqualTo(conversation);
   }
 
@@ -60,7 +60,7 @@ class PersistenceConverterTest {
     ProjectPO po = ProjectConverter.toPo(project);
     assertThat(po.getStatus()).isEqualTo(2);
     assertThat(po.getVersion()).isEqualTo(7L);
-    assertThat(po.getPkId()).isNull();
+    assertThat(po.getId()).isNull();
     assertThat(ProjectConverter.toProject(po)).isEqualTo(project);
   }
 
@@ -76,7 +76,7 @@ class PersistenceConverterTest {
   void projectRepositoryRefRoundTrips() {
     ProjectRepositoryRef ref = new ProjectRepositoryRef("p1", "r1", 9L);
     ProjectRepositoryRefPO po = ProjectConverter.toPo(ref);
-    assertThat(po.getPkId()).isNull();
+    assertThat(po.getId()).isNull();
     assertThat(ProjectConverter.toReference(po)).isEqualTo(ref);
   }
 
@@ -91,7 +91,7 @@ class PersistenceConverterTest {
 
     LocalRepoBinding binding = new LocalRepoBinding("d1", "r1", 5L);
     LocalRepoBindingPO bindingPo = RepositoryConverter.toPo(binding);
-    assertThat(bindingPo.getPkId()).isNull();
+    assertThat(bindingPo.getId()).isNull();
     assertThat(RepositoryConverter.toBinding(bindingPo)).isEqualTo(binding);
   }
 

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  *
  * <p>【功能定义】
  * 映射 TDSQL 表 wb_user 的持久化实体。
- * 业务全局唯一标识 id (UUID) 与底层物理自增主键 pk_id 严格解耦。
+ * 业务全局唯一标识 user_id (UUID) 与底层物理自增主键 id 严格解耦。
  *
  * <p>【协作边界】
  * - 上游调用方：UserMapper、IdentityConverter、IdentityRepositoryImpl。
@@ -21,13 +21,13 @@ import java.time.LocalDateTime;
 @TableName("wb_user")
 public class UserPO {
 
-    /** 物理聚簇自增主键 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 用户全局唯一业务标识 (UUID) */
-    @TableField("id")
-    private String id;
+    @TableField("user_id")
+    private String userId;
 
     /** 登录用户名（唯一） */
     @TableField("username")
@@ -45,20 +45,20 @@ public class UserPO {
     @TableField("created_at")
     private LocalDateTime createdAt;
 
-    public Long getPkId() {
-        return pkId;
-    }
-
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
-    }
-
-    public String getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(String id) {
+    public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
     }
 
     public String getUsername() {

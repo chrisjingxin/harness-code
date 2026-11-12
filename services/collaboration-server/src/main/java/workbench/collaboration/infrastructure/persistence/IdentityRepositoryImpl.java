@@ -39,7 +39,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
 
     @Override
     public Optional<User> findUserById(String id) {
-        return Optional.ofNullable(users.selectOne(new QueryWrapper<UserPO>().eq("id", id)))
+        return Optional.ofNullable(users.selectOne(new QueryWrapper<UserPO>().eq("user_id", id)))
                 .map(IdentityConverter::toUser);
     }
 
@@ -58,7 +58,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
 
     @Override
     public Optional<Workspace> findWorkspaceById(String id) {
-        return Optional.ofNullable(workspaces.selectOne(new QueryWrapper<WorkspacePO>().eq("id", id)))
+        return Optional.ofNullable(workspaces.selectOne(new QueryWrapper<WorkspacePO>().eq("workspace_id", id)))
                 .map(IdentityConverter::toWorkspace);
     }
 
@@ -110,7 +110,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return workspaces.selectList(new QueryWrapper<WorkspacePO>().in("id", ids).orderByAsc("slug"))
+        return workspaces.selectList(new QueryWrapper<WorkspacePO>().in("workspace_id", ids).orderByAsc("slug"))
                 .stream()
                 .map(IdentityConverter::toWorkspace)
                 .toList();
@@ -125,7 +125,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return users.selectList(new QueryWrapper<UserPO>().in("id", ids).eq("enabled", 1).orderByAsc("username"))
+        return users.selectList(new QueryWrapper<UserPO>().in("user_id", ids).eq("enabled", 1).orderByAsc("username"))
                 .stream()
                 .map(IdentityConverter::toUser)
                 .toList();

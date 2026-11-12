@@ -22,7 +22,7 @@ final class ConversationConverter {
 
     static ConversationPO toPo(Conversation conversation) {
         ConversationPO po = new ConversationPO();
-        po.setId(conversation.id());
+        po.setConversationId(conversation.id());
         po.setWorkspaceId(conversation.workspaceId());
         po.setProjectId(conversation.projectId());
         po.setOwnerUserId(conversation.ownerUserId());
@@ -43,7 +43,7 @@ final class ConversationConverter {
 
     static Conversation toConversation(ConversationPO po) {
         return new Conversation(
-                po.getId(),
+                po.getConversationId(),
                 po.getWorkspaceId(),
                 po.getProjectId(),
                 po.getOwnerUserId(),

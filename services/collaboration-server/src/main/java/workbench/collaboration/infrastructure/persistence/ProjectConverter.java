@@ -23,7 +23,7 @@ final class ProjectConverter {
 
     static ProjectPO toPo(Project project) {
         ProjectPO po = new ProjectPO();
-        po.setId(project.id());
+        po.setProjectId(project.id());
         po.setWorkspaceId(project.workspaceId());
         po.setName(project.name());
         po.setDescription(project.description());
@@ -37,7 +37,7 @@ final class ProjectConverter {
 
     static Project toProject(ProjectPO po) {
         return new Project(
-                po.getId(),
+                po.getProjectId(),
                 po.getWorkspaceId(),
                 po.getName(),
                 po.getDescription(),

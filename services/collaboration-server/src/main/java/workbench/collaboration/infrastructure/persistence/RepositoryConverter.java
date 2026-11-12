@@ -22,7 +22,7 @@ final class RepositoryConverter {
 
     static RepositoryPO toPo(Repository repository) {
         RepositoryPO po = new RepositoryPO();
-        po.setId(repository.id());
+        po.setRepositoryId(repository.id());
         po.setWorkspaceId(repository.workspaceId());
         po.setName(repository.name());
         po.setRemoteUrl(repository.remoteUrl());
@@ -38,7 +38,7 @@ final class RepositoryConverter {
 
     static Repository toRepository(RepositoryPO po) {
         return new Repository(
-                po.getId(),
+                po.getRepositoryId(),
                 po.getWorkspaceId(),
                 po.getName(),
                 po.getRemoteUrl(),

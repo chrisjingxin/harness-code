@@ -22,13 +22,13 @@ import java.time.LocalDateTime;
 @TableName("wb_conversation")
 public class ConversationPO {
 
-    /** 物理聚簇自增主键（BIGINT UNSIGNED），用于底层高效索引与物理存储 */
-    @TableId(value = "pk_id", type = IdType.AUTO)
-    private Long pkId;
+    /** 物理主键（BIGINT UNSIGNED AUTO_INCREMENT） */
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /** 会话全局唯一业务标识 (UUID) */
-    @TableField("id")
-    private String id;
+    @TableField("conversation_id")
+    private String conversationId;
 
     /** 所属工作区标识 */
     @TableField("workspace_id")
@@ -90,20 +90,20 @@ public class ConversationPO {
     @TableField("updated_at")
     private LocalDateTime updatedAt;
 
-    public Long getPkId() {
-        return pkId;
-    }
-
-    public void setPkId(Long pkId) {
-        this.pkId = pkId;
-    }
-
-    public String getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(String id) {
+    public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getConversationId() {
+        return conversationId;
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
     }
 
     public String getWorkspaceId() {
