@@ -4,8 +4,17 @@ import org.junit.jupiter.api.Test;
 import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.domain.project.MemberStatus;
+import workbench.collaboration.domain.project.Project;
+import workbench.collaboration.domain.project.ProjectMember;
+import workbench.collaboration.domain.project.ProjectRepositoryRef;
+import workbench.collaboration.domain.project.ProjectStatus;
+import workbench.collaboration.domain.repository.LocalRepoBinding;
+import workbench.collaboration.domain.repository.Repository;
+import workbench.collaboration.domain.repository.RepositoryStatus;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 0/1 标记与可空字段进出领域对象时不能丢。 */
 class PersistenceConverterTest {
@@ -39,5 +48,55 @@ class PersistenceConverterTest {
     assertThat(po.getBriefText()).isNull();
     assertThat(po.getPkId()).isNull();
     assertThat(ConversationConverter.toConversation(po)).isEqualTo(conversation);
+  }
+
+  @Test
+  void projectStatusAndVersionRoundTrips() {
+    Project project = new Project("p1", "w1", "账单", "desc", "u1", ProjectStatus.ARCHIVED, 7L, 1L, 2L);
+    ProjectPO po = ProjectConverter.toPo(project);
+    assertThat(po.getStatus()).isEqualTo("archived");
+    assertThat(po.getVersion()).isEqualTo(7L);
+    assertThat(po.getPkId()).isNull();
+    assertThat(ProjectConverter.toProject(po)).isEqualTo(project);
+  }
+
+  @Test
+  void projectMemberRemovedStatusRoundTrips() {
+    ProjectMember member = new ProjectMember("p1", "u1", MemberStatus.REMOVED, 1L, 2L);
+    ProjectMemberPO po = ProjectConverter.toPo(member);
+    assertThat(po.getStatus()).isEqualTo("removed");
+    assertThat(ProjectConverter.toMember(po)).isEqualTo(member);
+  }
+
+  @Test
+  void projectRepositoryRefRoundTrips() {
+    ProjectRepositoryRef ref = new ProjectRepositoryRef("p1", "r1", 9L);
+    ProjectRepositoryRefPO po = ProjectConverter.toPo(ref);
+    assertThat(po.getPkId()).isNull();
+    assertThat(ProjectConverter.toReference(po)).isEqualTo(ref);
+  }
+
+  @Test
+  void repositoryAndBindingRoundTrips() {
+    Repository repository = new Repository("r1", "w1", "中台", "git@x:y.git", "main", RepositoryStatus.ACTIVE, "u1", 1L, 2L);
+    RepositoryPO po = RepositoryConverter.toPo(repository);
+    assertThat(po.getStatus()).isEqualTo("active");
+    assertThat(RepositoryConverter.toRepository(po)).isEqualTo(repository);
+
+    LocalRepoBinding binding = new LocalRepoBinding("d1", "r1", 5L);
+    LocalRepoBindingPO bindingPo = RepositoryConverter.toPo(binding);
+    assertThat(bindingPo.getPkId()).isNull();
+    assertThat(RepositoryConverter.toBinding(bindingPo)).isEqualTo(binding);
+  }
+
+  @Test
+  void unknownStatusCodesFailFast() {
+    ProjectPO projectPo = new ProjectPO();
+    projectPo.setStatus("deleted");
+    assertThatThrownBy(() -> ProjectConverter.toProject(projectPo)).isInstanceOf(IllegalArgumentException.class);
+
+    RepositoryPO repositoryPo = new RepositoryPO();
+    repositoryPo.setStatus("gone");
+    assertThatThrownBy(() -> RepositoryConverter.toRepository(repositoryPo)).isInstanceOf(IllegalArgumentException.class);
   }
 }

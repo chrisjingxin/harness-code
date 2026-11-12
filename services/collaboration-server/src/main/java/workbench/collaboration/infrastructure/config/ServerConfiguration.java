@@ -8,7 +8,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.support.JdbcTransactionManager;
+import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.identity.IdentityRepository;
+import workbench.collaboration.domain.project.ProjectRepository;
+import workbench.collaboration.domain.repository.RepositoryCatalog;
 import workbench.collaboration.infrastructure.contract.Contracts;
 import workbench.collaboration.infrastructure.contract.Foundation;
 
@@ -36,6 +39,19 @@ public class ServerConfiguration {
     @Bean
     Contracts contracts() {
         return new Contracts();
+    }
+
+    /**
+     * 装配项目制授权策略：统一团队/项目/仓库/设备四个维度的准入判定，
+     * 供各应用服务在写路径与项目资源读路径前调用。
+     */
+    @Bean
+    ProjectAccessPolicy projectAccessPolicy(
+            IdentityRepository identity,
+            ProjectRepository projects,
+            RepositoryCatalog repositories
+    ) {
+        return new ProjectAccessPolicy(identity, projects, repositories);
     }
 
     /**
