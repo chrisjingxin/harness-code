@@ -38,7 +38,7 @@
     "ProjectMemberAddRequest": {
       "type": "object",
       "properties": {
-        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
       },
       "required": ["userId", "requestId"],
@@ -72,7 +72,7 @@
         "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "name": { "type": "string" },
         "description": { "type": "string" },
-        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "status": { "$ref": "#/$defs/ProjectStatus" },
         "role": { "$ref": "#/$defs/ProjectRole" },
         "memberCount": { "type": "integer", "minimum": 0 },
@@ -90,7 +90,7 @@
         "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "name": { "type": "string" },
         "description": { "type": "string" },
-        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "status": { "$ref": "#/$defs/ProjectStatus" },
         "version": { "type": "integer", "minimum": 1 },
         "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
@@ -111,7 +111,7 @@
     "ProjectMemberSummary": {
       "type": "object",
       "properties": {
-        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "status": { "$ref": "#/$defs/MemberStatus" },
         "joinedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "leftAt": {
@@ -150,7 +150,7 @@
         "remoteUrl": { "type": "string" },
         "defaultBranch": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "archived"] },
-        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
       },
@@ -252,7 +252,7 @@
       "properties": {
         "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
-        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "type": "string" },
         "status": { "$ref": "#/$defs/ConversationStatus" },

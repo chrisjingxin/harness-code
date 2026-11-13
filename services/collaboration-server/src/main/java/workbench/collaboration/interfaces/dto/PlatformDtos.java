@@ -23,8 +23,17 @@ public final class PlatformDtos {
 
     private PlatformDtos() {}
 
-    /** 普通用户展示身份信息 */
-    public record UserSummary(String id, String username, String displayName) {}
+    /** 普通用户展示身份与所属组织信息 */
+    public record UserSummary(
+            String id,
+            String userNo,
+            String userName,
+            String photo,
+            String orgId,
+            String orgNo,
+            String orgName,
+            String orgPathName
+    ) {}
 
     /** 工作区展示资料 */
     public record WorkspaceSummary(String id, String slug, String name) {}
@@ -45,7 +54,7 @@ public final class PlatformDtos {
     public record MembersResponse(String workspaceId, List<MemberSummary> members) {}
 
     /** 演示快捷登录请求 */
-    public record DemoLoginRequest(String username) {}
+    public record DemoLoginRequest(String userNo) {}
 
     /** CSRF 令牌获取响应 */
     public record CsrfResponse(String headerName, String token) {}

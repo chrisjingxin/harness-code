@@ -41,6 +41,7 @@ export type NavigationRetryArea = "projects" | "members" | "sessions";
 
 export type ProjectNavigationView = {
   accountName: string | null;
+  accountPhoto?: string | null;
   workspaceName: string | null;
   projects: readonly NavigationProjectItem[];
   projectsAvailability: NavigationAvailability;
@@ -93,8 +94,25 @@ function Status({ value, area, actions }: { value: NavigationAvailability; area:
   );
 }
 
-function Avatar({ initial, self }: { initial: string; self?: boolean }) {
-  return <span className="pnav-avatar" data-self={self ? "true" : "false"} aria-hidden="true">{initial}</span>;
+function safeAvatarUrl(photo?: string | null): string | null {
+  if (!photo) return null;
+  try {
+    const url = new URL(photo);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function Avatar({ initial, photo, self }: { initial: string; photo?: string | null; self?: boolean }) {
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const candidate = safeAvatarUrl(photo);
+  const src = candidate && brokenUrl !== candidate ? candidate : null;
+  return (
+    <span className="pnav-avatar" data-self={self ? "true" : "false"} aria-hidden="true">
+      {src ? <img className="pnav-avatar-img" src={src} alt="" onError={() => setBrokenUrl(candidate)} /> : initial}
+    </span>
+  );
 }
 
 /** 项目下拉只用于选择项目；创建入口在分隔线下，管理动作在独立的设置按钮。 */
@@ -206,7 +224,7 @@ function MemberGroup({ group, view, actions }: { group: NavigationMemberGroup; v
         onClick={() => actions.toggleMember(group.userId)}
       >
         {group.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <Avatar initial={group.initial} self={group.self} />
+        <Avatar initial={group.initial} photo={group.photo} self={group.self} />
         <span className="pnav-ellipsis">{group.label}</span>
         {group.detail && <small>{group.detail}</small>}
         {group.left && <small>已离开</small>}
@@ -338,7 +356,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           团队知识
         </button>
         <div className="pnav-account">
-          <Avatar initial={(view.accountName ?? "?").slice(0, 1)} self />
+          <Avatar initial={(view.accountName ?? "?").slice(0, 1)} photo={view.accountPhoto} self />
           <span className="pnav-account-copy">
             <strong className="pnav-ellipsis">{view.workspaceName ?? "未选择团队"}</strong>
             <small className="pnav-ellipsis">{view.accountName ?? "未登录"}</small>

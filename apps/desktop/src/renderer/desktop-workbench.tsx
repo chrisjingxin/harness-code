@@ -94,7 +94,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     context={{ title: "协作工作台" }}
     navigation={<div className="desktop-navigation">
       <ProjectNavigation view={{
-        accountName: signedIn?.user.displayName ?? null, workspaceName: null, projects: [],
+        accountName: signedIn?.user.userName ?? null, accountPhoto: signedIn?.user.photo || null, workspaceName: null, projects: [],
         projectsAvailability: { state: status === "loading" ? "loading" : "unavailable", message },
         currentProjectId: null, groups: [], membersAvailability: { state: "unavailable" }, sessionsAvailability: { state: "unavailable" },
         search: "", activePage: null, selectedConversationId: null, taskCount: null,

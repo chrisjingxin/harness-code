@@ -35,20 +35,22 @@ public final class RouteCatalog {
 
     /** 路由匹配命中结果 */
     public record Match(Route route, Map<String, String> path) {
-        /** 强校验路径中捕获的所有业务标识变量是否均符合标准 UUID 正则 */
+        /** 强校验路径中捕获的业务标识变量：userId 为 32 位无横杠 UUID，其余实体标识为标准 UUID */
         public boolean hasValidPathIds() {
-            return path.values().stream().allMatch(ID.asMatchPredicate());
+            return path.entrySet().stream().allMatch(entry ->
+                ("userId".equals(entry.getKey()) ? USER_ID : ID).asMatchPredicate().test(entry.getValue()));
         }
     }
 
     private static final Pattern ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    private static final Pattern USER_ID = Pattern.compile("[0-9a-f]{32}");
     private static final Pattern TIME = Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z");
     private static final Pattern LIMIT = Pattern.compile("[1-9][0-9]{0,2}");
     private static final Pattern SEQUENCE = Pattern.compile("[0-9]{1,19}");
     private static final Map<String, Pattern> NONE = Map.of();
     private static final Map<String, Pattern> DEVICE_PAGE = Map.of("limit", LIMIT, "beforeCreatedAt", TIME, "beforeDeviceId", ID);
     private static final Map<String, Pattern> REPOSITORY_PAGE = Map.of("status", Pattern.compile("active|archived"));
-    private static final Map<String, Pattern> CONVERSATION_PAGE = Map.of("ownerId", ID, "status", Pattern.compile("idle|running|waiting_approval|error"));
+    private static final Map<String, Pattern> CONVERSATION_PAGE = Map.of("ownerId", USER_ID, "status", Pattern.compile("idle|running|waiting_approval|error"));
     private static final Map<String, Pattern> HISTORY_PAGE = Map.of("afterSequence", SEQUENCE, "limit", Pattern.compile("[1-9][0-9]{0,2}"));
 
     private final List<Route> routes = List.of(

@@ -15,6 +15,7 @@ type Authorized = { identity: Identity; name: string; project?: { deviceId: stri
 const fail = (message: string): PersonalResult<never> => ({ ok: false, message })
 const ok = <T>(value: T): PersonalResult<T> => ({ ok: true, value })
 const id = { type: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+const userId = { type: "string", pattern: "^[0-9a-f]{32}$" }
 const nullableId = { anyOf: [id, { type: "null" }] }
 const text = { type: "string", maxLength: 4096 }
 const nullableText = { anyOf: [text, { type: "null" }] }
@@ -35,7 +36,7 @@ const schemas: Record<PersonalKey["kind"], object> = {
       object(["kind", "conversationId"], { kind: { const: "conversation" }, conversationId: id }),
       object(["kind", "taskId"], { kind: { const: "task" }, taskId: id }),
     ] },
-    expandedMembers: { type: "array", maxItems: 2000, items: id }, selfCollapsed: { type: "boolean" },
+    expandedMembers: { type: "array", maxItems: 2000, items: userId }, selfCollapsed: { type: "boolean" },
   }),
   conversation: object(["scroll", "expandedTools", "expandedOutputs", "draft"], {
     scroll: object(["anchorEntryId", "offsetPx", "following", "seenContentRevision"], {

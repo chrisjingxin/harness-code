@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
-        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "createdAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "revokedAt": {

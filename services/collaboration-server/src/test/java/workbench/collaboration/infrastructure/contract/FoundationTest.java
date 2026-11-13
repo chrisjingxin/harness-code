@@ -32,13 +32,19 @@ class FoundationTest {
     }
 
     private static Set<String> compliantTables() {
-        return Set.of("wb_user", "wb_workspace", "wb_workspace_member", "wb_device",
+        return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
                 "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
                 "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository");
     }
 
     private static Set<String> compliantColumns() {
-        return Set.of("wb_user.user_id", "wb_workspace.workspace_id",
+        return Set.of("wb_user.user_id", "wb_user.user_no", "wb_user.user_name",
+                "wb_user.org_id", "wb_user.org_name", "wb_user.updated_at",
+                "wb_user_org.user_id", "wb_user_org.position_type", "wb_user_org.org_id",
+                "wb_user_org.org_no", "wb_user_org.status", "wb_user_org.updated_at",
+                "wb_org.org_id", "wb_org.org_no", "wb_org.org_name",
+                "wb_org.parent_org_id", "wb_org.path_id", "wb_org.path_name", "wb_org.updated_at",
+                "wb_workspace.workspace_id",
                 "wb_device.device_id", "wb_device.owner_user_id",
                 "wb_repository.repository_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
                 "wb_repository.status", "wb_project.project_id", "wb_project.owner_user_id", "wb_project.version",
@@ -53,7 +59,7 @@ class FoundationTest {
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("11"));
+        assertTrue(error.getMessage().contains("13"));
     }
 
     @Test

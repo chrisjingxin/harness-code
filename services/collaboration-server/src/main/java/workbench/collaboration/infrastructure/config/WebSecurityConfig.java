@@ -180,7 +180,7 @@ public class WebSecurityConfig {
             if (input == null) {
                 throw new ApiProblem(400, "INVALID_REQUEST");
             }
-            String userId = identity.authenticate(input.username());
+            String userId = identity.authenticate(input.userNo());
             return org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(userId, null, List.of());
         }
 

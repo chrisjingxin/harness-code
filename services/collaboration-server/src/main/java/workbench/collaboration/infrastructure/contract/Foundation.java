@@ -5,7 +5,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import workbench.collaboration.domain.identity.IdentityRepository;
+import workbench.collaboration.domain.identity.Org;
 import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.domain.identity.UserOrg;
 import workbench.collaboration.domain.identity.Workspace;
 import workbench.collaboration.domain.identity.WorkspaceMember;
 
@@ -29,7 +31,7 @@ import java.util.UUID;
  *      wb_conversation、wb_conversation_repository；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
- *      业务标识列带实体前缀（wb_user.user_id、wb_project.project_id 等，CHAR(36) 唯一索引）；
+ *      业务标识列带实体前缀（wb_user.user_id 为 CHAR(32) 唯一索引，wb_project.project_id 等为 CHAR(36) 唯一索引）；
  *    - 抽查新语义关键列：wb_device.owner_user_id、wb_repository.remote_url_sha256、
  *      wb_conversation 的 owner/status/brief/synced_sequence/brief_updated_at 等；
  *    - 团队规范落库形态：时间列 DATETIME(3)（*_at，应用当前时区），状态列 TINYINT，全列 NOT NULL。
@@ -48,23 +50,25 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 11 张控制面表 */
+    /** 必须存在的 13 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
-            "wb_user", "wb_workspace", "wb_workspace_member", "wb_device",
+            "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
             "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository"
     );
 
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
-    private static final Map<String, List<String>> REQUIRED_COLUMNS = Map.of(
-            "wb_user", List.of("user_id"),
-            "wb_workspace", List.of("workspace_id"),
-            "wb_device", List.of("device_id", "owner_user_id"),
-            "wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status"),
-            "wb_project", List.of("project_id", "owner_user_id", "version"),
-            "wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence"),
-            "wb_local_repo_binding", List.of("device_id", "repository_id"),
-            "wb_conversation_repository", List.of("conversation_id", "repository_id")
+    private static final Map<String, List<String>> REQUIRED_COLUMNS = Map.ofEntries(
+            Map.entry("wb_user", List.of("user_id", "user_no", "user_name", "org_id", "org_name", "updated_at")),
+            Map.entry("wb_user_org", List.of("user_id", "position_type", "org_id", "org_no", "status", "updated_at")),
+            Map.entry("wb_org", List.of("org_id", "org_no", "org_name", "parent_org_id", "path_id", "path_name", "updated_at")),
+            Map.entry("wb_workspace", List.of("workspace_id")),
+            Map.entry("wb_device", List.of("device_id", "owner_user_id")),
+            Map.entry("wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status")),
+            Map.entry("wb_project", List.of("project_id", "owner_user_id", "version")),
+            Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence")),
+            Map.entry("wb_local_repo_binding", List.of("device_id", "repository_id")),
+            Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id"))
     );
 
     /** 严禁存在的已废弃表集合（历史流水表 + 旧协作模型表，防架构倒退） */
@@ -79,7 +83,7 @@ public final class Foundation {
             Map.entry("wb_device", List.of("workspace_id", "pk_id", "created_at_ms", "updated_at_ms")),
             Map.entry("wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence", "pk_id",
                     "created_at_ms", "updated_at_ms", "brief_updated_at_ms")),
-            Map.entry("wb_user", List.of("pk_id", "created_at_ms")),
+            Map.entry("wb_user", List.of("pk_id", "created_at_ms", "username", "display_name")),
             Map.entry("wb_workspace", List.of("pk_id", "created_at_ms")),
             Map.entry("wb_workspace_member", List.of("pk_id", "created_at_ms")),
             Map.entry("wb_repository", List.of("pk_id", "created_at_ms", "updated_at_ms")),
@@ -193,22 +197,73 @@ public final class Foundation {
 
     private void insertMissing() {
         long now = System.currentTimeMillis();
-        String[] userIds = new String[3];
-        for (int number = 1; number <= 3; number++) {
-            String username = "user%02d".formatted(number);
-            var found = identity.findUserByUsername(username);
-            if (found.isEmpty()) {
-                String id = UUID.randomUUID().toString();
-                identity.insertUser(new User(id, username, "用户 %02d".formatted(number), true, now));
-                userIds[number - 1] = id;
-            } else {
-                userIds[number - 1] = found.get().id();
+        List<Org> orgNodes = List.of(
+                new Org("org-001", "100001", "信息技术部", "", "", "", "org-001", "100001", "信息技术部", false, now, now),
+                new Org("org-002", "100002", "架构管理团队", "org-001", "100001", "信息技术部", "org-001/org-002", "100001/100002", "信息技术部/架构管理团队", false, now, now),
+                new Org("org-003", "100003", "零售应用架构四室", "org-002", "100002", "架构管理团队", "org-001/org-002/org-003", "100001/100002/100003", "信息技术部/架构管理团队/零售应用架构四室", false, now, now),
+                new Org("org-004", "100004", "平台架构二组", "org-003", "100003", "零售应用架构四室", "org-001/org-002/org-003/org-004", "100001/100002/100003/100004", "信息技术部/架构管理团队/零售应用架构四室/平台架构二组", true, now, now)
+        );
+        for (Org org : orgNodes) {
+            if (identity.findOrgById(org.orgId()).isEmpty()) {
+                identity.insertOrg(org);
             }
         }
+
+        List<String[]> demoUsers = List.of(
+                new String[]{"80278667", "沈北辰"},
+                new String[]{"80278668", "张景新"},
+                new String[]{"80278669", "王大林"},
+                new String[]{"80278670", "冯学茗"},
+                new String[]{"80278671", "杨康"}
+        );
+        List<String> userIds = new ArrayList<>();
+        for (String[] entry : demoUsers) {
+            String userNo = entry[0];
+            String userName = entry[1];
+            var found = identity.findUserByUserNo(userNo);
+            String userId;
+            if (found.isEmpty()) {
+                userId = UUID.randomUUID().toString().replace("-", "");
+                identity.insertUser(new User(
+                        userId,
+                        userNo,
+                        userName,
+                        "",
+                        "org-004",
+                        "100004",
+                        "平台架构二组",
+                        "org-001/org-002/org-003/org-004",
+                        "100001/100002/100003/100004",
+                        "信息技术部/架构管理团队/零售应用架构四室/平台架构二组",
+                        true,
+                        now,
+                        now
+                ));
+            } else {
+                userId = found.get().id();
+            }
+            userIds.add(userId);
+            if (!identity.userOrgExists(userId, "org-004")) {
+                identity.insertUserOrg(new UserOrg(
+                        userId,
+                        1,
+                        "org-004",
+                        "100004",
+                        "平台架构二组",
+                        "org-001/org-002/org-003/org-004",
+                        "100001/100002/100003/100004",
+                        "信息技术部/架构管理团队/零售应用架构四室/平台架构二组",
+                        1,
+                        now,
+                        now
+                ));
+            }
+        }
+
         var workspace = identity.findWorkspaceBySlug("demo");
         String workspaceId = workspace.map(Workspace::id).orElseGet(() -> {
             String id = UUID.randomUUID().toString();
-            identity.insertWorkspace(new Workspace(id, "demo", "演示工作区", now));
+            identity.insertWorkspace(new Workspace(id, "demo", "平台架构二组协作区", now));
             return id;
         });
         for (String userId : userIds) {

@@ -8,7 +8,7 @@ import workbench.collaboration.application.port.SearchIndexBus;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.support.FakeStores;
 import workbench.collaboration.domain.project.MemberStatus;
 import workbench.collaboration.domain.project.Project;
 import workbench.collaboration.domain.project.ProjectMember;
@@ -44,8 +44,8 @@ class ConversationSyncAppServiceTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String WS = "22222222-2222-4222-8222-222222222222";
     private static final String PROJECT = "55555555-5555-4555-8555-555555555555";
-    private static final String OWNER = "11111111-1111-4111-8111-111111111111";
-    private static final String OTHER = "99999999-9999-4999-8999-999999999999";
+    private static final String OWNER = "11111111111141118111111111111111";
+    private static final String OTHER = "99999999999949998999999999999999";
     private static final String CONV = "88888888-8888-4888-8888-888888888888";
     private static final String DEVICE = "33333333-3333-4333-8333-333333333333";
     private static final String OTHER_DEVICE = "44444444-4444-4444-8444-444444444444";
@@ -62,8 +62,8 @@ class ConversationSyncAppServiceTest {
 
     @BeforeEach
     void setUp() {
-        identity.users.put(OWNER, new User(OWNER, "owner", "负责人", true, 1L));
-        identity.users.put(OTHER, new User(OTHER, "other", "外人", true, 1L));
+        identity.users.put(OWNER, FakeStores.user(OWNER, "80278667", "负责人", true));
+        identity.users.put(OTHER, FakeStores.user(OTHER, "80278669", "外人", true));
         identity.addMember(WS, OWNER);
         identity.addMember(WS, OTHER);
         projects.projects.put(PROJECT, new Project(

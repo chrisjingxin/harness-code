@@ -55,7 +55,7 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
   }
   handle("get-state", 0, () => identity.getState())
   handle("demo-users", 0, () => identity.listDemoUsers())
-  handle("sign-in", 1, username => typeof username === "string" && /^[a-z][a-z0-9]{0,31}$/.test(username) ? identity.signIn(username) : identityError("INVALID_REQUEST", "用户名无效。"))
+  handle("sign-in", 1, userNo => typeof userNo === "string" && /^[0-9a-z][0-9a-z_-]{0,31}$/.test(userNo) ? identity.signIn(userNo) : identityError("INVALID_REQUEST", "员工工号无效。"))
   handle("sign-out", 0, () => identity.signOut())
   handle("members", 1, id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? identity.listMembers(id) : identityError("INVALID_REQUEST", "工作区标识无效。"))
   handle("conversations", 2, (workspaceId, cursor) => isId(workspaceId) && isCursor(cursor)

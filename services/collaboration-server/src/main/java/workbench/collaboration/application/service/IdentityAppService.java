@@ -32,15 +32,15 @@ public class IdentityAppService {
     }
 
     /**
-     * 根据用户名执行快捷认证（常用于演示账号或简易登录）。
+     * 根据员工工号执行快捷认证（常用于演示账号或简易登录）。
      *
-     * @param username 用户名
+     * @param userNo 员工工号
      * @return 认证成功后的用户唯一标识 (UUID)
      * @throws ApiProblem 401 DEMO_LOGIN_REJECTED 当用户不存在或被禁用时
      */
     @Transactional(readOnly = true)
-    public String authenticate(String username) {
-        return identity.findUserByUsername(username)
+    public String authenticate(String userNo) {
+        return identity.findUserByUserNo(userNo)
                 .filter(User::enabled)
                 .map(User::id)
                 .orElseThrow(() -> new ApiProblem(401, "DEMO_LOGIN_REJECTED"));
@@ -142,7 +142,16 @@ public class IdentityAppService {
     }
 
     private PlatformDtos.UserSummary user(User user) {
-        return new PlatformDtos.UserSummary(user.id(), user.username(), user.displayName());
+        return new PlatformDtos.UserSummary(
+                user.id(),
+                user.userNo(),
+                user.userName(),
+                user.photo(),
+                user.orgId(),
+                user.orgNo(),
+                user.orgName(),
+                user.orgPathName()
+        );
     }
 
     private PlatformDtos.WorkspaceSummary workspace(Workspace workspace) {

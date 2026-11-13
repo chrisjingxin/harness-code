@@ -23,7 +23,7 @@
       "type": "object",
       "properties": {
         "kind": { "const": "user", "type": "string" },
-        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "userId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "username": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z][a-z0-9]{0,31}$" },
         "displayName": { "type": "string", "minLength": 1, "maxLength": 80 }
       },
@@ -108,7 +108,7 @@
         "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "inputId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "inputSequence": { "$ref": "#/$defs/Sequence" },
-        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "state": { "$ref": "#/$defs/ExecutionState" },
         "lastConfirmedState": { "$ref": "#/$defs/ExecutionState" },
         "cancelState": { "$ref": "#/$defs/CancelState" },
@@ -125,8 +125,8 @@
         "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "workspaceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "$ref": "#/$defs/ConversationTitle" },
-        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
-        "currentUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "createdByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
+        "currentUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },

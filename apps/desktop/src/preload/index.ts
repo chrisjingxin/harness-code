@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld("workbench", host)
 const collaboration: CollaborationHost = {
   getState: () => ipcRenderer.invoke("collaboration:get-state"),
   listDemoUsers: () => ipcRenderer.invoke("collaboration:demo-users"),
-  signIn: username => ipcRenderer.invoke("collaboration:sign-in", username),
+  signIn: userNo => ipcRenderer.invoke("collaboration:sign-in", userNo),
   signOut: () => ipcRenderer.invoke("collaboration:sign-out"),
   listMembers: id => ipcRenderer.invoke("collaboration:members", id),
   onStateChanged: listener => {

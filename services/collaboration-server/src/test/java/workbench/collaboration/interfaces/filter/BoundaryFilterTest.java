@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,6 +13,7 @@ import workbench.collaboration.infrastructure.contract.Contracts;
 import workbench.collaboration.interfaces.http.ApiResponses;
 import workbench.collaboration.interfaces.http.RouteCatalog;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -73,6 +75,21 @@ class BoundaryFilterTest {
     return headers;
   }
 
+  @Test
+  void userIdPathAndOwnerIdQueryRequire32HexCharsWithoutHyphens() throws Exception {
+    String projectId = "55555555-5555-4555-8555-555555555555";
+    String validUserId = "11111111111141118111111111111111";
+    String hyphenatedUserId = "11111111-1111-4111-8111-111111111111";
+    mvc.perform(delete("/api/v1/workspaces/" + WORKSPACE + "/projects/" + projectId + "/members/" + validUserId).headers(ok()))
+      .andExpect(status().isOk());
+    mvc.perform(delete("/api/v1/workspaces/" + WORKSPACE + "/projects/" + projectId + "/members/" + hyphenatedUserId).headers(ok()))
+      .andExpect(status().isBadRequest()).andExpect(jsonPath("$.body.code").value("INVALID_REQUEST"));
+    mvc.perform(get("/api/v1/workspaces/" + WORKSPACE + "/projects/" + projectId + "/conversations?ownerId=" + validUserId).headers(ok()))
+      .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/workspaces/" + WORKSPACE + "/projects/" + projectId + "/conversations?ownerId=" + hyphenatedUserId).headers(ok()))
+      .andExpect(status().isBadRequest()).andExpect(jsonPath("$.body.code").value("INVALID_REQUEST"));
+  }
+
   @RestController
   static class Probe {
     @GetMapping("/api/v1/meta")
@@ -80,5 +97,11 @@ class BoundaryFilterTest {
 
     @PostMapping("/api/v1/workspaces/{workspaceId}/devices")
     ResponseEntity<String> create() { return ApiResponses.json(201, "{}"); }
+
+    @DeleteMapping("/api/v1/workspaces/{workspaceId}/projects/{projectId}/members/{userId}")
+    ResponseEntity<String> removeMember() { return ApiResponses.json(200, "{}"); }
+
+    @GetMapping("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations")
+    ResponseEntity<String> listConversations() { return ApiResponses.json(200, "{}"); }
   }
 }

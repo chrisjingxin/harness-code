@@ -38,7 +38,7 @@ export function useCollaborationIdentity(host: CollaborationHost) {
     }
   }, [host, refresh])
 
-  async function perform(kind: "signIn" | "signOut", username = "") {
+  async function perform(kind: "signIn" | "signOut", userNo = "") {
     if (pending.current === "signOut" || (kind === "signIn" && pending.current)) return
     const request = ++operation.current
     const version = ++revision.current
@@ -47,7 +47,7 @@ export function useCollaborationIdentity(host: CollaborationHost) {
     setState({ status: "loading" })
     setNotice("")
     try {
-      const result = kind === "signIn" ? await host.signIn(username) : await host.signOut()
+      const result = kind === "signIn" ? await host.signIn(userNo) : await host.signOut()
       if (request !== operation.current) return
       if (version === revision.current) await refresh()
       if (request === operation.current && !result.ok) setNotice(result.error.message)
@@ -62,5 +62,5 @@ export function useCollaborationIdentity(host: CollaborationHost) {
       }
     }
   }
-  return { state, action, notice, refresh, signIn: (username: string) => perform("signIn", username), signOut: () => perform("signOut") }
+  return { state, action, notice, refresh, signIn: (userNo: string) => perform("signIn", userNo), signOut: () => perform("signOut") }
 }

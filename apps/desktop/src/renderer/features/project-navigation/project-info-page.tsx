@@ -44,7 +44,12 @@ export function ProjectInfoPage({ host, workspaceId, detail, availability, team,
   }
 
   const names = new Map(team.map(item => [item.user.id, item.user]))
-  const nameOf = (userId: string) => names.get(userId)?.displayName ?? `成员 ${userId.slice(0, 8)}`
+  const nameOf = (userId: string) => names.get(userId)?.userName ?? `成员 ${userId.slice(0, 8)}`
+  const metaOf = (userId: string) => {
+    const user = names.get(userId)
+    if (!user) return ""
+    return user.orgName ? `${user.userNo} · ${user.orgName}` : user.userNo
+  }
   const active = detail.members.filter(member => member.status === "active")
   const candidates = team.filter(item => !active.some(member => member.userId === item.user.id))
   const linkable = repositories.repositories.filter(item => item.status === "active" && !detail.repositories.some(linked => linked.repositoryId === item.repositoryId))
@@ -102,7 +107,10 @@ export function ProjectInfoPage({ host, workspaceId, detail, availability, team,
         <ul className="pnav-list">
           {active.map(member => <li key={member.userId}>
             <span className="pnav-avatar" data-self={member.userId === selfUserId}>{nameOf(member.userId).slice(0, 1)}</span>
-            <strong>{nameOf(member.userId)}</strong>
+            <span className="pnav-list-copy">
+              <strong>{nameOf(member.userId)}</strong>
+              {metaOf(member.userId) && <small>{metaOf(member.userId)}</small>}
+            </span>
             {member.userId === project.ownerUserId && <span className="pnav-tag">项目负责人</span>}
             {manage && member.userId !== project.ownerUserId &&
               <button className="wb-button wb-button-quiet wb-button-small" disabled={busy}
@@ -112,7 +120,7 @@ export function ProjectInfoPage({ host, workspaceId, detail, availability, team,
         {manage && <div className="pnav-form-row">
           <select aria-label="选择要添加的团队成员" value={candidate} disabled={busy || !candidates.length} onChange={event => setCandidate(event.target.value)}>
             <option value="">{candidates.length ? "选择团队成员" : "团队成员都已加入"}</option>
-            {candidates.map(item => <option key={item.user.id} value={item.user.id}>{item.user.displayName}（{item.user.username}）</option>)}
+            {candidates.map(item => <option key={item.user.id} value={item.user.id}>{item.user.userName}（{item.user.userNo}{item.user.orgName ? ` · ${item.user.orgName}` : ""}）</option>)}
           </select>
           <button className="wb-button wb-button-secondary wb-button-small" disabled={busy || !candidate}
             onClick={() => { void run("members", () => host.addMember(workspaceId, project.projectId, { userId: candidate, requestId: crypto.randomUUID() }), `已添加${nameOf(candidate)}。`, () => setCandidate("")) }}>添加</button>

@@ -69,8 +69,9 @@
 .pnav-member-toggle small { flex: none; color: var(--subtle); font-size: 10px; font-weight: 400; }
 .pnav-member-items { min-height: 0; overflow-y: auto; padding-top: 3px; scrollbar-gutter: stable; }
 .pnav-member-items[hidden] { display: none; }
-.pnav-avatar { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--text-soft); font-size: 10px; font-weight: 600; }
+.pnav-avatar { flex: none; overflow: hidden; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--text-soft); font-size: 10px; font-weight: 600; }
 .pnav-avatar[data-self="true"] { background: var(--accent-soft-2); color: var(--accent); }
+.pnav-avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .pnav-session { width: calc(100% - 20px); margin-left: 20px; display: grid; grid-template-columns: 15px minmax(0, 1fr); align-items: start; gap: 8px; padding: 9px 8px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
 .pnav-session > svg { margin-top: 2px; color: var(--subtle); }

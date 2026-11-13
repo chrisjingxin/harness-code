@@ -27,8 +27,8 @@ import static org.mockito.Mockito.when;
 /** 设备属人登记、心跳在线展示与吊销。秘密只留哈希，非所有者吊销被拒。 */
 class DeviceAppServiceTest {
   private static final JsonMapper JSON = JsonMapper.builder().build();
-  private static final String USER = "11111111-1111-4111-8111-111111111111";
-  private static final String OTHER = "99999999-9999-4999-8999-999999999999";
+  private static final String USER = "11111111111141118111111111111111";
+  private static final String OTHER = "99999999999949998999999999999999";
   private static final String WORKSPACE = "22222222-2222-4222-8222-222222222222";
   private static final String DEVICE = "33333333-3333-4333-8333-333333333333";
   private static final String SECRET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";

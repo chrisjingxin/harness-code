@@ -19,11 +19,11 @@ class IdentityAppServiceTest {
 
   @Test
   void disabledOrMissingUserCannotSignIn() {
-    when(repository.findUserByUsername("missing01")).thenReturn(Optional.empty());
-    when(repository.findUserByUsername("user03")).thenReturn(Optional.of(user(false)));
+    when(repository.findUserByUserNo("missing01")).thenReturn(Optional.empty());
+    when(repository.findUserByUserNo("80278669")).thenReturn(Optional.of(user(false)));
     assertThatThrownBy(() -> service.authenticate("missing01")).isInstanceOf(ApiProblem.class)
       .extracting("status", "code").containsExactly(401, "DEMO_LOGIN_REJECTED");
-    assertThatThrownBy(() -> service.authenticate("user03")).isInstanceOf(ApiProblem.class)
+    assertThatThrownBy(() -> service.authenticate("80278669")).isInstanceOf(ApiProblem.class)
       .extracting("code").isEqualTo("DEMO_LOGIN_REJECTED");
   }
 
@@ -43,6 +43,10 @@ class IdentityAppServiceTest {
   }
 
   private static User user(boolean enabled) {
-    return new User("11111111-1111-4111-8111-111111111111", "user01", "用户 01", enabled, 1);
+    return new User("11111111111141118111111111111111", "80278667", "沈北辰", "",
+      "org-004", "100004", "平台架构二组",
+      "org-001/org-002/org-003/org-004", "100001/100002/100003/100004",
+      "信息技术部/架构管理团队/零售应用架构四室/平台架构二组",
+      enabled, 1L, 1L);
   }
 }

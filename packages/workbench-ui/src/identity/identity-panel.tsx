@@ -23,11 +23,15 @@ function StandaloneIdentityPanel({ host, workspaceId }: IdentityPanelProps) {
   return <IdentityForm host={host} identity={identity} workspaceId={workspaceId} />
 }
 
+function userDetail(user: UserSummary) {
+  return user.orgName ? `${user.userNo} · ${user.orgName}` : user.userNo
+}
+
 function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { identity: IdentityControls }) {
   const { state, action, notice, refresh, signIn, signOut } = identity
   const headingId = useId()
   const [users, setUsers] = useState<UserSummary[]>([])
-  const [username, setUsername] = useState("")
+  const [userNo, setUserNo] = useState("")
   const [fetching, setFetching] = useState(false)
   const [userNotice, setUserNotice] = useState("")
   const [reload, setReload] = useState(0)
@@ -46,7 +50,7 @@ function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { id
       if (!active) return
       if (result.ok) {
         setUsers(result.value.users)
-        setUsername(old => result.value.users.some(user => user.username === old) ? old : result.value.users[0]?.username ?? "")
+        setUserNo(old => result.value.users.some(user => user.userNo === old) ? old : result.value.users[0]?.userNo ?? "")
       } else {
         setUsers([])
         setUserNotice(result.error.message)
@@ -69,7 +73,7 @@ function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { id
       {!action && notice && <button className="wb-button wb-button-secondary" onClick={() => { void refresh() }}>重试连接</button>}
     </div> : state.status === "connectionError" ? <>
       <p className="error" role="alert">{state.error.message}</p>
-      {state.lastKnownUser && <p>上次身份：{state.lastKnownUser.displayName}（{state.lastKnownUser.username}）。连接确认前暂停业务读取。</p>}
+      {state.lastKnownUser && <p>上次身份：{state.lastKnownUser.userName}（{userDetail(state.lastKnownUser)}）。连接确认前暂停业务读取。</p>}
       <div className="identity-actions">
         <button className="wb-button wb-button-secondary" disabled={fetching && retryAnonymous} onClick={() => {
           if (retryAnonymous) setReload(value => value + 1)
@@ -78,16 +82,16 @@ function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { id
         {state.lastKnownUser && <button className="wb-button wb-button-secondary" onClick={() => { void signOut() }}>退出本机账号</button>}
       </div>
     </> : state.status === "signedIn" ? <>
-      <div className="identity-actions"><p>当前用户：<strong>{state.user.displayName}</strong>（{state.user.username}）</p><button className="wb-button wb-button-secondary" onClick={() => { void signOut() }}>退出 / 切换账号</button></div>
+      <div className="identity-actions"><p>当前用户：<strong>{state.user.userName}</strong>（{userDetail(state.user)}）</p><button className="wb-button wb-button-secondary" onClick={() => { void signOut() }}>退出 / 切换账号</button></div>
       {workspace
         ? <Members key={JSON.stringify([state.user.id, workspace.id])} host={host} workspace={workspace} />
         : <p>{state.workspaces.length ? "请先选择工作区。" : "当前账号未加入工作区"}</p>}
     </> : <div className="identity-actions">
-      <label>演示账号<select aria-label="演示账号" value={username} disabled={fetching || action !== null} onChange={event => setUsername(event.target.value)}>
+      <label>演示账号<select aria-label="演示账号" value={userNo} disabled={fetching || action !== null} onChange={event => setUserNo(event.target.value)}>
         {users.length === 0 && <option value="">{fetching ? "正在读取…" : "暂无可用账号"}</option>}
-        {users.map(user => <option key={user.id} value={user.username}>{user.displayName}（{user.username}）</option>)}
+        {users.map(user => <option key={user.id} value={user.userNo}>{user.userName}（{userDetail(user)}）</option>)}
       </select></label>
-      <button className="primary wb-button wb-button-primary" disabled={!username || fetching || action !== null} onClick={() => { void signIn(username) }}>演示登录</button>
+      <button className="primary wb-button wb-button-primary" disabled={!userNo || fetching || action !== null} onClick={() => { void signIn(userNo) }}>演示登录</button>
       <button className="wb-button wb-button-secondary" disabled={fetching} onClick={() => setReload(value => value + 1)}>刷新账号</button>
     </div>}
     {(notice || (signedOut && userNotice)) && <p className="error" role="alert">{notice || userNotice}</p>}
@@ -114,7 +118,7 @@ function Members({ host, workspace }: { host: CollaborationHost; workspace: { id
     <h3>{workspace.name}</h3>
     <div className="identity-actions"><p>工作区成员</p><button className="wb-button wb-button-secondary" onClick={() => setReload(value => value + 1)}>刷新成员</button></div>
     {notice ? <p className="error" role="alert">{notice}</p> : members === null ? <p role="status">正在读取成员…</p> : members.length
-      ? <ul aria-label="工作区成员">{members.map(member => <li key={member.user.id}>{member.user.displayName}（{member.user.username}）</li>)}</ul>
+      ? <ul aria-label="工作区成员">{members.map(member => <li key={member.user.id}>{member.user.userName}（{userDetail(member.user)}）</li>)}</ul>
       : <p>当前工作区暂无成员。</p>}
   </div>
 }

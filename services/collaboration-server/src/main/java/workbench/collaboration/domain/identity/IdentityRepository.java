@@ -25,12 +25,12 @@ public interface IdentityRepository {
     Optional<User> findUserById(String id);
 
     /**
-     * 根据登录用户名查询用户（如 demo-alice、demo-bob）。
+     * 根据员工工号/一号通标识查询用户（如 80278667）。
      *
-     * @param username 唯一用户名
+     * @param userNo 员工工号
      * @return 存在时返回包含 User 的 Optional，否则返回 Optional.empty()
      */
-    Optional<User> findUserByUsername(String username);
+    Optional<User> findUserByUserNo(String userNo);
 
     /**
      * 插入一条新用户记录。
@@ -38,6 +38,37 @@ public interface IdentityRepository {
      * @param user 用户实体
      */
     void insertUser(User user);
+
+    /**
+     * 根据内部机构 ID 查询机构节点。
+     *
+     * @param orgId 内部机构标识
+     * @return 存在时返回包含 Org 的 Optional，否则返回 Optional.empty()
+     */
+    Optional<Org> findOrgById(String orgId);
+
+    /**
+     * 插入一条新机构记录。
+     *
+     * @param org 机构实体
+     */
+    void insertOrg(Org org);
+
+    /**
+     * 校验指定用户与机构的关联关系是否已存在。
+     *
+     * @param userId 用户标识
+     * @param orgId 内部机构标识
+     * @return 已存在返回 true，否则返回 false
+     */
+    boolean userOrgExists(String userId, String orgId);
+
+    /**
+     * 插入一条用户与机构关联记录。
+     *
+     * @param userOrg 用户机构关系实体
+     */
+    void insertUserOrg(UserOrg userOrg);
 
     /**
      * 根据工作区标识查询工作区。

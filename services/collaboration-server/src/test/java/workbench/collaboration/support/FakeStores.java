@@ -5,7 +5,9 @@ import workbench.collaboration.domain.conversation.ConversationRepository;
 import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.identity.IdentityRepository;
+import workbench.collaboration.domain.identity.Org;
 import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.domain.identity.UserOrg;
 import workbench.collaboration.domain.identity.Workspace;
 import workbench.collaboration.domain.identity.WorkspaceMember;
 import workbench.collaboration.domain.project.MemberStatus;
@@ -35,6 +37,12 @@ public final class FakeStores {
 
     private FakeStores() {}
 
+    public static User user(String id, String userNo, String userName, boolean enabled) {
+        return new User(id, userNo, userName, "", "org-004", "100004", "平台架构二组",
+                "org-001/org-002/org-003/org-004", "100001/100002/100003/100004",
+                "信息技术部/架构管理团队/零售应用架构四室/平台架构二组", enabled, 1L, 1L);
+    }
+
     public static final class FakeIdentity implements IdentityRepository {
         public final Map<String, User> users = new HashMap<>();
         public final List<String> members = new ArrayList<>();
@@ -44,8 +52,12 @@ public final class FakeStores {
         }
 
         @Override public Optional<User> findUserById(String id) { return Optional.ofNullable(users.get(id)); }
-        @Override public Optional<User> findUserByUsername(String username) { return Optional.empty(); }
+        @Override public Optional<User> findUserByUserNo(String userNo) { return Optional.empty(); }
         @Override public void insertUser(User user) { users.put(user.id(), user); }
+        @Override public Optional<Org> findOrgById(String orgId) { return Optional.empty(); }
+        @Override public void insertOrg(Org org) {}
+        @Override public boolean userOrgExists(String userId, String orgId) { return false; }
+        @Override public void insertUserOrg(UserOrg userOrg) {}
         @Override public Optional<Workspace> findWorkspaceById(String id) { return Optional.empty(); }
         @Override public Optional<Workspace> findWorkspaceBySlug(String slug) { return Optional.empty(); }
         @Override public void insertWorkspace(Workspace workspace) {}

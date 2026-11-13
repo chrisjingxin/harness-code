@@ -19,15 +19,59 @@
 
 CREATE TABLE wb_user (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
-  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '用户全局唯一业务标识(UUID)',
-  username VARCHAR(32) NOT NULL COMMENT '登录用户名',
-  display_name VARCHAR(80) NOT NULL COMMENT '对外展示名称',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '用户全局唯一业务标识(32位无横杠UUID)',
+  user_no VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '员工工号/一号通标识(如 80278667，未绑定为空串)',
+  user_name VARCHAR(80) NOT NULL COMMENT '用户名称',
+  photo VARCHAR(255) NOT NULL DEFAULT '' COMMENT '用户头像URL(未设置为空串)',
+  org_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '所属内部机构ID(空串表示未绑定)',
+  org_no VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '所属外部机构ID(空串表示未绑定)',
+  org_name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '所属机构名称',
+  org_path_id VARCHAR(1024) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '内部机构路径ID',
+  org_path_no VARCHAR(1024) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '外部机构路径ID',
+  org_path_name VARCHAR(1024) NOT NULL DEFAULT '' COMMENT '机构路径名称',
   enabled TINYINT UNSIGNED NOT NULL COMMENT '账号是否启用：0=停用,1=启用',
   created_at DATETIME(3) NOT NULL COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL COMMENT '最近更新时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_user_id (user_id),
-  UNIQUE KEY uk_username (username)
+  KEY idx_user_no (user_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户账号表';
+
+CREATE TABLE wb_user_org (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '用户全局唯一业务标识(32位无横杠UUID)',
+  position_type TINYINT UNSIGNED NOT NULL COMMENT '岗位类型：1=主岗,2=兼岗(对应原系统 0/1)',
+  org_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '内部机构ID',
+  org_no VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '外部/租户机构ID',
+  org_name VARCHAR(128) NOT NULL COMMENT '机构名称',
+  org_path_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '内部机构路径ID',
+  org_path_no VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '外部机构路径ID',
+  org_path_name VARCHAR(512) NOT NULL DEFAULT '' COMMENT '机构路径名称',
+  status TINYINT UNSIGNED NOT NULL COMMENT '关系状态：1=有效,2=无效(对应原系统 0/3)',
+  created_at DATETIME(3) NOT NULL COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL COMMENT '最近更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_user_id_org_id (user_id, org_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户和机构关系表';
+
+CREATE TABLE wb_org (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
+  org_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '内部机构ID',
+  org_no VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '外部/一号通机构ID',
+  org_name VARCHAR(128) NOT NULL COMMENT '机构名称',
+  parent_org_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '内部父级机构ID(根机构为空串)',
+  parent_org_no VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '外部父级机构ID(根机构为空串)',
+  parent_org_name VARCHAR(256) NOT NULL DEFAULT '' COMMENT '父级机构名称',
+  path_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '内部机构路径ID',
+  path_no VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '外部机构路径ID',
+  path_name VARCHAR(512) NOT NULL DEFAULT '' COMMENT '机构路径名称',
+  is_leaf TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否叶子机构：0=否,1=是',
+  created_at DATETIME(3) NOT NULL COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL COMMENT '最近更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_org_id (org_id),
+  UNIQUE KEY uk_org_no (org_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='一号通机构信息表';
 
 CREATE TABLE wb_workspace (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
@@ -43,7 +87,7 @@ CREATE TABLE wb_workspace (
 CREATE TABLE wb_workspace_member (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属工作区标识',
-  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '成员用户标识',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '成员用户标识',
   created_at DATETIME(3) NOT NULL COMMENT '加入时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_workspace_id_user_id (workspace_id, user_id),
@@ -55,7 +99,7 @@ CREATE TABLE wb_workspace_member (
 CREATE TABLE wb_device (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
   device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备全局唯一业务标识(UUID)',
-  owner_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备所属用户标识',
+  owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备所属用户标识',
   installation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '本机客户端安装实例标识',
   ledger_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '本机客户端状态账本标识',
   name VARCHAR(80) NOT NULL COMMENT '设备展示别名',
@@ -81,7 +125,7 @@ CREATE TABLE wb_repository (
   remote_url_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'remote_url 的 SHA-256(团队内唯一，替代前缀索引)',
   default_branch VARCHAR(128) NOT NULL COMMENT '默认分支名',
   status TINYINT UNSIGNED NOT NULL COMMENT '目录状态：1=active,2=archived',
-  created_by_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '登记者用户标识',
+  created_by_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '登记者用户标识',
   created_at DATETIME(3) NOT NULL COMMENT '登记时间',
   updated_at DATETIME(3) NOT NULL COMMENT '最近修改时间',
   PRIMARY KEY (id),
@@ -98,7 +142,7 @@ CREATE TABLE wb_project (
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属团队标识',
   name VARCHAR(80) NOT NULL COMMENT '项目显示名',
   description VARCHAR(2000) NOT NULL COMMENT '项目说明',
-  owner_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '项目负责人用户标识',
+  owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '项目负责人用户标识',
   status TINYINT UNSIGNED NOT NULL COMMENT '项目状态：1=active,2=archived',
   version BIGINT NOT NULL DEFAULT 1 COMMENT '乐观并发版本号，创建为1，每次CAS写入+1',
   created_at DATETIME(3) NOT NULL COMMENT '创建时间',
@@ -112,7 +156,7 @@ CREATE TABLE wb_project (
 CREATE TABLE wb_project_member (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
   project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属项目标识',
-  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '成员用户标识',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '成员用户标识',
   status TINYINT UNSIGNED NOT NULL COMMENT '成员状态：1=active,2=removed(移出保留不删,D9)',
   created_at DATETIME(3) NOT NULL COMMENT '首次加入时间(回active保留原值)',
   updated_at DATETIME(3) NOT NULL COMMENT '状态最近变更时间',
@@ -151,7 +195,7 @@ CREATE TABLE wb_conversation (
   conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '会话全局唯一业务标识(UUID)',
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属工作区标识',
   project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属业务项目标识',
-  owner_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '会话主人用户标识(创建者,固定不变)',
+  owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '会话主人用户标识(创建者,固定不变)',
   device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '主人执行设备标识',
   agent_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '绑定的Agent配置标识(''表示未绑定)',
   task_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '关联任务卡片标识(''表示无,HC-212写入)',

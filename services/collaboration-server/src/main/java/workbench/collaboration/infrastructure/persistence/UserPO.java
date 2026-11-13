@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  *
  * <p>【功能定义】
  * 映射 TDSQL 表 wb_user 的持久化实体。
- * 业务全局唯一标识 user_id (UUID) 与底层物理自增主键 id 严格解耦。
+ * 业务全局唯一标识 user_id (UUID) 与底层物理自增主键 id 严格解耦，并承载用户工号、姓名、头像与所属机构路径。
  *
  * <p>【协作边界】
  * - 上游调用方：UserMapper、IdentityConverter、IdentityRepositoryImpl。
@@ -29,21 +29,53 @@ public class UserPO {
     @TableField("user_id")
     private String userId;
 
-    /** 登录用户名（唯一） */
-    @TableField("username")
-    private String username;
+    /** 员工工号/一号通标识（如 80278667，未绑定为空串） */
+    @TableField("user_no")
+    private String userNo;
 
-    /** 展示名称 */
-    @TableField("display_name")
-    private String displayName;
+    /** 用户名称 */
+    @TableField("user_name")
+    private String userName;
 
-    /** 账号启用状态（1: 启用, 0: 禁用） */
+    /** 用户头像 URL（未设置为空串） */
+    @TableField("photo")
+    private String photo;
+
+    /** 所属内部机构 ID */
+    @TableField("org_id")
+    private String orgId;
+
+    /** 所属外部机构 ID */
+    @TableField("org_no")
+    private String orgNo;
+
+    /** 所属机构名称 */
+    @TableField("org_name")
+    private String orgName;
+
+    /** 内部机构路径 ID */
+    @TableField("org_path_id")
+    private String orgPathId;
+
+    /** 外部机构路径 ID */
+    @TableField("org_path_no")
+    private String orgPathNo;
+
+    /** 机构路径名称 */
+    @TableField("org_path_name")
+    private String orgPathName;
+
+    /** 账号启用状态（1: 启用, 0: 停用） */
     @TableField("enabled")
     private Integer enabled;
 
-    /** 创建时间戳（毫秒） */
+    /** 创建时间 */
     @TableField("created_at")
     private LocalDateTime createdAt;
+
+    /** 最近更新时间 */
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
     public Long getId() {
         return id;
@@ -61,20 +93,76 @@ public class UserPO {
         this.userId = userId;
     }
 
-    public String getUsername() {
-        return username;
+    public String getUserNo() {
+        return userNo;
     }
 
-    public void setUsername(String username) {
-        this.username = username;
+    public void setUserNo(String userNo) {
+        this.userNo = userNo;
     }
 
-    public String getDisplayName() {
-        return displayName;
+    public String getUserName() {
+        return userName;
     }
 
-    public void setDisplayName(String displayName) {
-        this.displayName = displayName;
+    public void setUserName(String userName) {
+        this.userName = userName;
+    }
+
+    public String getPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(String photo) {
+        this.photo = photo;
+    }
+
+    public String getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(String orgId) {
+        this.orgId = orgId;
+    }
+
+    public String getOrgNo() {
+        return orgNo;
+    }
+
+    public void setOrgNo(String orgNo) {
+        this.orgNo = orgNo;
+    }
+
+    public String getOrgName() {
+        return orgName;
+    }
+
+    public void setOrgName(String orgName) {
+        this.orgName = orgName;
+    }
+
+    public String getOrgPathId() {
+        return orgPathId;
+    }
+
+    public void setOrgPathId(String orgPathId) {
+        this.orgPathId = orgPathId;
+    }
+
+    public String getOrgPathNo() {
+        return orgPathNo;
+    }
+
+    public void setOrgPathNo(String orgPathNo) {
+        this.orgPathNo = orgPathNo;
+    }
+
+    public String getOrgPathName() {
+        return orgPathName;
+    }
+
+    public void setOrgPathName(String orgPathName) {
+        this.orgPathName = orgPathName;
     }
 
     public Integer getEnabled() {
@@ -91,5 +179,13 @@ public class UserPO {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

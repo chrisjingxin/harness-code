@@ -361,7 +361,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       context={headerContext}
       navigation={<div className="desktop-navigation">
         <ProjectNavigation view={{
-          accountName: user.displayName,
+          accountName: user.userName,
+          accountPhoto: user.photo || null,
           workspaceName: props.workspaceName,
           projects: shell.projects.projects.map(item => ({ projectId: item.projectId, name: item.name, archived: item.status === "archived" })),
           projectsAvailability: shell.projects.availability,

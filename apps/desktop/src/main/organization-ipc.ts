@@ -9,7 +9,9 @@ import { identityError } from "./collaboration-state.js"
 import { verifyDesktopSource } from "./trusted-source.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const USER_ID = /^[0-9a-f]{32}$/
 const ids = (...values: unknown[]): boolean => values.every(value => typeof value === "string" && UUID.test(value))
+const isUserId = (value: unknown): value is string => typeof value === "string" && USER_ID.test(value)
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 const invalid = () => identityError("INVALID_REQUEST", "项目请求参数无效。")
 
@@ -35,8 +37,8 @@ export function bindOrganizationIpc(window: BrowserWindow, trustedUrl: string, i
     ? identity.updateProject(workspace as string, project as string, request as never) : invalid())
   handle("add-member", 3, (workspace, project, request) => ids(workspace, project) && isObject(request)
     ? identity.addProjectMember(workspace as string, project as string, request as never) : invalid())
-  handle("remove-member", 3, (workspace, project, user) => ids(workspace, project, user)
-    ? identity.removeProjectMember(workspace as string, project as string, user as string) : invalid())
+  handle("remove-member", 3, (workspace, project, user) => ids(workspace, project) && isUserId(user)
+    ? identity.removeProjectMember(workspace as string, project as string, user) : invalid())
   handle("list-repositories", 1, workspace => ids(workspace) ? identity.listRepositories(workspace as string) : invalid())
   handle("link-repository", 3, (workspace, project, repository) => ids(workspace, project, repository)
     ? identity.linkRepository(workspace as string, project as string, repository as string) : invalid())

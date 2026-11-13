@@ -85,13 +85,13 @@ export class CollaborationState {
     return result
   }
   /** 完整登录确认属于同一代操作；已有身份或正在退出时禁止覆盖登录。 */
-  async signIn(username: string): Promise<CollaborationResult<CurrentUserResponse>> {
+  async signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>> {
     if (this.#disposed) return this.#cancelled()
     if (!this.#client) return this.#unavailable()
     if (this.#state.status === "loading" || this.#state.status === "signedIn" || (this.#state.status === "connectionError" && this.#state.lastKnownUser)) return identityError("ALREADY_AUTHENTICATED", "请先退出当前账号。")
     const generation = ++this.#generation
     this.#publish({ status: "loading" })
-    const result = await this.#client.signIn(username)
+    const result = await this.#client.signIn(userNo)
     if (!this.#current(generation)) return this.#cancelled()
     if (result.ok) this.#publish({ status: "signedIn", ...result.value })
     else { this.#publish({ status: "signedOut" }); this.#failure(result.error) }

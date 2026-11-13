@@ -6,7 +6,7 @@ import tools.jackson.databind.json.JsonMapper;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.support.FakeStores;
 import workbench.collaboration.domain.project.MemberStatus;
 import workbench.collaboration.domain.project.Project;
 import workbench.collaboration.domain.project.ProjectMember;
@@ -38,9 +38,9 @@ class ConversationAppServiceTest {
     private static final String WS = "22222222-2222-4222-8222-222222222222";
     private static final String OTHER_WS = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     private static final String PROJECT = "55555555-5555-4555-8555-555555555555";
-    private static final String OWNER = "11111111-1111-4111-8111-111111111111";
-    private static final String MEMBER = "55555555-5555-4555-8555-555555555555";
-    private static final String OUTSIDER = "99999999-9999-4999-8999-999999999999";
+    private static final String OWNER = "11111111111141118111111111111111";
+    private static final String MEMBER = "55555555555545558555555555555555";
+    private static final String OUTSIDER = "99999999999949998999999999999999";
     private static final String REPO = "77777777-7777-4777-8777-777777777777";
     private static final String OTHER_REPO = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     private static final String DEVICE = "33333333-3333-4333-8333-333333333333";
@@ -56,9 +56,9 @@ class ConversationAppServiceTest {
 
     @BeforeEach
     void setUp() {
-        identity.users.put(OWNER, new User(OWNER, "owner", "负责人", true, 1L));
-        identity.users.put(MEMBER, new User(MEMBER, "member", "成员", true, 1L));
-        identity.users.put(OUTSIDER, new User(OUTSIDER, "outsider", "外人", true, 1L));
+        identity.users.put(OWNER, FakeStores.user(OWNER, "80278667", "负责人", true));
+        identity.users.put(MEMBER, FakeStores.user(MEMBER, "80278668", "成员", true));
+        identity.users.put(OUTSIDER, FakeStores.user(OUTSIDER, "80278669", "外人", true));
         identity.addMember(WS, OWNER);
         identity.addMember(WS, MEMBER);
         projects.projects.put(PROJECT, new Project(

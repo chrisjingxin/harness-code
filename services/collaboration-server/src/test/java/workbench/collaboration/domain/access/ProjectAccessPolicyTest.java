@@ -57,9 +57,9 @@ class ProjectAccessPolicyTest {
         repositories = new FakeRepositories();
         policy = new ProjectAccessPolicy(identity, projects, repositories);
 
-        identity.users.put(OWNER, new User(OWNER, "owner", "负责人", true, 1L));
-        identity.users.put(MEMBER, new User(MEMBER, "member", "成员", true, 1L));
-        identity.users.put(OUTSIDER, new User(OUTSIDER, "outsider", "外人", true, 1L));
+        identity.users.put(OWNER, new User(OWNER, "80278667", "负责人", "", "org-004", "100004", "平台架构二组", "org-001/org-002/org-003/org-004", "100001/100002/100003/100004", "信息技术部/架构管理团队/零售应用架构四室/平台架构二组", true, 1L, 1L));
+        identity.users.put(MEMBER, new User(MEMBER, "80278668", "成员", "", "org-004", "100004", "平台架构二组", "org-001/org-002/org-003/org-004", "100001/100002/100003/100004", "信息技术部/架构管理团队/零售应用架构四室/平台架构二组", true, 1L, 1L));
+        identity.users.put(OUTSIDER, new User(OUTSIDER, "80278669", "外人", "", "org-004", "100004", "平台架构二组", "org-001/org-002/org-003/org-004", "100001/100002/100003/100004", "信息技术部/架构管理团队/零售应用架构四室/平台架构二组", true, 1L, 1L));
         identity.members.add(WS + ":" + OWNER);
         identity.members.add(WS + ":" + MEMBER);
         identity.members.add(WS + ":" + OUTSIDER);
@@ -79,7 +79,7 @@ class ProjectAccessPolicyTest {
     void 用户不存在或停用拒绝401() {
         ApiProblem missing = assertThrows(ApiProblem.class, () -> policy.requireWorkspaceMember(WS, "ghost"));
         assertEquals(401, missing.status);
-        identity.users.put("disabled", new User("disabled", "x", "停用", false, 1L));
+        identity.users.put("disabled", new User("disabled", "80278699", "停用", "", "", "", "", "", "", "", false, 1L, 1L));
         assertEquals(401, assertThrows(ApiProblem.class, () -> policy.requireWorkspaceMember(WS, "disabled")).status);
     }
 
@@ -205,8 +205,12 @@ class ProjectAccessPolicyTest {
         final List<String> members = new ArrayList<>();
 
         @Override public Optional<User> findUserById(String id) { return Optional.ofNullable(users.get(id)); }
-        @Override public Optional<User> findUserByUsername(String username) { return Optional.empty(); }
+        @Override public Optional<User> findUserByUserNo(String userNo) { return Optional.empty(); }
         @Override public void insertUser(User user) { users.put(user.id(), user); }
+        @Override public Optional<workbench.collaboration.domain.identity.Org> findOrgById(String orgId) { return Optional.empty(); }
+        @Override public void insertOrg(workbench.collaboration.domain.identity.Org org) {}
+        @Override public boolean userOrgExists(String userId, String orgId) { return false; }
+        @Override public void insertUserOrg(workbench.collaboration.domain.identity.UserOrg userOrg) {}
         @Override public Optional<Workspace> findWorkspaceById(String id) { return Optional.empty(); }
         @Override public Optional<Workspace> findWorkspaceBySlug(String slug) { return Optional.empty(); }
         @Override public void insertWorkspace(Workspace workspace) {}

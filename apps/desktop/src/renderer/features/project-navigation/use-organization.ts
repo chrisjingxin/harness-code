@@ -86,13 +86,21 @@ export function useProjectDetail(host: OrganizationHost, workspaceId: string, pr
   return { ...current, reload: load }
 }
 
-/** 项目成员与团队成员按 userId 合并出显示名；团队名单里找不到的成员用标识前缀兜底。 */
+/** 项目成员与团队成员按 userId 合并出姓名、工号与所属机构；团队名单里找不到的成员用标识前缀兜底。 */
 export function projectMembers(detail: ProjectDetailResponse | null, team: readonly MemberSummary[]): NavigationMember[] {
   if (!detail) return []
   const users = new Map(team.map(item => [item.user.id, item.user]))
   return detail.members.map(member => {
     const user = users.get(member.userId)
-    return { userId: member.userId, displayName: user?.displayName ?? `成员 ${member.userId.slice(0, 8)}`, username: user?.username ?? "", left: member.status === "removed" }
+    return {
+      userId: member.userId,
+      userName: user?.userName ?? `成员 ${member.userId.slice(0, 8)}`,
+      userNo: user?.userNo ?? "",
+      ...(user?.photo ? { photo: user.photo } : {}),
+      ...(user?.orgName ? { orgName: user.orgName } : {}),
+      ...(user?.orgPathName ? { orgPathName: user.orgPathName } : {}),
+      left: member.status === "removed",
+    }
   })
 }
 

@@ -1,5 +1,14 @@
 /** 云端普通用户与身份端口；主进程负责会话，UI 只读取不含凭据的业务结果。 */
-export interface UserSummary { id: string; username: string; displayName: string }
+export interface UserSummary {
+  id: string
+  userNo: string
+  userName: string
+  photo: string
+  orgId: string
+  orgNo: string
+  orgName: string
+  orgPathName: string
+}
 /** 工作区展示资料；访问权每次由服务端成员关系判断。 */
 export interface WorkspaceSummary { id: string; slug: string; name: string }
 export interface MemberSummary { user: UserSummary }
@@ -7,7 +16,7 @@ export interface CurrentUserResponse { user: UserSummary; workspaces: WorkspaceS
 export interface DemoUsersResponse { users: UserSummary[] }
 export interface WorkspaceListResponse { workspaces: WorkspaceSummary[] }
 export interface MembersResponse { workspaceId: string; members: MemberSummary[] }
-export interface DemoLoginRequest { username: string }
+export interface DemoLoginRequest { userNo: string }
 /** CSRF 数据仅供宿主传输消费，不作为 CollaborationHost 的返回值。 */
 export interface CsrfResponse { headerName: "X-CSRF-TOKEN"; token: string }
 export interface MetaResponse { productVersion: string; protocolVersion: 1; loginMode: "demo" }
@@ -28,7 +37,7 @@ export type IdentityState = { status: "signedOut" } | { status: "loading" } | { 
 export interface CollaborationHost {
   getState(): Promise<CollaborationResult<IdentityState>>
   listDemoUsers(): Promise<CollaborationResult<DemoUsersResponse>>
-  signIn(username: string): Promise<CollaborationResult<CurrentUserResponse>>
+  signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>>
   signOut(): Promise<CollaborationResult<null>>
   listMembers(workspaceId: string): Promise<CollaborationResult<MembersResponse>>
   onStateChanged(listener: (state: IdentityState) => void): () => void

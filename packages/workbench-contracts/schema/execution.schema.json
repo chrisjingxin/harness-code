@@ -34,7 +34,7 @@
         "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "inputSequence": { "$ref": "https://workbench.invalid/schema/conversation.schema.json#/$defs/Sequence" },
-        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "initiatedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "agentConfigId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "shareVersion": { "$ref": "https://workbench.invalid/schema/conversation.schema.json#/$defs/ShareVersion" },
         "nativeSessionId": {
@@ -60,7 +60,7 @@
         "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "startCommandId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "startBodySha256": { "$ref": "#/$defs/BodySha256" },
-        "requestedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
+        "requestedByUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
         "bodySha256": { "$ref": "#/$defs/BodySha256" }
       },
       "required": ["workspaceId", "conversationId", "executionId", "inputId", "deviceId", "projectId", "startCommandId", "startBodySha256", "requestedByUserId", "bodySha256"],

@@ -3,11 +3,14 @@
  * 只处理已加载数据，不发请求，也不解释同步含义；桌面装配与受控预览共用这一处规则。
  */
 
-/** 项目成员的显示资料；`userId` 是唯一分组依据，显示名可能重复。 */
+/** 项目成员的显示资料；`userId` 是唯一分组依据，姓名可能重复。 */
 export type NavigationMember = {
   userId: string;
-  displayName: string;
-  username: string;
+  userName: string;
+  userNo: string;
+  photo?: string;
+  orgName?: string;
+  orgPathName?: string;
   /** 已移出项目的成员只在仍有可见会话时出现。 */
   left: boolean;
 };
@@ -25,9 +28,10 @@ export type NavigationSessionEntry = {
 export type NavigationMemberGroup = {
   userId: string;
   label: string;
-  /** 同名成员附带用户名以便区分。 */
+  /** 同名成员附带工号与机构以便区分。 */
   detail?: string;
   initial: string;
+  photo?: string;
   self: boolean;
   left: boolean;
   expanded: boolean;
@@ -51,7 +55,7 @@ const collator = new Intl.Collator("zh-CN");
 
 /** 未在成员名单里的所有者（例如名单刷新前出现的新会话）用标识前缀兜底显示。 */
 function unknownMember(userId: string): NavigationMember {
-  return { userId, displayName: `成员 ${userId.slice(0, 8)}`, username: "", left: false };
+  return { userId, userName: `成员 ${userId.slice(0, 8)}`, userNo: "", left: false };
 }
 
 export function buildMemberGroups(input: MemberGroupInput): NavigationMemberGroup[] {
@@ -69,30 +73,38 @@ export function buildMemberGroups(input: MemberGroupInput): NavigationMemberGrou
   const visible = [...members.values()].filter(
     (member) => member.userId === input.selfUserId || !member.left || byOwner.has(member.userId),
   );
-  if (!members.has(input.selfUserId)) visible.push({ ...unknownMember(input.selfUserId), displayName: "我" });
+  if (!members.has(input.selfUserId)) visible.push({ ...unknownMember(input.selfUserId), userName: "我" });
   const nameCount = new Map<string, number>();
-  for (const member of visible) nameCount.set(member.displayName, (nameCount.get(member.displayName) ?? 0) + 1);
+  for (const member of visible) nameCount.set(member.userName, (nameCount.get(member.userName) ?? 0) + 1);
   visible.sort((a, b) => {
     if (a.userId === input.selfUserId || b.userId === input.selfUserId) return a.userId === input.selfUserId ? -1 : 1;
     if (a.left !== b.left) return a.left ? 1 : -1;
-    return collator.compare(a.displayName, b.displayName) || collator.compare(a.username, b.username);
+    return collator.compare(a.userName, b.userName) || collator.compare(a.userNo, b.userNo);
   });
   const groups: NavigationMemberGroup[] = [];
   for (const member of visible) {
     const self = member.userId === input.selfUserId;
-    const label = self ? "我的会话" : member.displayName;
+    const label = self ? "我的会话" : member.userName;
     const all = byOwner.get(member.userId) ?? [];
     let sessions: readonly NavigationSessionEntry[] = all;
     if (query) {
-      const nameHit = matches(label) || matches(member.displayName) || (member.username !== "" && matches(member.username));
+      const nameHit =
+        matches(label) ||
+        matches(member.userName) ||
+        (member.userNo !== "" && matches(member.userNo)) ||
+        (!!member.orgName && matches(member.orgName));
       if (!nameHit) sessions = all.filter((entry) => matches(entry.title));
       if (!nameHit && sessions.length === 0) continue;
     }
+    const detail = !self && member.userNo && (nameCount.get(member.userName) ?? 0) > 1
+      ? (member.orgName ? `${member.orgName} · ${member.userNo}` : member.userNo)
+      : undefined;
     groups.push({
       userId: member.userId,
       label,
-      ...(!self && member.username && (nameCount.get(member.displayName) ?? 0) > 1 ? { detail: member.username } : {}),
-      initial: (member.displayName || "?").slice(0, 1),
+      ...(detail ? { detail } : {}),
+      initial: (member.userName || "?").slice(0, 1),
+      ...(member.photo ? { photo: member.photo } : {}),
       self,
       left: member.left,
       expanded: query ? true : self ? !input.selfCollapsed : input.expandedMembers.includes(member.userId),

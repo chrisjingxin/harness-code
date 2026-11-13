@@ -219,10 +219,10 @@ export class CollaborationClient {
     return this.#call(`/api/v1/workspaces/${workspaceId}/members`, "MembersResponse")
   }
   /** 登录响应丢失后只查询同一 Jar 的 /me，绝不盲目再次 POST 登录。 */
-  async signIn(username: string): Promise<CollaborationResult<CurrentUserResponse>> {
-    if (!this.#validator("DemoLoginRequest")({ username })) return this.#error("INVALID_REQUEST")
+  async signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>> {
+    if (!this.#validator("DemoLoginRequest")({ userNo })) return this.#error("INVALID_REQUEST")
     const session = this.#session
-    const result = await this.#write<CurrentUserResponse>("/api/v1/auth/demo-login", "CurrentUserResponse", { body: { username }, inputSchema: "DemoLoginRequest", session })
+    const result = await this.#write<CurrentUserResponse>("/api/v1/auth/demo-login", "CurrentUserResponse", { body: { userNo }, inputSchema: "DemoLoginRequest", session })
     if (!this.#live(session)) return this.#error("NETWORK_UNAVAILABLE")
     if (result.ok || (!result.ok && ["NETWORK_UNAVAILABLE", "INVALID_SERVER_RESPONSE"].includes(result.error.code))) {
       const token = await this.#csrf(session)
@@ -230,7 +230,7 @@ export class CollaborationClient {
       if (!this.#live(session)) return this.#error("NETWORK_UNAVAILABLE")
       const confirmed = await this.#call<CurrentUserResponse>("/api/v1/auth/me", "CurrentUserResponse", "GET", { session })
       if (!this.#live(session) && (confirmed.ok || confirmed.error.code !== "AUTHENTICATION_REQUIRED")) return this.#error("NETWORK_UNAVAILABLE")
-      if (confirmed.ok) return confirmed.value.user.username === username ? confirmed : this.#error("INVALID_SERVER_RESPONSE")
+      if (confirmed.ok) return confirmed.value.user.userNo === userNo ? confirmed : this.#error("INVALID_SERVER_RESPONSE")
       return result.ok ? confirmed : result
     }
     return result

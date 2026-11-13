@@ -21,7 +21,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PersistenceConverterTest {
   @Test
   void userEnabledFlagRoundTrips() {
-    User disabled = new User("u1", "user01", "用户 01", false, 10L);
+    User disabled = new User("u1", "80278667", "沈北辰", "https://example.com/a.png",
+      "org-004", "100004", "平台架构二组",
+      "org-001/org-002/org-003/org-004", "100001/100002/100003/100004",
+      "信息技术部/架构管理团队/零售应用架构四室/平台架构二组",
+      false, 10L, 20L);
     UserPO po = IdentityConverter.toPo(disabled);
     assertThat(po.getEnabled()).isZero();
     assertThat(po.getId()).isNull();

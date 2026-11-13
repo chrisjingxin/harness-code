@@ -4,7 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.identity.User;
+import workbench.collaboration.support.FakeStores;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryStatus;
 import workbench.collaboration.infrastructure.cache.MemoryDeviceHeartbeat;
@@ -31,8 +31,8 @@ import static org.mockito.Mockito.mock;
 class RepoBindingAppServiceTest {
 
     private static final String WS = "22222222-2222-4222-8222-222222222222";
-    private static final String OWNER = "11111111-1111-4111-8111-111111111111";
-    private static final String OUTSIDER = "99999999-9999-4999-8999-999999999999";
+    private static final String OWNER = "11111111111141118111111111111111";
+    private static final String OUTSIDER = "99999999999949998999999999999999";
     private static final String REPO = "77777777-7777-4777-8777-777777777777";
     private static final String DEVICE = "33333333-3333-4333-8333-333333333333";
     private static final String SECRET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
@@ -45,8 +45,8 @@ class RepoBindingAppServiceTest {
 
     @BeforeEach
     void setUp() {
-        identity.users.put(OWNER, new User(OWNER, "owner", "负责人", true, 1L));
-        identity.users.put(OUTSIDER, new User(OUTSIDER, "outsider", "外人", true, 1L));
+        identity.users.put(OWNER, FakeStores.user(OWNER, "80278667", "负责人", true));
+        identity.users.put(OUTSIDER, FakeStores.user(OUTSIDER, "80278669", "外人", true));
         identity.addMember(WS, OWNER);
         repositories.items.put(REPO, new Repository(
                 REPO, WS, "中台服务", "git@example.com:team/middle.git", "main",
