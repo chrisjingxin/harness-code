@@ -6,4 +6,13 @@ import { DesktopWorkbench } from "./desktop-workbench.js"
 // 禁用触控板捏合对应的页面缩放，窗口缩放统一由主进程限制范围。
 window.addEventListener("wheel", event => { if (event.ctrlKey) event.preventDefault() }, { passive: false })
 
-createRoot(document.getElementById("root")!).render(<DesktopWorkbench host={window.workbench} collaboration={window.collaboration} devices={window.devices} organization={window.organization} personalHost={window.personal} />)
+createRoot(document.getElementById("root")!).render(
+  <DesktopWorkbench
+    host={window.workbench}
+    collaboration={window.collaboration}
+    devices={window.devices}
+    organization={window.organization}
+    projectConversations={window.projectConversations}
+    personalHost={window.personal}
+  />,
+)

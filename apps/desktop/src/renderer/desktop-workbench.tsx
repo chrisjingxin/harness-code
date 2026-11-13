@@ -1,29 +1,42 @@
 /**
- * 正式窗口装配：宿主确认的身份 → 恢复账号记录并确定团队 → Project 外壳。
+ * 正式窗口装配：宿主确认的身份 → 恢复账号记录并确定团队 → Project 外壳与会话协调器。
  * 个人记录按身份重新创建，退出前先保存；业务读取只走 preload 暴露的具名端口。
  */
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { CollaborationHost, DesktopHost, DeviceHost, ThemeMode, UserSummary, WindowState, ZoomAction } from "@workbench/contracts"
+import type {
+  CollaborationHost,
+  DesktopHost,
+  DeviceHost,
+  ProjectConversationHost,
+  ThemeMode,
+  UserSummary,
+  WindowState,
+  ZoomAction,
+} from "@workbench/contracts"
 import type { AccountPersonal, PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
 import { DeviceRegistrationPanel, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
-import type { NavigationSessionSource, ProjectPageProviders } from "./features/project-navigation/index.js"
+import type { ProjectPageProviders } from "./features/project-navigation/index.js"
+import { useProjectSessions } from "./features/session/index.js"
 import { useLocalDevice } from "./local-device.js"
 import { PersonalPersistence } from "./personal-persistence.js"
 import "@workbench/ui/layout.css"
 import "@workbench/ui/navigation.css"
+import "@workbench/ui/conversation.css"
 import "./desktop-workbench.css"
 
-type Hosts = { host: DesktopHost; collaboration: CollaborationHost; devices: DeviceHost; organization: OrganizationHost; personalHost: PersonalHost }
+type Hosts = {
+  host: DesktopHost
+  collaboration: CollaborationHost
+  devices: DeviceHost
+  organization: OrganizationHost
+  projectConversations: ProjectConversationHost
+  personalHost: PersonalHost
+}
 type Identity = ReturnType<typeof useCollaborationIdentity>
 type Preferences = ReturnType<typeof useWindowPreferences>
 const noop = () => {}
-const unavailableSessions: NavigationSessionSource = {
-  entries: [],
-  availability: { state: "unavailable", message: "会话列表尚未接入。" },
-  retry: noop,
-}
 
 /** 窗口重开后重新登录；每次身份变化都重新创建个人记录会话。 */
 export function DesktopWorkbench(hosts: Hosts) {
@@ -67,20 +80,37 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
 
   const titleBarClassName = "desktop-titlebar" + (navigator.platform.startsWith("Mac") ? " desktop-titlebar-macos"
     : navigator.platform.startsWith("Win") ? " desktop-titlebar-windows" : "")
-  const settings = <div className="desktop-settings">
+
+  const baseSettings = <>
     <h2>设置</h2>
     <WindowPreferences {...props.preferences} />
     <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />
-    {signedIn && workspace
-      ? <LocalDeviceSettings host={props.devices} workspaceId={workspace.id} userId={signedIn.user.id} />
-      : <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />}
-  </div>
+  </>
 
   if (signedIn && account === "ready" && workspace) {
-    return <WorkspaceProjectWorkbench key={workspace.id} organization={props.organization} collaboration={props.collaboration} persistence={persistence}
-      workspaceId={workspace.id} workspaceName={workspace.name} user={signedIn.user} titleBarClassName={titleBarClassName}
-      settings={settings} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen} personalError={props.personalError} />
+    return <WorkspaceProjectWorkbench
+      key={workspace.id}
+      host={props.host}
+      organization={props.organization}
+      collaboration={props.collaboration}
+      devices={props.devices}
+      projectConversations={props.projectConversations}
+      persistence={persistence}
+      workspaceId={workspace.id}
+      workspaceName={workspace.name}
+      user={signedIn.user}
+      titleBarClassName={titleBarClassName}
+      baseSettings={baseSettings}
+      settingsOpen={settingsOpen}
+      setSettingsOpen={setSettingsOpen}
+      personalError={props.personalError}
+    />
   }
+
+  const settings = <div className="desktop-settings">
+    {baseSettings}
+    <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />
+  </div>
 
   const status = identity.state.status
   const message = status === "loading" ? "正在确认账号。"
@@ -130,14 +160,17 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
 }
 
 function WorkspaceProjectWorkbench(props: {
+  host: DesktopHost
   organization: OrganizationHost
   collaboration: CollaborationHost
+  devices: DeviceHost
+  projectConversations: ProjectConversationHost
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
   user: UserSummary
   titleBarClassName: string
-  settings: React.ReactNode
+  baseSettings: React.ReactNode
   settingsOpen: boolean
   setSettingsOpen(open: boolean): void
   personalError: string
@@ -149,10 +182,49 @@ function WorkspaceProjectWorkbench(props: {
     workspaceId: props.workspaceId,
     user: props.user,
   })
-  // HC-218～220 交付后在此按 shell.scope 接入各自会话来源、任务数量与页面提供者；未交付模块保持未接入。
-  const sessions: NavigationSessionSource = unavailableSessions
+  const localDevice = useLocalDevice(props.devices, props.workspaceId, props.user.id)
+  const validLocalDevice = localDevice.device?.deviceId
+    ? localDevice.devices.find(
+        item => item.deviceId === localDevice.device?.deviceId && item.ownerUserId === props.user.id && item.revokedAt === null,
+      ) ?? null
+    : null
+  const currentProject = shell.projects.projects.find(item => item.projectId === shell.projectId)
+  const selectedConversationId = shell.personal.page.kind === "conversation"
+    ? shell.personal.page.conversationId
+    : null
+
+  const projectSessions = useProjectSessions({
+    host: props.host,
+    projectConversations: props.projectConversations,
+    persistence: props.persistence,
+    scope: shell.scope,
+    projectName: currentProject?.name ?? "当前项目",
+    userId: props.user.id,
+    localDeviceId: validLocalDevice?.deviceId ?? null,
+    ...(validLocalDevice?.name ? { localDeviceName: validLocalDevice.name } : {}),
+    ...(localDevice.blockedReason ? { localDeviceBlockedReason: localDevice.blockedReason } : {}),
+    members: shell.team.members,
+    devices: localDevice.devices,
+    selectedConversationId,
+  })
+
+  // HC-219～220 交付后在此接入任务与看板页面提供者；未交付模块保持未接入。
   const taskCount: number | null = null
-  const providers: ProjectPageProviders = {}
+  const providers: ProjectPageProviders = {
+    session: projectSessions.provider,
+  }
+
+  const settings = <div className="desktop-settings">
+    {props.baseSettings}
+    <DeviceRegistrationPanel
+      host={props.devices}
+      workspaceId={props.workspaceId}
+      device={localDevice.device}
+      devices={localDevice.devices}
+      blockedReason={localDevice.blockedReason}
+      onChanged={localDevice.refresh}
+    />
+  </div>
 
   return <ProjectWorkbench
     shell={shell}
@@ -162,20 +234,14 @@ function WorkspaceProjectWorkbench(props: {
     workspaceName={props.workspaceName}
     user={props.user}
     titleBarClassName={props.titleBarClassName}
-    settings={props.settings}
+    settings={settings}
     settingsOpen={props.settingsOpen}
     setSettingsOpen={props.setSettingsOpen}
     personalError={props.personalError}
-    sessions={sessions}
+    sessions={projectSessions.navigationSource}
     taskCount={taskCount}
     providers={providers}
   />
-}
-
-function LocalDeviceSettings({ host, workspaceId, userId }: { host: DeviceHost; workspaceId: string; userId: string }) {
-  const local = useLocalDevice(host, workspaceId, userId)
-  return <DeviceRegistrationPanel host={host} workspaceId={workspaceId} device={local.device} devices={local.devices}
-    blockedReason={local.blockedReason} onChanged={local.refresh} />
 }
 
 /** 宿主回传实际颜色和缩放；读取失败时可继续使用当前窗口。 */

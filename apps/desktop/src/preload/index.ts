@@ -1,7 +1,6 @@
 /** 隔离桥只转发固定桌面/身份/设备方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
-import type { CollaborationHost, ConversationReadHost, DesktopHost, DeviceHost, DeviceState, IdentityState, WindowState } from "@workbench/contracts"
-import type { ProjectReadHost } from "../project-read-host.js"
+import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, ProjectConversationHost, WindowState } from "@workbench/contracts"
 import type { PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
 
@@ -34,20 +33,13 @@ const collaboration: CollaborationHost = {
 }
 contextBridge.exposeInMainWorld("collaboration", collaboration)
 
-const conversations: ConversationReadHost = {
-  listConversations: (workspaceId, cursor) => ipcRenderer.invoke("collaboration:conversations", workspaceId, cursor),
-  getConversation: (workspaceId, conversationId) => ipcRenderer.invoke("collaboration:conversation", workspaceId, conversationId),
-  readHistory: (workspaceId, conversationId, page) => ipcRenderer.invoke("collaboration:history", workspaceId, conversationId, page),
-  subscribeConversation: (workspaceId, conversationId, afterSequence) => ipcRenderer.invoke("collaboration:subscribe-conversation", workspaceId, conversationId, afterSequence),
-  readConversationEvents: (subscriptionId, afterSequence) => ipcRenderer.invoke("collaboration:conversation-events", subscriptionId, afterSequence),
-  unsubscribeConversation: subscriptionId => ipcRenderer.invoke("collaboration:unsubscribe-conversation", subscriptionId),
+const projectConversations: ProjectConversationHost = {
+  listConversations: (workspaceId, projectId, query) => ipcRenderer.invoke("workbench:project-conversations:list", workspaceId, projectId, query),
+  registerConversation: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:project-conversations:register", workspaceId, projectId, request),
+  getConversation: (workspaceId, projectId, conversationId) => ipcRenderer.invoke("workbench:project-conversations:get", workspaceId, projectId, conversationId),
+  readHistory: (workspaceId, projectId, conversationId, afterSequence, limit) => ipcRenderer.invoke("workbench:project-conversations:history", workspaceId, projectId, conversationId, afterSequence, limit),
 }
-contextBridge.exposeInMainWorld("conversations", conversations)
-
-const projects: ProjectReadHost = {
-  readProject: (workspaceId, conversationId, action) => ipcRenderer.invoke("collaboration:project-read", workspaceId, conversationId, action),
-}
-contextBridge.exposeInMainWorld("projects", projects)
+contextBridge.exposeInMainWorld("projectConversations", projectConversations)
 
 const organization: OrganizationHost = {
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),

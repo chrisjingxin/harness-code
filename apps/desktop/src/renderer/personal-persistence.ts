@@ -3,7 +3,7 @@ import type { PersonalHost, PersonalKey, PersonalRead, PersonalResult, PersonalV
 
 export class PersonalPersistence {
   #revisions = new Map<string, number>()
-  #bindings = new Map<string, string>()
+  #loaded = new Set<string>()
   #pending = new Set<Promise<void>>()
   #failed = new Map<string, { key: PersonalKey; revision: number; value: PersonalValue }>()
   #generation = 0
@@ -14,7 +14,7 @@ export class PersonalPersistence {
   /** 重登后重新确认范围；旧账号迟到的结果不能进入当前窗口。 */
   reset(): void {
     this.#generation++
-    this.#revisions.clear(); this.#bindings.clear(); this.#failed.clear()
+    this.#revisions.clear(); this.#loaded.clear(); this.#failed.clear()
     this.notice("")
   }
 
@@ -25,18 +25,16 @@ export class PersonalPersistence {
     catch { result = { ok: false, message: "无法读取个人视图，请重试。" } }
     if (generation !== this.#generation) return { ok: false, message: "账号已变化。" }
     if (!result.ok) { this.notice(result.message); return result }
-    const requested = this.#key(key)
-    const canonical = key.kind === "project" && result.value.project
-      ? JSON.stringify(["project", key.workspaceId, result.value.project.deviceId, result.value.project.projectId]) : requested
-    this.#bindings.set(requested, canonical)
+    const canonical = this.#key(key)
+    this.#loaded.add(canonical)
     this.#revisions.set(canonical, Math.max(this.#revisions.get(canonical) ?? 0, result.value.revision))
     if (!this.#failed.size) this.notice("")
     return result
   }
 
   save(key: PersonalKey, value: PersonalValue): void {
-    const canonical = this.#bindings.get(this.#key(key))
-    if (!canonical) return
+    const canonical = this.#key(key)
+    if (!this.#loaded.has(canonical)) return
     const revision = (this.#revisions.get(canonical) ?? 0) + 1
     this.#revisions.set(canonical, revision)
     this.#send(canonical, { key, revision, value: structuredClone(value) })

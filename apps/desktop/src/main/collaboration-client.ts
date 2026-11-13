@@ -3,7 +3,6 @@
  * 身份、会话与设备共用同一 Cookie/CSRF 实例；SSE 只走具名解析器，不暴露给 renderer。
  */
 import { randomUUID } from "node:crypto"
-import { setTimeout as delay } from "node:timers/promises"
 import { Cookie, CookieJar } from "tough-cookie"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import formats from "ajv-formats"
@@ -15,11 +14,9 @@ import projectSchema from "@workbench/contracts/schema/project" with { type: "js
 import organizationSchema from "@workbench/contracts/schema/organization" with { type: "json" }
 import type {
   BeeResponseEntity, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
-  MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
-  CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
-  CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
-  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse,
-  DeviceRevokeRequest, DeviceRevokedResponse, ProjectReadAction, ProjectReadResponse,
+  MembersResponse, MetaResponse, WorkspaceListResponse,
+  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceRevokeRequest, DeviceRevokedResponse,
+  ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
   ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
   ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
 } from "@workbench/contracts"
@@ -56,11 +53,9 @@ const messages: Record<CollaborationError["code"], string> = {
   PROJECT_GIT_STALE: "Git 状态已变化，请刷新", PROJECT_READ_FAILED: "项目读取失败",
 }
 class ClientProblem extends Error {
-  constructor(readonly code: CollaborationError["code"], readonly rebuildProjection = false) { super(code) }
+  constructor(readonly code: CollaborationError["code"]) { super(code) }
 }
 interface CallOptions { body?: unknown; inputSchema?: string; query?: Record<string, string>; session?: Session }
-interface StreamHandle { close(): void }
-type StreamConnection = "connecting" | "connected" | "reconnecting" | "stopped"
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
 export class CollaborationClient {
@@ -252,203 +247,54 @@ export class CollaborationClient {
     }
   }
 
-  listConversations(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<ConversationListResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations`, "conversation#ConversationListResponse", "GET", { query })
-  }
-  createConversation(workspaceId: string, request: CreateConversationRequest): Promise<CollaborationResult<CreateConversationResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations`, "CreateConversationResponse", { body: request, inputSchema: "CreateConversationRequest" })
-  }
-  getConversation(workspaceId: string, conversationId: string): Promise<CollaborationResult<ConversationResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}`, "ConversationResponse")
-  }
-  sendInput(workspaceId: string, conversationId: string, request: SendInputRequest): Promise<CollaborationResult<InputSavedResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/inputs`, "InputSavedResponse", { body: request, inputSchema: "SendInputRequest" })
-  }
-  getExecution(workspaceId: string, conversationId: string, executionId: string): Promise<CollaborationResult<ExecutionResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/executions/${executionId}`, "ExecutionResponse")
-  }
-  cancelExecution(workspaceId: string, conversationId: string, executionId: string, request: CancelExecutionRequest): Promise<CollaborationResult<CancelExecutionResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/executions/${executionId}/cancel`, "CancelExecutionResponse", { body: request, inputSchema: "CancelExecutionRequest" })
-  }
-  history(workspaceId: string, conversationId: string, query: Record<string, string> = {}): Promise<CollaborationResult<HistoryResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/history`, "HistoryResponse", "GET", { query })
-  }
-
-  /** 请求与响应均校验项目 schema，服务从会话确定原设备及项目。 */
-  async readProject(workspaceId: string, conversationId: string, action: ProjectReadAction): Promise<CollaborationResult<ProjectReadResponse>> {
-    const result = await this.#write<ProjectReadResponse>(`/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/project/read`,
-      "ProjectReadResponse", { body: action, inputSchema: "ProjectReadAction" })
-    if (!result.ok) return result
-    const value = result.value
-    if (value.kind !== action.kind || (value.kind === "readPreview" && action.kind === "readPreview" && value.value.path !== action.path)
-      || (value.kind === "gitDiff" && action.kind === "gitDiff" && (value.value.path !== action.path || value.value.snapshot !== action.snapshot))) {
-      return this.#error("INVALID_SERVER_RESPONSE")
+  /** 项目级会话只读与登记接口：统一消费 HC-211 服务端路由并按 organization Schema 校验报文。 */
+  listProjectConversations(workspaceId: string, projectId: string, query: { ownerId?: string; status?: ConversationStatus } = {}): Promise<CollaborationResult<ConversationListResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    const params: Record<string, string> = {}
+    if (query.ownerId !== undefined) {
+      if (!this.#validator("platform#UserId")(query.ownerId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+      params.ownerId = query.ownerId
     }
-    return result
+    if (query.status !== undefined) {
+      if (!this.#validator("organization#ConversationStatus")(query.status)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+      params.status = query.status
+    }
+    return this.#call(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations`,
+      "organization#ConversationListResponse",
+      "GET",
+      Object.keys(params).length ? { query: params } : {},
+    )
   }
-
-  /** 网络重连携带已交给调用方的连续位置；调用方负责保留未确认的事件。 */
-  subscribeConversation(workspaceId: string, conversationId: string, afterSequence: string,
-                        onEvent: (event: ConversationEvent) => void, onProblem: (problem: { code: string; rebuildProjection?: boolean }) => void,
-                        onStatus?: (status: StreamConnection) => void): StreamHandle {
-    const controller = new AbortController()
-    const session = this.#session
-    const signal = AbortSignal.any([controller.signal, session.abort.signal])
-    const live = () => !signal.aborted && !this.#disposed && session === this.#session
-    const emitProblem = (code: string, rebuildProjection = false) => { if (live()) onProblem({ code, ...(rebuildProjection ? { rebuildProjection: true } : {}) }) }
-    const emitStatus = (status: StreamConnection) => { if (live()) onStatus?.(status) }
-    let cursor = afterSequence
-    let retry = 0
-    let lastEvent: string | undefined
-    let reconnect = false
-
-    const read = async () => {
-      const connection = new AbortController()
-      const connectionSignal = AbortSignal.any([signal, connection.signal])
-      let timer: ReturnType<typeof setTimeout> | undefined
-      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-      const deadline = (ms: number) => {
-        clearTimeout(timer)
-        timer = setTimeout(() => connection.abort(), ms)
-      }
-      try {
-        const headers: Record<string, string> = {
-          Origin: this.#origin, "X-Workbench-Protocol-Version": "1", Accept: "text/event-stream", "X-Request-Id": randomUUID(),
-        }
-        const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
-        if (!live()) return
-        if (cookie) headers.Cookie = cookie
-        const path = `/api/v1/workspaces/${workspaceId}/conversations/${conversationId}/events`
-        const query = reconnect ? "" : `?afterSequence=${cursor}`
-        if (reconnect) headers["Last-Event-ID"] = `${conversationId}:${cursor}`
-        deadline(10_000)
-        const response = await this.#transport(`${this.#origin}${path}${query}`, {
-          method: "GET", headers, redirect: "manual", signal: connectionSignal,
-        })
-        if (!live() || connectionSignal.aborted) { void response.body?.cancel().catch(() => {}); return }
-        if (response.status !== 200) {
-          if (response.status >= 300 && response.status < 400) {
-            void response.body?.cancel().catch(() => {})
-            throw new ClientProblem("INVALID_SERVER_RESPONSE")
-          }
-          const body = await this.#readJson(response)
-          if (!live()) return
-          if (!this.#validator("ErrorEnvelope")(body)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-          throw new ClientProblem((body as ErrorEnvelope).body.code)
-        }
-        if (!response.body || response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "text/event-stream") {
-          void response.body?.cancel().catch(() => {})
-          throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        }
-        emitStatus("connected")
-        reader = response.body.getReader()
-        const decoder = new TextDecoder("utf-8", { fatal: true })
-        let pending = ""
-        let id: string | undefined
-        let name: string | undefined
-        let data: string[] = []
-        let bytes = 0
-        let comment = false
-        deadline(45_000)
-        while (live() && !connectionSignal.aborted) {
-          const { done, value } = await reader.read()
-          if (!live() || connectionSignal.aborted || done) return
-          deadline(45_000)
-          try { pending += decoder.decode(value, { stream: true }) }
-          catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
-          let newline = pending.indexOf("\n")
-          while (newline >= 0) {
-            if (!live() || connectionSignal.aborted) return
-            const line = pending.slice(0, newline).replace(/\r$/, "")
-            pending = pending.slice(newline + 1)
-            newline = pending.indexOf("\n")
-            bytes += Buffer.byteLength(line) + 1
-            if (bytes > 66_560) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-            if (!line) {
-              if (name === "stream.problem" && id === undefined) {
-                const problem = parse(data.join("\n"))
-                if (!this.#validator("ErrorEnvelope")(problem)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-                throw new ClientProblem((problem as ErrorEnvelope).body.code)
-              }
-              if (name === "conversation.event") {
-                const content = data.join("\n")
-                const event = parse(content) as ConversationEvent
-                if (Buffer.byteLength(content) > 65_536 || !this.#validator("ConversationEvent")(event)
-                  || event.workspaceId !== workspaceId || event.conversationId !== conversationId
-                  || id !== `${conversationId}:${event.sequence}`)
-                  throw new ClientProblem("INVALID_SERVER_RESPONSE")
-                if (event.sequence === cursor && content === lastEvent) {
-                  // 当前连接末尾的相同事件可安全忽略。无法核对的重复必须停止。
-                } else {
-                  if (event.sequence !== (BigInt(cursor) + 1n).toString()) {
-                    // 旧位置的正文无法核对时不能当成相同事件，需要从头重建投影。
-                    throw new ClientProblem("INVALID_SERVER_RESPONSE", BigInt(event.sequence) <= BigInt(cursor))
-                  }
-                  onEvent(event)
-                  if (!live()) return
-                  cursor = event.sequence
-                  lastEvent = content
-                }
-                retry = 0
-              } else if (id !== undefined || name !== undefined || data.length) {
-                throw new ClientProblem("INVALID_SERVER_RESPONSE")
-              } else if (comment) retry = 0
-              id = undefined; name = undefined; data = []; bytes = 0; comment = false
-            } else if (line.startsWith(":")) comment = true
-            else if (line.startsWith("id:") && id === undefined) id = line.slice(3).replace(/^ /, "")
-            else if (line.startsWith("event:") && name === undefined) name = line.slice(6).replace(/^ /, "")
-            else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""))
-            else throw new ClientProblem("INVALID_SERVER_RESPONSE")
-          }
-          if (bytes + Buffer.byteLength(pending) > 66_560) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        }
-      } finally {
-        clearTimeout(timer)
-        connection.abort()
-        if (reader) {
-          void reader.cancel().catch(() => {})
-          reader.releaseLock()
-        }
-      }
+  registerProjectConversation(workspaceId: string, projectId: string, request: ConversationRegisterRequest): Promise<CollaborationResult<ConversationDetailResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations`,
+      "organization#ConversationDetailResponse",
+      { body: request, inputSchema: "organization#ConversationRegisterRequest" },
+    )
+  }
+  getProjectConversation(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId) || !this.#validator("Id")(conversationId)) {
+      return Promise.resolve(this.#error("INVALID_REQUEST"))
     }
-
-    const parse = (value: string): unknown => {
-      try { return JSON.parse(value) }
-      catch { throw new ClientProblem("INVALID_SERVER_RESPONSE") }
+    return this.#call(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations/${conversationId}`,
+      "organization#ConversationDetailResponse",
+    )
+  }
+  readProjectConversationHistory(workspaceId: string, projectId: string, conversationId: string, afterSequence: number, limit = 200): Promise<CollaborationResult<ConversationHistoryResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId) || !this.#validator("Id")(conversationId)
+      || !Number.isSafeInteger(afterSequence) || afterSequence < 0
+      || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+      return Promise.resolve(this.#error("INVALID_REQUEST"))
     }
-    const run = async () => {
-      emitStatus("connecting")
-      if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(conversationId)
-        || !/^(0|[1-9][0-9]{0,18})$/.test(cursor) || BigInt(cursor) > 9_223_372_036_854_775_807n) {
-        emitStatus("stopped")
-        emitProblem("INVALID_REQUEST")
-        return
-      }
-      while (live()) {
-        try { await read() }
-        catch (failure) {
-          if (!live()) return
-          const code = failure instanceof ClientProblem ? failure.code : "NETWORK_UNAVAILABLE"
-          if (code === "AUTHENTICATION_REQUIRED") {
-            // 先清除旧 Cookie，再通知窗口；通知可能同步关闭该订阅。
-            this.#discardSession()
-            onProblem({ code })
-            return
-          }
-          if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") emitStatus("stopped")
-          emitProblem(code, failure instanceof ClientProblem && failure.rebuildProjection)
-          if (code !== "NETWORK_UNAVAILABLE" && code !== "SERVICE_UNAVAILABLE") return
-        }
-        if (!live()) return
-        // 正常流结束也要立刻显示重连，成功握手时再切回已连接。
-        emitStatus("reconnecting")
-        reconnect = true
-        const wait = [1000, 2000, 5000][Math.min(retry++, 2)]
-        try { await delay(wait, undefined, { signal }) } catch { return }
-      }
-    }
-    void run()
-    return { close: () => { if (live()) { emitStatus("stopped"); controller.abort() } } }
+    return this.#call(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations/${conversationId}/history`,
+      "organization#ConversationHistoryResponse",
+      "GET",
+      { query: { afterSequence: String(afterSequence), limit: String(limit) } },
+    )
   }
 
   registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {

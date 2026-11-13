@@ -1,0 +1,367 @@
+/* HC-218 会话中央页样式：仅消费 @workbench/ui 公共主题色与控件，不重画三栏壳层或对话时间线。 */
+
+.session-center {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.session-heading {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 20px 28px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-heading h1 {
+  margin: 0 0 5px;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+  line-height: 1.4;
+}
+
+.session-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.session-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.session-tag[data-tone="accent"] {
+  color: var(--accent);
+  background: var(--accent-soft-2);
+}
+
+.session-tag[data-tone="success"] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+}
+
+.session-tag[data-tone="warning"] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+
+.session-tag[data-tone="danger"] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.session-conversation-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 28px 14px;
+}
+
+.session-conversation-wrap[hidden] {
+  display: none;
+}
+
+/* 跨机器只读会话隐藏输入表单区，仅保留时间线阅读、折叠与复制交互。 */
+.session-remote-readonly .session-conversation-wrap form {
+  display: none;
+}
+
+.session-directory-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 12px 34px;
+}
+
+.session-directory-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.session-directory-button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+.session-remote-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px 36px;
+}
+
+.session-remote-brief {
+  max-width: 780px;
+  margin: 16px auto;
+}
+
+.session-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.session-brief-text {
+  margin: 0 0 20px;
+  font-size: 16px;
+  line-height: 1.85;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.session-brief-text.is-empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.session-brief-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-brief-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-remote-download {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 28px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.session-download-icon {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--accent-soft-2);
+  color: var(--accent);
+}
+
+.session-remote-download h2 {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.session-remote-download p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-remote-download > button {
+  margin-left: auto;
+  flex: none;
+}
+
+.session-remote-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.session-remote-footnote {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 16px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.session-remote-synced-note {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 28px;
+  background: var(--field-bg);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.session-remote-synced-note[data-tone="warning"] {
+  color: var(--warning);
+}
+
+.session-remote-synced-note[data-tone="danger"] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.session-remote-synced-note .session-note-action {
+  margin-left: auto;
+}
+
+.session-remote-action-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 28px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.session-remote-action-bar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-remote-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-inline-notice {
+  flex: none;
+  margin: 0;
+  padding: 8px 28px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.session-new-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px;
+  background: var(--bg);
+}
+
+.session-new-page h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.8px;
+}
+
+.session-new-page > p {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.session-new-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.session-new-page textarea {
+  box-sizing: border-box;
+  width: min(680px, 100%);
+  height: 120px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  outline-color: var(--accent);
+}
+
+.session-new-send {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(680px, 100%);
+  margin-top: 12px;
+}
+
+.session-new-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-new-status[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.session-new-note {
+  margin: 16px 0 0;
+  color: var(--subtle);
+  font-size: 12px;
+}

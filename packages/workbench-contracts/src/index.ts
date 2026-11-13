@@ -31,16 +31,7 @@ export type * from "./identity.js"
 export type * from "./conversation.js"
 export type * from "./execution.js"
 export type * from "./device.js"
-// 组织层会话类型（ConversationSummary 等）与旧会话契约同名，随 HC-218 换成新会话模型后一并导出。
-export type {
-  ProjectStatus, MemberStatus, ProjectRole, RepositoryStatus,
-  ProjectCreateRequest, ProjectPatchRequest, ProjectMemberAddRequest,
-  RepositoryCreateRequest, RepositoryPatchRequest,
-  ProjectSummary, ProjectResponse, ProjectListResponse,
-  ProjectMemberSummary, ProjectMemberListResponse, ProjectMemberChangeResponse,
-  RepositorySummary, RepositoryListResponse, ReferencingProjectSummary,
-  RepositoryDetailResponse, ClonedDeviceSummary, ProjectRepositoryItem,
-  ProjectRepositoryListResponse, ProjectDetailResponse,
-} from "./organization.js"
+export type * from "./organization.js"
+export type * from "./session.js"
 export * from "./deterministic.js"
 export type * from "./project.js"
