@@ -14,6 +14,8 @@ import {
   CheckCheck,
   CheckSquare,
   ChevronDown,
+  ChevronRight,
+  SquarePen,
   Circle,
   Clock,
   FileText,
@@ -356,8 +358,8 @@ function Preview() {
   const [syncing, setSyncing] = useState<RemoteKey | null>(null)
   // 仅视觉稿本地阶段，不定义或映射服务端任务状态机。
   const [taskAccepted, setTaskAccepted] = useState(false)
-  const [search, setSearch] = useState(""),
-    [sessionFilter, setSessionFilter] = useState("all")
+  const [search, setSearch] = useState("")
+  const [collapsedMembers, setCollapsedMembers] = useState<string[]>(["李四", "王五"])
   const [taskFilter, setTaskFilter] = useState("指派给我")
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -385,6 +387,11 @@ function Preview() {
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
   }, [])
+  useEffect(() => {
+    if (page === "remote") {
+      setCollapsedMembers((previous) => previous.filter((owner) => owner !== remoteSessions[remoteKey].owner))
+    }
+  }, [page, remoteKey])
   const remote = remoteSessions[remoteKey]
   const isLocal = page === "local"
   const stateKey = isLocal ? "local" : `remote-${remoteKey}`
@@ -812,7 +819,7 @@ function Preview() {
             <strong>3</strong>位成员
           </span>
           <span>
-            <strong>4</strong>条会话
+            <strong>3</strong>条会话
           </span>
           <span>
             <strong>1</strong>项进行中的任务
@@ -1189,6 +1196,26 @@ function Preview() {
       </p>
     </div>
   )
+  const memberSessions = [
+    { owner: "张三", sessions: [{ key: "local", title: "支付失败重试方案" }] },
+    {
+      owner: "李四",
+      sessions: [{ key: "lee", title: remoteSessions.lee.title }],
+    },
+    {
+      owner: "王五",
+      sessions: [{ key: "wang", title: remoteSessions.wang.title }],
+    },
+  ]
+    .map((member) => ({
+      ...member,
+      sessions: member.sessions.filter((session) =>
+        `${member.owner} ${session.title}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()),
+      ),
+    }))
+    .filter((member) => member.sessions.length > 0)
   const navigation = (
     <div className="design-nav">
       <div className="nav-brand">
@@ -1197,123 +1224,175 @@ function Preview() {
         </span>
         Harness Code
       </div>
-      <div className="nav-team">
-        <Users size={12} />
-        研发协作组
-      </div>
-      <button className="project-switch" onClick={() => setProjectMenu((value) => !value)}>
-        <span>支付体验优化</span>
-        <ChevronDown size={14} />
-      </button>
-      {projectMenu ? (
-        <div className="nav-project-menu">
-          <button
-            onClick={() => {
-              setPage("overview")
-              setProjectMenu(false)
-            }}
-          >
-            <Check size={13} />
-            支付体验优化
-          </button>
-          <button
-            onClick={() => {
-              setModal("new-project")
-              setProjectMenu(false)
-            }}
-          >
-            <Plus size={13} />
-            创建项目
-          </button>
-        </div>
-      ) : null}
-      <div className="project-nav">
-        {[
-          { key: "overview", label: "项目概览", icon: LayoutGrid },
-          { key: "tasks", label: "项目任务", icon: ListChecks },
-          { key: "info", label: "项目资料", icon: Folder },
-        ].map((item) => (
-          <button
-            key={item.key}
-            className="nav-item"
-            data-active={page === item.key || (item.key === "tasks" && page === "task")}
-            onClick={() => setPage(item.key as Page)}
-          >
-            <item.icon size={16} />
-            {item.label}
-            {item.key === "tasks" ? <span className="nav-badge">2</span> : null}
-          </button>
-        ))}
-      </div>
-      <button className="new-conversation" onClick={() => setPage("new")}>
-        <Plus size={16} />
-        新建会话
+      <button
+        className="new-conversation"
+        data-active={page === "new"}
+        onClick={() => setPage("new")}
+      >
+        <SquarePen size={17} />
+        新对话
       </button>
       <div className="nav-search">
-        <Search size={14} />
+        <Search size={16} />
         <input
-          aria-label="搜索会话"
-          placeholder="搜索会话"
+          aria-label="搜索成员或会话"
+          placeholder="搜索成员或会话"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
       </div>
-      <div className="session-filter">
-        <strong>会话</strong>
-        <button data-active={sessionFilter === "mine"} onClick={() => setSessionFilter("mine")}>
-          我的
+      <div className="nav-project">
+        <button
+          className="project-switch"
+          aria-expanded={projectMenu}
+          onClick={() => setProjectMenu((value) => !value)}
+        >
+          <span>
+            <FolderOpen size={15} />
+            支付体验优化
+          </span>
+          <ChevronDown size={14} />
         </button>
-        <button data-active={sessionFilter === "all"} onClick={() => setSessionFilter("all")}>
-          全部
+        <button
+          className="icon-button project-settings"
+          aria-label="项目设置"
+          title="项目设置 · 资料与成员"
+          data-active={page === "info"}
+          onClick={() => {
+            setPage("info")
+            setProjectMenu(false)
+          }}
+        >
+          <Settings size={14} />
         </button>
-      </div>
-      <div className="session-list">
-        {[
-          { key: "local", title: "支付失败重试方案", owner: "张三", device: "本机" },
-          { key: "lee", title: remoteSessions.lee.title, owner: "李四", device: "只读" },
-          { key: "wang", title: remoteSessions.wang.title, owner: "王五", device: "只读" },
-          {
-            key: "other-device",
-            title: remoteSessions["other-device"].title,
-            owner: "张三",
-            device: "另一台设备",
-          },
-        ]
-          .filter(
-            (item) => item.title.includes(search) && (sessionFilter !== "mine" || item.owner === "张三"),
-          )
-          .map((item) => (
+        {projectMenu ? (
+          <div className="nav-project-menu" aria-label="切换项目">
+            <div className="project-menu-label">项目</div>
+            <button onClick={() => setProjectMenu(false)}>
+              <Check size={14} />
+              支付体验优化
+            </button>
             <button
-              className="session-row"
-              key={item.key}
-              data-active={item.key === "local" ? isLocal : page === "remote" && remoteKey === item.key}
+              className="project-menu-create"
               onClick={() => {
-                setCentralPath(null)
-                if (item.key === "local") setPage("local")
-                else {
-                  setRemoteKey(item.key as RemoteKey)
-                  setPage("remote")
-                }
+                setModal("new-project")
+                setProjectMenu(false)
               }}
             >
-              <MessageSquare size={16} />
-              <span className="session-copy">
-                <span className="session-title">{item.title}</span>
-                <span className="session-meta">
-                  {item.owner}
-                  <span>·</span>
-                  {item.device}
-                  {item.key === "local" ? (
-                    <em>15:56</em>
-                  ) : (
-                    <em data-updated={item.key === "wang" && !synced.wang}>
-                      {synced[item.key as RemoteKey] ? "已同步" : "未同步"}
-                    </em>
-                  )}
-                </span>
-              </span>
+              <Plus size={14} />
+              创建项目
             </button>
-          ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="project-nav" aria-label="项目工具">
+        <button
+          data-active={page === "overview"}
+          onClick={() => setPage("overview")}
+        >
+          <LayoutGrid size={14} />
+          看板
+        </button>
+        <button
+          data-active={page === "tasks" || page === "task"}
+          onClick={() => setPage("tasks")}
+        >
+          <ListChecks size={14} />
+          任务<span className="nav-task-count">2</span>
+        </button>
+      </div>
+      <div className="session-list" data-searching={Boolean(search.trim())} aria-label="按成员分组的项目会话">
+        {memberSessions.length === 0 ? (
+          <p className="session-empty">没有匹配的成员或会话</p>
+        ) : null}
+        {memberSessions.map((member) => {
+          const expanded =
+            Boolean(search.trim()) || !collapsedMembers.includes(member.owner)
+          const groupId = `member-sessions-${member.owner}`
+          return (
+            <section
+              className="member-sessions"
+              data-self={member.owner === "张三"}
+              data-expanded={expanded}
+              key={member.owner}
+            >
+              <button
+                className="member-toggle"
+                aria-expanded={expanded}
+                aria-controls={groupId}
+                onClick={() => {
+                  setCollapsedMembers((previous) =>
+                    previous.includes(member.owner)
+                      ? previous.filter((name) => name !== member.owner)
+                      : [...previous, member.owner],
+                  )
+                }}
+              >
+                {expanded ? (
+                  <ChevronDown size={13} />
+                ) : (
+                  <ChevronRight size={13} />
+                )}
+                <Avatar
+                  name={member.owner}
+                  tone={member.owner === "张三" ? undefined : "neutral"}
+                />
+                <span>
+                  {member.owner === "张三" ? "我的会话" : member.owner}
+                </span>
+                <span className="member-session-count">
+                  {member.sessions.length}
+                </span>
+              </button>
+              <div
+                id={groupId}
+                hidden={!expanded}
+                className="member-session-items"
+              >
+                {member.sessions.map((item) => {
+                  const active =
+                    item.key === "local"
+                      ? isLocal
+                      : page === "remote" && remoteKey === item.key
+                  return (
+                    <button
+                      className="session-row"
+                      key={item.key}
+                      title={item.title}
+                      aria-current={active ? "page" : undefined}
+                      data-active={active}
+                      onClick={() => {
+                        setCentralPath(null)
+                        if (item.key === "local") setPage("local")
+                        else {
+                          setRemoteKey(item.key as RemoteKey)
+                          setPage("remote")
+                        }
+                      }}
+                    >
+                      <MessageSquare size={15} />
+                      <span className="session-copy">
+                        <span className="session-title">{item.title}</span>
+                        <span className="session-meta">
+                          {item.key === "local"
+                            ? "进行中"
+                            : synced[item.key as RemoteKey]
+                              ? "已同步 · 只读"
+                              : "未同步"}
+                          <time>
+                            {item.key === "local"
+                              ? "15:56"
+                              : remoteSessions[item.key as RemoteKey].time}
+                          </time>
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )
+        })}
       </div>
       <div className="nav-bottom">
         <button
@@ -1326,9 +1405,15 @@ function Preview() {
         </button>
         <div className="nav-account">
           <Avatar name="张三" />
-          <span>张三</span>
-          <small>当前设备</small>
-          <button className="icon-button" aria-label="设置" onClick={() => setSettings(true)}>
+          <span className="nav-account-copy">
+            <strong>研发协作组</strong>
+            <small>张三</small>
+          </span>
+          <button
+            className="icon-button"
+            aria-label="设置"
+            onClick={() => setSettings(true)}
+          >
             <Settings size={16} />
           </button>
         </div>
