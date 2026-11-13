@@ -5,7 +5,7 @@
  * 中央复用 @workbench/ui 的 ConversationView 展示消息时间线、工具与输入区；
  * 上方显示本地工作目录切换条与云端共享范围提示；发送与取消严格受控于真实 Agent 执行端口。
  */
-import type { ReactElement, ReactNode } from "react"
+import type { ReactElement } from "react"
 import { ConversationView } from "@workbench/ui"
 import type {
   ConversationActions,
@@ -18,6 +18,8 @@ import type {
 } from "@workbench/ui"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
 import { ChevronDownIcon, FolderIcon, LaptopIcon, UsersIcon } from "./icons.js"
+import { SessionCentralFilePanels, SessionCentralTabBar } from "./session-center.js"
+import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename } from "./session-model.js"
 
 export type LocalSessionPageProps = {
@@ -33,7 +35,7 @@ export type LocalSessionPageProps = {
   readonly execution: LocalSessionExecutionPort
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
-  readonly centralOverride?: ReactNode
+  readonly centralFiles?: SessionCentralFilesState
   readonly onChooseDirectory: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
@@ -55,7 +57,7 @@ export function LocalSessionPage({
   execution,
   rendering,
   hooks,
-  centralOverride,
+  centralFiles,
   onChooseDirectory,
   onPersonalChange,
   onCapabilitySelect,
@@ -63,6 +65,7 @@ export function LocalSessionPage({
   onRequestFileCandidates,
   onOpenFile,
 }: LocalSessionPageProps): ReactElement {
+  const viewingFile = Boolean(centralFiles && centralFiles.activeCentral !== null)
   const availability = execution.getAvailability(conversation.conversationId)
   const folderName = directoryBasename(directoryPath)
   const composer: ConversationComposerView = {
@@ -117,77 +120,78 @@ export function LocalSessionPage({
         </div>
       </header>
 
-      <div className="session-conversation-wrap">
-        {centralOverride ?? (
-          <ConversationView
-            scope={scope}
-            visible={visible}
-            entries={entries}
-            contentRevision={contentRevision}
-            interaction={null}
-            personal={personal}
-            composer={composer}
-            actions={{
-              onPersonalChange,
-              ...(execution.send
-                ? {
-                    onSend: async (targetScope, _revision, text, referenceIds, attachmentIds) =>
-                      execution.send!({
-                        scope: {
-                          namespace: targetScope.namespace,
-                          accountId: targetScope.accountId,
-                          workspaceId: targetScope.workspaceId,
-                          projectId: conversation.projectId,
-                        },
-                        conversationId: conversation.conversationId,
-                        directoryPath,
-                        text,
-                        referenceIds,
-                        attachmentIds,
-                      }),
-                  }
-                : {}),
-              ...(execution.cancel
-                ? {
-                    onCancel: async targetScope =>
-                      execution.cancel!(
-                        {
-                          namespace: targetScope.namespace,
-                          accountId: targetScope.accountId,
-                          workspaceId: targetScope.workspaceId,
-                          projectId: conversation.projectId,
-                        },
-                        conversation.conversationId,
-                      ),
-                  }
-                : {}),
-              onCapabilitySelect,
-              onReferenceAction,
-              onRequestFileCandidates,
-              onOpenFile,
-              rendering,
-            }}
-            slots={{
-              aboveTimeline: (
-                <div className="session-directory-row">
-                  <button
-                    type="button"
-                    className="session-directory-button"
-                    onClick={onChooseDirectory}
-                    title={directoryPath ?? "选择一个本机文件夹（支持普通非 Git 目录）"}
-                  >
-                    <FolderIcon size={13} />
-                    <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
-                    <ChevronDownIcon size={12} />
-                  </button>
-                  <span className="session-tag">本机目录 · 仅当前电脑</span>
-                </div>
-              ),
-              ...(hooks?.composerExtra ? { composer: hooks.composerExtra } : {}),
-            }}
-          />
-        )}
+      {centralFiles ? <SessionCentralTabBar state={centralFiles} /> : null}
+
+      <div className="session-conversation-wrap" hidden={viewingFile}>
+        <ConversationView
+          scope={scope}
+          visible={visible && !viewingFile}
+          entries={entries}
+          contentRevision={contentRevision}
+          interaction={null}
+          personal={personal}
+          composer={composer}
+          actions={{
+            onPersonalChange,
+            ...(execution.send
+              ? {
+                  onSend: async (targetScope, _revision, text, referenceIds, attachmentIds) =>
+                    execution.send!({
+                      scope: {
+                        namespace: targetScope.namespace,
+                        accountId: targetScope.accountId,
+                        workspaceId: targetScope.workspaceId,
+                        projectId: conversation.projectId,
+                      },
+                      conversationId: conversation.conversationId,
+                      directoryPath,
+                      text,
+                      referenceIds,
+                      attachmentIds,
+                    }),
+                }
+              : {}),
+            ...(execution.cancel
+              ? {
+                  onCancel: async targetScope =>
+                    execution.cancel!(
+                      {
+                        namespace: targetScope.namespace,
+                        accountId: targetScope.accountId,
+                        workspaceId: targetScope.workspaceId,
+                        projectId: conversation.projectId,
+                      },
+                      conversation.conversationId,
+                    ),
+                }
+              : {}),
+            onCapabilitySelect,
+            onReferenceAction,
+            onRequestFileCandidates,
+            onOpenFile,
+            rendering,
+          }}
+          slots={{
+            aboveTimeline: (
+              <div className="session-directory-row">
+                <button
+                  type="button"
+                  className="session-directory-button"
+                  onClick={onChooseDirectory}
+                  title={directoryPath ?? "选择一个本机文件夹（支持普通非 Git 目录）"}
+                >
+                  <FolderIcon size={13} />
+                  <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
+                  <ChevronDownIcon size={12} />
+                </button>
+                <span className="session-tag">本机目录 · 仅当前电脑</span>
+              </div>
+            ),
+            ...(hooks?.composerExtra ? { composer: hooks.composerExtra } : {}),
+          }}
+        />
       </div>
+      {centralFiles ? <SessionCentralFilePanels state={centralFiles} /> : null}
     </section>
   )
 }

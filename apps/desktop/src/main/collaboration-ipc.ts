@@ -7,8 +7,9 @@ import { bindDeviceIpc } from "./device-ipc.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
 import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { verifyDesktopSource } from "./trusted-source.js"
-import type { ConversationRegisterRequest, ConversationStatus } from "@workbench/contracts"
+import type { ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
 import { randomUUID } from "node:crypto"
+import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -16,7 +17,28 @@ const USER_ID = /^[0-9a-f]{32}$/
 const CONVERSATION_STATUSES = new Set(["idle", "running", "waiting_approval", "error"])
 const isId = (value: unknown): value is string => typeof value === "string" && UUID.test(value)
 const isUserId = (value: unknown): value is string => typeof value === "string" && USER_ID.test(value)
+const isNonEmptyString = (value: unknown, maxLength = 4096): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= maxLength
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+
+function isProjectReadAction(value: unknown): value is ProjectReadAction {
+  if (!isObject(value) || typeof value.kind !== "string") return false
+  switch (value.kind) {
+    case "listDirectory":
+      return typeof value.directory === "string" && (value.cursor === undefined || typeof value.cursor === "string")
+    case "searchCandidates":
+      return typeof value.directory === "string" && typeof value.query === "string"
+        && (value.limit === undefined || (typeof value.limit === "number" && Number.isSafeInteger(value.limit) && value.limit > 0))
+    case "readPreview":
+      return typeof value.path === "string"
+    case "gitStatus":
+      return true
+    case "gitDiff":
+      return typeof value.snapshot === "string" && typeof value.path === "string"
+    default:
+      return false
+  }
+}
 
 function isConversationQuery(value: unknown): value is { ownerId?: string; status?: ConversationStatus } | undefined {
   if (value === undefined) return true
@@ -33,6 +55,7 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
   const identity = new CollaborationState(process.env.WORKBENCH_SERVICE_ORIGIN)
   const client = identity.network()
   const personal = new PersonalStore(identity, client ? process.env.WORKBENCH_SERVICE_ORIGIN! : "", app.getPath("userData"))
+  const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
   if (client) bindDeviceIpc(window, trustedUrl, new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity))
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const channels: string[] = []
@@ -73,6 +96,15 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
     && isHistoryLimit(limit)
       ? identity.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit)
       : identityError("INVALID_REQUEST", "项目会话历史参数无效。"))
+
+  handle("workbench:local-directory:bind", 4, (workspaceId, projectId, conversationKey, directoryPath) =>
+    isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isNonEmptyString(directoryPath, 4096)
+      ? localDirectory.bindDirectory(workspaceId, projectId, conversationKey, directoryPath)
+      : identityError("INVALID_REQUEST", "本机工作目录绑定参数无效。"))
+  handle("workbench:local-directory:read", 4, (workspaceId, projectId, conversationKey, action) =>
+    isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
+      ? localDirectory.readDirectory(workspaceId, projectId, conversationKey, action)
+      : identityError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
 
   const personalChannels = ["personal:load", "personal:save", "personal:close-ready"]
   ipcMain.handle("personal:load", async (event, key: unknown) => {

@@ -3,7 +3,7 @@
  * 1. useProjectShell：恢复团队个人记录 → 读取项目列表确定当前项目与导航范围（scope）→ 读取项目详情与本项目导航记录。
  * 2. ProjectWorkbench：左栏 ProjectNavigation + 按 page.kind 选择提供者；会话提供者在项目范围内常驻挂载（切页只改 visible），右栏与顶栏上下文由当前提供者决定。
  */
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { CollaborationHost, UserSummary } from "@workbench/contracts"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "@workbench/ui"
@@ -21,6 +21,7 @@ import type {
 } from "./contracts.js"
 import { CreateProjectDialog } from "./create-project-dialog.js"
 import { ProjectInfoPage } from "./project-info-page.js"
+import { resolveUserPhoto } from "../../demo-avatars.js"
 import { projectMembers, useProjectDetail, useProjects, useTeamMembers } from "./use-organization.js"
 import "./project-navigation.css"
 
@@ -142,9 +143,10 @@ export function useProjectShell({
     if (status === "ready") persistence.save({ kind: "projectNavigation", workspaceId, projectId }, value)
   }
 
-  const scope: ProjectNavigationScope | null = workspaceReady && projectId
-    ? { namespace, accountId: user.id, workspaceId, projectId }
-    : null
+  const scope: ProjectNavigationScope | null = useMemo(
+    () => (workspaceReady && projectId ? { namespace, accountId: user.id, workspaceId, projectId } : null),
+    [workspaceReady, namespace, user.id, workspaceId, projectId],
+  )
 
   return {
     workspace,
@@ -362,7 +364,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       navigation={<div className="desktop-navigation">
         <ProjectNavigation view={{
           accountName: user.userName,
-          accountPhoto: user.photo || null,
+          accountPhoto: resolveUserPhoto(user),
           workspaceName: props.workspaceName,
           projects: shell.projects.projects.map(item => ({ projectId: item.projectId, name: item.name, archived: item.status === "archived" })),
           projectsAvailability: shell.projects.availability,

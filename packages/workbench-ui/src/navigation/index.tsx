@@ -94,8 +94,12 @@ function Status({ value, area, actions }: { value: NavigationAvailability; area:
   );
 }
 
+const SAFE_DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
+
 function safeAvatarUrl(photo?: string | null): string | null {
   if (!photo) return null;
+  if (SAFE_DATA_IMAGE_RE.test(photo)) return photo;
+  if ((photo.startsWith("/") && !photo.startsWith("//")) || photo.startsWith("./")) return photo;
   try {
     const url = new URL(photo);
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
@@ -104,7 +108,8 @@ function safeAvatarUrl(photo?: string | null): string | null {
   }
 }
 
-function Avatar({ initial, photo, self }: { initial: string; photo?: string | null; self?: boolean }) {
+/** 成员圆形头像：支持安全远程链接、站内静态路径及打包内联位图，加载失败自动回退到姓名首字。 */
+export function MemberAvatar({ initial, photo, self }: { initial: string; photo?: string | null; self?: boolean }): ReactElement {
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   const candidate = safeAvatarUrl(photo);
   const src = candidate && brokenUrl !== candidate ? candidate : null;
@@ -224,7 +229,7 @@ function MemberGroup({ group, view, actions }: { group: NavigationMemberGroup; v
         onClick={() => actions.toggleMember(group.userId)}
       >
         {group.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <Avatar initial={group.initial} photo={group.photo} self={group.self} />
+        <MemberAvatar initial={group.initial} photo={group.photo} self={group.self} />
         <span className="pnav-ellipsis">{group.label}</span>
         {group.detail && <small>{group.detail}</small>}
         {group.left && <small>已离开</small>}
@@ -356,7 +361,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           团队知识
         </button>
         <div className="pnav-account">
-          <Avatar initial={(view.accountName ?? "?").slice(0, 1)} photo={view.accountPhoto} self />
+          <MemberAvatar initial={(view.accountName ?? "?").slice(0, 1)} photo={view.accountPhoto} self />
           <span className="pnav-account-copy">
             <strong className="pnav-ellipsis">{view.workspaceName ?? "未选择团队"}</strong>
             <small className="pnav-ellipsis">{view.accountName ?? "未登录"}</small>

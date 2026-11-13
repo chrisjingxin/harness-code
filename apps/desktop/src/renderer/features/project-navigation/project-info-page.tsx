@@ -4,8 +4,10 @@
  */
 import { useState } from "react"
 import type { CollaborationResult, MemberSummary, ProjectDetailResponse } from "@workbench/contracts"
+import { MemberAvatar } from "@workbench/ui"
 import type { NavigationAvailability } from "@workbench/ui"
 import type { OrganizationHost } from "../../../organization-host.js"
+import { resolveUserPhoto } from "../../demo-avatars.js"
 import { organizationMessage } from "./organization-errors.js"
 import { useRepositories } from "./use-organization.js"
 
@@ -106,7 +108,7 @@ export function ProjectInfoPage({ host, workspaceId, detail, availability, team,
         <h2>项目成员</h2>
         <ul className="pnav-list">
           {active.map(member => <li key={member.userId}>
-            <span className="pnav-avatar" data-self={member.userId === selfUserId}>{nameOf(member.userId).slice(0, 1)}</span>
+            <MemberAvatar initial={nameOf(member.userId).slice(0, 1)} photo={resolveUserPhoto(names.get(member.userId))} self={member.userId === selfUserId} />
             <span className="pnav-list-copy">
               <strong>{nameOf(member.userId)}</strong>
               {metaOf(member.userId) && <small>{metaOf(member.userId)}</small>}

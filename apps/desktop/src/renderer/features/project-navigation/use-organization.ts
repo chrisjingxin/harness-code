@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CollaborationHost, MemberSummary, ProjectDetailResponse, ProjectSummary, RepositorySummary } from "@workbench/contracts"
 import type { NavigationAvailability, NavigationMember } from "@workbench/ui"
 import type { OrganizationHost } from "../../../organization-host.js"
+import { resolveUserPhoto } from "../../demo-avatars.js"
 
 type Loaded<T> = { value: T; availability: NavigationAvailability }
 const failed = (message: string): NavigationAvailability => ({ state: "failed", message })
@@ -92,11 +93,12 @@ export function projectMembers(detail: ProjectDetailResponse | null, team: reado
   const users = new Map(team.map(item => [item.user.id, item.user]))
   return detail.members.map(member => {
     const user = users.get(member.userId)
+    const photo = resolveUserPhoto(user)
     return {
       userId: member.userId,
       userName: user?.userName ?? `成员 ${member.userId.slice(0, 8)}`,
       userNo: user?.userNo ?? "",
-      ...(user?.photo ? { photo: user.photo } : {}),
+      ...(photo ? { photo } : {}),
       ...(user?.orgName ? { orgName: user.orgName } : {}),
       ...(user?.orgPathName ? { orgPathName: user.orgPathName } : {}),
       left: member.status === "removed",

@@ -1,6 +1,6 @@
 /** 隔离桥只转发固定桌面/身份/设备方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
-import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, ProjectConversationHost, WindowState } from "@workbench/contracts"
+import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
 import type { PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
 
@@ -40,6 +40,14 @@ const projectConversations: ProjectConversationHost = {
   readHistory: (workspaceId, projectId, conversationId, afterSequence, limit) => ipcRenderer.invoke("workbench:project-conversations:history", workspaceId, projectId, conversationId, afterSequence, limit),
 }
 contextBridge.exposeInMainWorld("projectConversations", projectConversations)
+
+const localDirectory: LocalDirectoryHost = {
+  bindDirectory: (workspaceId, projectId, conversationKey, directoryPath) =>
+    ipcRenderer.invoke("workbench:local-directory:bind", workspaceId, projectId, conversationKey, directoryPath),
+  readDirectory: (workspaceId, projectId, conversationKey, action) =>
+    ipcRenderer.invoke("workbench:local-directory:read", workspaceId, projectId, conversationKey, action),
+}
+contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 
 const organization: OrganizationHost = {
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),

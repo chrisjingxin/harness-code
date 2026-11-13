@@ -18,15 +18,9 @@ import type {
   WorkbenchRightSlot,
 } from "@workbench/ui"
 import type { ProjectPage, ProjectPageProvider, ProjectNavigationScope } from "../project-navigation/contracts.js"
-import type {
-  LocalSessionExecutionPort,
-  NewSessionDraft,
-  ProjectConversationSummary,
-  SessionExternalHooks,
-  SessionKind,
-  SessionSyncState,
-} from "./contracts.js"
+import type { LocalSessionExecutionPort, NewSessionDraft, ProjectConversationSummary, SessionExternalHooks, SessionKind, SessionSyncState } from "./contracts.js"
 import { LocalSessionPage } from "./local-session-page.js"
+import type { SessionCentralFilesState } from "./session-center.js"
 import { NewSessionPage } from "./new-session-page.js"
 import { RemoteSessionPage } from "./remote-session-page.js"
 import "./session.css"
@@ -134,7 +128,7 @@ export type SessionPageController = {
   onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
   onOpenFile?: ConversationActions["onOpenFile"]
   renderLocalRight?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary; slot: WorkbenchRightSlot }): ReactNode | null
-  renderLocalCentral?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary }): ReactNode | null
+  getCentralFiles?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary }): SessionCentralFilesState | undefined
 }
 
 /** 根据实时控制器构造符合 HC-217 协议的会话页面提供者。 */
@@ -230,7 +224,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             execution={controller.execution}
             rendering={controller.rendering}
             hooks={controller.hooks}
-            centralOverride={controller.renderLocalCentral?.({ scope, conversation })}
+            centralFiles={controller.getCentralFiles?.({ scope, conversation })}
             onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             onPersonalChange={controller.onPersonalChange}
             onCapabilitySelect={controller.onCapabilitySelect}

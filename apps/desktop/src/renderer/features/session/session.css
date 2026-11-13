@@ -365,3 +365,52 @@
   color: var(--subtle);
   font-size: 12px;
 }
+
+.session-central-file-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-central-file-wrap[hidden] {
+  display: none;
+}
+
+.session-central-file-wrap .project-workbench-file-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.session-right-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 20px 18px;
+  color: var(--text);
+}
+
+.session-right-guide-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.session-right-guide h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session-right-guide p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}

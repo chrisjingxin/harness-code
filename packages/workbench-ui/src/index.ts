@@ -35,7 +35,7 @@ export type {
   ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,
   ConversationViewProps,
 } from "./conversation/index.js"
-export { ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
+export { MemberAvatar, ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
 export type {
   MemberGroupInput, NavigationAvailability, NavigationMember, NavigationMemberGroup, NavigationPageKind,
   NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, ProjectNavigationActions,

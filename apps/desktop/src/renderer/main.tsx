@@ -1,6 +1,7 @@
 /** 将受限桌面端口注入通用视图；本入口不组装任何 Agent 或旧 Web 服务。 */
 import { createRoot } from "react-dom/client"
 import "@workbench/ui/theme.css"
+import "@workbench/ui/project.css"
 import { DesktopWorkbench } from "./desktop-workbench.js"
 
 // 禁用触控板捏合对应的页面缩放，窗口缩放统一由主进程限制范围。
@@ -13,6 +14,7 @@ createRoot(document.getElementById("root")!).render(
     devices={window.devices}
     organization={window.organization}
     projectConversations={window.projectConversations}
+    localDirectory={window.localDirectory}
     personalHost={window.personal}
   />,
 )

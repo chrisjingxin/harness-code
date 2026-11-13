@@ -7,6 +7,7 @@ import type {
   CollaborationHost,
   DesktopHost,
   DeviceHost,
+  LocalDirectoryHost,
   ProjectConversationHost,
   ThemeMode,
   UserSummary,
@@ -21,6 +22,7 @@ import type { ProjectPageProviders } from "./features/project-navigation/index.j
 import { useProjectSessions } from "./features/session/index.js"
 import { useLocalDevice } from "./local-device.js"
 import { PersonalPersistence } from "./personal-persistence.js"
+import { resolveUserPhoto } from "./demo-avatars.js"
 import "@workbench/ui/layout.css"
 import "@workbench/ui/navigation.css"
 import "@workbench/ui/conversation.css"
@@ -32,6 +34,7 @@ type Hosts = {
   devices: DeviceHost
   organization: OrganizationHost
   projectConversations: ProjectConversationHost
+  localDirectory?: LocalDirectoryHost
   personalHost: PersonalHost
 }
 type Identity = ReturnType<typeof useCollaborationIdentity>
@@ -95,6 +98,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       collaboration={props.collaboration}
       devices={props.devices}
       projectConversations={props.projectConversations}
+      localDirectory={props.localDirectory}
       persistence={persistence}
       workspaceId={workspace.id}
       workspaceName={workspace.name}
@@ -124,7 +128,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     context={{ title: "协作工作台" }}
     navigation={<div className="desktop-navigation">
       <ProjectNavigation view={{
-        accountName: signedIn?.user.userName ?? null, accountPhoto: signedIn?.user.photo || null, workspaceName: null, projects: [],
+        accountName: signedIn?.user.userName ?? null, accountPhoto: resolveUserPhoto(signedIn?.user), workspaceName: null, projects: [],
         projectsAvailability: { state: status === "loading" ? "loading" : "unavailable", message },
         currentProjectId: null, groups: [], membersAvailability: { state: "unavailable" }, sessionsAvailability: { state: "unavailable" },
         search: "", activePage: null, selectedConversationId: null, taskCount: null,
@@ -165,6 +169,7 @@ function WorkspaceProjectWorkbench(props: {
   collaboration: CollaborationHost
   devices: DeviceHost
   projectConversations: ProjectConversationHost
+  localDirectory?: LocalDirectoryHost
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
@@ -196,6 +201,7 @@ function WorkspaceProjectWorkbench(props: {
   const projectSessions = useProjectSessions({
     host: props.host,
     projectConversations: props.projectConversations,
+    localDirectory: props.localDirectory,
     persistence: props.persistence,
     scope: shell.scope,
     projectName: currentProject?.name ?? "当前项目",
@@ -206,9 +212,24 @@ function WorkspaceProjectWorkbench(props: {
     members: shell.team.members,
     devices: localDevice.devices,
     selectedConversationId,
+    onOpenConversation: conversation => {
+      shell.locateConversation(conversation.conversationId, [
+        {
+          conversationId: conversation.conversationId,
+          ownerUserId: conversation.ownerUserId,
+          title: conversation.title,
+          timeLabel: "刚刚",
+          badge: { text: "本机", tone: "neutral" },
+        },
+      ])
+    },
+    onOpenNewSessionPage: () => {
+      shell.openPage({ kind: "new" })
+    },
   })
 
-  // HC-219～220 交付后在此接入任务与看板页面提供者；未交付模块保持未接入。
+  // HC-219～220 交付后在此接入任务、引用与看板页面提供者，并消费 `projectSessions.integration`；未交付模块保持未接入。
+  void projectSessions.integration
   const taskCount: number | null = null
   const providers: ProjectPageProviders = {
     session: projectSessions.provider,

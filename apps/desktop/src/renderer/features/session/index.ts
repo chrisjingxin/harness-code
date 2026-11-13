@@ -15,3 +15,7 @@ export {
 export type { SessionPageController } from "./session-provider.js"
 export { useProjectSessions } from "./use-project-sessions.js"
 export type { UseProjectSessionsOptions } from "./use-project-sessions.js"
+export { useLocalDirectory } from "./use-local-directory.js"
+export type { UseLocalDirectoryOptions } from "./use-local-directory.js"
+export { SessionCentralTabBar, SessionCentralFilePanels, SessionRightDock } from "./session-center.js"
+export type { CentralFileTabItem, SessionCentralFilesState, SessionRightDockProps } from "./session-center.js"

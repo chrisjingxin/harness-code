@@ -20,7 +20,7 @@
 .pnav-list-copy { display: grid; gap: 2px; }
 .pnav-list-copy small { color: var(--subtle); font-size: 11px; }
 .pnav-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; white-space: nowrap; }
-.pnav-page .pnav-avatar, .pnav-list .pnav-avatar { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); color: var(--text-soft); font-size: 11px; font-weight: 600; }
+.pnav-page .pnav-avatar, .pnav-list .pnav-avatar { flex: none; overflow: hidden; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); color: var(--text-soft); font-size: 11px; font-weight: 600; }
 .pnav-list .pnav-avatar[data-self="true"] { background: var(--accent-soft-2); color: var(--accent); }
 .pnav-form, .pnav-dialog { display: grid; gap: 12px; }
 .pnav-form label, .pnav-dialog label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
