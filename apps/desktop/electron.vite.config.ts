@@ -3,7 +3,7 @@ import { defineConfig } from "electron-vite"
 import react from "@vitejs/plugin-react"
 import { resolve } from "node:path"
 
-type PreviewTarget = "hc205" | "hc206" | "hc207" | "hc208"
+type PreviewTarget = "hc205" | "hc206" | "hc207" | "hc217"
 
 /** 预览身份只由各自的固定构建配置选择；正式构建没有运行时入口开关。 */
 export function desktopConfig(preview: PreviewTarget | null = null) {

@@ -4,15 +4,26 @@ import type { ConversationPersonalState, ProjectPersonalView } from "@workbench/
 export type PersonalKey =
   | { kind: "account" }
   | { kind: "workspace"; workspaceId: string }
+  | { kind: "projectNavigation"; workspaceId: string; projectId: string }
   | { kind: "conversation"; workspaceId: string; conversationId: string }
   | { kind: "project"; workspaceId: string; conversationId: string }
 
 export type AccountPersonal = { workspaceId: string | null }
+/** 团队范围：当前项目与左右栏布局偏好。 */
 export type WorkspacePersonal = {
-  expandedDevices: readonly string[]
-  expandedProjects: readonly string[]
-  selectedConversationId: string | null
+  projectId: string | null
   panels: Record<"left" | "right", { open: boolean; width: number }>
+}
+/** 项目内的中央页面；会话与任务只保存标识，打开时由各自模块重新授权读取。 */
+export type ProjectPage =
+  | { kind: "new" | "board" | "tasks" | "info" | "knowledge" }
+  | { kind: "conversation"; conversationId: string }
+  | { kind: "task"; taskId: string }
+/** 项目范围：上次页面、展开的他人成员组和本人组是否被手动收起。 */
+export type ProjectNavigationPersonal = {
+  page: ProjectPage
+  expandedMembers: readonly string[]
+  selfCollapsed: boolean
 }
 export type ConversationPersonal = Omit<ConversationPersonalState, "interactions">
 export type ProjectPersonal = {
@@ -26,7 +37,7 @@ export type ProjectPersonalRecord = {
   personal: ProjectPersonal
   positions: readonly { area: "central" | "dock" | "tree"; path: string; top: number; left: number }[]
 }
-export type PersonalValue = AccountPersonal | WorkspacePersonal | ConversationPersonal | ProjectPersonalRecord
+export type PersonalValue = AccountPersonal | WorkspacePersonal | ProjectNavigationPersonal | ConversationPersonal | ProjectPersonalRecord
 export type PersonalRead = {
   revision: number
   data: PersonalValue | null

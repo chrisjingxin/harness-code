@@ -12,16 +12,20 @@ import conversationSchema from "@workbench/contracts/schema/conversation" with {
 import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
 import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
 import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
+import organizationSchema from "@workbench/contracts/schema/organization" with { type: "json" }
 import type {
   BeeResponseEntity, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
   MembersResponse, MetaResponse, WorkspaceListResponse, ConversationListResponse, ConversationResponse,
   CreateConversationRequest, CreateConversationResponse, SendInputRequest, InputSavedResponse, ExecutionResponse,
   CancelExecutionRequest, CancelExecutionResponse, HistoryResponse, ConversationEvent,
-  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, ProjectListResponse,
-  DeviceRevokeRequest, DeviceRevokedResponse, ProjectStopSharingRequest, ProjectSavedResponse, ProjectReadAction, ProjectReadResponse,
+  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse,
+  DeviceRevokeRequest, DeviceRevokedResponse, ProjectReadAction, ProjectReadResponse,
+  ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
+  ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
 } from "@workbench/contracts"
 
 type Transport = typeof fetch
+type WriteMethod = "POST" | "PATCH" | "PUT" | "DELETE"
 type Session = { jar: CookieJar; csrf: string | null; abort: AbortController }
 const messages: Record<CollaborationError["code"], string> = {
   INVALID_REQUEST: "请求参数无效", AUTHENTICATION_REQUIRED: "请先登录", DEMO_LOGIN_REJECTED: "演示账号不存在或已停用",
@@ -72,14 +76,22 @@ export class CollaborationClient {
     let url: URL
     try { url = new URL(origin) } catch { throw new Error("服务地址无效") }
     if (url.origin !== origin || url.username || url.password || url.search || url.hash || url.pathname !== "/" ||
-      !(url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "127.0.0.1"))) throw new Error("服务地址无效")
+      !(url.protocol === "https:" || url.protocol === "http:")) throw new Error("服务地址无效")
     this.#origin = origin
     this.#transport = transport
     formats.default(this.#ajv)
-    for (const schema of [platform, conversationSchema, executionSchema, deviceSchema, projectSchema]) {
+    // 类型统一按"Schema 名#类型名"定位；只在所有 Schema 中唯一的类型名才允许省略前缀，重名类型必须写全。
+    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, device: deviceSchema, project: projectSchema, organization: organizationSchema }
+    const bare = new Map<string, string | null>()
+    for (const [key, schema] of Object.entries(schemas)) {
       this.#ajv.addSchema(schema)
-      for (const name of Object.keys(schema.$defs)) this.#types.set(name, `${schema.$id}#/$defs/${name}`)
+      for (const name of Object.keys(schema.$defs)) {
+        const target = `${schema.$id}#/$defs/${name}`
+        this.#types.set(`${key}#${name}`, target)
+        bare.set(name, bare.has(name) ? null : target)
+      }
     }
+    for (const [name, target] of bare) if (target) this.#types.set(name, target)
   }
   #emptySession(): Session { return { jar: new CookieJar(undefined, { prefixSecurity: "strict" }), csrf: null, abort: new AbortController() } }
   #discardSession() {
@@ -138,7 +150,7 @@ export class CollaborationClient {
       const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (cookie) headers.Cookie = cookie
-      if (method === "POST" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
+      if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
       if (body) headers["Content-Type"] = "application/json"
       const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any([session.abort.signal, AbortSignal.timeout(10000)]) })
       if (!this.#live(session)) { void response.body?.cancel().catch(() => {}); throw new ClientProblem("NETWORK_UNAVAILABLE") }
@@ -151,6 +163,12 @@ export class CollaborationClient {
         if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
         await session.jar.setCookie(parsed, this.#origin, { http: true })
         if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
+      }
+      // 无正文的成功响应只对声明无返回值的写操作有效。
+      if (response.status === 204) {
+        void response.body?.cancel().catch(() => {})
+        if (schema !== null || method === "GET") throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        return { ok: true, value: null as T }
       }
       const data = await this.#readJson(response)
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
@@ -184,10 +202,10 @@ export class CollaborationClient {
     if (result.ok && this.#live(session)) session.csrf = result.value.token
     return result
   }
-  async #write<T>(path: string, schema: string | null, options: CallOptions = {}): Promise<CollaborationResult<T>> {
+  async #write<T>(path: string, schema: string | null, options: CallOptions = {}, method: WriteMethod = "POST"): Promise<CollaborationResult<T>> {
     const session = options.session ?? this.#session
     if (!session.csrf) { const token = await this.#csrf(session); if (!token.ok) return token }
-    const result = await this.#call<T>(path, schema, "POST", { ...options, session })
+    const result = await this.#call<T>(path, schema, method, { ...options, session })
     if (!result.ok && result.error.code === "CSRF_INVALID" && this.#live(session)) await this.#csrf(session)
     return result
   }
@@ -235,7 +253,7 @@ export class CollaborationClient {
   }
 
   listConversations(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<ConversationListResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations`, "ConversationListResponse", "GET", { query })
+    return this.#call(`/api/v1/workspaces/${workspaceId}/conversations`, "conversation#ConversationListResponse", "GET", { query })
   }
   createConversation(workspaceId: string, request: CreateConversationRequest): Promise<CollaborationResult<CreateConversationResponse>> {
     return this.#write(`/api/v1/workspaces/${workspaceId}/conversations`, "CreateConversationResponse", { body: request, inputSchema: "CreateConversationRequest" })
@@ -439,13 +457,36 @@ export class CollaborationClient {
   listDevices(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<DeviceListResponse>> {
     return this.#call(`/api/v1/workspaces/${workspaceId}/devices`, "DeviceListResponse", "GET", { query })
   }
-  listProjects(workspaceId: string, deviceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<ProjectListResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/devices/${deviceId}/projects`, "ProjectListResponse", "GET", { query })
-  }
   revokeDevice(workspaceId: string, deviceId: string, request: DeviceRevokeRequest): Promise<CollaborationResult<DeviceRevokedResponse>> {
     return this.#write(`/api/v1/workspaces/${workspaceId}/devices/${deviceId}/revoke`, "DeviceRevokedResponse", { body: request, inputSchema: "DeviceRevokeRequest" })
   }
-  stopSharing(workspaceId: string, projectId: string, request: ProjectStopSharingRequest): Promise<CollaborationResult<ProjectSavedResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/stop-sharing`, "ProjectSavedResponse", { body: request, inputSchema: "ProjectStopSharingRequest" })
+
+  /** 组织层：项目、成员与仓库目录。路径参数由 IPC 先校验为 UUID，请求体按组织层 Schema 校验。 */
+  listProjects(workspaceId: string): Promise<CollaborationResult<ProjectListResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/projects`, "organization#ProjectListResponse")
+  }
+  createProject(workspaceId: string, request: ProjectCreateRequest): Promise<CollaborationResult<ProjectResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects`, "organization#ProjectResponse", { body: request, inputSchema: "organization#ProjectCreateRequest" })
+  }
+  getProject(workspaceId: string, projectId: string): Promise<CollaborationResult<ProjectDetailResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/projects/${projectId}`, "organization#ProjectDetailResponse")
+  }
+  updateProject(workspaceId: string, projectId: string, request: ProjectPatchRequest): Promise<CollaborationResult<ProjectResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}`, "organization#ProjectResponse", { body: request, inputSchema: "organization#ProjectPatchRequest" }, "PATCH")
+  }
+  addProjectMember(workspaceId: string, projectId: string, request: ProjectMemberAddRequest): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/members`, "organization#ProjectMemberChangeResponse", { body: request, inputSchema: "organization#ProjectMemberAddRequest" })
+  }
+  removeProjectMember(workspaceId: string, projectId: string, userId: string): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/members/${userId}`, "organization#ProjectMemberChangeResponse", {}, "DELETE")
+  }
+  listRepositories(workspaceId: string): Promise<CollaborationResult<RepositoryListResponse>> {
+    return this.#call(`/api/v1/workspaces/${workspaceId}/repositories`, "organization#RepositoryListResponse")
+  }
+  linkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/repositories/${repositoryId}`, null, {}, "PUT")
+  }
+  unlinkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/repositories/${repositoryId}`, null, {}, "DELETE")
   }
 }

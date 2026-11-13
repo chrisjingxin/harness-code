@@ -28,12 +28,8 @@ export function bindDeviceIpc(window: BrowserWindow, trustedUrl: string, host: D
   handle("list-devices", 1, workspaceId => UUID.test(String(workspaceId)) ? host.listDevices(String(workspaceId)) : identityError("INVALID_REQUEST", "工作区标识无效。"))
   handle("register", 2, (workspaceId, name) => UUID.test(String(workspaceId)) && typeof name === "string"
     ? host.registerDevice(String(workspaceId), name) : identityError("INVALID_REQUEST", "登记参数无效。"))
-  handle("list-projects", 2, (workspaceId, deviceId) => UUID.test(String(workspaceId)) && UUID.test(String(deviceId))
-    ? host.listProjects(String(workspaceId), String(deviceId)) : identityError("INVALID_REQUEST", "项目查询参数无效。"))
   handle("revoke", 3, (workspaceId, deviceId, requestId) => [workspaceId, deviceId, requestId].every(value => UUID.test(String(value)))
     ? host.revokeDevice(String(workspaceId), String(deviceId), String(requestId)) : identityError("INVALID_REQUEST", "撤销参数无效。"))
-  handle("stop-sharing", 4, (workspaceId, projectId, requestId, expected) => [workspaceId, projectId, requestId].every(value => UUID.test(String(value))) && /^(?:0|[1-9][0-9]{0,18})$/.test(String(expected))
-    ? host.stopSharing(String(workspaceId), String(projectId), String(requestId), String(expected)) : identityError("INVALID_REQUEST", "共享参数无效。"))
   handle("share", 0, () => host.shareProject())
   handle("start", 0, () => host.startRunner())
   handle("stop", 0, () => host.stopRunner())

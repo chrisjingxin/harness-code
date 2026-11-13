@@ -1,0 +1,37 @@
+/* 项目外壳的中央页面与创建弹窗；只消费公共主题变量与公共按钮样式。 */
+.pnav-page-slot { height: 100%; min-height: 0; }
+.pnav-page-slot[hidden] { display: none; }
+.pnav-page { box-sizing: border-box; height: 100%; overflow: auto; padding: 28px 32px; }
+.pnav-page > h1 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+.pnav-page-status { margin: 6px 0 12px; color: var(--muted); font-size: 13px; }
+.pnav-page-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.pnav-page .error, .pnav-dialog .error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
+.pnav-page-content { max-width: 760px; margin: 0 auto; }
+.pnav-page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.pnav-page-heading h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.pnav-page-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.pnav-section { padding: 16px 0; border-top: 1px solid var(--line); }
+.pnav-section h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.pnav-section > p { margin: 0; color: var(--text-soft); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.pnav-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.pnav-list li { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 6px; border-radius: 6px; font-size: 13px; }
+.pnav-list li:hover { background: var(--surface-2); }
+.pnav-list li > button { margin-left: auto; }
+.pnav-list-copy { display: grid; gap: 2px; }
+.pnav-list-copy small { color: var(--subtle); font-size: 11px; }
+.pnav-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.pnav-page .pnav-avatar, .pnav-list .pnav-avatar { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); color: var(--text-soft); font-size: 11px; font-weight: 600; }
+.pnav-list .pnav-avatar[data-self="true"] { background: var(--accent-soft-2); color: var(--accent); }
+.pnav-form, .pnav-dialog { display: grid; gap: 12px; }
+.pnav-form label, .pnav-dialog label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.pnav-form input, .pnav-form textarea, .pnav-form-row select, .pnav-dialog input, .pnav-dialog textarea {
+  box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+}
+.pnav-form textarea, .pnav-dialog textarea { resize: vertical; }
+.pnav-form-actions, .pnav-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.pnav-form-row { display: flex; gap: 8px; margin-top: 10px; }
+.pnav-form-row select { flex: 1; min-width: 0; width: auto; }
+.pnav-dialog { width: min(440px, 100%); }
+.pnav-dialog h2 { margin: 0; padding-right: 32px; font-size: 15px; font-weight: 600; }
+.pnav-dialog-hint { margin: -6px 0 0; color: var(--muted); font-size: 12px; }

@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type {
   CollaborationError, ConversationPageCursor, ConversationReadHost, ConversationSummary,
 } from "@workbench/contracts"
-import type { ConversationScope, NavigationAvailability } from "@workbench/ui"
+import type { ConversationScope } from "@workbench/ui"
+import type { ListAvailability } from "./list-availability.js"
 import type { HistoryProjection } from "./conversation-history.js"
 import { ConversationFeed, conversationScopeKey } from "./conversation-feed.js"
 import type { HistoryView } from "./conversation-feed.js"
@@ -13,10 +14,10 @@ export type { HistoryView } from "./conversation-feed.js"
 type ListState = {
   rows: readonly ConversationSummary[]
   nextPage: ConversationPageCursor | null
-  availability: NavigationAvailability
+  availability: ListAvailability
 }
 
-function listFailure(error: CollaborationError): NavigationAvailability {
+function listFailure(error: CollaborationError): ListAvailability {
   if (error.code === "AUTHENTICATION_REQUIRED" || error.code === "RESOURCE_NOT_FOUND" || error.code === "REQUEST_SOURCE_REJECTED") {
     return { state: "denied", message: "当前账号无法读取共享会话。" }
   }

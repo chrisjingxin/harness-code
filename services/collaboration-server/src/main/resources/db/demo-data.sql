@@ -9,25 +9,25 @@ INSERT IGNORE INTO wb_user (user_id, username, display_name, enabled, created_at
   ('00000000-0000-4000-8000-0000000000d3', 'user03', '用户 03', 1, NOW(3));
 
 INSERT IGNORE INTO wb_workspace (workspace_id, slug, name, created_at) VALUES
-  ('00000000-0000-4000-8000-0000000000w1', 'demo', '演示工作区', NOW(3));
+  ('00000000-0000-4000-8000-0000000000c1', 'demo', '演示工作区', NOW(3));
 
 INSERT IGNORE INTO wb_workspace_member (workspace_id, user_id, created_at) VALUES
-  ('00000000-0000-4000-8000-0000000000w1', '00000000-0000-4000-8000-0000000000d1', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000w1', '00000000-0000-4000-8000-0000000000d2', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000w1', '00000000-0000-4000-8000-0000000000d3', NOW(3));
+  ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000d1', NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000d2', NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000d3', NOW(3));
 
 -- remote_url_sha256 由应用侧 SHA-256(remote_url) 写入；本文件用内置 SHA2() 保持同等语义。
 INSERT IGNORE INTO wb_repository (repository_id, workspace_id, name, remote_url, remote_url_sha256, default_branch, status, created_by_user_id, created_at, updated_at) VALUES
-  ('00000000-0000-4000-8000-0000000000r1', '00000000-0000-4000-8000-0000000000w1', 'harness-code', 'git@github.com:example/harness-code.git', SHA2('git@github.com:example/harness-code.git', 256), 'main', 1, '00000000-0000-4000-8000-0000000000d1', NOW(3), NOW(3)),
-  ('00000000-0000-4000-8000-0000000000r2', '00000000-0000-4000-8000-0000000000w1', 'workbench-ui', 'git@github.com:example/workbench-ui.git', SHA2('git@github.com:example/workbench-ui.git', 256), 'main', 1, '00000000-0000-4000-8000-0000000000d1', NOW(3), NOW(3));
+  ('00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000c1', 'harness-code', 'git@github.com:example/harness-code.git', SHA2('git@github.com:example/harness-code.git', 256), 'main', 1, '00000000-0000-4000-8000-0000000000d1', NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-0000000000c1', 'workbench-ui', 'git@github.com:example/workbench-ui.git', SHA2('git@github.com:example/workbench-ui.git', 256), 'main', 1, '00000000-0000-4000-8000-0000000000d1', NOW(3), NOW(3));
 
 INSERT IGNORE INTO wb_project (project_id, workspace_id, name, description, owner_user_id, status, version, created_at, updated_at) VALUES
-  ('00000000-0000-4000-8000-0000000000p1', '00000000-0000-4000-8000-0000000000w1', '演示项目', 'HC-211 冒烟演示项目', '00000000-0000-4000-8000-0000000000d1', 1, 1, NOW(3), NOW(3));
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000c1', '演示项目', 'HC-211 冒烟演示项目', '00000000-0000-4000-8000-0000000000d1', 1, 1, NOW(3), NOW(3));
 
 INSERT IGNORE INTO wb_project_member (project_id, user_id, status, created_at, updated_at) VALUES
-  ('00000000-0000-4000-8000-0000000000p1', '00000000-0000-4000-8000-0000000000d1', 1, NOW(3), NOW(3)),
-  ('00000000-0000-4000-8000-0000000000p1', '00000000-0000-4000-8000-0000000000d2', 1, NOW(3), NOW(3));
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000d1', 1, NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000d2', 1, NOW(3), NOW(3));
 
 INSERT IGNORE INTO wb_project_repository (project_id, repository_id, created_at) VALUES
-  ('00000000-0000-4000-8000-0000000000p1', '00000000-0000-4000-8000-0000000000r1', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000p1', '00000000-0000-4000-8000-0000000000r2', NOW(3));
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b1', NOW(3)),
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b2', NOW(3));

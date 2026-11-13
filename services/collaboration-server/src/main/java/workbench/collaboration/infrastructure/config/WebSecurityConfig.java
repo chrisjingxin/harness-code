@@ -84,9 +84,9 @@ public class WebSecurityConfig {
     ) throws Exception {
         String origin = properties.getOrigin();
         URI uri = URI.create(origin);
-        // 校验 Origin 合法性，仅允许安全的 https 源或本地 127.0.0.1 测试源
+        // 校验 Origin 合法性：支持 http 与 https 源（适应企业内网与测试部署），禁止携带凭据、路径或参数
         if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null || (uri.getPath() != null && !uri.getPath().isEmpty())
-                || !("https".equals(uri.getScheme()) || ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost())))) {
+                || !("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))) {
             throw new IllegalArgumentException("服务 origin 无效");
         }
 

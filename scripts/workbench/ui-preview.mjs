@@ -13,7 +13,7 @@ const configs = {
   hc205: "electron.vite.preview.config.ts",
   hc206: "electron.vite.hc206-preview.config.ts",
   hc207: "electron.vite.hc207-preview.config.ts",
-  hc208: "electron.vite.hc208-preview.config.ts",
+  hc217: "electron.vite.hc217-preview.config.ts",
 }
 if (!Object.hasOwn(configs, previewId)) throw new Error(`预览目标只支持 ${Object.keys(configs).join("、")}`)
 if (!["dev", "build", "preview"].includes(operation)) throw new Error("预览命令只支持 dev、build 或 preview")

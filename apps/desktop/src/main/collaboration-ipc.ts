@@ -4,6 +4,7 @@ import type { BrowserWindow } from "electron"
 import { CollaborationState, identityError } from "./collaboration-state.js"
 import { DeviceHost } from "./device-host.js"
 import { bindDeviceIpc } from "./device-ipc.js"
+import { bindOrganizationIpc } from "./organization-ipc.js"
 import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { verifyDesktopSource } from "./trusted-source.js"
 import type { ConversationHistoryPage, ConversationPageCursor, ProjectReadAction } from "@workbench/contracts"
@@ -36,6 +37,7 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
   const client = identity.network()
   const personal = new PersonalStore(identity, client ? process.env.WORKBENCH_SERVICE_ORIGIN! : "", app.getPath("userData"))
   if (client) bindDeviceIpc(window, trustedUrl, new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity))
+  const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const channels: string[] = []
   const unsubscribe = identity.onStateChanged(state => {
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
@@ -111,7 +113,7 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
   })
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
-    unsubscribe(); identity.dispose()
+    unsubscribe(); unbindOrganization(); identity.dispose()
     for (const channel of [...channels, ...personalChannels]) ipcMain.removeHandler(channel)
   })
 }

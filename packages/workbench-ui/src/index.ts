@@ -35,10 +35,11 @@ export type {
   ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,
   ConversationViewProps,
 } from "./conversation/index.js"
-export { CollaborationNavigation } from "./navigation/index.js"
+export { ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
 export type {
-  NavigationActions, NavigationAvailability, NavigationConversation, NavigationDevice, NavigationProject,
-  NavigationProps, NavigationScope, NavigationView,
+  MemberGroupInput, NavigationAvailability, NavigationMember, NavigationMemberGroup, NavigationPageKind,
+  NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, ProjectNavigationActions,
+  ProjectNavigationProps, ProjectNavigationView,
 } from "./navigation/index.js"
 export { WorkbenchLayout } from "./layout/index.js"
 export type { CollaborationContextView, WorkbenchLayoutProps, WorkbenchPanelMode, WorkbenchRightSlot } from "./layout/index.js"

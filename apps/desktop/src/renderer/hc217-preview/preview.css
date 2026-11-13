@@ -1,0 +1,35 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+/* 预览窗口为 macOS 原生窗口按钮留出空间；正式窗口由桌面装配处理。 */
+.collaboration-header {
+  padding-left: 88px;
+}
+.hc217-page {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+.hc217-page h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+}
+.hc217-page p {
+  margin: 0;
+  font-size: 13px;
+}
+.hc217-settings { display: grid; gap: 14px; font-size: 13px; }
+.hc217-settings h2 { margin: 0; font-size: 16px; }
+.hc217-settings label { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+.hc217-settings select { padding: 6px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+/* 受控预览没有右栏内容，隐藏右栏开关。 */
+.collaboration-header > button:last-child { visibility: hidden; }

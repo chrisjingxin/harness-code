@@ -12,7 +12,8 @@ html, body, #root { height: 100%; overflow: hidden; }
 }
 
 .desktop-navigation { height: 100%; display: flex; flex-direction: column; background: var(--sidebar-bg); }
-.desktop-navigation .collaboration-navigation { flex: 1; }
+.desktop-navigation .project-navigation { flex: 1; min-height: 0; }
+.desktop-workspace-choice { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .desktop-navigation-note { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 11px; }
 
 .desktop-empty { height: 100%; overflow: auto; padding: 20px; }

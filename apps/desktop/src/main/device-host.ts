@@ -4,7 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { lstat, realpath } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type {
-  CollaborationResult, DeviceState, DeviceListResponse, ProjectListResponse, DeviceRevokedResponse, ProjectSavedResponse,
+  CollaborationResult, DeviceState, DeviceListResponse, DeviceRevokedResponse, ProjectSavedResponse,
   DeviceProjectPublishRequest, IdentityState, LocalDeviceRegistration,
 } from "@workbench/contracts"
 import { identityError } from "./collaboration-state.js"
@@ -83,19 +83,9 @@ export class DeviceHost {
   }
 
   listDevices(workspaceId: string): Promise<CollaborationResult<DeviceListResponse>> { return this.#client.listDevices(workspaceId, { limit: "50" }) }
-  listProjects(workspaceId: string, deviceId: string): Promise<CollaborationResult<ProjectListResponse>> { return this.#client.listProjects(workspaceId, deviceId, { limit: "50" }) }
   async revokeDevice(workspaceId: string, deviceId: string, requestId: string): Promise<CollaborationResult<DeviceRevokedResponse>> {
     const result = await this.#client.revokeDevice(workspaceId, deviceId, { requestId })
     if (result.ok && this.#device?.deviceId === deviceId) await this.#supervisor.stop()
-    return result
-  }
-
-  async stopSharing(workspaceId: string, projectId: string, requestId: string, expectedShareVersion: string): Promise<CollaborationResult<ProjectSavedResponse>> {
-    const result = await this.#client.stopSharing(workspaceId, projectId, { requestId, expectedShareVersion })
-    if (result.ok && this.#device?.projectId === projectId) {
-      await this.#save({ ...this.#device, shareEnabled: false, shareVersion: result.value.project.shareVersion })
-      this.#publish()
-    }
     return result
   }
 

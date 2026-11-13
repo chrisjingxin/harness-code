@@ -17,9 +17,9 @@
     "dev:project-preview": "node ../../scripts/workbench/ui-preview.mjs hc207 dev",
     "build:project-preview": "node ../../scripts/workbench/ui-preview.mjs hc207 build",
     "preview:project": "node ../../scripts/workbench/ui-preview.mjs hc207 preview",
-    "dev:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc208 dev",
-    "build:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc208 build",
-    "preview:navigation": "node ../../scripts/workbench/ui-preview.mjs hc208 preview"
+    "dev:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc217 dev",
+    "build:navigation-preview": "node ../../scripts/workbench/ui-preview.mjs hc217 build",
+    "preview:navigation": "node ../../scripts/workbench/ui-preview.mjs hc217 preview"
   },
   "dependencies": {
     "@workbench/contracts": "0.2.0",

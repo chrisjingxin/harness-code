@@ -6,6 +6,10 @@ import { randomUUID } from "node:crypto"
 import type { CollaborationError, CollaborationResult, CurrentUserResponse, DemoUsersResponse, IdentityState, MembersResponse } from "@workbench/contracts"
 import type { ConversationEventBatch, ConversationHistoryPage, ConversationListResponse, ConversationPageCursor, ConversationResponse, ConversationSubscription, HistoryResponse } from "@workbench/contracts"
 import type { ProjectReadAction, ProjectReadResponse } from "@workbench/contracts"
+import type {
+  ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
+  ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
+} from "@workbench/contracts"
 import { CollaborationClient } from "./collaboration-client.js"
 import { ConversationDelivery } from "./conversation-delivery.js"
 
@@ -150,6 +154,35 @@ export class CollaborationState {
   /** 项目读取使用同一窗口身份，网络往返后再次确认身份代次。 */
   async readProject(workspaceId: string, conversationId: string, action: ProjectReadAction): Promise<CollaborationResult<ProjectReadResponse>> {
     return this.#readWorkspace(workspaceId, client => client.readProject(workspaceId, conversationId, action))
+  }
+
+  /** 组织层读写与会话读取共用身份代次和工作区校验；权限由服务端判定，这里不推断角色。 */
+  listProjects(workspaceId: string): Promise<CollaborationResult<ProjectListResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.listProjects(workspaceId))
+  }
+  createProject(workspaceId: string, request: ProjectCreateRequest): Promise<CollaborationResult<ProjectResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.createProject(workspaceId, request))
+  }
+  getProject(workspaceId: string, projectId: string): Promise<CollaborationResult<ProjectDetailResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.getProject(workspaceId, projectId))
+  }
+  updateProject(workspaceId: string, projectId: string, request: ProjectPatchRequest): Promise<CollaborationResult<ProjectResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.updateProject(workspaceId, projectId, request))
+  }
+  addProjectMember(workspaceId: string, projectId: string, request: ProjectMemberAddRequest): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.addProjectMember(workspaceId, projectId, request))
+  }
+  removeProjectMember(workspaceId: string, projectId: string, userId: string): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.removeProjectMember(workspaceId, projectId, userId))
+  }
+  listRepositories(workspaceId: string): Promise<CollaborationResult<RepositoryListResponse>> {
+    return this.#readWorkspace(workspaceId, client => client.listRepositories(workspaceId))
+  }
+  linkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
+    return this.#readWorkspace(workspaceId, client => client.linkRepository(workspaceId, projectId, repositoryId))
+  }
+  unlinkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
+    return this.#readWorkspace(workspaceId, client => client.unlinkRepository(workspaceId, projectId, repositoryId))
   }
 
   /** 订阅绑定当前窗口身份代次与工作区，切换身份或关窗会立即释放。 */

@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, ConversationReadHost, DesktopHost, DeviceHost, DeviceState, IdentityState, WindowState } from "@workbench/contracts"
 import type { ProjectReadHost } from "../project-read-host.js"
 import type { PersonalHost } from "../personal-host.js"
+import type { OrganizationHost } from "../organization-host.js"
 
 const host: DesktopHost = {
   chooseDirectory: () => ipcRenderer.invoke("workbench:choose-directory"),
@@ -48,6 +49,19 @@ const projects: ProjectReadHost = {
 }
 contextBridge.exposeInMainWorld("projects", projects)
 
+const organization: OrganizationHost = {
+  listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),
+  createProject: (workspaceId, request) => ipcRenderer.invoke("organization:create-project", workspaceId, request),
+  getProject: (workspaceId, projectId) => ipcRenderer.invoke("organization:get-project", workspaceId, projectId),
+  updateProject: (workspaceId, projectId, request) => ipcRenderer.invoke("organization:update-project", workspaceId, projectId, request),
+  addMember: (workspaceId, projectId, request) => ipcRenderer.invoke("organization:add-member", workspaceId, projectId, request),
+  removeMember: (workspaceId, projectId, userId) => ipcRenderer.invoke("organization:remove-member", workspaceId, projectId, userId),
+  listRepositories: workspaceId => ipcRenderer.invoke("organization:list-repositories", workspaceId),
+  linkRepository: (workspaceId, projectId, repositoryId) => ipcRenderer.invoke("organization:link-repository", workspaceId, projectId, repositoryId),
+  unlinkRepository: (workspaceId, projectId, repositoryId) => ipcRenderer.invoke("organization:unlink-repository", workspaceId, projectId, repositoryId),
+}
+contextBridge.exposeInMainWorld("organization", organization)
+
 let closeListener: (() => Promise<boolean>) | null = null
 ipcRenderer.on("personal:prepare-close", (_event: unknown, request: string) => {
   void (async () => {
@@ -70,9 +84,7 @@ const devices: DeviceHost = {
   getState: () => ipcRenderer.invoke("devices:get-state"),
   listDevices: workspaceId => ipcRenderer.invoke("devices:list-devices", workspaceId),
   registerDevice: (workspaceId, name) => ipcRenderer.invoke("devices:register", workspaceId, name),
-  listProjects: (workspaceId, deviceId) => ipcRenderer.invoke("devices:list-projects", workspaceId, deviceId),
   revokeDevice: (workspaceId, deviceId, requestId) => ipcRenderer.invoke("devices:revoke", workspaceId, deviceId, requestId),
-  stopSharing: (workspaceId, projectId, requestId, expectedShareVersion) => ipcRenderer.invoke("devices:stop-sharing", workspaceId, projectId, requestId, expectedShareVersion),
   shareProject: () => ipcRenderer.invoke("devices:share"),
   startRunner: () => ipcRenderer.invoke("devices:start"),
   stopRunner: () => ipcRenderer.invoke("devices:stop"),

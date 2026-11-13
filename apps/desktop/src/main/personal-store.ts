@@ -26,9 +26,16 @@ const panel = { type: "object", additionalProperties: false, required: ["open", 
 const object = (required: string[], properties: Record<string, unknown>) => ({ type: "object", additionalProperties: false, required, properties })
 const schemas: Record<PersonalKey["kind"], object> = {
   account: object(["workspaceId"], { workspaceId: nullableId }),
-  workspace: object(["expandedDevices", "expandedProjects", "selectedConversationId", "panels"], {
-    expandedDevices: { type: "array", maxItems: 2000, items: id }, expandedProjects: strings, selectedConversationId: nullableId,
-    panels: object(["left", "right"], { left: panel, right: panel }),
+  workspace: object(["projectId", "panels"], {
+    projectId: nullableId, panels: object(["left", "right"], { left: panel, right: panel }),
+  }),
+  projectNavigation: object(["page", "expandedMembers", "selfCollapsed"], {
+    page: { oneOf: [
+      object(["kind"], { kind: { enum: ["new", "board", "tasks", "info", "knowledge"] } }),
+      object(["kind", "conversationId"], { kind: { const: "conversation" }, conversationId: id }),
+      object(["kind", "taskId"], { kind: { const: "task" }, taskId: id }),
+    ] },
+    expandedMembers: { type: "array", maxItems: 2000, items: id }, selfCollapsed: { type: "boolean" },
   }),
   conversation: object(["scroll", "expandedTools", "expandedOutputs", "draft"], {
     scroll: object(["anchorEntryId", "offsetPx", "following", "seenContentRevision"], {
@@ -60,12 +67,13 @@ const schemas: Record<PersonalKey["kind"], object> = {
 }
 const ajv = new Ajv2020({ strict: true })
 const validators = {
-  account: ajv.compile(schemas.account), workspace: ajv.compile(schemas.workspace),
+  account: ajv.compile(schemas.account), workspace: ajv.compile(schemas.workspace), projectNavigation: ajv.compile(schemas.projectNavigation),
   conversation: ajv.compile(schemas.conversation), project: ajv.compile(schemas.project),
 }
 const keyValidators = {
   account: ajv.compile(object(["kind"], { kind: { const: "account" } })),
   workspace: ajv.compile(object(["kind", "workspaceId"], { kind: { const: "workspace" }, workspaceId: id })),
+  projectNavigation: ajv.compile(object(["kind", "workspaceId", "projectId"], { kind: { const: "projectNavigation" }, workspaceId: id, projectId: id })),
   conversation: ajv.compile(object(["kind", "workspaceId", "conversationId"], { kind: { const: "conversation" }, workspaceId: id, conversationId: id })),
   project: ajv.compile(object(["kind", "workspaceId", "conversationId"], { kind: { const: "project" }, workspaceId: id, conversationId: id })),
 }
@@ -83,7 +91,7 @@ export class PersonalStore {
   readonly #root: string
 
   constructor(private readonly identity: CollaborationState, private readonly origin: string, userData: string) {
-    this.#root = join(userData, "personal-view-v1")
+    this.#root = join(userData, "personal-view-v2")
   }
   #current(identity: Identity): boolean {
     const current = this.identity.personalIdentity()
@@ -99,6 +107,12 @@ export class PersonalStore {
     if (key.kind !== "account" && !identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
     const parts = [identity.accountId, key.kind]
     if (key.kind === "workspace") parts.push(key.workspaceId)
+    if (key.kind === "projectNavigation") {
+      // 项目记录只给仍可访问该项目的账号读写；被移出后旧选择随之失效。
+      const detail = await this.identity.getProject(key.workspaceId, key.projectId)
+      if (!detail.ok || !this.#current(identity) || detail.value.project.projectId !== key.projectId) return fail("无法确认项目访问权限，请重试。")
+      parts.push(key.workspaceId, key.projectId)
+    }
     let project: Authorized["project"]
     if (key.kind === "conversation" || key.kind === "project") {
       const detail = await this.identity.getConversation(key.workspaceId, key.conversationId)

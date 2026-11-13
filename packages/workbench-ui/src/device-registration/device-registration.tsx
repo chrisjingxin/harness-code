@@ -62,15 +62,6 @@ function DeviceForm({ host, workspaceId, device, devices = [], blockedReason, on
     finally { setBusy(false) }
   }
 
-  async function stopSharing() {
-    if (!workspaceId || !device?.deviceId || !device.projectId) return { ok: false }
-    const projects = await host.listProjects(workspaceId, device.deviceId)
-    if (!projects.ok) return projects
-    const project = projects.value.projects.find(item => item.projectId === device.projectId)
-    if (!project) return { ok: false, error: { message: "服务尚未确认此项目，请刷新后重试。" } }
-    return host.stopSharing(workspaceId, project.projectId, crypto.randomUUID(), project.shareVersion)
-  }
-
   if (!workspaceId) return <section className="device-panel" aria-label="本机设备"><h2>本机设备</h2><p className="hint">登录并加入工作区后可登记本机。</p></section>
 
   return <section className="device-panel" aria-label="本机设备">
@@ -87,7 +78,6 @@ function DeviceForm({ host, workspaceId, device, devices = [], blockedReason, on
     </p>
     <div className="device-actions">
       <button disabled={blocked || !device?.projectId || device.shareEnabled} onClick={() => { void run(() => host.shareProject()) }}>共享项目</button>
-      <button disabled={blocked || !device?.shareEnabled} onClick={() => { void run(stopSharing) }}>撤回共享</button>
       <button disabled={blocked || !device?.shareEnabled || device.status === "running"} onClick={() => { void run(() => host.startRunner()) }}>启动本机执行器</button>
       <button disabled={blocked || device?.status !== "running"} onClick={() => { void run(() => host.stopRunner()) }}>停止</button>
     </div>

@@ -19,7 +19,8 @@ export interface DeviceSummary {
   connectionState: ConnectionState
   lastSeenAt: UtcTimestamp | null
 }
-export interface ProjectSummary {
+/** 本机项目共享发布后的服务端确认；只服务于设备共享流程，与组织层的 Project 无关。 */
+export interface SharedProjectSummary {
   projectId: Uuid
   deviceId: Uuid
   workspaceId: Uuid
@@ -43,9 +44,6 @@ export interface DevicePageCursor { beforeCreatedAt: UtcTimestamp; beforeDeviceI
 export interface DeviceListResponse { workspaceId: Uuid; devices: DeviceSummary[]; nextPage: DevicePageCursor | null }
 export interface DeviceRevokeRequest { requestId: Uuid }
 export interface DeviceRevokedResponse { deviceId: Uuid; revokedAt: UtcTimestamp }
-export interface ProjectPageCursor { beforeCreatedAt: UtcTimestamp; beforeProjectId: Uuid }
-export interface ProjectListResponse { workspaceId: Uuid; deviceId: Uuid; projects: ProjectSummary[]; nextPage: ProjectPageCursor | null }
-export interface ProjectStopSharingRequest { requestId: Uuid; expectedShareVersion: ShareVersion }
 export interface DeviceProjectPublishRequest {
   requestId: Uuid
   projectId: Uuid
@@ -54,7 +52,7 @@ export interface DeviceProjectPublishRequest {
   expectedShareVersion: ShareVersion
   agentConfigs: AgentConfigSummary[]
 }
-export interface ProjectSavedResponse { requestId: Uuid; project: ProjectSummary }
+export interface ProjectSavedResponse { requestId: Uuid; project: SharedProjectSummary }
 
 /** 仅 main 与私有 Runner 端口使用的本机登记记录，禁止投影到 renderer 或云端。 */
 export interface LocalDeviceRegistration {
@@ -193,9 +191,7 @@ export interface DeviceHost {
   getState(): Promise<CollaborationResult<DeviceState>>
   listDevices(workspaceId: Uuid): Promise<CollaborationResult<DeviceListResponse>>
   registerDevice(workspaceId: Uuid, name: string): Promise<CollaborationResult<DeviceState>>
-  listProjects(workspaceId: Uuid, deviceId: Uuid): Promise<CollaborationResult<ProjectListResponse>>
   revokeDevice(workspaceId: Uuid, deviceId: Uuid, requestId: Uuid): Promise<CollaborationResult<DeviceRevokedResponse>>
-  stopSharing(workspaceId: Uuid, projectId: Uuid, requestId: Uuid, expectedShareVersion: ShareVersion): Promise<CollaborationResult<ProjectSavedResponse>>
   shareProject(): Promise<CollaborationResult<DeviceState>>
   startRunner(): Promise<CollaborationResult<DeviceState>>
   stopRunner(): Promise<CollaborationResult<DeviceState>>

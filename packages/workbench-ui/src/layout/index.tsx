@@ -84,6 +84,33 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     rightMode === "overlay"
       ? Math.min(overlayRightWidth ?? rightWidth, Math.max(0, width - 32))
       : rightWidth;
+  const closeRight = (open: boolean) => {
+    if (rightMode === "overlay") {
+      if (!open) {
+        setOverlay(null);
+        rightButton.current?.focus();
+      }
+    } else props.setPanelOpen("right", open);
+  };
+  const rightContent = props.right({
+    mode: rightMode,
+    open: rightMode !== "hidden",
+    widthPx: effectiveRight,
+    setOpen: closeRight,
+    setWidth: (value) =>
+      rightMode === "overlay"
+        ? setOverlayRightWidth(
+            clamp(
+              value,
+              Math.min(RIGHT_MIN, Math.max(0, width - 32)),
+              Math.max(0, width - 32),
+            ),
+          )
+        : props.setPanelWidth("right", clamp(value, RIGHT_MIN, RIGHT_MAX)),
+  });
+  const hasRight =
+    rightContent !== null && rightContent !== undefined && rightContent !== false;
+  const visibleRightMode: WorkbenchPanelMode = hasRight ? rightMode : "hidden";
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
@@ -93,7 +120,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const previous = useRef({ leftMode, rightMode });
+  const previous = useRef({ leftMode, rightMode: visibleRightMode });
   useLayoutEffect(() => {
     if (
       previous.current.leftMode !== "hidden" &&
@@ -103,16 +130,19 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       leftButton.current?.focus();
     if (
       previous.current.rightMode !== "hidden" &&
-      rightMode === "hidden" &&
+      visibleRightMode === "hidden" &&
       right.current?.contains(document.activeElement)
     )
       rightButton.current?.focus();
-    previous.current = { leftMode, rightMode };
-  }, [leftMode, rightMode]);
+    previous.current = { leftMode, rightMode: visibleRightMode };
+  }, [leftMode, visibleRightMode]);
   useEffect(() => {
-    if ((overlay === "left" && leftFits) || (overlay === "right" && rightFits))
+    if (
+      (overlay === "left" && leftFits) ||
+      (overlay === "right" && (rightFits || !hasRight))
+    )
       setOverlay(null);
-  }, [overlay, leftFits, rightFits]);
+  }, [overlay, leftFits, rightFits, hasRight]);
   useEffect(() => {
     if (!props.settingsOpen) return;
     settingsReturn.current =
@@ -151,6 +181,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     };
   }, [props.setPanelWidth]);
   const toggle = (side: "left" | "right") => {
+    if (side === "right" && !hasRight) return;
     const fits = side === "left" ? leftFits : rightFits;
     if (!fits) {
       if (side === "right") setOverlayRightWidth(null);
@@ -160,14 +191,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         side,
         !(side === "left" ? props.leftOpen : props.rightOpen),
       );
-  };
-  const closeRight = (open: boolean) => {
-    if (rightMode === "overlay") {
-      if (!open) {
-        setOverlay(null);
-        rightButton.current?.focus();
-      }
-    } else props.setPanelOpen("right", open);
   };
   const keyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
@@ -233,8 +256,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         <button
           ref={rightButton}
           onClick={() => toggle("right")}
+          disabled={!hasRight}
+          tabIndex={hasRight ? undefined : -1}
+          aria-hidden={!hasRight || undefined}
+          style={hasRight ? undefined : { visibility: "hidden" }}
           aria-label="切换项目面板"
-          aria-expanded={rightMode !== "hidden"}
+          aria-expanded={visibleRightMode !== "hidden"}
         >
           <PanelRight size={18} />
         </button>
@@ -271,30 +298,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         <div
           ref={right}
           className="collaboration-right"
-          data-mode={rightMode}
-          style={{ width: rightMode === "hidden" ? 0 : effectiveRight }}
-          aria-hidden={rightMode === "hidden" || undefined}
-          inert={rightMode === "hidden"}
+          data-mode={visibleRightMode}
+          style={{ width: visibleRightMode === "hidden" ? 0 : effectiveRight }}
+          aria-hidden={visibleRightMode === "hidden" || undefined}
+          inert={visibleRightMode === "hidden"}
         >
-          {props.right({
-            mode: rightMode,
-            open: rightMode !== "hidden",
-            widthPx: effectiveRight,
-            setOpen: closeRight,
-            setWidth: (value) =>
-              rightMode === "overlay"
-                ? setOverlayRightWidth(
-                    clamp(
-                      value,
-                      Math.min(RIGHT_MIN, Math.max(0, width - 32)),
-                      Math.max(0, width - 32),
-                    ),
-                  )
-                : props.setPanelWidth(
-                    "right",
-                    clamp(value, RIGHT_MIN, RIGHT_MAX),
-                  ),
-          })}
+          {rightContent}
         </div>
       </div>
       {props.settingsOpen && (
