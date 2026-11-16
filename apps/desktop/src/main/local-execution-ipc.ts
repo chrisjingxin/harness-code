@@ -1,0 +1,202 @@
+/** 授权本人本机会话、绑定已选目录，并按受理 → 正文 → 终态的顺序向可信窗口转发。 */
+import { randomUUID } from "node:crypto"
+import { realpath, stat } from "node:fs/promises"
+import type { BrowserWindow } from "electron"
+import type { LocalAcpEvent, LocalAcpHost, LocalAcpSession, UnavailableReason } from "@workbench/acp-runtime"
+import type { CollaborationResult } from "@workbench/contracts"
+import { localExecutionKey } from "../local-execution-host.js"
+import type { LocalExecutionBinding, LocalExecutionNotice, LocalExecutionReceipt, LocalExecutionScope } from "../local-execution-host.js"
+import type { CollaborationState } from "./collaboration-state.js"
+import { identityError } from "./collaboration-state.js"
+import type { DeviceHost } from "./device-host.js"
+
+export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
+type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
+type DirectoryGrant = { readonly path: string; readonly dev: bigint; readonly ino: bigint }
+type Binding = {
+  readonly id: string
+  readonly login: Login
+  readonly directory: DirectoryGrant
+  readonly session: LocalAcpSession
+  readonly unsubscribe: () => void
+}
+
+const unavailableMessages: Record<UnavailableReason | "empty-text", string> = {
+  "agent-not-configured": "尚未配置本机 Agent。请设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。",
+  "session-busy": "等待当前回复完成。",
+  "session-closed": "本机会话执行连接已关闭，请重新打开会话。",
+  "agent-disconnected": "本机 Agent 已断开，当前版本无法恢复原生会话。",
+  "empty-text": "请输入消息。",
+}
+
+const failureMessages: Record<Extract<LocalAcpEvent, { type: "failed" }>["reason"], string> = {
+  "directory-unavailable": "所选工作目录已变更或不可访问，请重新选择。",
+  "agent-start-failed": "本机 Agent 启动或 ACP 初始化失败，请检查 Agent 命令和配置。",
+  "agent-disconnected": "本机 Agent 已断开。",
+  "prompt-failed": "Agent 未能完成本轮请求，请检查 Agent 或模型配置。",
+  "session-closed": "本机执行连接已关闭，本轮回复结束。",
+  "agent-stopped": "Agent 提前结束本轮。",
+}
+
+const stoppedMessages = {
+  max_tokens: "Agent 已达到本轮输出长度上限。",
+  max_turn_requests: "Agent 已达到本轮请求次数上限。",
+  refusal: "Agent 拒绝继续本轮请求。",
+  cancelled: "Agent 已取消本轮。",
+}
+
+function availability(session: LocalAcpSession) {
+  const status = session.getAvailability()
+  return status.available ? status : { available: false, reason: unavailableMessages[status.reason] }
+}
+
+const ok = <T>(value: T): CollaborationResult<T> => ({ ok: true, value })
+const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号在本机设备创建的会话可以执行。")
+
+/** 窗口绑定独占订阅，应用级 HC-197 宿主可在新窗口打开时继续接受新的绑定。 */
+export function createLocalExecutionIpc(
+  window: BrowserWindow,
+  identity: CollaborationState,
+  device: DeviceHost | null,
+  runtime: LocalExecutionRuntime,
+) {
+  const grants = new Map<string, DirectoryGrant>()
+  const bindings = new Map<string, Binding>()
+  let tail: Promise<void> = Promise.resolve()
+  let disposed = false
+
+  function enqueue<T>(action: () => Promise<T>): Promise<T> {
+    const result = tail.then(action)
+    tail = result.then(() => {}, () => {})
+    return result
+  }
+
+  function isCurrent(login: Login): boolean {
+    const current = identity.personalIdentity()
+    return !disposed && !window.isDestroyed() && current?.generation === login.generation && current.accountId === login.accountId
+  }
+
+  function publish(login: Login, notice: LocalExecutionNotice): void {
+    if (!isCurrent(login) || window.webContents.isDestroyed()) return
+    // 页面退出期间通知可以丢弃，已经受理的提交仍须正常返回其结果。
+    try { window.webContents.send("workbench:local-execution:notice", notice) } catch {}
+  }
+
+  async function release(key: string, binding: Binding): Promise<void> {
+    await binding.session.close()
+    binding.unsubscribe()
+    bindings.delete(key)
+  }
+
+  function reset(): Promise<void> {
+    grants.clear()
+    return enqueue(async () => { await Promise.all([...bindings].map(([key, binding]) => release(key, binding))) })
+  }
+
+  const unsubscribe = identity.onStateChanged(() => {
+    if (!identity.personalIdentity()) void reset().catch(() => {})
+  })
+
+  async function authorize(scope: LocalExecutionScope, login: Login) {
+    if (!device || !isCurrent(login) || login.accountId !== scope.accountId || !login.workspaces.includes(scope.workspaceId)) return forbidden()
+    const local = await device.getState()
+    if (!local.ok) return local
+    if (!isCurrent(login) || local.value.deviceId !== scope.deviceId) return forbidden()
+    const [detail, devices] = await Promise.all([
+      identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId),
+      device.listDevices(scope.workspaceId),
+    ])
+    if (!detail.ok) return detail
+    if (!devices.ok) return devices
+    const session = detail.value.conversation
+    return isCurrent(login) && session.ownerUserId === login.accountId && session.deviceId === scope.deviceId
+      && session.projectId === scope.projectId && session.conversationId === scope.conversationId
+      && devices.value.workspaceId === scope.workspaceId
+      && devices.value.devices.some(item => item.deviceId === scope.deviceId && item.ownerUserId === login.accountId && item.revokedAt === null)
+      ? ok(null) : forbidden()
+  }
+
+  return {
+    /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号。 */
+    captureDirectorySelection() {
+      const login = identity.personalIdentity()
+      return async (path: string) => {
+        if (!login || !isCurrent(login)) return
+        try {
+          const canonical = await realpath(path)
+          const info = await stat(canonical, { bigint: true })
+          if (info.isDirectory() && isCurrent(login)) grants.set(path, { path: canonical, dev: info.dev, ino: info.ino })
+        } catch { /* 目录已失效，准备执行时会要求重新确认。 */ }
+      }
+    },
+
+    prepare(scope: LocalExecutionScope, path: string): Promise<CollaborationResult<LocalExecutionBinding>> {
+      const login = identity.personalIdentity()
+      return enqueue(async () => {
+        if (!login || !isCurrent(login)) return forbidden()
+        if ("error" in runtime) return identityError("INVALID_REQUEST", runtime.error)
+        const key = localExecutionKey(scope)
+        const directory = grants.get(path)
+        if (!directory) return identityError("PROJECT_PATH_INVALID", "请通过「工作目录」重新确认本次执行使用的文件夹。")
+        const authorized = await authorize(scope, login)
+        if (!authorized.ok) return authorized
+        const existing = bindings.get(key)
+        try {
+          const info = await stat(directory.path, { bigint: true })
+          if (!info.isDirectory() || info.dev !== directory.dev || info.ino !== directory.ino
+            || await realpath(directory.path) !== directory.path) {
+            return identityError("PROJECT_ROOT_CHANGED", "所选工作目录已变更，请重新选择。")
+          }
+          if (existing?.directory.path === directory.path && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino) {
+            return ok({ bindingId: existing.id, ...availability(existing.session) })
+          }
+          if (existing) await release(key, existing)
+          if (!isCurrent(login)) return forbidden()
+          const session = await runtime.host.bind(scope, directory.path)
+          if (!isCurrent(login)) { await session.close(); return forbidden() }
+          const bindingId = randomUUID()
+          const stopListening = session.subscribe(event => {
+            const source = { scope, bindingId, turnId: event.turnId, sequence: event.sequence }
+            if (event.type === "text-delta") publish(login, { ...source, kind: "text", text: event.text })
+            else publish(login, {
+              ...source,
+              kind: "finished",
+              availability: availability(session),
+              ...(event.type === "failed" ? {
+                failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
+              } : {}),
+            })
+          })
+          bindings.set(key, { id: bindingId, login, directory, session, unsubscribe: stopListening })
+          return ok({ bindingId, ...availability(session) })
+        } catch {
+          return identityError("PROJECT_ROOT_CHANGED", "无法确认本机工作目录或释放旧执行连接，请重新选择目录后重试。")
+        }
+      })
+    },
+
+    send(scope: LocalExecutionScope, bindingId: string, requestId: string, text: string): Promise<CollaborationResult<LocalExecutionReceipt>> {
+      const login = identity.personalIdentity()
+      return enqueue(async () => {
+        if (!login || !isCurrent(login)) return forbidden()
+        const binding = bindings.get(localExecutionKey(scope))
+        if (binding?.id !== bindingId || binding.login.generation !== login.generation) {
+          return identityError("PROJECT_PATH_INVALID", "会话工作目录已变化，请再次确认后发送。")
+        }
+        const authorized = await authorize(scope, login)
+        if (!authorized.ok) return authorized
+        const result = binding.session.send(text)
+        if (result.status === "rejected") return ok({ status: "rejected", reason: unavailableMessages[result.reason] })
+        // 受理与正文共用一个推送通道。即使 invoke 的回包较晚，页面也先收到受理。
+        publish(login, { scope, bindingId, kind: "accepted", turnId: result.turnId, requestId, text })
+        return ok(result)
+      })
+    },
+
+    dispose(): Promise<void> {
+      disposed = true
+      unsubscribe()
+      return reset()
+    },
+  }
+}

@@ -11,6 +11,8 @@ import type { ConversationRegisterRequest, ConversationStatus, ProjectReadAction
 import { randomUUID } from "node:crypto"
 import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
+import { createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
+import type { LocalExecutionScope } from "../local-execution-host.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const USER_ID = /^[0-9a-f]{32}$/
@@ -51,12 +53,25 @@ function isHistoryLimit(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 500)
 }
 
-export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, supervisor: RunnerSupervisor, onCloseAborted: () => void): void {
+function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
+  return isObject(value) && isUserId(value.accountId) && isId(value.workspaceId) && isId(value.projectId)
+    && isId(value.deviceId) && isId(value.conversationId)
+}
+
+export function bindCollaborationIpc(
+  window: BrowserWindow,
+  trustedUrl: string,
+  supervisor: RunnerSupervisor,
+  onCloseAborted: () => void,
+  runtime: LocalExecutionRuntime,
+) {
   const identity = new CollaborationState(process.env.WORKBENCH_SERVICE_ORIGIN)
   const client = identity.network()
   const personal = new PersonalStore(identity, client ? process.env.WORKBENCH_SERVICE_ORIGIN! : "", app.getPath("userData"))
   const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
-  if (client) bindDeviceIpc(window, trustedUrl, new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity))
+  const device = client ? new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity) : null
+  if (device) bindDeviceIpc(window, trustedUrl, device)
+  const execution = createLocalExecutionIpc(window, identity, device, runtime)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const channels: string[] = []
   const unsubscribe = identity.onStateChanged(state => {
@@ -105,6 +120,15 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
     isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
       ? localDirectory.readDirectory(workspaceId, projectId, conversationKey, action)
       : identityError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
+  handle("workbench:local-execution:prepare", 2, (scope, directory) =>
+    isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
+      ? execution.prepare(scope, directory)
+      : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
+  handle("workbench:local-execution:send", 4, (scope, bindingId, requestId, text) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
+      && isNonEmptyString(text, 16_384) && Buffer.byteLength(text, "utf8") <= 32_768
+      ? execution.send(scope, bindingId, requestId, text)
+      : identityError("INVALID_REQUEST", "请输入有效的文本消息，最长 16,384 字符且不超过 32 KiB。"))
 
   const personalChannels = ["personal:load", "personal:save", "personal:close-ready"]
   ipcMain.handle("personal:load", async (event, key: unknown) => {
@@ -118,12 +142,15 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
   let allowedToClose = false
   let closeRequest: string | null = null
   let closeTimer: ReturnType<typeof setTimeout> | null = null
-  const closeFailed = () => {
+  const closeFailed = (executionFailed = false) => {
     closeRequest = null
     if (closeTimer) clearTimeout(closeTimer)
     closeTimer = null
     onCloseAborted()
-    if (!window.isDestroyed()) dialog.showErrorBox("个人视图未保存", "请检查应用数据目录，然后再次关闭窗口。")
+    if (!window.isDestroyed()) {
+      if (executionFailed) dialog.showErrorBox("本机 Agent 未确认停止", "请稍后再次关闭窗口。")
+      else dialog.showErrorBox("个人视图未保存", "请检查应用数据目录，然后再次关闭窗口。")
+    }
   }
   window.on("close", event => {
     if (allowedToClose) return
@@ -141,13 +168,18 @@ export function bindCollaborationIpc(window: BrowserWindow, trustedUrl: string, 
     // 超时后的旧结果不能取消用户发起的下一次关窗。
     if (request !== closeRequest) return
     if (!flushed) { closeFailed(); return }
+    try { await execution.dispose() }
+    catch { closeFailed(true); return }
+    if (request !== closeRequest) return
     if (closeTimer) clearTimeout(closeTimer)
     closeTimer = null; closeRequest = null; allowedToClose = true
     if (!window.isDestroyed()) window.close()
   })
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
+    void execution.dispose().catch(() => {})
     unsubscribe(); unbindOrganization(); identity.dispose()
     for (const channel of [...channels, ...personalChannels]) ipcMain.removeHandler(channel)
   })
+  return execution.captureDirectorySelection
 }

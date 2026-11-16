@@ -21,6 +21,8 @@ import { ChevronDownIcon, FolderIcon, LaptopIcon, UsersIcon } from "./icons.js"
 import { SessionCentralFilePanels, SessionCentralTabBar } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename } from "./session-model.js"
+import { projectLocalExecution } from "./local-execution-view.js"
+import { textOnlyReason } from "./use-local-execution.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -67,32 +69,40 @@ export function LocalSessionPage({
 }: LocalSessionPageProps): ReactElement {
   const viewingFile = Boolean(centralFiles && centralFiles.activeCentral !== null)
   const availability = execution.getAvailability(conversation.conversationId)
+  const hasUnsupportedMaterial = execution.textOnly && (personal.draft.referenceIds.length > 0 || personal.draft.attachmentIds.length > 0)
   const folderName = directoryBasename(directoryPath)
   const composer: ConversationComposerView = {
-    send: availability.available
+    send: hasUnsupportedMaterial
+      ? { enabled: false, reason: textOnlyReason }
+      : availability.available
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
     cancel: availability.available && execution.cancel
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
     primaryActions: "send",
-    statusText: availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
+    statusText: hasUnsupportedMaterial ? textOnlyReason
+      : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: [],
     controls: [
       {
         id: "agent",
-        label: "Harness",
+        label: execution.textOnly ? "本机 Agent" : "Harness",
         selectedId: "default",
         availability: availability.available
           ? { enabled: true }
-          : { enabled: false, reason: "等待本机 Agent 接入" },
-        items: [{ id: "default", label: availability.available ? "本机 Agent" : "未接入", availability: { enabled: availability.available } }],
+          : { enabled: false, reason: availability.reason },
+        items: [{ id: "default", label: execution.textOnly || availability.available ? "本机 Agent" : "未接入", availability: { enabled: availability.available } }],
       },
     ],
     projectTarget: directoryPath ? { deviceId: conversation.deviceId, projectId: conversation.projectId } : null,
     references: hooks?.references ?? [],
     attachments: [],
   }
+  const activeExecution = execution.getView?.(conversation.conversationId)
+  const view = activeExecution
+    ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
+    : { entries, contentRevision, composer }
 
   return (
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
@@ -124,18 +134,18 @@ export function LocalSessionPage({
 
       <div className="session-conversation-wrap" hidden={viewingFile}>
         <ConversationView
+          {...view}
           scope={scope}
           visible={visible && !viewingFile}
-          entries={entries}
-          contentRevision={contentRevision}
           interaction={null}
           personal={personal}
-          composer={composer}
           actions={{
-            onPersonalChange,
+            onPersonalChange: (targetScope, change) => {
+              if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
+            },
             ...(execution.send
               ? {
-                  onSend: async (targetScope, _revision, text, referenceIds, attachmentIds) =>
+                  onSend: async (targetScope, draftRevision, text, referenceIds, attachmentIds) =>
                     execution.send!({
                       scope: {
                         namespace: targetScope.namespace,
@@ -145,6 +155,7 @@ export function LocalSessionPage({
                       },
                       conversationId: conversation.conversationId,
                       directoryPath,
+                      draftRevision,
                       text,
                       referenceIds,
                       attachmentIds,

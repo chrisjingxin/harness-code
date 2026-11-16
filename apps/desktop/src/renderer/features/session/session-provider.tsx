@@ -150,7 +150,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             busy={controller.newSessionBusy}
             canCreateConversation={controller.canCreateConversation}
             createBlockedReason={controller.createBlockedReason}
-            agentLabel={avail.available ? "Harness · 本机可用" : "Agent 暂不可用 · 仅支持草稿"}
+            agentLabel={avail.available ? "Harness · 本机可用" : controller.execution.textOnly ? avail.reason ?? "创建后确认本机 Agent" : "Agent 暂不可用 · 仅支持草稿"}
             agentAvailable={avail.available}
             errorMessage={controller.newSessionError}
             onChooseDirectory={controller.onChooseNewDirectory}

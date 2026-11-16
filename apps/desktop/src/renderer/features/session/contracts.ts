@@ -6,6 +6,7 @@
  * HC-219 / HC-220 协作用集成接点，以及向本机 Agent 执行器的可注入边界。
  */
 import type { ReactNode } from "react"
+import type { LocalExecutionView } from "./local-execution-view.js"
 import type { ConversationReferenceView } from "@workbench/ui"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 
@@ -84,13 +85,17 @@ export type NewSessionDraft = {
   readonly draftText: string
 }
 
-/** 向本机 Agent / ACP 执行内核预留的窄适配端口，未交付前如实返回不可用。 */
+/** 页面只消费执行视图与用户动作。正式装配负责按原范围提交已受理的草稿修订。 */
 export interface LocalSessionExecutionPort {
   getAvailability(conversationId: string): { readonly available: boolean; readonly reason?: string }
+  readonly textOnly?: boolean
+  readonly commitsAcceptedDraft?: boolean
+  getView?(conversationId: string): LocalExecutionView | undefined
   send?(input: {
     readonly scope: ProjectNavigationScope
     readonly conversationId: string
     readonly directoryPath: string | null
+    readonly draftRevision: number
     readonly text: string
     readonly referenceIds: readonly string[]
     readonly attachmentIds: readonly string[]

@@ -1,4 +1,4 @@
-/** 将受限桌面端口注入通用视图；本入口不组装任何 Agent 或旧 Web 服务。 */
+/** 将主进程提供的受限桌面端口注入正式工作台。 */
 import { createRoot } from "react-dom/client"
 import "@workbench/ui/theme.css"
 import "@workbench/ui/project.css"
@@ -15,6 +15,7 @@ createRoot(document.getElementById("root")!).render(
     organization={window.organization}
     projectConversations={window.projectConversations}
     localDirectory={window.localDirectory}
+    localExecution={window.localExecution}
     personalHost={window.personal}
   />,
 )

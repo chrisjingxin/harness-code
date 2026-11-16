@@ -1,6 +1,5 @@
 /**
- * HC-218 停点 1 受控独立预览：演示新会话准备、本人本机会话、同账号其他设备只读、
- * 他人会话简报与五态主动同步（未同步 / 同步中 / 已同步 / 有更新 / 同步失败）。
+ * HC-218 独立预览：演示新会话准备、本人本机会话、跨机器只读、主动同步和受控的本机文本执行视图。
  * 不连接真实服务端与 Agent；预览替身绝不进入正式入口 desktop-workbench.tsx。
  */
 import { useEffect, useRef, useState } from "react"
@@ -20,6 +19,7 @@ import "@workbench/ui/navigation.css"
 import "@workbench/ui/conversation.css"
 import "../features/session/session.css"
 import "./preview.css"
+import { LocalExecutionFixture, localExecutionFixtureTitle } from "./local-execution-fixture.js"
 import type { ProjectPage } from "../features/project-navigation/contracts.js"
 import {
   EMPTY_PERSONAL_STATE,
@@ -40,6 +40,7 @@ const orgName = "平台架构二组"
 const orgPathName = "信息技术部/架构管理团队/零售应用架构四室/平台架构二组"
 const SELF_ID = "u-shen"
 const LOCAL_DEVICE_ID = "dev-shen-mac"
+const LOCAL_EXECUTION_FIXTURE_ID = "c-local-execution-fixture"
 const DEVICE_NAMES: Record<string, string> = {
   "dev-shen-mac": "MacBook Pro · 办公室",
   "dev-shen-home": "家里台式机",
@@ -58,6 +59,20 @@ const members: readonly NavigationMember[] = [
 
 const now = Date.now()
 const initialConversations: ProjectConversationSummary[] = [
+  {
+    conversationId: LOCAL_EXECUTION_FIXTURE_ID,
+    projectId: "p-retail",
+    ownerUserId: SELF_ID,
+    deviceId: LOCAL_DEVICE_ID,
+    title: localExecutionFixtureTitle,
+    status: "idle",
+    briefText: "",
+    briefSource: "rule",
+    briefUpdatedAtMs: now,
+    syncedSequence: 0,
+    updatedAt: new Date(now).toISOString(),
+    repositories: [],
+  },
   {
     conversationId: "c-local-1",
     projectId: "p-retail",
@@ -376,7 +391,9 @@ function Preview(): ReactElement {
     openSettings: () => setSettingsOpen(true),
   }
 
-  const center = page.kind === "new" || page.kind === "conversation"
+  const center = page.kind === "conversation" && page.conversationId === LOCAL_EXECUTION_FIXTURE_ID
+    ? <LocalExecutionFixture scope={{ ...scope, conversationId: LOCAL_EXECUTION_FIXTURE_ID }} />
+    : page.kind === "new" || page.kind === "conversation"
     ? provider.render({ scope, page, navigator, visible: true })
     : (
       <section className="hc218-placeholder" aria-label="其他协作页面占位">
@@ -452,7 +469,7 @@ function Preview(): ReactElement {
             </button>
           </div>
           {settingsNotice ? <p className="hc218-settings-note" role="status">{settingsNotice}</p> : null}
-          <p className="hc218-settings-note">本页为 HC-218 停点 1 受控预览，演示本机与跨机器只读/主动同步状态，不连接真实后端或 Agent。</p>
+          <p className="hc218-settings-note">HC-218 受控预览，演示本机执行界面及跨机器只读与主动同步。这里使用固定夹具。</p>
         </div>
       }
     />

@@ -9,7 +9,7 @@ import { nativeTheme as workbenchNativeTheme } from "@workbench/ui/native-theme"
 import { verifyDesktopSource } from "./trusted-source.js"
 
 /** 绑定可信主窗口；窗口销毁时移除 IPC 和系统主题监听，允许 macOS 重开。 */
-export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void {
+export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, captureDirectorySelection?: () => (path: string) => Promise<void>): void {
   let themeMode: ThemeMode = "system"
   let zoomPercent = 100
   let choosing = false
@@ -34,9 +34,12 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string): void 
   handle("workbench:choose-directory", 0, async () => {
     if (choosing) throw new Error("目录选择器已打开")
     choosing = true
+    const recordSelection = captureDirectorySelection?.()
     try {
       const result = await dialog.showOpenDialog(window, { title: "选择工作目录", buttonLabel: "选择目录", properties: ["openDirectory"] })
-      return result.canceled ? null : result.filePaths[0] ?? null
+      const path = result.canceled ? null : result.filePaths[0] ?? null
+      if (path) await recordSelection?.(path)
+      return path
     } finally { choosing = false }
   })
   handle("workbench:set-theme-mode", 1, value => {

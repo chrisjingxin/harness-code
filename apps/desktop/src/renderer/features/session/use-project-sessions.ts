@@ -19,6 +19,7 @@ import type {
 import type { ConversationPersonalState, ConversationScope, RenderingActions } from "@workbench/ui"
 import type { ConversationPersonal, ProjectDraftPersonal } from "../../../personal-host.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
+import type { DesktopLocalExecutionHost } from "../../../local-execution-host.js"
 import type { NavigationSessionSource, ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type {
   LocalSessionExecutionPort,
@@ -43,6 +44,7 @@ import {
   createSessionPageProvider,
 } from "./session-provider.js"
 import { useLocalDirectory } from "./use-local-directory.js"
+import { useLocalExecution } from "./use-local-execution.js"
 
 const HISTORY_PAGE_LIMIT = 200
 const MAX_HISTORY_PAGES = 50
@@ -150,6 +152,7 @@ export type UseProjectSessionsOptions = {
   readonly host: DesktopHost
   readonly projectConversations: ProjectConversationHost
   readonly localDirectory?: LocalDirectoryHost
+  readonly localExecution?: DesktopLocalExecutionHost
   readonly persistence: PersonalPersistence
   readonly scope: ProjectNavigationScope | null
   readonly projectName: string
@@ -172,6 +175,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     host,
     projectConversations,
     localDirectory,
+    localExecution,
     persistence,
     scope,
     projectName,
@@ -679,6 +683,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     onOpenConversation,
   ])
 
+  const [directorySelectionRevision, confirmDirectorySelection] = useState(0)
   const onChooseSessionDirectory = useCallback((conversationId: string) => {
     if (!scope || !currentScopeKey) return
     const targetScope = scope
@@ -689,6 +694,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         ...prev,
         directoryPath: picked,
       }), true)
+      // 从个人记录恢复的同一路径也需要原生选择器重新授权执行。
+      confirmDirectorySelection(value => value + 1)
     }).catch(() => {})
   }, [scope, currentScopeKey, host, updateRecord])
 
@@ -769,6 +776,17 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const selectedDirectoryPath = selectedIsLocal && selectedConversationId
     ? (currentDirectories[selectedConversationId] ?? null)
     : null
+  const commitAcceptedDraft = useCallback((source: ProjectNavigationScope, id: string, revision: number) => {
+    if (!mountedRef.current) return
+    updateRecord(source, makeScopeKey(source), id, previous => ({
+      ...previous,
+      personal: applyConversationPersonalChange(previous.personal, { kind: "clear-draft", expectedRevision: revision }),
+    }), true)
+  }, [updateRecord])
+  const localExecutionPort = useLocalExecution(
+    localExecution, scope, localDeviceId, selectedIsLocal ? selectedConversationId : null,
+    selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我", commitAcceptedDraft,
+  )
 
   const localDir = useLocalDirectory({
     localDirectory,
@@ -803,7 +821,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     canCreateConversation,
     createBlockedReason,
     newSessionError,
-    execution: execution ?? defaultExecutionPort,
+    execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
     hooks,
     resolveOwnerName: ownerId => memberNameById.get(ownerId) ?? `成员 (${ownerId.slice(0, 6)})`,
@@ -897,6 +915,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     createBlockedReason,
     newSessionError,
     execution,
+    localExecutionPort,
     rendering,
     hooks,
     memberNameById,

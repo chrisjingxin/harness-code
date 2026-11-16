@@ -66,7 +66,7 @@ export function NewSessionPage({
         <span
           className="session-tag"
           data-tone={agentAvailable ? "success" : "warning"}
-          title={agentAvailable ? "本机 Agent 可用" : "当前仅可准备目录与草稿，待 Agent 接入后可发起执行"}
+          title={agentLabel}
         >
           {agentLabel}
         </span>

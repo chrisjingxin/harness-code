@@ -5,6 +5,8 @@ import { RunnerSupervisor } from "./runner-supervisor.js"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname } from "node:path"
+import { createDesktopLocalAcpHost } from "./local-acp-host.js"
+import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 if (__WORKBENCH_UI_PREVIEW__) {
   // 预览是独立进程，不能读写正式工作台的用户目录或设备账本。
@@ -18,15 +20,26 @@ if (__WORKBENCH_UI_PREVIEW__) {
 }
 
 const supervisor = new RunnerSupervisor()
+const execution = __WORKBENCH_UI_PREVIEW__ ? undefined : configureLocalExecution()
 let tray: Tray | null = null
 let exiting = false
 let quitAllowed = false
 let quitRequested = false
 
+function configureLocalExecution(): LocalExecutionRuntime {
+  if (!process.env.WORKBENCH_ACP_EXECUTABLE?.trim()) {
+    return { error: "尚未配置本机 Agent。请设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
+  }
+  try { return { host: createDesktopLocalAcpHost() } }
+  catch {
+    return { error: "本机 Agent 配置无效。请检查可执行文件的绝对路径及 WORKBENCH_ACP_ARGS_JSON 字符串数组。" }
+  }
+}
+
 function openWindow(): void {
   const window = BrowserWindow.getAllWindows()[0]
   if (window) { window.show(); window.focus() }
-  else if (!exiting) createWindow(supervisor, () => { quitRequested = false; quitAllowed = false; exiting = false })
+  else if (!exiting) createWindow(supervisor, () => { quitRequested = false; quitAllowed = false; exiting = false }, execution)
 }
 
 app.setName(__WORKBENCH_UI_PREVIEW__ ? {

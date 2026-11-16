@@ -16,6 +16,7 @@ import type {
 } from "@workbench/contracts"
 import type { AccountPersonal, PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
+import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
 import { DeviceRegistrationPanel, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { ProjectPageProviders } from "./features/project-navigation/index.js"
@@ -35,6 +36,7 @@ type Hosts = {
   organization: OrganizationHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
+  localExecution?: DesktopLocalExecutionHost
   personalHost: PersonalHost
 }
 type Identity = ReturnType<typeof useCollaborationIdentity>
@@ -99,6 +101,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       devices={props.devices}
       projectConversations={props.projectConversations}
       localDirectory={props.localDirectory}
+      localExecution={props.localExecution}
       persistence={persistence}
       workspaceId={workspace.id}
       workspaceName={workspace.name}
@@ -170,6 +173,7 @@ function WorkspaceProjectWorkbench(props: {
   devices: DeviceHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
+  localExecution?: DesktopLocalExecutionHost
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
@@ -202,6 +206,7 @@ function WorkspaceProjectWorkbench(props: {
     host: props.host,
     projectConversations: props.projectConversations,
     localDirectory: props.localDirectory,
+    localExecution: props.localExecution,
     persistence: props.persistence,
     scope: shell.scope,
     projectName: currentProject?.name ?? "当前项目",

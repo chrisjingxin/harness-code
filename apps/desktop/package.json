@@ -25,6 +25,7 @@
     "preview:session": "node ../../scripts/workbench/ui-preview.mjs hc218 preview"
   },
   "dependencies": {
+    "@workbench/acp-runtime": "0.2.0",
     "@workbench/contracts": "0.2.0",
     "@workbench/ui": "0.2.0",
     "react": "19.3.0",

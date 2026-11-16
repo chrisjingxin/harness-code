@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
 import type { PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
+import type { DesktopLocalExecutionHost, LocalExecutionNotice } from "../local-execution-host.js"
 
 const host: DesktopHost = {
   chooseDirectory: () => ipcRenderer.invoke("workbench:choose-directory"),
@@ -48,6 +49,17 @@ const localDirectory: LocalDirectoryHost = {
     ipcRenderer.invoke("workbench:local-directory:read", workspaceId, projectId, conversationKey, action),
 }
 contextBridge.exposeInMainWorld("localDirectory", localDirectory)
+
+const localExecution: DesktopLocalExecutionHost = {
+  prepare: (scope, directory) => ipcRenderer.invoke("workbench:local-execution:prepare", scope, directory),
+  send: (scope, bindingId, requestId, text) => ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text),
+  onNotice: listener => {
+    const receive = (_event: unknown, notice: LocalExecutionNotice) => listener(notice)
+    ipcRenderer.on("workbench:local-execution:notice", receive)
+    return () => { ipcRenderer.removeListener("workbench:local-execution:notice", receive) }
+  },
+}
+contextBridge.exposeInMainWorld("localExecution", localExecution)
 
 const organization: OrganizationHost = {
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),
