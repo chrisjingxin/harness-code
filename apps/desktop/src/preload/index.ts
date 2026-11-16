@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 const localExecution: DesktopLocalExecutionHost = {
   prepare: (scope, directory) => ipcRenderer.invoke("workbench:local-execution:prepare", scope, directory),
   send: (scope, bindingId, requestId, text) => ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text),
+  cancel: (scope, bindingId, turnId) => ipcRenderer.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),
+  answerPermission: (scope, bindingId, turnId, requestId, optionId) =>
+    ipcRenderer.invoke("workbench:local-execution:answer-permission", scope, bindingId, turnId, requestId, optionId),
   onNotice: listener => {
     const receive = (_event: unknown, notice: LocalExecutionNotice) => listener(notice)
     ipcRenderer.on("workbench:local-execution:notice", receive)

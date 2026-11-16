@@ -5,10 +5,12 @@ import { lstat, realpath } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type {
   CollaborationResult, DeviceState, DeviceListResponse, DeviceRevokedResponse, ProjectSavedResponse,
-  DeviceProjectPublishRequest, IdentityState, LocalDeviceRegistration,
+  DeviceProjectPublishRequest, DeviceSyncRequest, IdentityState, LocalDeviceRegistration,
 } from "@workbench/contracts"
+import type { LocalExecutionScope, LocalExecutionUploadNotice } from "../local-execution-host.js"
 import { identityError } from "./collaboration-state.js"
 import type { CollaborationClient } from "./collaboration-client.js"
+import { ConversationUploads, type FinalizedTurn } from "./conversation-uploads.js"
 import type { RunnerSupervisor } from "./runner-supervisor.js"
 
 type SavedDevice = LocalDeviceRegistration
@@ -28,6 +30,7 @@ export class DeviceHost {
   readonly #identity: IdentitySource
   readonly #origin: string
   readonly #root: string
+  readonly #uploads: ConversationUploads
   readonly #listeners = new Set<(state: DeviceState) => void>()
   readonly #disposeListeners: (() => void)[]
   #device: SavedDevice | null = null
@@ -35,16 +38,23 @@ export class DeviceHost {
   #identityKey: string | null = null
   #busy = false
 
-  constructor(client: CollaborationClient, supervisor: RunnerSupervisor, window: () => BrowserWindow | null, identity: IdentitySource) {
+  constructor(client: CollaborationClient, supervisor: RunnerSupervisor, window: () => BrowserWindow | null, identity: IdentitySource,
+    onUpload: (notice: LocalExecutionUploadNotice) => void) {
     this.#client = client
     this.#supervisor = supervisor
     this.#window = window
     this.#identity = identity
     this.#origin = process.env.WORKBENCH_SERVICE_ORIGIN!
     this.#root = join(app.getPath("userData"), "runner", createHash("sha256").update(this.#origin).digest("hex"))
+    this.#uploads = new ConversationUploads(join(this.#root, "conversation-uploads"), {
+      watermark: (scope, signal) => this.#conversationWatermark(scope, signal),
+      upload: (scope, request, signal) => this.#sendConversationBatch(scope, request, signal),
+    }, onUpload)
     this.#disposeListeners = [supervisor.onStateChanged(() => this.#publish()), identity.onStateChanged(state => {
       this.#generation++
       this.#identityKey = state.status === "signedIn" ? state.user.id : null
+      const uploadOwner = this.#identityKey ?? (state.status === "connectionError" ? state.lastKnownUser?.id : null)
+      this.#uploads.useAccount(uploadOwner ?? null)
       this.#publish()
     })]
   }
@@ -52,6 +62,7 @@ export class DeviceHost {
   dispose(): void {
     this.#generation++
     this.#identityKey = null
+    this.#uploads.useAccount(null)
     this.#listeners.clear()
     for (const dispose of this.#disposeListeners) dispose()
   }
@@ -83,6 +94,33 @@ export class DeviceHost {
   }
 
   listDevices(workspaceId: string): Promise<CollaborationResult<DeviceListResponse>> { return this.#client.listDevices(workspaceId, { limit: "50" }) }
+
+  /** 仅主进程调用。受理过的本机轮在终态落盘，再由同一设备凭据异步上传。 */
+  enqueueConversationTurn(scope: LocalExecutionScope, turn: FinalizedTurn): Promise<void> {
+    return this.#uploads.enqueue(scope, turn)
+  }
+
+  /** 退出窗口前只等文件落盘，未确认的设备请求留给同一账号下次登录续传。 */
+  pauseConversationUploads(): Promise<void> {
+    this.#uploads.useAccount(null)
+    return this.#uploads.flush()
+  }
+
+  async #conversationWatermark(scope: LocalExecutionScope, signal: AbortSignal): Promise<CollaborationResult<number>> {
+    const detail = await this.#client.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId, signal)
+    if (!detail.ok) return detail
+    const { conversation } = detail.value
+    if (signal.aborted || conversation.conversationId !== scope.conversationId || conversation.projectId !== scope.projectId
+      || conversation.ownerUserId !== scope.accountId || conversation.deviceId !== scope.deviceId) return denied()
+    return { ok: true, value: conversation.syncedSequence }
+  }
+
+  async #sendConversationBatch(scope: LocalExecutionScope, request: DeviceSyncRequest, signal: AbortSignal) {
+    const device = await this.#load()
+    if (signal.aborted || !device?.registered || device.origin !== this.#origin || device.ownerUserId !== scope.accountId
+      || device.deviceId !== scope.deviceId) return denied()
+    return this.#client.syncDeviceConversation(scope.conversationId, device, request, signal)
+  }
   async revokeDevice(workspaceId: string, deviceId: string, requestId: string): Promise<CollaborationResult<DeviceRevokedResponse>> {
     const result = await this.#client.revokeDevice(workspaceId, deviceId, { requestId })
     if (result.ok && this.#device?.deviceId === deviceId) await this.#supervisor.stop()

@@ -9,23 +9,26 @@ import type { LocalExecutionBinding, LocalExecutionNotice, LocalExecutionReceipt
 import type { CollaborationState } from "./collaboration-state.js"
 import { identityError } from "./collaboration-state.js"
 import type { DeviceHost } from "./device-host.js"
+import { syncPayloadLimit, type FinalizedTurn } from "./conversation-uploads.js"
 
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type DirectoryGrant = { readonly path: string; readonly dev: bigint; readonly ino: bigint }
+type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & { sequence: number }
 type Binding = {
   readonly id: string
   readonly login: Login
   readonly directory: DirectoryGrant
   readonly session: LocalAcpSession
   readonly unsubscribe: () => void
+  activeTurn?: ActiveTurn
 }
 
 const unavailableMessages: Record<UnavailableReason | "empty-text", string> = {
   "agent-not-configured": "尚未配置本机 Agent。请设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。",
   "session-busy": "等待当前回复完成。",
   "session-closed": "本机会话执行连接已关闭，请重新打开会话。",
-  "agent-disconnected": "本机 Agent 已断开，当前版本无法恢复原生会话。",
+  "agent-disconnected": "正在确认已断开的本机 Agent 退出。",
   "empty-text": "请输入消息。",
 }
 
@@ -35,6 +38,8 @@ const failureMessages: Record<Extract<LocalAcpEvent, { type: "failed" }>["reason
   "agent-disconnected": "本机 Agent 已断开。",
   "prompt-failed": "Agent 未能完成本轮请求，请检查 Agent 或模型配置。",
   "session-closed": "本机执行连接已关闭，本轮回复结束。",
+  "session-restore-unsupported": "此 Agent 不支持恢复已有会话。",
+  "session-restore-failed": "Agent 无法恢复原生会话，请确认 Agent 配置及原会话仍可用。",
   "agent-stopped": "Agent 提前结束本轮。",
 }
 
@@ -42,7 +47,6 @@ const stoppedMessages = {
   max_tokens: "Agent 已达到本轮输出长度上限。",
   max_turn_requests: "Agent 已达到本轮请求次数上限。",
   refusal: "Agent 拒绝继续本轮请求。",
-  cancelled: "Agent 已取消本轮。",
 }
 
 function availability(session: LocalAcpSession) {
@@ -116,7 +120,25 @@ export function createLocalExecutionIpc(
       ? ok(null) : forbidden()
   }
 
+  function actOnTurn(scope: LocalExecutionScope, bindingId: string, turnId: string, action: (session: LocalAcpSession) => boolean) {
+    const login = identity.personalIdentity()
+    return enqueue(async () => {
+      const binding = bindings.get(localExecutionKey(scope))
+      if (!login || !isCurrent(login) || binding?.id !== bindingId || binding.login.generation !== login.generation) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      return binding.activeTurn?.turnId === turnId && action(binding.session)
+        ? ok(null) : identityError("INVALID_REQUEST", "当前轮次或审批请求已结束。")
+    })
+  }
+
   return {
+    cancel(scope: LocalExecutionScope, bindingId: string, turnId: string) {
+      return actOnTurn(scope, bindingId, turnId, session => session.cancel(turnId))
+    },
+    answerPermission(scope: LocalExecutionScope, bindingId: string, turnId: string, requestId: string, optionId: string) {
+      return actOnTurn(scope, bindingId, turnId, session => session.answerPermission(turnId, requestId, optionId))
+    },
     /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号。 */
     captureDirectorySelection() {
       const login = identity.personalIdentity()
@@ -147,7 +169,8 @@ export function createLocalExecutionIpc(
             || await realpath(directory.path) !== directory.path) {
             return identityError("PROJECT_ROOT_CHANGED", "所选工作目录已变更，请重新选择。")
           }
-          if (existing?.directory.path === directory.path && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino) {
+          if (existing?.login.generation === login.generation && existing.directory.path === directory.path
+            && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino) {
             return ok({ bindingId: existing.id, ...availability(existing.session) })
           }
           if (existing) await release(key, existing)
@@ -155,19 +178,41 @@ export function createLocalExecutionIpc(
           const session = await runtime.host.bind(scope, directory.path)
           if (!isCurrent(login)) { await session.close(); return forbidden() }
           const bindingId = randomUUID()
-          const stopListening = session.subscribe(event => {
+          const binding: Binding = { id: bindingId, login, directory, session, unsubscribe: session.subscribe(event => {
             const source = { scope, bindingId, turnId: event.turnId, sequence: event.sequence }
-            if (event.type === "text-delta") publish(login, { ...source, kind: "text", text: event.text })
-            else publish(login, {
+            const turn = binding.activeTurn
+            if (!turn || turn.turnId !== event.turnId || turn.sequence + 1 !== event.sequence) return
+            turn.sequence = event.sequence
+            if (event.type === "text-delta") {
+              if (turn.reply !== undefined) {
+                turn.reply = turn.reply.length + event.text.length <= syncPayloadLimit ? turn.reply + event.text : undefined
+              }
+              publish(login, { ...source, kind: "text", text: event.text })
+              return
+            }
+            if (event.type === "tool") {
+              publish(login, { ...source, kind: "tool", tool: event.tool })
+              return
+            }
+            if (event.type === "permission") {
+              publish(login, { ...source, kind: "permission", request: event.request })
+              return
+            }
+            binding.activeTurn = undefined
+            publish(login, {
               ...source,
               kind: "finished",
               availability: availability(session),
               ...(event.type === "failed" ? {
                 failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
-              } : {}),
+              } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
             })
-          })
-          bindings.set(key, { id: bindingId, login, directory, session, unsubscribe: stopListening })
+            // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开设备。
+            if (event.type === "completed" && event.shareable && isCurrent(login)) {
+              void device?.enqueueConversationTurn(scope, { ...turn, completedAtMs: Date.now() })
+            }
+          }) }
+          bindings.set(key, binding)
           return ok({ bindingId, ...availability(session) })
         } catch {
           return identityError("PROJECT_ROOT_CHANGED", "无法确认本机工作目录或释放旧执行连接，请重新选择目录后重试。")
@@ -187,16 +232,17 @@ export function createLocalExecutionIpc(
         if (!authorized.ok) return authorized
         const result = binding.session.send(text)
         if (result.status === "rejected") return ok({ status: "rejected", reason: unavailableMessages[result.reason] })
+        binding.activeTurn = { turnId: result.turnId, userText: text, reply: "", acceptedAtMs: Date.now(), sequence: 0 }
         // 受理与正文共用一个推送通道。即使 invoke 的回包较晚，页面也先收到受理。
         publish(login, { scope, bindingId, kind: "accepted", turnId: result.turnId, requestId, text })
         return ok(result)
       })
     },
 
-    dispose(): Promise<void> {
+    async dispose(): Promise<void> {
       disposed = true
       unsubscribe()
-      return reset()
+      await Promise.all([reset(), device?.pauseConversationUploads()])
     },
   }
 }

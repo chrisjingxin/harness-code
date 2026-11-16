@@ -69,7 +69,11 @@ export function bindCollaborationIpc(
   const client = identity.network()
   const personal = new PersonalStore(identity, client ? process.env.WORKBENCH_SERVICE_ORIGIN! : "", app.getPath("userData"))
   const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
-  const device = client ? new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity) : null
+  const device = client ? new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity, notice => {
+    if (identity.personalIdentity()?.accountId === notice.scope.accountId && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      try { window.webContents.send("workbench:local-execution:notice", notice) } catch { /* 窗口可能正好关闭。 */ }
+    }
+  }) : null
   if (device) bindDeviceIpc(window, trustedUrl, device)
   const execution = createLocalExecutionIpc(window, identity, device, runtime)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
@@ -129,6 +133,15 @@ export function bindCollaborationIpc(
       && isNonEmptyString(text, 16_384) && Buffer.byteLength(text, "utf8") <= 32_768
       ? execution.send(scope, bindingId, requestId, text)
       : identityError("INVALID_REQUEST", "请输入有效的文本消息，最长 16,384 字符且不超过 32 KiB。"))
+
+  handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId)
+      ? execution.cancel(scope, bindingId, turnId)
+      : identityError("INVALID_REQUEST", "停止参数无效。"))
+  handle("workbench:local-execution:answer-permission", 5, (scope, bindingId, turnId, requestId, optionId) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId) && isId(requestId) && isNonEmptyString(optionId, 1024)
+      ? execution.answerPermission(scope, bindingId, turnId, requestId, optionId)
+      : identityError("INVALID_REQUEST", "审批参数无效。"))
 
   const personalChannels = ["personal:load", "personal:save", "personal:close-ready"]
   ipcMain.handle("personal:load", async (event, key: unknown) => {

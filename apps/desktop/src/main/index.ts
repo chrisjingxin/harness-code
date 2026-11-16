@@ -4,7 +4,7 @@ import { createWindow } from "./window.js"
 import { RunnerSupervisor } from "./runner-supervisor.js"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, dirname } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { createDesktopLocalAcpHost } from "./local-acp-host.js"
 import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
@@ -20,7 +20,7 @@ if (__WORKBENCH_UI_PREVIEW__) {
 }
 
 const supervisor = new RunnerSupervisor()
-const execution = __WORKBENCH_UI_PREVIEW__ ? undefined : configureLocalExecution()
+let execution: LocalExecutionRuntime | undefined
 let tray: Tray | null = null
 let exiting = false
 let quitAllowed = false
@@ -30,7 +30,7 @@ function configureLocalExecution(): LocalExecutionRuntime {
   if (!process.env.WORKBENCH_ACP_EXECUTABLE?.trim()) {
     return { error: "尚未配置本机 Agent。请设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
   }
-  try { return { host: createDesktopLocalAcpHost() } }
+  try { return { host: createDesktopLocalAcpHost(process.env, join(app.getPath("userData"), "local-acp-bindings")) } }
   catch {
     return { error: "本机 Agent 配置无效。请检查可执行文件的绝对路径及 WORKBENCH_ACP_ARGS_JSON 字符串数组。" }
   }
@@ -46,6 +46,7 @@ app.setName(__WORKBENCH_UI_PREVIEW__ ? {
   hc205: "工作台主题预览", hc206: "工作台对话预览", hc207: "工作台项目预览", hc217: "工作台项目导航预览", hc218: "工作台会话预览",
 }[__WORKBENCH_UI_PREVIEW__] : "协作工作台")
 app.whenReady().then(() => {
+  if (!__WORKBENCH_UI_PREVIEW__) execution = configureLocalExecution()
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }] }] : []),
     { label: "编辑", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },

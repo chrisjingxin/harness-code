@@ -87,7 +87,16 @@ export function useLocalExecution(
   useEffect(() => {
     mounted.current = true
     const stop = host?.onNotice(notice => {
-      const screen = screens.current.get(localExecutionKey(notice.scope))
+      const key = localExecutionKey(notice.scope)
+      const screen = screens.current.get(key)
+      if (notice.kind === "upload") {
+        if (!screen && !notice.failure) return
+        const target = screen ?? { timeline: emptyLocalExecutionView }
+        target.timeline = applyLocalExecutionUpdate(target.timeline, notice)
+        screens.current.set(key, target)
+        refresh()
+        return
+      }
       if (!screen) return
       const flight = screen?.flight
       if (!flight) {
@@ -108,9 +117,15 @@ export function useLocalExecution(
       }
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
       flight.lastSequence = notice.sequence
+      if (notice.kind === "permission") {
+        screen.timeline = { ...screen.timeline, permission: notice.request }
+        refresh()
+        return
+      }
       screen.timeline = applyLocalExecutionUpdate(screen.timeline, notice.kind === "text"
         ? { kind: "assistant-text", turnId: notice.turnId, text: notice.text }
-        : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
+        : notice.kind === "tool" ? notice
+          : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
       if (notice.kind === "finished") {
         screen.flight = undefined
         screen.terminal = notice
@@ -166,6 +181,31 @@ export function useLocalExecution(
     commitsAcceptedDraft: true,
     getAvailability: id => readAvailability(target, id),
     getView: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.timeline : undefined,
+    async cancel(scope, id) {
+      const source = current.current.target
+      const flight = source && screens.current.get(source.key)?.flight
+      if (!source || !flight?.turnId || source.scope.accountId !== scope.accountId || source.scope.workspaceId !== scope.workspaceId
+        || source.scope.projectId !== scope.projectId || source.scope.conversationId !== id) throw new Error("执行目标已变更。")
+      const result = await host.cancel(source.scope, flight.bindingId, flight.turnId)
+      if (!result.ok) throw new Error(result.error.message)
+    },
+    async answerPermission(id, requestId, optionId) {
+      const source = current.current.target
+      const screen = source && screens.current.get(source.key)
+      const flight = screen?.flight
+      if (!source || source.scope.conversationId !== id || !screen || !flight?.turnId || screen.timeline.permission?.id !== requestId) {
+        throw new Error("审批请求已变更。")
+      }
+      const result = await host.answerPermission(source.scope, flight.bindingId, flight.turnId, requestId, optionId)
+      if (!result.ok) {
+        if (screen.timeline.permission?.id === requestId) {
+          screen.timeline = { ...screen.timeline, failure: result.error.message,
+            permissionRetryRevision: (screen.timeline.permissionRetryRevision ?? 0) + 1 }
+          refresh()
+        }
+        throw new Error(result.error.message)
+      }
+    },
     async send(input) {
       if (input.referenceIds.length || input.attachmentIds.length) return { status: "rejected", message: textOnlyReason }
       const source = current.current.target

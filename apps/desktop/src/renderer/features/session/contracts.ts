@@ -101,6 +101,7 @@ export interface LocalSessionExecutionPort {
     readonly attachmentIds: readonly string[]
   }): Promise<{ readonly status: "accepted" } | { readonly status: "rejected" | "unknown"; readonly message: string }>
   cancel?(scope: ProjectNavigationScope, conversationId: string): Promise<void>
+  answerPermission?(conversationId: string, id: string, optionId: string): Promise<void>
 }
 
 /** 供 HC-219 / HC-220 消费的桌面前端内部集成能力。 */

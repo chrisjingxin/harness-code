@@ -17,6 +17,7 @@ import type {
   MembersResponse, MetaResponse, WorkspaceListResponse,
   DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceRevokeRequest, DeviceRevokedResponse,
   ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
+  DeviceSyncRequest, DeviceSyncResponse, LocalDeviceRegistration,
   ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
   ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
 } from "@workbench/contracts"
@@ -55,7 +56,14 @@ const messages: Record<CollaborationError["code"], string> = {
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
 }
-interface CallOptions { body?: unknown; inputSchema?: string; query?: Record<string, string>; session?: Session }
+interface CallOptions {
+  body?: unknown
+  inputSchema?: string
+  query?: Record<string, string>
+  session?: Session
+  device?: Pick<LocalDeviceRegistration, "deviceId" | "secret">
+  signal?: AbortSignal
+}
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
 export class CollaborationClient {
@@ -142,15 +150,21 @@ export class CollaborationClient {
       if (body && Buffer.byteLength(body) > 1_048_576) return this.#error("PAYLOAD_TOO_LARGE", requestId)
       const query = options.query ? "?" + new URLSearchParams(options.query).toString() : ""
       const headers: Record<string, string> = { Origin: this.#origin, "X-Workbench-Protocol-Version": "1", "X-Request-Id": requestId }
-      const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
+      if (options.device) headers.Authorization = `Bearer ${options.device.deviceId}.${options.device.secret}`
+      else {
+        const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
+        if (cookie) headers.Cookie = cookie
+        if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
+      }
       if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
-      if (cookie) headers.Cookie = cookie
-      if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
       if (body) headers["Content-Type"] = "application/json"
-      const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any([session.abort.signal, AbortSignal.timeout(10000)]) })
+      const signals = [session.abort.signal, AbortSignal.timeout(10_000)]
+      if (options.signal) signals.push(options.signal)
+      const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any(signals) })
       if (!this.#live(session)) { void response.body?.cancel().catch(() => {}); throw new ClientProblem("NETWORK_UNAVAILABLE") }
       if (response.status >= 300 && response.status < 400) throw new ClientProblem("INVALID_SERVER_RESPONSE")
       for (const header of response.headers.getSetCookie()) {
+        if (options.device) throw new ClientProblem("INVALID_SERVER_RESPONSE")
         const parsed = Cookie.parse(header)
         if (!parsed || parsed.key !== "WBSESSION" || parsed.domain || parsed.path !== "/") throw new ClientProblem("INVALID_SERVER_RESPONSE")
         const deleting = parsed.value === "" && (parsed.maxAge === 0 || (parsed.expires instanceof Date && parsed.expires.getTime() <= Date.now()))
@@ -171,8 +185,8 @@ export class CollaborationClient {
         if (!this.#validator("ErrorEnvelope")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
         const envelope = data as ErrorEnvelope
         const error = envelope.body
-        if (error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
-        if (error.code === "CSRF_INVALID") session.csrf = null
+        if (!options.device && error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
+        if (!options.device && error.code === "CSRF_INVALID") session.csrf = null
         return { ok: false, error: { ...error, message: messages[error.code] ?? envelope.errorMsg } }
       }
       if ((response.status !== 200 && response.status !== 201) || !this.#validator("BeeResponseEntity")(data)
@@ -274,13 +288,14 @@ export class CollaborationClient {
       { body: request, inputSchema: "organization#ConversationRegisterRequest" },
     )
   }
-  getProjectConversation(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
+  getProjectConversation(workspaceId: string, projectId: string, conversationId: string, signal?: AbortSignal): Promise<CollaborationResult<ConversationDetailResponse>> {
     if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId) || !this.#validator("Id")(conversationId)) {
       return Promise.resolve(this.#error("INVALID_REQUEST"))
     }
     return this.#call(
       `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations/${conversationId}`,
       "organization#ConversationDetailResponse",
+      "GET", { signal },
     )
   }
   readProjectConversationHistory(workspaceId: string, projectId: string, conversationId: string, afterSequence: number, limit = 200): Promise<CollaborationResult<ConversationHistoryResponse>> {
@@ -295,6 +310,15 @@ export class CollaborationClient {
       "GET",
       { query: { afterSequence: String(afterSequence), limit: String(limit) } },
     )
+  }
+
+  /** 设备上传只用本机 Bearer；响应按 Java 已发布的同步契约核对。 */
+  syncDeviceConversation(conversationId: string, device: Pick<LocalDeviceRegistration, "deviceId" | "secret">,
+    request: DeviceSyncRequest, signal: AbortSignal): Promise<CollaborationResult<DeviceSyncResponse>> {
+    if (!this.#validator("Id")(conversationId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#call(`/api/v1/device/conversations/${conversationId}/sync`, "organization#DeviceSyncResponse", "POST", {
+      device, body: request, inputSchema: "organization#DeviceSyncRequest", signal,
+    })
   }
 
   registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {

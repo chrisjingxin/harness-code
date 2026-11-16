@@ -71,16 +71,18 @@ export function LocalSessionPage({
   const availability = execution.getAvailability(conversation.conversationId)
   const hasUnsupportedMaterial = execution.textOnly && (personal.draft.referenceIds.length > 0 || personal.draft.attachmentIds.length > 0)
   const folderName = directoryBasename(directoryPath)
+  const activeExecution = execution.getView?.(conversation.conversationId)
+  const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
       ? { enabled: false, reason: textOnlyReason }
       : availability.available
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
-    cancel: availability.available && execution.cancel
+    cancel: canCancel
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
-    primaryActions: "send",
+    primaryActions: canCancel ? "cancel" : "send",
     statusText: hasUnsupportedMaterial ? textOnlyReason
       : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: [],
@@ -99,7 +101,7 @@ export function LocalSessionPage({
     references: hooks?.references ?? [],
     attachments: [],
   }
-  const activeExecution = execution.getView?.(conversation.conversationId)
+  const permission = activeExecution?.permission
   const view = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
@@ -137,7 +139,15 @@ export function LocalSessionPage({
           {...view}
           scope={scope}
           visible={visible && !viewingFile}
-          interaction={null}
+          interaction={permission ? {
+            kind: "approval", id: permission.id, title: permission.title, readOnly: false,
+            availability: { enabled: true },
+            retryRevision: activeExecution?.permissionRetryRevision,
+            options: permission.options.map(option => ({
+              id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
+              behavior: "immediate", feedback: "none", availability: { enabled: true },
+            })),
+          } : null}
           personal={personal}
           actions={{
             onPersonalChange: (targetScope, change) => {
@@ -176,6 +186,10 @@ export function LocalSessionPage({
                     ),
                 }
               : {}),
+            onInteractionSubmit: execution.answerPermission ? async (targetScope, id, answer) => {
+              if (answer.kind !== "approval" || targetScope.conversationId !== scope.conversationId) throw new Error("审批目标已变更。")
+              await execution.answerPermission!(conversation.conversationId, id, answer.optionId)
+            } : undefined,
             onCapabilitySelect,
             onReferenceAction,
             onRequestFileCandidates,
