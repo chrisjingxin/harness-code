@@ -11,10 +11,10 @@ html, body, #root { height: 100%; overflow: hidden; }
   padding-right: max(180px, calc(100% - env(titlebar-area-width, 100%) - env(titlebar-area-x, 0px) + 12px));
 }
 
-.desktop-navigation { height: 100%; display: flex; flex-direction: column; background: var(--sidebar-bg); }
-.desktop-navigation .project-navigation { flex: 1; min-height: 0; }
+.desktop-navigation { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sidebar-bg); }
+.desktop-navigation .project-navigation { flex: 1 1 0; min-height: 0; }
 .desktop-workspace-choice { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
-.desktop-navigation-note { margin: 0; padding: 0 12px 10px; color: var(--muted); font-size: var(--text-xs); }
+.desktop-navigation-note { flex: none; margin: 0; padding: 0 12px 10px; color: var(--muted); font-size: var(--text-xs); }
 
 .desktop-empty { height: 100%; overflow: auto; padding: 28px; background: var(--bg); }
 .desktop-empty h1, .desktop-empty h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--text); }
