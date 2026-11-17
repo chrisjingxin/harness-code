@@ -313,7 +313,14 @@
             "PROJECT_ARCHIVED",
             "REPOSITORY_ARCHIVED",
             "OWNER_CANNOT_LEAVE",
-            "SEQUENCE_CONFLICT"
+            "SEQUENCE_CONFLICT",
+            "SNAPSHOT_EMPTY",
+            "SNAPSHOT_TOO_LARGE",
+            "TASK_STATE_CONFLICT",
+            "TASK_ROLE_REQUIRED",
+            "TASK_CONVERSATION_CONFLICT",
+            "KNOWLEDGE_TERM_CONFLICT",
+            "KNOWLEDGE_ARCHIVED"
           ]
         },
         "requestId": {

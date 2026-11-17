@@ -1,0 +1,96 @@
+[
+  {
+    "name": "task-create",
+    "schema": "TaskCreateRequest",
+    "valid": true,
+    "data": {
+      "title": "核对账单",
+      "description": "核对最新汇总",
+      "assigneeId": "000000000000400080000000000000d1",
+      "requestId": "00000000-0000-4000-8000-0000000000a1"
+    }
+  },
+  {
+    "name": "task-transition",
+    "schema": "TaskTransitionRequest",
+    "valid": true,
+    "data": {
+      "targetStatus": "review",
+      "expectedVersion": 2,
+      "requestId": "00000000-0000-4000-8000-0000000000a2",
+      "commitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "task-invalid-transition-shape",
+    "schema": "TaskTransitionRequest",
+    "valid": false,
+    "data": {
+      "targetStatus": "accepted",
+      "expectedVersion": 2,
+      "requestId": "00000000-0000-4000-8000-0000000000a2"
+    }
+  },
+  {
+    "name": "knowledge-create",
+    "schema": "KnowledgeCreateRequest",
+    "valid": true,
+    "data": {
+      "termKey": "billing",
+      "category": "术语",
+      "title": "账单",
+      "text": "结算流水汇总。"
+    }
+  },
+  {
+    "name": "knowledge-invalid-term",
+    "schema": "KnowledgeCreateRequest",
+    "valid": false,
+    "data": {
+      "termKey": "Billing",
+      "category": "术语",
+      "title": "账单",
+      "text": "结算流水汇总。"
+    }
+  },
+  {
+    "name": "notification-metadata",
+    "schema": "NotificationEvent",
+    "valid": true,
+    "data": {
+      "id": 4,
+      "eventId": "00000000-0000-4000-8000-0000000000a1",
+      "type": "knowledge.updated",
+      "objectId": "00000000-0000-4000-8000-0000000000a2",
+      "projectId": null,
+      "occurredAtMs": 12000
+    }
+  },
+  {
+    "name": "notification-rejects-text",
+    "schema": "NotificationEvent",
+    "valid": false,
+    "data": {
+      "id": 4,
+      "eventId": "00000000-0000-4000-8000-0000000000a1",
+      "type": "knowledge.updated",
+      "objectId": "00000000-0000-4000-8000-0000000000a2",
+      "projectId": null,
+      "occurredAtMs": 12000,
+      "text": "不能进入通知的正文"
+    }
+  },
+  {
+    "name": "board-empty-project",
+    "schema": "BoardResponse",
+    "valid": true,
+    "data": {
+      "projectId": "00000000-0000-4000-8000-0000000000a1",
+      "members": [],
+      "conversations": [],
+      "tasks": [],
+      "conversationsTruncated": false,
+      "tasksTruncated": false
+    }
+  }
+]

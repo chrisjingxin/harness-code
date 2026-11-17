@@ -50,11 +50,13 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 13 张控制面表 */
+    /** 必须存在的 21 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
             "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
-            "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository"
+            "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository", "wb_snapshot",
+            "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
+            "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox"
     );
 
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
@@ -68,7 +70,19 @@ public final class Foundation {
             Map.entry("wb_project", List.of("project_id", "owner_user_id", "version")),
             Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence")),
             Map.entry("wb_local_repo_binding", List.of("device_id", "repository_id")),
-            Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id"))
+            Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id")),
+            Map.entry("wb_snapshot", List.of("snapshot_id", "project_id", "source_conversation_id",
+                    "source_owner_user_id", "source_title", "source_synced_sequence", "source_synced_at",
+                    "from_sequence", "to_sequence", "message_count", "text", "sha256", "storage_uri",
+                    "created_by_user_id", "created_at")),
+            Map.entry("wb_task", List.of("task_id", "project_id", "assignee_id", "status", "version", "conversation_id")),
+            Map.entry("wb_task_transition", List.of("task_id", "version", "actor_id", "from_status", "to_status", "commit_sha")),
+            Map.entry("wb_task_link", List.of("task_id", "link_type", "version_id", "knowledge_id")),
+            Map.entry("wb_task_request", List.of("project_id", "actor_id", "request_id", "fingerprint", "response")),
+            Map.entry("wb_knowledge_item", List.of("workspace_id", "knowledge_id", "term_key", "current_version_id",
+                    "version", "indexed_version", "archived")),
+            Map.entry("wb_knowledge_version", List.of("knowledge_id", "version_id", "version", "text")),
+            Map.entry("wb_notification_outbox", List.of("workspace_id", "user_id", "project_id", "event_id", "event_type", "object_id"))
     );
 
     /** 严禁存在的已废弃表集合（历史流水表 + 旧协作模型表，防架构倒退） */

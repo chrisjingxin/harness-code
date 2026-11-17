@@ -1,0 +1,764 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workbench.invalid/schema/collaboration.schema.json",
+  "$defs": {
+    "TaskStatus": {
+      "enum": [
+        "todo",
+        "doing",
+        "review",
+        "done",
+        "cancelled"
+      ]
+    },
+    "KnowledgeRef": {
+      "type": "object",
+      "properties": {
+        "knowledgeId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "versionId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "knowledgeId",
+        "versionId"
+      ],
+      "additionalProperties": false
+    },
+    "TaskCreateRequest": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "assigneeId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "requestId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "snapshotIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          },
+          "maxItems": 16
+        },
+        "knowledgeRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeRef"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "assigneeId",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "TaskPatchRequest": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "description",
+        "expectedVersion",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "TaskTransitionRequest": {
+      "type": "object",
+      "properties": {
+        "targetStatus": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+        }
+      },
+      "required": [
+        "targetStatus",
+        "expectedVersion",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "TaskConversationRequest": {
+      "type": "object",
+      "properties": {
+        "conversationId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "conversationId",
+        "expectedVersion",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "TaskSummary": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "creatorId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "assigneeId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "taskId",
+        "projectId",
+        "title",
+        "creatorId",
+        "assigneeId",
+        "status",
+        "version",
+        "conversationId",
+        "createdAtMs",
+        "updatedAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "TaskTransition": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "created",
+            "edited",
+            "transition",
+            "conversation_linked"
+          ]
+        },
+        "actorId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "fromStatus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toStatus": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "commitSha": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kind",
+        "actorId",
+        "fromStatus",
+        "toStatus",
+        "version",
+        "note",
+        "commitSha",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "TaskDetail": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskSummary"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "snapshotIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        "knowledgeRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeRef"
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskTransition"
+          }
+        }
+      },
+      "required": [
+        "task",
+        "description",
+        "snapshotIds",
+        "knowledgeRefs",
+        "transitions"
+      ],
+      "additionalProperties": false
+    },
+    "TaskListResponse": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskSummary"
+          }
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tasks",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeCreateRequest": {
+      "type": "object",
+      "properties": {
+        "termKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "termKey",
+        "category",
+        "title",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeUpdateRequest": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "category",
+        "title",
+        "text",
+        "expectedVersion"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeSummary": {
+      "type": "object",
+      "properties": {
+        "knowledgeId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "termKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "currentVersionId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "knowledgeId",
+        "termKey",
+        "category",
+        "title",
+        "currentVersionId",
+        "version",
+        "archived",
+        "updatedAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeVersionSummary": {
+      "type": "object",
+      "properties": {
+        "versionId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "authorId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "versionId",
+        "version",
+        "category",
+        "title",
+        "authorId",
+        "createdAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeVersion": {
+      "type": "object",
+      "properties": {
+        "knowledgeId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "termKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "version": {
+          "$ref": "#/$defs/KnowledgeVersionSummary"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "knowledgeId",
+        "termKey",
+        "archived",
+        "version",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeDetail": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/KnowledgeSummary"
+        },
+        "current": {
+          "$ref": "#/$defs/KnowledgeVersion"
+        }
+      },
+      "required": [
+        "item",
+        "current"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeListResponse": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeSummary"
+          }
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeVersionListResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeVersionSummary"
+          }
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "versions",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "BoardMember": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "status": {
+          "enum": [
+            "active",
+            "removed"
+          ]
+        },
+        "deviceOnline": {
+          "type": "boolean"
+        },
+        "conversationIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        "receivedTaskIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        "sentTaskIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      },
+      "required": [
+        "userId",
+        "name",
+        "status",
+        "deviceOnline",
+        "conversationIds",
+        "receivedTaskIds",
+        "sentTaskIds"
+      ],
+      "additionalProperties": false
+    },
+    "BoardConversation": {
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "$ref": "https://workbench.invalid/schema/organization.schema.json#/$defs/ConversationSummary"
+        },
+        "deviceOnline": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversation",
+        "deviceOnline"
+      ],
+      "additionalProperties": false
+    },
+    "BoardResponse": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardMember"
+          }
+        },
+        "conversations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardConversation"
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskSummary"
+          }
+        },
+        "conversationsTruncated": {
+          "type": "boolean"
+        },
+        "tasksTruncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectId",
+        "members",
+        "conversations",
+        "tasks",
+        "conversationsTruncated",
+        "tasksTruncated"
+      ],
+      "additionalProperties": false
+    },
+    "NotificationEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "eventId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "type": {
+          "enum": [
+            "task.assigned",
+            "task.changed",
+            "conversation.brief_updated",
+            "snapshot.created",
+            "knowledge.updated",
+            "project.member_changed"
+          ]
+        },
+        "objectId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "eventId",
+        "type",
+        "objectId",
+        "projectId",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "NotificationPage": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NotificationEvent"
+          }
+        },
+        "nextAfterId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "events",
+        "nextAfterId",
+        "hasMore"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

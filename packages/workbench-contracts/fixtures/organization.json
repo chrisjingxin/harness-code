@@ -348,5 +348,59 @@
     "data": {
       "syncedSequence": 5
     }
+  },
+  {
+    "name": "snapshot-default-range",
+    "schema": "SnapshotCreateRequest",
+    "valid": true,
+    "data": {
+      "sourceConversationId": "00000000-0000-4000-8000-0000000000a5"
+    }
+  },
+  {
+    "name": "snapshot-explicit-range",
+    "schema": "SnapshotCreateRequest",
+    "valid": true,
+    "data": {
+      "sourceConversationId": "00000000-0000-4000-8000-0000000000a5",
+      "range": {
+        "type": "range",
+        "fromSequence": 1,
+        "toSequence": 2
+      }
+    }
+  },
+  {
+    "name": "snapshot-brief-with-sequence",
+    "schema": "SnapshotCreateRequest",
+    "valid": false,
+    "data": {
+      "sourceConversationId": "00000000-0000-4000-8000-0000000000a5",
+      "range": {
+        "type": "brief",
+        "toSequence": 2
+      }
+    }
+  },
+  {
+    "name": "snapshot-brief-response",
+    "schema": "SnapshotResponse",
+    "valid": true,
+    "data": {
+      "snapshotId": "00000000-0000-4000-8000-0000000000a6",
+      "projectId": "00000000-0000-4000-8000-0000000000a1",
+      "sourceConversationId": "00000000-0000-4000-8000-0000000000a5",
+      "sourceOwnerUserId": "000000000000400080000000000000d1",
+      "sourceTitle": "示例会话",
+      "sourceSyncedSequence": 2,
+      "sourceSyncedAtMs": 1700000000000,
+      "fromSequence": null,
+      "toSequence": null,
+      "messageCount": 0,
+      "text": "已确认进度",
+      "sha256": "c0da381686f708d32d793a13cefea89eed6c9823edd1e43a37a618cb34f1d704",
+      "createdByUserId": "000000000000400080000000000000d2",
+      "createdAtMs": 1700000001000
+    }
   }
 ]

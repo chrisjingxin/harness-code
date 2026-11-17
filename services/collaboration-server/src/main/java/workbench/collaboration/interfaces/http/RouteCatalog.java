@@ -53,6 +53,14 @@ public final class RouteCatalog {
     private static final Map<String, Pattern> CONVERSATION_PAGE = Map.of("ownerId", USER_ID, "status", Pattern.compile("idle|running|waiting_approval|error"));
     private static final Map<String, Pattern> HISTORY_PAGE = Map.of("afterSequence", SEQUENCE, "limit", Pattern.compile("[1-9][0-9]{0,2}"));
 
+    private static final Map<String, Pattern> ID_PAGE = Map.of("afterId", ID, "limit", LIMIT);
+    private static final Map<String, Pattern> TASK_PAGE = Map.of("afterId", ID, "limit", LIMIT,
+            "assignee", Pattern.compile("me"), "creator", Pattern.compile("me"),
+            "status", Pattern.compile("todo|doing|review|done|cancelled"));
+    private static final Map<String, Pattern> KNOWLEDGE_PAGE = Map.of("afterId", ID, "limit", LIMIT,
+            "category", Pattern.compile(".{1,80}"), "q", Pattern.compile(".{1,200}"));
+    private static final Map<String, Pattern> NOTIFICATION_PAGE = Map.of("afterId", SEQUENCE, "limit", LIMIT);
+
     private final List<Route> routes = List.of(
             new Route("/health", Set.of("GET"), Auth.PUBLIC, 0, NONE),
             new Route("/api/v1/meta", Set.of("GET"), Auth.PUBLIC, 0, NONE),
@@ -77,6 +85,20 @@ public final class RouteCatalog {
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations", Set.of("GET", "POST"), Auth.USER, 16384, CONVERSATION_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/history", Set.of("GET"), Auth.USER, 0, HISTORY_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/snapshots", Set.of("POST"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/snapshots/{snapshotId}", Set.of("GET"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks", Set.of("GET", "POST"), Auth.USER, 16384, TASK_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}", Set.of("GET", "PATCH"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}/transitions", Set.of("POST"), Auth.USER, 16384, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}/conversation", Set.of("PUT"), Auth.USER, 4096, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge", Set.of("GET", "POST"), Auth.USER, 131072, KNOWLEDGE_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}", Set.of("GET", "PUT", "DELETE"), Auth.USER, 131072,
+                    Map.of("expectedVersion", SEQUENCE)),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions", Set.of("GET"), Auth.USER, 0, ID_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}", Set.of("GET"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/board", Set.of("GET"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/notifications", Set.of("GET"), Auth.USER, 0, NOTIFICATION_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/notifications/stream", Set.of("GET"), Auth.USER, 0, Map.of("afterId", SEQUENCE)),
             new Route("/api/v1/device/conversations/{conversationId}/sync", Set.of("POST"), Auth.DEVICE, 1048576, NONE),
             new Route("/api/v1/device/heartbeat", Set.of("POST"), Auth.DEVICE, 0, NONE)
     );

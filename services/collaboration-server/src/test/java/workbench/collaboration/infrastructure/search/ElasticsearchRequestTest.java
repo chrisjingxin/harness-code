@@ -40,6 +40,24 @@ class ElasticsearchRequestTest {
   }
 
   @Test
+  void knowledgeIndexFencesStaleVersionsAndSearchScopesCandidates() throws Exception {
+    var requests = new EsMessageRequests("http://127.0.0.1:9200");
+    var write = requests.indexKnowledge("workspace", "knowledge", 4, "{}");
+    assertThat(write.url().encodedPath()).isEqualTo("/wb_knowledge_v1/_doc/knowledge");
+    assertThat(write.url().queryParameter("routing")).isEqualTo("workspace");
+    assertThat(write.url().queryParameter("version_type")).isEqualTo("external_gte");
+    assertThat(write.url().queryParameter("version")).isEqualTo("4");
+
+    var query = requests.searchKnowledge("workspace", "术语", "Billing", "after", 20);
+    Buffer body = new Buffer();
+    query.body().writeTo(body);
+    assertThat(query.url().queryParameter("routing")).isEqualTo("workspace");
+    assertThat(body.readUtf8()).contains("\"workspaceId.keyword\":\"workspace\"",
+            "\"category.keyword\":\"术语\"", "\"archived\":false",
+            "\"termKey.keyword\":\"billing\"", "\"search_after\":[\"after\"]");
+  }
+
+  @Test
   void unreachableClusterReturnsEmptyWithinTheFuse() {
     OkHttpClient http = new OkHttpClient.Builder().callTimeout(800, TimeUnit.MILLISECONDS).build();
     var adapter = new ElasticsearchMessageStoreAdapter(new EsMessageRequests("http://192.0.2.1:9"), http);

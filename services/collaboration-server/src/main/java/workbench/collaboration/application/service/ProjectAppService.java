@@ -4,6 +4,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import workbench.collaboration.application.port.IdempotencyPort;
+import workbench.collaboration.application.port.NotificationPort;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.identity.IdentityRepository;
@@ -57,6 +58,7 @@ public class ProjectAppService {
     private final IdentityRepository identity;
     private final IdempotencyPort idempotency;
     private final Contracts contracts;
+    private final NotificationPort notifications;
 
     public ProjectAppService(
             ProjectAccessPolicy policy,
@@ -66,7 +68,8 @@ public class ProjectAppService {
             DeviceRepository devices,
             IdentityRepository identity,
             IdempotencyPort idempotency,
-            Contracts contracts
+            Contracts contracts,
+            NotificationPort notifications
     ) {
         this.policy = policy;
         this.projects = projects;
@@ -76,6 +79,7 @@ public class ProjectAppService {
         this.identity = identity;
         this.idempotency = idempotency;
         this.contracts = contracts;
+        this.notifications = notifications;
     }
 
     /**
@@ -186,14 +190,16 @@ public class ProjectAppService {
                         throw new ApiProblem(400, "INVALID_REQUEST");
                     }
                     long now = System.currentTimeMillis();
-                    ProjectMember member = projects.findMember(projectId, request.userId())
-                            .map(existing -> existing.status() == MemberStatus.ACTIVE
+                    var before = projects.findMember(projectId, request.userId());
+                    ProjectMember member = before.map(existing -> existing.status() == MemberStatus.ACTIVE
                                     ? existing
                                     : new ProjectMember(projectId, request.userId(), MemberStatus.ACTIVE,
                                             existing.createdAtMs(), now))
                             .orElseGet(() -> new ProjectMember(projectId, request.userId(), MemberStatus.ACTIVE, now, now));
-                    // upsert 对"已 active"是幂等写，对 removed/新增则翻回或建行
-                    projects.upsertMember(member);
+                    if (before.filter(existing -> existing.status() == MemberStatus.ACTIVE).isEmpty()) {
+                        projects.upsertMember(member);
+                        memberChanged(userId, workspaceId, projectId);
+                    }
                     return contracts.encode("ProjectMemberChangeResponse",
                             new ProjectDtos.ProjectMemberChangeResponse(memberSummary(member)));
                 });
@@ -219,8 +225,14 @@ public class ProjectAppService {
         ProjectMember removed = new ProjectMember(projectId, targetUserId, MemberStatus.REMOVED,
                 existing.createdAtMs(), System.currentTimeMillis());
         projects.upsertMember(removed);
+        memberChanged(userId, workspaceId, projectId);
         return contracts.encode("ProjectMemberChangeResponse",
                 new ProjectDtos.ProjectMemberChangeResponse(memberSummary(removed)));
+    }
+
+    private void memberChanged(String userId, String workspaceId, String projectId) {
+        notifications.publish("project.member_changed", projectId, java.util.Map.of(
+                "workspaceId", workspaceId, "actorId", userId, "projectId", projectId));
     }
 
     /**

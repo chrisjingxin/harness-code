@@ -135,6 +135,37 @@ public final class EsMessageRequests {
                 .build();
     }
 
+    /** 索引只接收已提交的版本。外部版本号防止并行投影用旧正文覆盖新正文。 */
+    public Request indexKnowledge(String workspaceId, String knowledgeId, long version, String documentJson) {
+        return new Request.Builder()
+                .url(baseUrl + "/wb_knowledge_v1/_doc/" + encode(knowledgeId) + "?routing=" + encode(workspaceId)
+                        + "&version_type=external_gte&version=" + version)
+                .put(RequestBody.create(documentJson, JSON))
+                .build();
+    }
+
+    /** 术语前缀匹配与标题正文搜索并用，返回按知识 ID 排序的候选。 */
+    public Request searchKnowledge(String workspaceId, String category, String keyword, String afterId, int limit) {
+        List<Object> filters = new ArrayList<>();
+        filters.add(Map.of("term", Map.of("workspaceId.keyword", workspaceId)));
+        filters.add(Map.of("term", Map.of("archived", false)));
+        if (category != null) filters.add(Map.of("term", Map.of("category.keyword", category)));
+        List<Object> matches = List.of(
+                Map.of("prefix", Map.of("termKey.keyword", keyword.toLowerCase(java.util.Locale.ROOT))),
+                Map.of("multi_match", Map.of("query", keyword, "fields", List.of("title", "text"))));
+        Map<String, Object> dsl = new LinkedHashMap<>();
+        dsl.put("timeout", "800ms");
+        dsl.put("size", limit);
+        dsl.put("_source", List.of("knowledgeId", "version"));
+        dsl.put("sort", List.of(Map.of("knowledgeId.keyword", "asc")));
+        if (!afterId.isEmpty()) dsl.put("search_after", List.of(afterId));
+        dsl.put("query", Map.of("bool", Map.of("filter", filters, "should", matches, "minimum_should_match", 1)));
+        return new Request.Builder()
+                .url(baseUrl + "/wb_knowledge_v1/_search?routing=" + encode(workspaceId))
+                .post(RequestBody.create(MAPPER.writeValueAsString(dsl), JSON))
+                .build();
+    }
+
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }

@@ -99,22 +99,19 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> open: 张三创建并指派李四
-    open --> accepted: 李四接收
-    open --> declined: 李四拒绝（附原因）
-    open --> cancelled: 张三撤回
-    accepted --> in_progress: 李四在本机基于任务创建/关联会话
-    in_progress --> done: 李四标记完成（可附结果说明/关联提交）
-    in_progress --> blocked: 李四标记阻塞
-    blocked --> in_progress
-    done --> [*]
-    declined --> [*]
-    cancelled --> [*]
+    [*] --> todo: 发起人创建并指派
+    todo --> doing: 受让人接收
+    doing --> review: 受让人提交验收
+    review --> done: 发起人验收
+    review --> todo: 发起人退回
+    todo --> cancelled: 发起人撤回
+    doing --> cancelled: 发起人撤回
+    review --> cancelled: 发起人撤回
 ```
 
-- 状态迁移只能由对应的人在自己的桌面发起（指派人：接收/拒绝/推进/完成；发起人：撤回/改描述），Java 用“预期状态 + 版本号”做 CAS，重复请求幂等。
-- “接收后交给 Agent 开发”发生在**李四本机**：李四桌面拉取任务详情（描述 + 附带快照 + 知识引用），在本机新建会话，Java 只登记 `task.conversation_id` 关联。
-- Java 推送 `task.assigned / task.changed` 到相关人的用户级通知流；**没有任何下行到 Runner 的执行命令**。
+- 发起人修改待接收任务的描述并负责验收。当前版本号用于并发校验，请求编号用于原响应重放。
+- 受让人拉取任务详情及固定材料后，可登记并关联本人会话，在本人设备主动开始。Java 只保存业务状态与会话关系。
+- Java 将 `task.assigned / task.changed` 放入相关人的用户通知流。流转和通知不改变会话运行状态。
 
 ### 3.4 团队知识引用
 
@@ -188,8 +185,8 @@ stateDiagram-v2
 | --- | --- |
 | `POST /workspaces/{ws}/projects/{p}/tasks` | 创建并指派（指派人须为 Project 成员），可附 snapshotIds / knowledgeRefs |
 | `GET .../tasks?assignee=me&status=` | 列表 |
-| `GET/PATCH .../tasks/{t}` | 详情/改描述（发起人，open 状态） |
-| `POST .../tasks/{t}/transitions` | `{action: accept|decline|start|block|complete|cancel, expectedVersion, requestId, note?}` |
+| `GET/PATCH .../tasks/{t}` | 详情/改描述（发起人，todo 状态） |
+| `POST .../tasks/{t}/transitions` | `{targetStatus, expectedVersion, requestId, note?, commitSha?}` |
 | `PUT .../tasks/{t}/conversation` | 指派人关联执行会话 |
 
 **知识**
@@ -198,6 +195,7 @@ stateDiagram-v2
 | --- | --- |
 | `GET/POST /workspaces/{ws}/knowledge` | 列表（支持搜索）/新建 |
 | `GET/PUT/DELETE /workspaces/{ws}/knowledge/{k}` | 读/改（生成新版本）/归档 |
+| `GET /workspaces/{ws}/knowledge/{k}/versions` | 分页列出固定版本元数据 |
 | `GET /workspaces/{ws}/knowledge/{k}/versions/{v}` | 读取固定版本（引用使用） |
 
 **看板与通知**
@@ -205,7 +203,8 @@ stateDiagram-v2
 | 方法 路由 | 说明 |
 | --- | --- |
 | `GET /workspaces/{ws}/projects/{p}/board` | 成员 × 会话简报 × 任务聚合 |
-| `GET /workspaces/{ws}/notifications/stream`（SSE） | 用户级通知：`task.assigned`、`task.changed`、`conversation.brief_updated`（仅我参与的项目）、`knowledge.updated`、`project.member_changed` |
+| `GET /workspaces/{ws}/notifications` | 当前用户按游标分页补读 |
+| `GET /workspaces/{ws}/notifications/stream`（SSE） | 用户级通知，支持 Last-Event-ID，消费示例见 [HC-212](../spec/HC-212-协作应用与看板通知.md#hc-220-看板和通知联调) |
 
 ### 4.4 设备通道：WSS 改为 HTTPS（D1 已定）
 
@@ -247,9 +246,11 @@ stateDiagram-v2
 | `wb_conversation_repository` | 新增 | 会话涉及的仓库（多个，须属于项目引用集合） |
 | `wb_snapshot` | 新增 | id、project_id、source_conversation_id、from/to sequence、message_count（默认 20）、text（上限 64KB）、sha256、created_by、source_synced_at_ms |
 | `wb_task` | 新增 | id、project_id、title、description、creator_id、assignee_id（单值，D8）、status、version、conversation_id、时间戳；`idx(assignee_id,status)`、`idx(project_id,status)` |
-| `wb_task_reference` | 新增 | task ↔ snapshot / knowledge_version |
-| `wb_task_event` | 新增 | 状态变化审计（谁、何时、从→到、备注） |
-| `wb_knowledge_entry` / `wb_knowledge_version` | 新增 | 条目头 + 不可变版本正文 |
+| `wb_task_link` | 新增 | task ↔ snapshot / knowledge_version |
+| `wb_task_transition` | 新增 | 状态变化审计（谁、何时、从→到、备注） |
+| `wb_task_request` | 新增 | 写入请求与原成功响应，和 Task 同事务 |
+| `wb_knowledge_item` / `wb_knowledge_version` | 新增 | 条目头 + 不可变版本正文 |
+| `wb_notification_outbox` | 新增 | 按工作区、用户、游标补读，按事件 ID 与用户去重 |
 | `wb_handoff`、`wb_message_reference`（HC-198 计划） | **取消** | 由 task / snapshot 替代 |
 
 > HC-210“TDSQL 封顶 8 张表”的约束需要放宽：新增表都是**低频控制面小表**（任务、项目、知识），不违背“不放流水表”的初衷；消息正文仍不进 TDSQL。
@@ -259,7 +260,7 @@ stateDiagram-v2
 | 组件 | 调整 |
 | --- | --- |
 | Redis | 删 `wb:daemon:presence:*` 与 `wb:exec:*`；保留幂等键、会话消息热窗（供同步拉取）；新增设备心跳 `wb:device:hb:{deviceId}`（短 TTL，只做在线展示） |
-| Kafka | 删 `wb.daemon.commands`；`wb.conversation.events` → `wb.collab.notifications`（按 projectId/userId 分区，驱动用户级 SSE）；保留 `wb.search.index`，新增知识条目索引 |
+| Kafka | 删 `wb.daemon.commands`；`wb.conversation.events` → `wb.collab.notifications`（按工作区发送轻量唤醒信号，流按持久游标回查）；保留 `wb.search.index`。知识索引按数据库已提交版本重试投影 |
 | ES | 保留 `wb_message_v1`（routing 可改为 projectId，便于项目内检索）；`wb_conversation_handoff_v1` 改为 `wb_conversation_v1`（简报检索）；新增 `wb_knowledge_v1` |
 
 ### 5.3 Java 分包（DDD 四层不变，领域重划）

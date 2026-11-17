@@ -6,6 +6,8 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import workbench.collaboration.application.port.SearchIndexBus;
 
 import java.nio.charset.StandardCharsets;
@@ -17,7 +19,7 @@ import java.util.Properties;
  * 模块：分布式 Kafka 检索索引总线 (KafkaEventBus)
  *
  * <p>【功能定义】
- * 集群模式下基于 Apache Kafka 实现的跨节点检索索引分发总线（wb.search.index 单主题）。
+ * 集群模式下基于 Apache Kafka 实现跨节点检索索引分发与用户通知唤醒。用户游标和接收人记录在数据库。
  *
  * <p>【跨节点广播与防回环设计 (Why)】
  * 1. 生产者直通：本节点产生索引文档时，优先同步投递至本节点的 LocalEventBus（保证本机订阅者零网络延迟感知），
@@ -33,17 +35,20 @@ import java.util.Properties;
  */
 public final class KafkaEventBus implements SearchIndexBus, AutoCloseable {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(KafkaEventBus.class);
     private static final String NODE = "node";
 
     private final LocalEventBus local;
     private final String nodeId;
+    private final NotificationSignal notifications;
     private final KafkaProducer<String, String> producer;
     private final KafkaConsumer<String, String> consumer;
     private final Thread loop;
     private volatile boolean closed;
 
-    public KafkaEventBus(LocalEventBus local, String nodeId, String bootstrapServers) {
+    public KafkaEventBus(LocalEventBus local, NotificationSignal notifications, String nodeId, String bootstrapServers) {
         this.local = local;
+        this.notifications = notifications;
         this.nodeId = nodeId;
 
         Properties producerProps = new Properties();
@@ -62,7 +67,7 @@ public final class KafkaEventBus implements SearchIndexBus, AutoCloseable {
         consumerProps.put("auto.offset.reset", "latest");
         consumerProps.put("enable.auto.commit", "true");
         consumer = new KafkaConsumer<>(consumerProps);
-        consumer.subscribe(List.of(Topics.SEARCH));
+        consumer.subscribe(List.of(Topics.SEARCH, Topics.NOTIFICATIONS));
 
         loop = new Thread(this::poll, "kafka-collaboration");
         loop.setDaemon(true);
@@ -78,22 +83,39 @@ public final class KafkaEventBus implements SearchIndexBus, AutoCloseable {
         producer.send(record);
     }
 
+    /** 通知已写入数据库，Kafka 传事件标识供其他节点尽快回查。 */
+    public void publishNotification(String workspace, String eventId) {
+        ProducerRecord<String, String> record = new ProducerRecord<>(Topics.NOTIFICATIONS, workspace, eventId);
+        record.headers().add(NODE, nodeId.getBytes(StandardCharsets.UTF_8));
+        producer.send(record, (metadata, error) -> {
+            if (error != null) LOGGER.warn("通知唤醒信号发送失败，事件 {} 可从数据库补读", eventId);
+        });
+    }
+
     private void poll() {
-        while (!closed) {
-            try {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(200));
-                for (ConsumerRecord<String, String> record : records) {
-                    // 过滤来自本节点的消息，防止回环重复投递
-                    if (fromSelf(record)) {
-                        continue;
+        try {
+            while (!closed) {
+                try {
+                    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(200));
+                    for (ConsumerRecord<String, String> record : records) {
+                        if (fromSelf(record)) continue;
+                        if (Topics.NOTIFICATIONS.equals(record.topic())) {
+                            notifications.wake();
+                        } else {
+                            local.publishSearchIndex(record.key(), record.value());
+                        }
                     }
-                    local.publishSearchIndex(record.key(), record.value());
-                }
-            } catch (RuntimeException e) {
-                if (closed) {
-                    return;
+                } catch (RuntimeException error) {
+                    if (closed) return;
+                    LOGGER.warn("Kafka 协作事件接收暂不可用", error);
+                    Thread.sleep(500);
                 }
             }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } finally {
+            // KafkaConsumer 由读取线程关闭，避免调用线程与 poll 同时操作。
+            consumer.close(Duration.ofSeconds(1));
         }
     }
 
@@ -107,6 +129,10 @@ public final class KafkaEventBus implements SearchIndexBus, AutoCloseable {
         closed = true;
         consumer.wakeup();
         producer.close(Duration.ofSeconds(1));
-        consumer.close(Duration.ofSeconds(1));
+        try {
+            loop.join(2500);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

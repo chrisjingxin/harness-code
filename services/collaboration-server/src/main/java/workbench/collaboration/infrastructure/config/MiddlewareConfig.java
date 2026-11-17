@@ -1,13 +1,14 @@
 package workbench.collaboration.infrastructure.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 import workbench.collaboration.application.port.IdempotencyPort;
-import workbench.collaboration.application.port.SearchIndexBus;
 import workbench.collaboration.domain.conversation.MessageStorePort;
 import workbench.collaboration.domain.device.DeviceHeartbeatPort;
 import workbench.collaboration.infrastructure.cache.JedisCollaborationState;
@@ -16,6 +17,7 @@ import workbench.collaboration.infrastructure.cache.MemoryHotWindow;
 import workbench.collaboration.infrastructure.cache.MemoryIdempotency;
 import workbench.collaboration.infrastructure.messaging.KafkaEventBus;
 import workbench.collaboration.infrastructure.messaging.LocalEventBus;
+import workbench.collaboration.infrastructure.messaging.NotificationSignal;
 import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAdapter;
 
 /**
@@ -33,6 +35,7 @@ import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAd
  * - 下游依赖方：JedisPool、KafkaEventBus、ElasticsearchMessageStoreAdapter。
  */
 @Configuration
+@EnableScheduling
 public class MiddlewareConfig {
 
     @Bean
@@ -45,12 +48,10 @@ public class MiddlewareConfig {
      */
     @Bean
     @Primary
-    SearchIndexBus searchIndexBus(LocalEventBus local, WorkbenchProperties properties) {
-        if (!properties.cluster()) {
-            return local;
-        }
+    @ConditionalOnProperty(name = "workbench.middleware.mode", havingValue = "cluster")
+    KafkaEventBus kafkaEventBus(LocalEventBus local, NotificationSignal signal, WorkbenchProperties properties) {
         return new KafkaEventBus(
-                local,
+                local, signal,
                 properties.getMiddleware().getNodeId(),
                 properties.getMiddleware().getKafka().getBootstrapServers()
         );

@@ -58,7 +58,7 @@ class ProjectAppServiceTest {
         service = new ProjectAppService(
                 new ProjectAccessPolicy(identity, projects, repositories),
                 projects, repositories, bindings, devices, identity,
-                new MemoryIdempotency(), new Contracts());
+                new MemoryIdempotency(), new Contracts(), (type, subject, payload) -> {});
     }
 
     @Test

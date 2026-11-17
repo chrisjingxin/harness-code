@@ -276,7 +276,6 @@
           "items": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
           "maxItems": 32
         },
-        "taskId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
       },
       "required": ["deviceId", "requestId"],
@@ -318,6 +317,172 @@
         "messages": { "type": "array", "items": { "$ref": "#/$defs/HistoryMessage" } }
       },
       "required": ["conversationId", "syncedSequence", "messages"],
+      "additionalProperties": false
+    },
+    "SnapshotCreateRequest": {
+      "type": "object",
+      "properties": {
+        "sourceConversationId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "range": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "latest"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 500
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "through"
+                },
+                "toSequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "type",
+                "toSequence"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "range"
+                },
+                "fromSequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "toSequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "type",
+                "fromSequence",
+                "toSequence"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "brief"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "sourceConversationId"
+      ],
+      "additionalProperties": false
+    },
+    "SnapshotResponse": {
+      "type": "object",
+      "properties": {
+        "snapshotId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "sourceConversationId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "sourceOwnerUserId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "sourceTitle": {
+          "type": "string"
+        },
+        "sourceSyncedSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceSyncedAtMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fromSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "toSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "messageCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "createdByUserId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "snapshotId",
+        "projectId",
+        "sourceConversationId",
+        "sourceOwnerUserId",
+        "sourceTitle",
+        "sourceSyncedSequence",
+        "sourceSyncedAtMs",
+        "fromSequence",
+        "toSequence",
+        "messageCount",
+        "text",
+        "sha256",
+        "createdByUserId",
+        "createdAtMs"
+      ],
       "additionalProperties": false
     },
     "SyncMessage": {

@@ -49,7 +49,6 @@ public final class ConversationDtos {
             String deviceId,
             String title,
             List<String> repositoryIds,
-            String taskId,
             String requestId
     ) {}
 

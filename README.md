@@ -36,7 +36,7 @@ npm run server:init-demo
 npm run server:start
 ```
 
-构建与契约检查不连接数据库。初始化/启动前通过受限配置提供 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 及 TLS 信任，不在源码或命令参数写真实密码。当前已移除 Flyway、V001～V003 和 server:migrate，不使用旧建库步骤。示例服务地址为 `http://127.0.0.1:18084`，业务响应采用当前 BeeResponseEntity 包络；组织和同步接口见 [HC-211 Spec](docs/developer/spec/HC-211-协作模型重构与只读同步.md)。standalone 开发模式不代表 Redis/Kafka/ES 集群已验证，部署配置以[Java 中继方案](docs/developer/project/Java中继调整方案.md)及当前 application.yml 为准。
+构建与契约检查不连接数据库。初始化/启动前通过受限配置提供 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 及 TLS 信任，不在源码或命令参数写真实密码。当前已移除 Flyway、V001～V003 和 server:migrate，不使用旧建库步骤。示例服务地址为 `http://127.0.0.1:18084`，业务响应采用当前 BeeResponseEntity 包络；组织和同步接口见 [HC-211 Spec](docs/developer/spec/HC-211-协作模型重构与只读同步.md)，会话快照、任务、知识、看板与通知接口和联调示例见 [HC-212 Spec](docs/developer/spec/HC-212-协作应用与看板通知.md)。standalone 开发模式不代表 Redis/Kafka/ES 集群已验证，部署配置以[Java 中继方案](docs/developer/project/Java中继调整方案.md)及当前 application.yml 为准。
 
 桌面只从宿主启动环境变量 `WORKBENCH_SERVICE_ORIGIN` 读取一个固定服务origin。研发先显式启动前述Java/MySQL，再运行：
 
@@ -48,7 +48,7 @@ WORKBENCH_SERVICE_ORIGIN=http://127.0.0.1:18084 npm run dev
 
 远端 D10 已取消跨机器实时文件/Git 访问。HC-199 原设备读取的[历史证据](docs/developer/task/HC-199-文件与Git服务迁移.md#原设备只读路由实施证据2026-11-11复核通过)保留，但不代表当前服务还开放该路由；查看者只读云端已上传内容。
 
-当前 schema.sql 声明 11 张服务端基础表，组织模型和只读同步停点见 [HC-211 Todo](docs/developer/todo/HC-211-协作模型重构与只读同步.md)，实库全链路冒烟仍待补齐。HC-195/196/198 已由远端标过时，原阶段证据继续保留。Windows、TDSQL、真实中间件与新版桌面整体验证另行完成。
+当前 schema.sql 声明 21 张服务端表（含会话快照、项目任务、知识版本与通知发件箱），组织模型和只读同步停点见 [HC-211 Todo](docs/developer/todo/HC-211-协作模型重构与只读同步.md)，实库全链路冒烟仍待补齐。HC-195/196/198 已由远端标过时，原阶段证据继续保留。Windows、TDSQL、真实中间件与新版桌面整体验证另行完成。
 
 ## 工程检查
 

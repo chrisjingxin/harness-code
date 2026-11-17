@@ -181,7 +181,6 @@ export interface ConversationRegisterRequest {
   title?: string
   /** 必须是项目已引用仓库的子集，否则 400 */
   repositoryIds?: string[]
-  taskId?: string
   requestId: string
 }
 
@@ -228,4 +227,37 @@ export interface DeviceSyncRequest {
 
 export interface DeviceSyncResponse {
   syncedSequence: number
+}
+
+/** 仅使用请求时服务端已确认的同步内容，序号区间包含两端。 */
+export type SnapshotRequestedRange =
+  | { type: "latest"; count?: number }
+  | { type: "through"; toSequence: number }
+  | { type: "range"; fromSequence: number; toSequence: number }
+  | { type: "brief" }
+
+export interface SnapshotCreateRequest {
+  sourceConversationId: string
+  /** 省略时取最新最多 20 条。 */
+  range?: SnapshotRequestedRange
+}
+
+/** 创建预览和按 ID 读取共用的固定材料。 */
+export interface SnapshotResponse {
+  snapshotId: string
+  projectId: string
+  sourceConversationId: string
+  sourceOwnerUserId: string
+  sourceTitle: string
+  sourceSyncedSequence: number
+  sourceSyncedAtMs: number
+  /** 简报快照的起止序号为 null，消息数为 0。 */
+  fromSequence: number | null
+  toSequence: number | null
+  messageCount: number
+  text: string
+  /** 完整正文的 UTF-8 字节 SHA-256，使用小写十六进制。 */
+  sha256: string
+  createdByUserId: string
+  createdAtMs: number
 }

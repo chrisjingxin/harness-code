@@ -106,6 +106,42 @@ public final class ElasticsearchMessageStoreAdapter {
                 .orElse(List.of());
     }
 
+    public record KnowledgeHit(String id, long version) {}
+
+    public boolean indexKnowledge(String workspaceId, String knowledgeId, long version, Object document) {
+        var request = requests.indexKnowledge(workspaceId, knowledgeId, version, json.writeValueAsString(document));
+        try (Response response = http.newCall(request).execute()) {
+            // 409 表示该文档已写入更新版本，该旧版本无需再投影。
+            return response.isSuccessful() || response.code() == 409;
+        } catch (IOException failure) {
+            return false;
+        }
+    }
+
+    public List<KnowledgeHit> searchKnowledge(String workspaceId, String category, String query, String afterId, int limit) {
+        Request request = requests.searchKnowledge(workspaceId, category, query, afterId, limit);
+        try (Response response = http.newCall(request).execute()) {
+            if (response.code() == 404) return List.of(); // 新建团队尚未写第一份索引
+            if (!response.isSuccessful() || response.body() == null) throw searchUnavailable();
+            JsonNode result = json.readTree(response.body().string());
+            if (result.path("timed_out").asBoolean(false) || result.path("_shards").path("failed").asInt(0) > 0) {
+                throw searchUnavailable();
+            }
+            List<KnowledgeHit> hits = new ArrayList<>();
+            for (JsonNode hit : result.path("hits").path("hits")) {
+                JsonNode source = hit.path("_source");
+                hits.add(new KnowledgeHit(source.path("knowledgeId").asString(), source.path("version").asLong()));
+            }
+            return hits;
+        } catch (IOException failure) {
+            throw searchUnavailable();
+        }
+    }
+
+    private static workbench.collaboration.interfaces.ApiProblem searchUnavailable() {
+        return new workbench.collaboration.interfaces.ApiProblem(503, "SERVICE_UNAVAILABLE");
+    }
+
     public EsMessageRequests requests() {
         return requests;
     }

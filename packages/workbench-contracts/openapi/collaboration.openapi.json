@@ -1,0 +1,1098 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "项目任务、团队知识、看板与通知",
+    "version": "1"
+  },
+  "paths": {
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks": {
+      "post": {
+        "operationId": "createTask",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/TaskCreateRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listTasks",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "assignee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "creator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}": {
+      "get": {
+        "operationId": "readTask",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateTask",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/TaskPatchRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}/transitions": {
+      "post": {
+        "operationId": "transitionTask",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/TaskTransitionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}/conversation": {
+      "put": {
+        "operationId": "linkTaskConversation",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/TaskDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/TaskConversationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge": {
+      "get": {
+        "operationId": "listKnowledge",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createKnowledge",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeCreateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}": {
+      "get": {
+        "operationId": "readKnowledge",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "editKnowledge",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeUpdateRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "archiveKnowledge",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions": {
+      "get": {
+        "operationId": "listKnowledgeVersions",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeVersionListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}": {
+      "get": {
+        "operationId": "readKnowledgeVersion",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeVersion"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/board": {
+      "get": {
+        "operationId": "readBoard",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/BoardResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/NotificationPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/notifications/stream": {
+      "get": {
+        "operationId": "streamNotifications",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "x-event-data-schema": {
+                  "$ref": "../schema/collaboration.schema.json#/$defs/NotificationEvent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "统一错误包络",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

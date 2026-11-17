@@ -1087,6 +1087,168 @@
         }
       }
     },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/snapshots": {
+      "post": {
+        "operationId": "post__conversation_snapshot",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "创建固定快照并返回预览",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/SnapshotResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "非当前项目成员，或来源/快照不属于该项目",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求或服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "快照超过 65,536 UTF-8 字节",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/SnapshotCreateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/snapshots/{snapshotId}": {
+      "get": {
+        "operationId": "get__conversation_snapshot",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "snapshotId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "按 ID 读取原快照",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/SnapshotResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "非当前项目成员，或来源/快照不属于该项目",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "请求或服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/device/repo-bindings/{repositoryId}": {
       "put": {
         "operationId": "put__repo_binding",

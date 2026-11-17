@@ -74,6 +74,13 @@ public final class ApiResponses {
             Map.entry("PROJECT_ARCHIVED", "CLB3006"),
             Map.entry("REPOSITORY_ARCHIVED", "CLB3007"),
             Map.entry("REQUEST_ID_CONFLICT", "CLB3008"),
+            Map.entry("SNAPSHOT_EMPTY", "CLB3009"),
+            Map.entry("SNAPSHOT_TOO_LARGE", "CLB3010"),
+            Map.entry("TASK_ROLE_REQUIRED", "CLB2007"),
+            Map.entry("TASK_STATE_CONFLICT", "CLB3011"),
+            Map.entry("TASK_CONVERSATION_CONFLICT", "CLB3012"),
+            Map.entry("KNOWLEDGE_TERM_CONFLICT", "CLB3013"),
+            Map.entry("KNOWLEDGE_ARCHIVED", "CLB3014"),
             Map.entry("INTERNAL_ERROR", "CLB5001"),
             Map.entry("SERVICE_UNAVAILABLE", "CLB5002")
     );
@@ -186,6 +193,13 @@ public final class ApiResponses {
             case "REPOSITORY_CONFLICT" -> "仓库地址已被登记";
             case "VERSION_CONFLICT" -> "数据已被他人修改，请刷新后重试";
             case "PROJECT_ARCHIVED" -> "项目已归档";
+            case "TASK_ROLE_REQUIRED" -> "当前账号无权执行该任务操作";
+            case "TASK_STATE_CONFLICT" -> "任务当前状态不支持此操作";
+            case "TASK_CONVERSATION_CONFLICT" -> "任务或会话已建立关联";
+            case "KNOWLEDGE_TERM_CONFLICT" -> "该术语键已存在";
+            case "KNOWLEDGE_ARCHIVED" -> "知识条目已归档";
+            case "SNAPSHOT_EMPTY" -> "当前范围没有已同步的会话材料";
+            case "SNAPSHOT_TOO_LARGE" -> "快照正文超过 64 KiB，请缩小范围";
             case "REPOSITORY_ARCHIVED" -> "仓库已归档";
             case "OWNER_CANNOT_LEAVE" -> "项目负责人不能移出自己";
             case "SEQUENCE_CONFLICT" -> "消息序号与服务端水位不一致，请按 expectedSequence 续传";

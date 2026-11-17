@@ -144,6 +144,7 @@ public class ConversationSyncAppService {
                 "updatedAtMs", now)));
 
         notifications.publish("conversation.brief_updated", updated.id(), Map.of(
+                "workspaceId", updated.workspaceId(), "actorId", updated.ownerUserId(),
                 "projectId", updated.projectId(),
                 "ownerUserId", updated.ownerUserId(),
                 "status", updated.status(),

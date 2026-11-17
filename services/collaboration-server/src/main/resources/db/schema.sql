@@ -223,3 +223,136 @@ CREATE TABLE wb_conversation_repository (
   PRIMARY KEY (id),
   UNIQUE KEY uk_conversation_id_repository_id (conversation_id, repository_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话涉及仓库关联表';
+
+-- ============ 项目内固定会话快照（HC-212，方案 D5） ============
+
+CREATE TABLE wb_snapshot (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
+  snapshot_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '固定快照业务标识(UUID)',
+  project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属业务项目标识',
+  source_conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '来源会话标识',
+  source_owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '创建时来源会话主人标识',
+  source_title VARCHAR(120) NOT NULL COMMENT '创建时来源会话标题',
+  source_synced_sequence BIGINT NOT NULL COMMENT '创建时来源已确认同步序号',
+  source_synced_at DATETIME(3) NOT NULL COMMENT '创建时来源同步时间',
+  from_sequence BIGINT NOT NULL COMMENT '起点序号(含)，0 表示仅简报',
+  to_sequence BIGINT NOT NULL COMMENT '终点序号(含)，0 表示仅简报',
+  message_count INT UNSIGNED NOT NULL COMMENT '固定的消息条数，简报为 0',
+  text MEDIUMTEXT NOT NULL COMMENT '固定正文，应用校验最大 65536 UTF-8 字节',
+  sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'UTF-8 正文 SHA-256 小写十六进制摘要',
+  storage_uri VARCHAR(1024) NOT NULL DEFAULT '' COMMENT '预留超限全文对象地址，空串表示正文内联',
+  created_by_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '创建快照的项目成员',
+  created_at DATETIME(3) NOT NULL COMMENT '快照创建时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_snapshot_id (snapshot_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目内不可变会话快照';
+
+-- ============ 产品任务、固定引用、审计与请求回执 ============
+
+CREATE TABLE wb_task (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  task_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  description TEXT NOT NULL,
+  creator_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  assignee_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  status TINYINT UNSIGNED NOT NULL COMMENT '1 todo, 2 doing, 3 review, 4 done, 5 cancelled',
+  version BIGINT NOT NULL,
+  conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_task_id (task_id),
+  KEY idx_project_id_task_id (project_id, task_id),
+  KEY idx_project_id_updated_at (project_id, updated_at),
+  KEY idx_assignee_id_status (assignee_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE wb_task_transition (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  task_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version BIGINT NOT NULL,
+  kind VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  from_status TINYINT UNSIGNED NOT NULL COMMENT '0 表示任务创建前无状态',
+  to_status TINYINT UNSIGNED NOT NULL,
+  note VARCHAR(1024) NOT NULL,
+  commit_sha VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_task_id_version (task_id, version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE wb_task_link (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  task_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  link_type TINYINT UNSIGNED NOT NULL COMMENT '1 快照，2 知识版本',
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '快照或固定知识版本',
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_task_id_link_type_version_id (task_id, link_type, version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE wb_task_request (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  response MEDIUMTEXT NOT NULL COMMENT '同事务保存首次成功响应',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_project_id_actor_id_request_id (project_id, actor_id, request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ 团队知识及固定正文版本 ============
+
+CREATE TABLE wb_knowledge_item (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  term_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  category VARCHAR(80) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  current_version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version BIGINT NOT NULL COMMENT '条目修改或归档递增',
+  indexed_version BIGINT NOT NULL DEFAULT 0 COMMENT '已成功写检索索引的条目版本',
+  archived TINYINT UNSIGNED NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_knowledge_id (knowledge_id),
+  UNIQUE KEY uk_workspace_id_term_key (workspace_id, term_key),
+  KEY idx_workspace_id_knowledge_id (workspace_id, knowledge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE wb_knowledge_version (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version BIGINT NOT NULL,
+  category VARCHAR(80) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  author_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  text MEDIUMTEXT NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_version_id (version_id),
+  UNIQUE KEY uk_knowledge_id_version (knowledge_id, version),
+  KEY idx_knowledge_id_version_id (knowledge_id, version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ 用户级轻量通知（业务事务发件箱） ============
+
+CREATE TABLE wb_notification_outbox (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户分页和 SSE 重连游标',
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  event_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  event_type VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  object_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_event_id_user_id (event_id, user_id),
+  KEY idx_workspace_id_user_id_id (workspace_id, user_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

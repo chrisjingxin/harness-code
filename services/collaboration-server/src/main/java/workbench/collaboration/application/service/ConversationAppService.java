@@ -102,7 +102,7 @@ public class ConversationAppService {
                     long now = System.currentTimeMillis();
                     Conversation conversation = new Conversation(
                             UUID.randomUUID().toString(), workspaceId, projectId, userId,
-                            request.deviceId(), "", request.taskId() == null ? "" : request.taskId(), "idle",
+                            request.deviceId(), "", "", "idle",
                             request.title() != null ? request.title() : "未命名会话",
                             "", "rule", now, 0L, "", now, now);
                     conversations.insert(conversation);
@@ -164,7 +164,7 @@ public class ConversationAppService {
                 .orElseThrow(() -> new ApiProblem(404, "RESOURCE_NOT_FOUND"));
     }
 
-    private ConversationDtos.ConversationSummary summary(Conversation conversation) {
+    ConversationDtos.ConversationSummary summary(Conversation conversation) {
         List<ConversationDtos.ConversationRepositoryItem> refs = conversations
                 .listRepositoryIds(conversation.id()).stream()
                 .map(id -> {

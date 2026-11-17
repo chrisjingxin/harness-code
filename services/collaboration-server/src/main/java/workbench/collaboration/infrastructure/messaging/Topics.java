@@ -17,6 +17,9 @@ public final class Topics {
     /** 全文检索异步索引主题（驱动定稿文档批量异步写入 Elasticsearch） */
     public static final String SEARCH = "wb.search.index";
 
+    /** 唤醒各服务节点的用户级轻量通知流。 */
+    public static final String NOTIFICATIONS = "wb.collab.notifications";
+
     private Topics() {}
 
     /**

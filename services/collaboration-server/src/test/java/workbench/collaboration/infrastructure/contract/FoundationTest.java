@@ -34,7 +34,9 @@ class FoundationTest {
     private static Set<String> compliantTables() {
         return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
                 "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
-                "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository");
+                "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository", "wb_snapshot",
+                "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
+                "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox");
     }
 
     private static Set<String> compliantColumns() {
@@ -52,14 +54,29 @@ class FoundationTest {
                 "wb_conversation.status", "wb_conversation.brief_source", "wb_conversation.brief_updated_at",
                 "wb_conversation.synced_sequence",
                 "wb_local_repo_binding.device_id", "wb_local_repo_binding.repository_id",
-                "wb_conversation_repository.conversation_id", "wb_conversation_repository.repository_id");
+                "wb_conversation_repository.conversation_id", "wb_conversation_repository.repository_id",
+                "wb_snapshot.snapshot_id", "wb_snapshot.project_id", "wb_snapshot.source_conversation_id",
+                "wb_snapshot.source_owner_user_id", "wb_snapshot.source_title", "wb_snapshot.source_synced_sequence",
+                "wb_snapshot.source_synced_at", "wb_snapshot.from_sequence", "wb_snapshot.to_sequence",
+                "wb_snapshot.message_count", "wb_snapshot.text", "wb_snapshot.sha256", "wb_snapshot.storage_uri",
+                "wb_snapshot.created_by_user_id", "wb_snapshot.created_at",
+                "wb_task.task_id", "wb_task.project_id", "wb_task.assignee_id", "wb_task.status", "wb_task.version", "wb_task.conversation_id",
+                "wb_task_transition.task_id", "wb_task_transition.version", "wb_task_transition.actor_id",
+                "wb_task_transition.from_status", "wb_task_transition.to_status", "wb_task_transition.commit_sha",
+                "wb_task_link.task_id", "wb_task_link.link_type", "wb_task_link.version_id", "wb_task_link.knowledge_id",
+                "wb_task_request.project_id", "wb_task_request.actor_id", "wb_task_request.request_id", "wb_task_request.fingerprint", "wb_task_request.response",
+                "wb_knowledge_item.workspace_id", "wb_knowledge_item.knowledge_id", "wb_knowledge_item.term_key",
+                "wb_knowledge_item.current_version_id", "wb_knowledge_item.version", "wb_knowledge_item.indexed_version", "wb_knowledge_item.archived",
+                "wb_knowledge_version.knowledge_id", "wb_knowledge_version.version_id", "wb_knowledge_version.version", "wb_knowledge_version.text",
+                "wb_notification_outbox.workspace_id", "wb_notification_outbox.user_id", "wb_notification_outbox.project_id",
+                "wb_notification_outbox.event_id", "wb_notification_outbox.event_type", "wb_notification_outbox.object_id");
     }
 
     @Test
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("13"));
+        assertTrue(error.getMessage().contains("21"));
     }
 
     @Test

@@ -5,6 +5,11 @@ import workbench.collaboration.interfaces.dto.DeviceDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
 import workbench.collaboration.interfaces.dto.ProjectDtos;
 import workbench.collaboration.interfaces.dto.RepositoryDtos;
+import workbench.collaboration.interfaces.dto.SnapshotDtos;
+import workbench.collaboration.interfaces.dto.TaskDtos;
+import workbench.collaboration.interfaces.dto.KnowledgeDtos;
+import workbench.collaboration.interfaces.dto.BoardDtos;
+import workbench.collaboration.interfaces.dto.NotificationDtos;
 
 import com.networknt.schema.*;
 import tools.jackson.databind.JsonNode;
@@ -208,7 +213,14 @@ public final class Contracts {
                 Map.entry("ConversationDetailResponse", ConversationDtos.ConversationDetailResponse.class),
                 Map.entry("ConversationHistoryResponse", ConversationDtos.ConversationHistoryResponse.class),
                 Map.entry("DeviceSyncRequest", ConversationDtos.DeviceSyncRequest.class),
-                Map.entry("DeviceSyncResponse", ConversationDtos.DeviceSyncResponse.class)
+                Map.entry("DeviceSyncResponse", ConversationDtos.DeviceSyncResponse.class),
+                Map.entry("SnapshotCreateRequest", SnapshotDtos.SnapshotCreateRequest.class),
+                Map.entry("SnapshotResponse", SnapshotDtos.SnapshotResponse.class),
+                Map.entry("TaskCreateRequest", TaskDtos.TaskCreateRequest.class),
+                Map.entry("TaskTransitionRequest", TaskDtos.TaskTransitionRequest.class),
+                Map.entry("KnowledgeCreateRequest", KnowledgeDtos.KnowledgeCreateRequest.class),
+                Map.entry("BoardResponse", BoardDtos.BoardResponse.class),
+                Map.entry("NotificationEvent", NotificationDtos.NotificationEvent.class)
         );
 
         for (JsonNode file : catalog.get("fixtures")) {
