@@ -39,6 +39,7 @@ public final class RouteCatalog {
 
     private static final Pattern ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final Pattern USER_ID = Pattern.compile("[0-9a-f]{32}");
+    private static final Pattern LIMIT = Pattern.compile("[1-9][0-9]{0,2}");
     private static final Pattern SEQUENCE = Pattern.compile("[0-9]{1,19}");
     private static final Map<String, Pattern> NONE = Map.of();
     private static final Map<String, Pattern> REPOSITORY_PAGE = Map.of("status", Pattern.compile("active|archived"));
