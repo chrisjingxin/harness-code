@@ -279,20 +279,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       ref={root}
       onKeyDown={keyDown}
     >
-      {/* 左栏折叠/展开按钮固定于左上角红绿灯旁（非 macOS 在左上角），收起与展开不来回跳动 */}
-      <button
-        ref={leftButton}
-        type="button"
-        className="collaboration-header-toggle"
-        data-active={leftMode === "overlay" ? "true" : "false"}
-        onClick={() => toggle("left")}
-        aria-label="切换导航"
-        aria-expanded={leftMode !== "hidden"}
-        title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
-      >
-        {leftMode !== "hidden" ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
-      </button>
-
       {/* 左侧边栏：通顶布局，直接触达顶部与底部 */}
       <aside
         ref={left}
@@ -395,6 +381,20 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
           </div>
         </div>
       </div>
+
+      {/* 左栏折叠/展开按钮固定于左上角红绿灯旁；DOM 必须位于含 -webkit-app-region: drag 的左侧栏与顶栏之后，否则 Electron 会按 DOM 顺序将按钮区域覆盖为拖动区导致点击失效 */}
+      <button
+        ref={leftButton}
+        type="button"
+        className="collaboration-header-toggle"
+        data-active={leftMode === "overlay" ? "true" : "false"}
+        onClick={() => toggle("left")}
+        aria-label="切换导航"
+        aria-expanded={leftMode !== "hidden"}
+        title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
+      >
+        {leftMode !== "hidden" ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+      </button>
 
       {props.overlays}
 
