@@ -74,8 +74,11 @@ const reviewEntries: ConversationTimelineEntry[] = [
   { kind: "interaction-history", id: "approval-1", title: "与待处理请求同 ID 的历史示例", statusLabel: "历史展示", description: "选择该待处理请求时不重复显示此条。" },
   { kind: "interaction-history", id: "history-1", title: "历史请求", statusLabel: "已处理", description: "这是一条只读的历史展示。" },
   { kind: "message", id: "user-2", role: "user", author: { id: "bob", displayName: "用户乙" }, createdAtMs: exampleTime + 180_000, text: "我接着查看。请保留重要的上下文和原来的顺序。" },
+  { kind: "reasoning", id: "reasoning-done", text: "已结束的思考示例：先确认了阅读位置归属，再核对上一条结论的来源，最后决定把整理动作拆成查询、修改、写回三步。", active: false },
   { kind: "message", id: "assistant-2", role: "assistant", createdAtMs: exampleTime + 240_000, text: "好的。各成员可以看到相同的讨论，每个人的阅读位置由自己保留。" },
+  { kind: "tool", id: "tool-2a", label: "查询记录", summary: "docs/讨论/示例记录.md", status: "completed", tone: "read", detail: { argumentsText: '{"path":"docs/讨论/示例记录.md"}', outputText: "已读取 3 条固定示例记录。", copyText: "已读取 3 条固定示例记录。" } },
   { kind: "tool", id: "tool-2", label: "整理记录", summary: "示例输出", status: "failed", tone: "write", detail: { argumentsText: '{"operation":"example"}', outputText: "这是固定的失败状态示例，不执行实际操作。", copyText: "这是固定的失败状态示例，不执行实际操作。" } },
+  { kind: "tool", id: "tool-2b", label: "刷新摘要缓存", status: "completed", tone: "neutral" },
   ...Array.from({ length: 7 }, (_, index): ConversationTimelineEntry => ({
     kind: "message",
     id: `sample-${index}`,
@@ -84,7 +87,9 @@ const reviewEntries: ConversationTimelineEntry[] = [
     createdAtMs: exampleTime + (index + 5) * 60_000,
     text: index % 2 === 0 ? `示例讨论 ${index + 1}：请继续保留阅读位置。` : `示例回复 ${index + 1}：这是预先准备的文本，不连接任何模型。`,
   })),
-  { kind: "reasoning", id: "reasoning-1", text: "正在展示一条固定的进行中状态。", active: true },
+  { kind: "reasoning", id: "reasoning-1", text: "正在核对最后几条示例回复的顺序，接着会汇总成一条说明。", active: true },
+  { kind: "tool", id: "tool-run-1", label: "检索示例上下文", summary: "docs/讨论/汇总.md", status: "running", tone: "read" },
+  { kind: "tool", id: "tool-run-2", label: "生成接续摘要", status: "running", tone: "write", detail: { argumentsText: '{"target":"summary"}', outputText: "已生成一半内容（固定示例）。", copyText: "已生成一半内容（固定示例）。" } },
   { kind: "message", id: "streaming-1", role: "assistant", text: "这里可以观察末尾的流式光标。", streaming: true },
 ]
 const noteEntries: ConversationTimelineEntry[] = [

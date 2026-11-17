@@ -9,6 +9,7 @@ import { Writable } from "node:stream"
 import { ClientSideConnection, ndJsonStream, type RequestPermissionRequest, type RequestPermissionResponse, type SessionNotification } from "@agentclientprotocol/sdk"
 import { setTimeout as delay } from "node:timers/promises"
 import { agentStdout } from "./agent-stdio.js"
+import { toLocalAcpTool } from "./tool-update.js"
 import type { NativeBinding } from "./native-binding.js"
 import type { AgentCommand, LocalAcpAvailability, LocalAcpEvent, LocalAcpSendResult, LocalAcpSession } from "./index.js"
 
@@ -281,9 +282,13 @@ export class BoundSession implements LocalAcpSession {
   private onUpdate(agent: Agent, { sessionId, update }: SessionNotification): void {
     if (!this.#active?.prompting || this.#agent !== agent || agent.sessionId !== sessionId || agent.disconnected) return
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
-      this.emit(this.#active, { type: "tool", tool: {
-        id: update.toolCallId, title: update.title ?? undefined, status: update.status ?? undefined,
-      } })
+      this.emit(this.#active, { type: "tool", tool: toLocalAcpTool(update) })
+      return
+    }
+    if (update.sessionUpdate === "agent_thought_chunk") {
+      if (update.content.type === "text" && update.content.text) {
+        this.emit(this.#active, { type: "thought-delta", text: update.content.text })
+      }
       return
     }
     if (update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text" || !update.content.text) return

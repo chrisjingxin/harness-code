@@ -210,6 +210,11 @@ export function createLocalExecutionIpc(
               publish(login, { ...source, kind: "text", text: event.text })
               return
             }
+            if (event.type === "thought-delta") {
+              // 思考片段只走时间线展示，不进入 turn.reply，避免随定稿上传。
+              publish(login, { ...source, kind: "thought", text: event.text })
+              return
+            }
             if (event.type === "tool") {
               publish(login, { ...source, kind: "tool", tool: event.tool })
               return

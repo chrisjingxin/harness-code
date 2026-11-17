@@ -31,11 +31,22 @@ export type LocalAcpPermission = {
   readonly options: readonly { readonly id: string; readonly label: string; readonly allows: boolean }[]
 }
 
-/** 标准 ACP 工具通知。工具仅展示来自 Agent 的标题和状态。 */
+/** 工具携带的一处文件差异；文本可能按长度截断。 */
+export type LocalAcpToolDiff = {
+  readonly path: string
+  readonly oldText?: string
+  readonly newText: string
+}
+
+/** 标准 ACP 工具通知的显示投影：标题/状态之外，携带已整理的参数、输出与差异文本。 */
 export type LocalAcpTool = {
   readonly id: string
   readonly title?: string
   readonly status?: "pending" | "in_progress" | "completed" | "failed"
+  readonly kind?: "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other"
+  readonly input?: string
+  readonly output?: string
+  readonly diffs?: readonly LocalAcpToolDiff[]
 }
 
 type Failure = {
@@ -51,6 +62,7 @@ export type LocalAcpEvent = {
   readonly sequence: number
 } & (
   | { readonly type: "text-delta"; readonly text: string; readonly messageId?: string }
+  | { readonly type: "thought-delta"; readonly text: string }
   | { readonly type: "tool"; readonly tool: LocalAcpTool }
   | { readonly type: "permission"; readonly request: LocalAcpPermission | null }
   | { readonly type: "completed"; readonly shareable: boolean }

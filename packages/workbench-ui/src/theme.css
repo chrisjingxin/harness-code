@@ -1,5 +1,6 @@
 /* 公共主题入口：页面装配时加载一次，区域组件不重复定义全局主题。 */
 @import "./theme/colors.css";
+@import "./theme/accent.css";
 @import "./theme/base.css";
 @import "./common/common.css";
 @import "./rendering/rendering.css";

@@ -126,7 +126,8 @@ export function useLocalExecution(
       screen.timeline = applyLocalExecutionUpdate(screen.timeline, notice.kind === "text"
         ? { kind: "assistant-text", turnId: notice.turnId, text: notice.text }
         : notice.kind === "tool" ? notice
-          : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
+          : notice.kind === "thought" ? { kind: "thought", turnId: notice.turnId, text: notice.text }
+            : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
       if (notice.kind === "finished") {
         screen.flight = undefined
         screen.terminal = notice

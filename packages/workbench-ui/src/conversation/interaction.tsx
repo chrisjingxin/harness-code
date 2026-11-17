@@ -2,6 +2,7 @@
  * 通用待处理交互：展示调用方提供的审批选项、问题和扩展节点。
  * 选择与反馈只写入当前 scope 的个人草稿，提交只上报意图，不推断真实处理结果。
  */
+import { AlertTriangle } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import type { ReactElement } from "react"
 import type { ConversationActions, ConversationInteractionAnswer, ConversationInteractionView, ConversationPersonalState, ConversationScope } from "./types.js"
@@ -45,7 +46,7 @@ export function ConversationInteraction({ scope, interaction, personal, actions,
     <section className="wb-interaction-dock" aria-label="待处理请求">
       <div className="wb-interaction-form">
         <header className="wb-interaction-heading">
-          <h3>{interaction.title}</h3>
+          <h3><AlertTriangle aria-hidden="true" className="wb-interaction-heading-icon" />{interaction.title}</h3>
           {deadline !== undefined ? <span className={expired ? "wb-interaction-deadline is-expired" : "wb-interaction-deadline"}>{expired ? "已过期" : `剩余 ${formatRemaining(deadline - now)}`}</span> : null}
         </header>
         {interaction.description ? <p className="wb-interaction-description">{interaction.description}</p> : null}

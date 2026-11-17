@@ -40,7 +40,7 @@ export function LocalExecutionFixture({ scope }: { readonly scope: ConversationS
       <header className="session-heading">
         <div>
           <h1>{localExecutionFixtureTitle}</h1>
-          <p className="session-subtitle">模拟显示事件。输入「拒绝测试」可验证拒绝后保留草稿。</p>
+          <p className="session-subtitle">模拟显示事件，发送后依次出现思考、工具组与回答，约 25 秒后结束。输入「拒绝测试」可验证拒绝后保留草稿。</p>
         </div>
         <label>
           <input type="checkbox" checked={available} onChange={event => setAvailable(event.currentTarget.checked)} />
@@ -60,13 +60,26 @@ export function LocalExecutionFixture({ scope }: { readonly scope: ConversationS
               if (text.trim() === "拒绝测试") return { status: "rejected", message: "夹具：发送未被受理，草稿已保留" }
               const turnId = crypto.randomUUID()
               updateExecution({ kind: "accepted", turnId, text, author: { id: scope.accountId, displayName: "预览用户" } })
+              const push = (delay: number, update: Parameters<typeof updateExecution>[0]) =>
+                window.setTimeout(() => updateExecution(update), delay)
               pending.current = [
-                window.setTimeout(() => updateExecution({ kind: "assistant-text", turnId, text: "这是第一段回复。" }), 300),
-                window.setTimeout(() => updateExecution({ kind: "assistant-text", turnId, text: "这是第二段回复。" }), 900),
+                push(300, { kind: "thought", turnId, text: "先检索相关文件，再决定改动范围……" }),
+                push(500, { kind: "tool", turnId, tool: { id: "fixture-search", title: "检索上下文", kind: "search", status: "in_progress", input: '{\n  "query": "同步状态推导"\n}' } }),
+                push(900, { kind: "tool", turnId, tool: { id: "fixture-search", status: "completed", output: "找到 3 个匹配：session-model.ts、local-execution-view.ts、timeline-model.ts" } }),
+                push(1100, { kind: "tool", turnId, tool: { id: "fixture-edit", title: "修改状态推导", kind: "edit", status: "in_progress" } }),
+                push(1300, {
+                  kind: "tool", turnId,
+                  tool: { id: "fixture-edit", diffs: [{ path: "src/session-model.ts", oldText: '  return "idle"', newText: '  return "syncing"' }] },
+                }),
+                push(1500, { kind: "tool", turnId, tool: { id: "fixture-cache", title: "刷新缓存", status: "in_progress" } }),
+                push(1600, { kind: "thought", turnId, text: "差异已写入，等待修改收尾。" }),
+                push(1800, { kind: "tool", turnId, tool: { id: "fixture-cache", status: "completed" } }),
+                push(1900, { kind: "assistant-text", turnId, text: "这是第一段回复。" }),
+                push(2200, { kind: "assistant-text", turnId, text: "这是第二段回复。" }),
                 window.setTimeout(() => {
                   updateExecution({ kind: "finished", turnId })
                   pending.current = []
-                }, 1500),
+                }, 25_000),
               ]
               return { status: "accepted" }
             },

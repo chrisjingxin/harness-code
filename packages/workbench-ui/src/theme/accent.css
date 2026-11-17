@@ -1,0 +1,46 @@
+/* 强调色唯一色源：每种强调色在浅色、深色下只定义 --accent / --accent-hover / --accent-fg 三个值。
+   未设置 data-accent 时按紫罗兰处理；--action、--accent-tint 等衍生令牌由 colors.css 统一计算。 */
+:root,
+:root[data-accent="violet"] {
+  --accent: #5b63d3;
+  --accent-hover: #4d55c4;
+  --accent-fg: #ffffff;
+}
+:root[data-accent="indigo"] {
+  --accent: #2b59e8;
+  --accent-hover: #2149c7;
+  --accent-fg: #ffffff;
+}
+:root[data-accent="teal"] {
+  --accent: #09695a;
+  --accent-hover: #075448;
+  --accent-fg: #ffffff;
+}
+:root[data-accent="ink"] {
+  --accent: #171717;
+  --accent-hover: #2d2d30;
+  --accent-fg: #ffffff;
+}
+
+/* 深色下的同名单独配色；未设置 data-accent 时仍回落紫罗兰，故显式列出 :not([data-accent])。 */
+:root[data-theme="dark"]:not([data-accent]),
+:root[data-theme="dark"][data-accent="violet"] {
+  --accent: #8c93f8;
+  --accent-hover: #a0a6fa;
+  --accent-fg: #11121c;
+}
+:root[data-theme="dark"][data-accent="indigo"] {
+  --accent: #82a0ff;
+  --accent-hover: #9ab3ff;
+  --accent-fg: #0b1124;
+}
+:root[data-theme="dark"][data-accent="teal"] {
+  --accent: #46c7ae;
+  --accent-hover: #62d4be;
+  --accent-fg: #04201c;
+}
+:root[data-theme="dark"][data-accent="ink"] {
+  --accent: #ededf0;
+  --accent-hover: #ffffff;
+  --accent-fg: #101013;
+}

@@ -1,5 +1,4 @@
-/* 工作台唯一公共色源：浅/深色中性底色、冷紫强调与细环阴影令牌；浅深色由根节点决定。 */
-:root { --brand: #5b63d3; }
+/* 工作台唯一公共色源：浅/深色中性底色与细环阴影令牌；浅深色由根节点决定，强调色值统一由 accent.css 提供。 */
 
 /* ---------- Semantic token：唯一 light/dark 映射 ---------- */
 :root:not([data-theme]),
@@ -20,17 +19,15 @@
   --text-soft: #3f3f46;
   --muted: #55555d;
   --subtle: #5e5e66;
-  --accent: var(--brand);
-  --accent-hover: #4d55c4;
-  --accent-text: #ffffff;
-  --accent-tint: rgba(91, 99, 211, .06);
+  --accent-text: var(--accent-fg);
+  --accent-tint: color-mix(in srgb, var(--accent) 6%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 6%, var(--surface));
   --accent-soft-2: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --accent-border: color-mix(in srgb, var(--accent) 26%, var(--surface));
   --accent-border-strong: color-mix(in srgb, var(--accent) 48%, var(--surface));
-  --action: var(--brand);
+  --action: var(--accent);
   --action-hover: var(--accent-hover);
-  --action-text: #ffffff;
+  --action-text: var(--accent-fg);
   --success: #15803d;
   --success-fg: #166534;
   --success-tint: rgba(21, 128, 61, .10);
@@ -110,9 +107,7 @@
   --toast-bg: #171717;
   --toast-fg: #ffffff;
   --scrim: rgba(16, 16, 19, .36);
-  --accent-fg: #ffffff;
   --sidebar-search-bg: var(--surface);
-  --message-user-bg: #f2f2f5;
   --thread-selected-bg: var(--selected);
   --overlay-scrim: rgba(16, 16, 19, .36);
 }
@@ -134,17 +129,15 @@
   --text-soft: #b4b4bc;
   --muted: #9898a2;
   --subtle: #9797a2;
-  --accent: #8c93f8;
-  --accent-hover: #a0a6fa;
-  --accent-text: #11121c;
-  --accent-tint: rgba(140, 147, 248, .12);
+  --accent-text: var(--accent-fg);
+  --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 8%, var(--surface));
   --accent-soft-2: color-mix(in srgb, var(--accent) 18%, var(--surface));
   --accent-border: color-mix(in srgb, var(--accent) 28%, var(--surface));
   --accent-border-strong: color-mix(in srgb, var(--accent) 56%, var(--surface));
-  --action: #8c93f8;
-  --action-hover: #a0a6fa;
-  --action-text: #11121c;
+  --action: var(--accent);
+  --action-hover: var(--accent-hover);
+  --action-text: var(--accent-fg);
   --success: #4ade80;
   --success-fg: #86efac;
   --success-tint: rgba(74, 222, 128, .14);
@@ -223,9 +216,7 @@
   --toast-bg: #ededf0;
   --toast-fg: #101013;
   --scrim: rgba(0, 0, 0, .60);
-  --accent-fg: #11121c;
   --sidebar-search-bg: var(--surface);
-  --message-user-bg: #1c1c22;
   --thread-selected-bg: var(--selected);
   --overlay-scrim: rgba(0, 0, 0, .60);
 }

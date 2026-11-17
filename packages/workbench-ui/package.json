@@ -20,6 +20,10 @@
     "./native-theme": {
       "types": "./dist/native-theme.d.ts",
       "import": "./dist/native-theme.js"
+    },
+    "./timeline-model": {
+      "types": "./dist/conversation/timeline-model.d.ts",
+      "import": "./dist/conversation/timeline-model.js"
     }
   },
   "dependencies": {

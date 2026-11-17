@@ -1,13 +1,15 @@
 /**
- * 普通工具文本卡：保留旧时间线的折叠行、输出与参数结构。
+ * 普通工具文本卡：紧凑工作日志行，参数、输出与差异折叠进详情区。
  *
  * 上游先给出显示文案和原文；这里不按工具名解析 Harness 载荷，也不执行工具。
+ * 没有任何可展开内容的调用渲染为不可点的静态行，不再出现空详情。
  */
-import { AlertTriangle, Check, ChevronDown, Copy, FilePenLine, FileText, Loader2, Wrench } from "lucide-react"
+import { Check, ChevronRight, Copy, FilePenLine, FileText, Loader2, Wrench } from "lucide-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 
 import type { RenderingActions } from "../rendering/types.js"
+import { Disclosure } from "./disclosure.js"
 import { ConversationToolBlocks, countToolBlockLines, usableToolBlocks } from "./tool-blocks.js"
 import type { ConversationTimelineEntry } from "./types.js"
 
@@ -16,6 +18,18 @@ type CopyStatus = "idle" | "copying" | "copied" | "error"
 
 /** 原 Web 以 24 行作为展示“展开全部”的边界。 */
 const COLLAPSE_LINES = 24
+
+/** 摘要像路径时（含 /、无空白）拆成可省略的目录与完整显示的文件名。 */
+function PathSummary({ text }: { text: string }): ReactNode {
+  if (!text.includes("/") || /\s/.test(text)) return <span className="wb-conversation-tool-summary">{text}</span>
+  const cut = text.lastIndexOf("/")
+  return (
+    <span className="wb-conversation-tool-summary">
+      <span className="wb-conversation-tool-summary-dir">{text.slice(0, cut + 1)}</span>
+      <span className="wb-conversation-tool-summary-name">{text.slice(cut + 1)}</span>
+    </span>
+  )
+}
 
 /** 单个工具的展开选择由对话视图持有者按会话保存。 */
 export function ConversationToolCard({
@@ -41,55 +55,67 @@ export function ConversationToolCard({
   const hasOutput = blocks.length > 0 || (output !== undefined && output.length > 0)
   const hasArguments = argumentsText !== undefined && argumentsText.length > 0
   const hasExtension = detail?.extension != null
+  const expandable = hasOutput || hasArguments || hasExtension
   const statusLabel = tool.status === "running" ? "运行中" : tool.status === "failed" ? "失败" : "已完成"
   const Icon = tool.tone === "read" ? FileText : tool.tone === "write" ? FilePenLine : Wrench
+  const failed = tool.status === "failed"
+
+  const head = (
+    <>
+      <Icon aria-hidden="true" focusable="false" className="wb-conversation-tool-icon" data-failed={failed || undefined} />
+      <span className="wb-conversation-tool-label" title={tool.originalName ?? tool.label}>{tool.label}</span>
+      {tool.summary ? <PathSummary text={tool.summary} /> : null}
+      <span className="wb-conversation-tool-status" role="img" aria-label={statusLabel} title={statusLabel}>
+        {tool.status === "running" ? <Loader2 aria-hidden="true" className="wb-conversation-spin" />
+          : failed ? <span className="wb-conversation-tool-failed-badge">失败</span>
+            : null}
+      </span>
+      {expandable && onToggle ? <ChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} /> : null}
+    </>
+  )
 
   return (
     <div className={`wb-conversation-tool-row wb-conversation-tool-${tool.status}`} data-tone={tool.tone}>
-      <button
-        type="button"
-        className="wb-conversation-tool-header"
-        aria-expanded={expanded}
-        aria-controls={expanded ? detailsId : undefined}
-        disabled={!onToggle}
-        onClick={onToggle}
-      >
-        <Icon aria-hidden="true" focusable="false" className="wb-conversation-tool-icon" />
-        <span className="wb-conversation-tool-label" title={tool.originalName ?? tool.label}>{tool.label}</span>
-        {tool.summary ? <span className="wb-conversation-tool-summary">{tool.summary}</span> : null}
-        <span className={`wb-conversation-tool-status wb-conversation-status-${tool.status}`} role="img" aria-label={statusLabel} title={statusLabel}>
-          {tool.status === "running" ? <Loader2 aria-hidden="true" className="wb-conversation-spin" />
-            : tool.status === "failed" ? <><AlertTriangle aria-hidden="true" /><span>{statusLabel}</span></>
-              : <Check aria-hidden="true" />}
-        </span>
-        <ChevronDown aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
-      </button>
-      {expanded ? (
-        <div id={detailsId} className="wb-conversation-tool-details">
-          {hasOutput ? (
-            <ConversationToolOutput
-              text={output ?? ""}
-              blocks={blocks}
-              copyText={detail?.copyText}
-              expanded={outputExpanded}
-              onToggle={onToggleOutput}
-              rendering={rendering}
-            />
-          ) : null}
-          {hasExtension ? <div className="wb-conversation-tool-extension">{detail?.extension}</div> : null}
-          {argumentsText !== undefined && argumentsText.length > 0 ? (
-            <details className="wb-conversation-detail-card wb-conversation-arguments">
-              <summary className="wb-conversation-detail-header wb-conversation-arguments-summary">
-                <span className="wb-conversation-detail-title">参数</span>
-                <ChevronDown aria-hidden="true" className="wb-conversation-detail-chevron" />
-              </summary>
-              <div className="wb-conversation-detail-body" data-clamped="false">
-                <pre className="wb-conversation-detail-pre">{prettifyObject(argumentsText) ?? argumentsText}</pre>
-              </div>
-            </details>
-          ) : null}
-          {!hasOutput && !hasArguments && !hasExtension ? <p className="wb-conversation-tool-empty">该调用尚无可显示内容。</p> : null}
-        </div>
+      {expandable && onToggle ? (
+        <button
+          type="button"
+          className="wb-conversation-tool-header"
+          aria-expanded={expanded}
+          aria-controls={expanded ? detailsId : undefined}
+          onClick={onToggle}
+        >
+          {head}
+        </button>
+      ) : (
+        <div className="wb-conversation-tool-header" aria-label={`${tool.label} · ${statusLabel}`}>{head}</div>
+      )}
+      {expandable ? (
+        <Disclosure open={expanded} className="wb-conversation-tool-details-disclosure">
+          <div id={detailsId} className="wb-conversation-tool-details">
+            {hasOutput ? (
+              <ConversationToolOutput
+                text={output ?? ""}
+                blocks={blocks}
+                copyText={detail?.copyText}
+                expanded={outputExpanded}
+                onToggle={onToggleOutput}
+                rendering={rendering}
+              />
+            ) : null}
+            {hasExtension ? <div className="wb-conversation-tool-extension">{detail?.extension}</div> : null}
+            {hasArguments ? (
+              <details className="wb-conversation-detail-card wb-conversation-arguments">
+                <summary className="wb-conversation-detail-header wb-conversation-arguments-summary">
+                  <span className="wb-conversation-detail-title">参数</span>
+                  <ChevronRight aria-hidden="true" className="wb-conversation-detail-chevron" />
+                </summary>
+                <div className="wb-conversation-detail-body" data-clamped="false">
+                  <pre className="wb-conversation-detail-pre">{prettifyObject(argumentsText) ?? argumentsText}</pre>
+                </div>
+              </details>
+            ) : null}
+          </div>
+        </Disclosure>
       ) : null}
     </div>
   )

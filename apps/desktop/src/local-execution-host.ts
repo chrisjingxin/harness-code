@@ -12,6 +12,10 @@ export type LocalExecutionTool = {
   readonly id: string
   readonly title?: string
   readonly status?: "pending" | "in_progress" | "completed" | "failed"
+  readonly kind?: "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other"
+  readonly input?: string
+  readonly output?: string
+  readonly diffs?: readonly { readonly path: string; readonly oldText?: string; readonly newText: string }[]
 }
 export type LocalExecutionPermission = {
   readonly id: string
@@ -37,6 +41,7 @@ export type LocalExecutionNotice = LocalExecutionUploadNotice | ({
 } & (
   | { readonly kind: "accepted"; readonly requestId: string; readonly text: string }
   | { readonly kind: "text"; readonly sequence: number; readonly text: string }
+  | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
   | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
   | { readonly kind: "permission"; readonly sequence: number; readonly request: LocalExecutionPermission | null }
   | { readonly kind: "finished"; readonly sequence: number; readonly failure?: string; readonly availability: LocalExecutionAvailability }

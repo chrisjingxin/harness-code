@@ -31,6 +31,7 @@ interface TimelineScrollResult {
   readonly anchorUnavailable: boolean
   readonly onScroll: () => void
   readonly scrollToBottom: () => void
+  readonly scrollToEntry: (entryId: string) => void
 }
 
 /** 实例由 scope 隔离；调用方保存回调中的锚点，供切换会话或重新挂载时恢复。 */
@@ -47,6 +48,8 @@ export function useTimelineScroll(input: TimelineScrollInput): TimelineScrollRes
   const suppliedSeenRef = useRef(input.saved.seenContentRevision)
   const visibleIdsRef = useRef(input.entryIds)
   const programmedTopRef = useRef<number | null>(null)
+  // 平滑跳转途中的持续 scroll 事件不能覆盖用户的跟随选择或反复回写锚点。
+  const jumpTargetRef = useRef<number | null>(null)
   const [showBottomButton, setShowBottomButton] = useState(!input.saved.following)
   const [hasNewOutput, setHasNewOutput] = useState(false)
   const [anchorUnavailable, setAnchorUnavailable] = useState(false)
@@ -137,6 +140,11 @@ export function useTimelineScroll(input: TimelineScrollInput): TimelineScrollRes
     const programmedTop = programmedTopRef.current
     programmedTopRef.current = null
     if (programmedTop !== null && Math.abs(programmedTop - scroller.scrollTop) < 1) return
+    const jumpTop = jumpTargetRef.current
+    if (jumpTop !== null) {
+      if (Math.abs(jumpTop - scroller.scrollTop) >= 1) return
+      jumpTargetRef.current = null
+    }
     const following = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= BOTTOM_THRESHOLD_PX
     followingRef.current = following
     setShowBottomButton(!following)
@@ -159,7 +167,30 @@ export function useTimelineScroll(input: TimelineScrollInput): TimelineScrollRes
     publish(scroller, true)
   }, [publish, setProgrammedTop])
 
-  return { scrollerRef, showBottomButton, hasNewOutput, anchorUnavailable, onScroll, scrollToBottom }
+  // 锚点跳转视同一次用户上滚：退出贴底跟随，目标条目落在视口约四分之一处。
+  const scrollToEntry = useCallback((entryId: string) => {
+    const scroller = scrollerRef.current
+    if (!scroller || !visibleRef.current) return
+    const element = scroller.querySelector<HTMLElement>(`[data-conversation-entry-id="${CSS.escape(entryId)}"]`)
+    if (!element) return
+    const viewportTop = scroller.getBoundingClientRect().top + scroller.clientTop
+    const top = scroller.scrollTop + element.getBoundingClientRect().top - viewportTop - scroller.clientHeight / 4
+    // 目标须夹在可滚动范围内，否则 scrollTop 永远到不了目标，后续滚动会被一直忽略。
+    const target = Math.min(Math.max(0, top), Math.max(0, scroller.scrollHeight - scroller.clientHeight))
+    jumpTargetRef.current = target
+    // 用户中途打断平滑滚动时同样到不了目标，超时后恢复正常的滚动判定。
+    window.setTimeout(() => { if (jumpTargetRef.current === target) jumpTargetRef.current = null }, 1000)
+    const instant = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    scroller.scrollTo({ top: target, behavior: instant ? "auto" : "smooth" })
+    followingRef.current = false
+    setShowBottomButton(true)
+    setAnchorUnavailable(false)
+    publish(scroller, false)
+    element.setAttribute("data-anchor-flash", "")
+    window.setTimeout(() => element.removeAttribute("data-anchor-flash"), 1400)
+  }, [publish])
+
+  return { scrollerRef, showBottomButton, hasNewOutput, anchorUnavailable, onScroll, scrollToBottom, scrollToEntry }
 }
 
 /** 选择视口内最上方的实际条目，避免把像素偏移误当成另一会话的位置。 */

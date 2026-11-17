@@ -18,8 +18,8 @@ import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import type { ProjectUpdatesHost } from "../project-updates-host.js"
-import { IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
-import type { NavigationWorkspaceItem } from "@workbench/ui"
+import { ACCENT_OPTIONS, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
+import type { AccentId, NavigationWorkspaceItem } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { ProjectPageProviders } from "./features/project-navigation/index.js"
 import { createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
@@ -427,13 +427,6 @@ function WorkspaceProjectWorkbench(props: {
   </>
 }
 
-const ACCENT_OPTIONS = [
-  { id: "violet", label: "紫罗兰", color: "#5b63d3" },
-  { id: "indigo", label: "靛蓝", color: "#2b59e8" },
-  { id: "teal", label: "青碧", color: "#09695a" },
-  { id: "ink", label: "墨黑", color: "#171717" },
-] as const
-type AccentOption = (typeof ACCENT_OPTIONS)[number]["id"]
 type DensityOption = "compact" | "standard" | "wide"
 
 const readStoredPref = <T extends string>(key: string, valid: readonly T[], fallback: T): T => {
@@ -452,7 +445,7 @@ const writeStoredPref = (key: string, value: string) => {
 /** 宿主回传实际颜色和缩放；读取失败时可继续使用当前窗口。 */
 function useWindowPreferences(host: DesktopHost) {
   const [state, setState] = useState<WindowState>({ themeMode: "system", colorScheme: "light", zoomPercent: 100 })
-  const [accent, setAccentState] = useState<AccentOption>(() => readStoredPref("wb.ui.accent", ["violet", "indigo", "teal", "ink"], "violet"))
+  const [accent, setAccentState] = useState<AccentId>(() => readStoredPref("wb.ui.accent", ACCENT_OPTIONS.map(option => option.id), DEFAULT_ACCENT))
   const [density, setDensityState] = useState<DensityOption>(() => readStoredPref("wb.ui.density", ["compact", "standard", "wide"], "standard"))
   const [error, setError] = useState("")
   const revision = useRef(0)
@@ -488,7 +481,7 @@ function useWindowPreferences(host: DesktopHost) {
     error,
     setThemeMode: (mode: ThemeMode) => update(() => host.setThemeMode(mode)),
     toggleTheme: () => update(() => host.setThemeMode(state.colorScheme === "dark" ? "light" : "dark")),
-    setAccent: (next: AccentOption) => { setAccentState(next); writeStoredPref("wb.ui.accent", next) },
+    setAccent: (next: AccentId) => { setAccentState(next); writeStoredPref("wb.ui.accent", next) },
     setDensity: (next: DensityOption) => { setDensityState(next); writeStoredPref("wb.ui.density", next) },
     adjustZoom: (action: ZoomAction) => update(() => host.adjustZoom(action)),
   }
@@ -543,7 +536,7 @@ function WindowPreferences({ state, accent, density, error, setThemeMode, setAcc
             className={`swatch${accent === opt.id ? " is-on" : ""}`}
             onClick={() => setAccent(opt.id)}
           >
-            <span className="swatch-chip" style={{ background: opt.color }} aria-hidden="true" />
+            <span className="swatch-chip" style={{ background: opt.swatch[state.colorScheme] }} aria-hidden="true" />
             <span>{opt.label}</span>
           </button>
         ))}
