@@ -1,7 +1,7 @@
 /**
  * 受控输入区：复用旧 Web 的聊天输入、上弹菜单、文件提及和发送/停止布局。
  *
- * 草稿及身份由调用方保存；候选只来自调用方的原设备/项目查询，选择不会读取文件。
+ * 草稿及身份由调用方保存。文件沿用原目录查询；项目会话只上报选择，由装配方取材和确认。
  * 输入或光标变化 → 匹配 @ token → 绑定 scope/目标/修订发请求 → 仅接收当前请求结果。
  */
 import { AlertTriangle, ChevronDown, Send, X } from "lucide-react"
@@ -18,12 +18,23 @@ import type {
   ConversationFileCandidateResult,
   ConversationMenuItemView,
   ConversationScope,
+  ConversationCollaborationCandidate,
+  ConversationCollaborationCandidateResult,
   ConversationTimelineActivity,
 } from "./types.js"
 
 type BrowseState = { targetKey: string; tokenStart: number; baseQuery: string; directory: string }
-type CandidateState = { key: string; loading: boolean; result?: ConversationFileCandidateResult }
+type CandidateState<T> = { key: string; result?: T }
+type MentionCandidate = ConversationFileCandidate | ConversationCollaborationCandidate
 type Control = ConversationComposerView["controls"][number]
+
+function candidateKey(item: MentionCandidate): string {
+  return `${item.kind}:${"relativePath" in item ? item.relativePath : item.id}`
+}
+
+const collaborationLabels: Record<ConversationCollaborationCandidate["kind"], string> = {
+  conversation: "项目会话", member: "项目成员", task: "项目任务", knowledge: "团队知识",
+}
 
 interface ComposerProps {
   readonly scope: ConversationScope
@@ -51,13 +62,16 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [browse, setBrowse] = useState<BrowseState | null>(null)
-  const [candidateState, setCandidateState] = useState<CandidateState | null>(null)
-  const [selected, setSelected] = useState(0)
+  const [fileState, setFileState] = useState<CandidateState<ConversationFileCandidateResult> | null>(null)
+  const [collaborationState, setCollaborationState] = useState<CandidateState<ConversationCollaborationCandidateResult> | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [windowStart, setWindowStart] = useState(0)
   const [hint, setHint] = useState("")
   const requestSequence = useRef(0)
-  const requestCallback = useRef(actions.onRequestFileCandidates)
-  requestCallback.current = actions.onRequestFileCandidates
+  const requestFiles = useRef(actions.onRequestFileCandidates)
+  requestFiles.current = actions.onRequestFileCandidates
+  const requestCollaboration = useRef(actions.onRequestCollaborationCandidates)
+  requestCollaboration.current = actions.onRequestCollaborationCandidates
 
   const token = draft.selectionStart === draft.selectionEnd ? extractMentionToken(draft.text, draft.selectionStart) : null
   const target = model.projectTarget
@@ -66,15 +80,26 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const validBrowse = token && browse && browse.targetKey === targetKey && browse.tokenStart === token.start && token.query.startsWith(browse.baseQuery) ? browse : null
   const directory = validBrowse?.directory ?? ""
   const query = token ? token.query.slice(validBrowse?.baseQuery.length ?? 0) : ""
+  const tokenText = token ? draft.text.slice(token.start, token.end) : ""
+  const showCollaboration = Boolean(target && !directory && actions.onRequestCollaborationCandidates && actions.onSelectCollaborationCandidate)
   const mentionVisible = Boolean(visible && !commandOpen && token && dismissed !== tokenKey && actions.onPersonalChange)
-  const requestKey = mentionVisible && token ? JSON.stringify([targetKey, draft.revision, draft.selectionStart, draft.selectionEnd, token.start, token.end, query, directory]) : ""
+  const requestKey = mentionVisible && token
+    ? JSON.stringify([targetKey, draft.revision, token.start, token.end, tokenText, query, directory, showCollaboration, Boolean(actions.onRequestFileCandidates)])
+    : ""
   const currentRequest = useRef(requestKey)
   currentRequest.current = requestKey
   const matchedCommands = filterCommands(model.commands, draft.text)
-  const candidateResult = candidateState?.key === requestKey ? candidateState : null
-  const candidates = candidateResult?.result?.status === "ready" ? candidateResult.result.items.slice(0, 1000) : []
-  const candidateIndex = clamp(selected, candidates.length)
+  const fileResult = fileState?.key === requestKey ? fileState.result : undefined
+  const collaborationResult = showCollaboration && collaborationState?.key === requestKey ? collaborationState.result : undefined
+  const files = fileResult?.status === "ready" ? fileResult.items.slice(0, 1000) : []
+  const collaborationItems = collaborationResult?.status === "ready" ? collaborationResult.items.slice(0, 1000) : []
+  const candidates = [...collaborationItems, ...files]
+  // 一组结果比另一组更早返回时，仍保留用户已选中的条目。
+  const candidateIndex = Math.max(0, candidates.findIndex(item => candidateKey(item) === selected))
   const candidateWindow = mentionWindow(candidateIndex, windowStart, candidates.length)
+  const firstVisibleFile = Math.max(0, candidateWindow.start - collaborationItems.length)
+  const lastVisibleFile = Math.max(0, candidateWindow.end - collaborationItems.length)
+  const candidateTotal = fileResult?.total !== undefined ? collaborationItems.length + fileResult.total : (showCollaboration ? candidates.length : "?")
   const canEdit = Boolean(actions.onPersonalChange)
   const hasContent = draft.text.trim().length > 0 || draft.referenceIds.length > 0 || draft.attachmentIds.length > 0
   const showSend = model.primaryActions === "send" || model.primaryActions === "both"
@@ -83,41 +108,52 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const invalidateCandidates = () => {
     requestSequence.current += 1
-    setCandidateState(null)
+    setFileState(null)
+    setCollaborationState(null)
   }
 
   useEffect(() => {
     if (!requestKey || !token) return
     const requestId = ++requestSequence.current
     let active = true
-    setSelected(0)
+    setSelected(null)
     setWindowStart(0)
-    if (!target || !requestCallback.current) {
-      setCandidateState({ key: requestKey, loading: false, result: { status: "unavailable", items: [], truncated: false, message: target ? "当前未提供文件候选。" : "当前会话没有可用的项目目标。" } })
-      return () => { active = false }
+    const isCurrent = () => active && requestSequence.current === requestId && currentRequest.current === requestKey
+    const loadFiles = requestFiles.current
+    const loadCollaboration = requestCollaboration.current
+    setFileState({ key: requestKey })
+    setCollaborationState(showCollaboration ? { key: requestKey } : null)
+    if (target && loadFiles) {
+      void Promise.resolve().then(() => {
+        if (isCurrent()) return loadFiles(scope, target, {
+          requestId, draftRevision: draft.revision, tokenStart: token.start, tokenEnd: token.end, query, directory,
+        })
+      }).then(result => {
+        if (result && isCurrent()) setFileState({ key: requestKey, result })
+      }).catch(() => {
+        if (isCurrent()) setFileState({ key: requestKey, result: { status: "error", items: [], truncated: false, message: "文件候选暂不可用。" } })
+      })
+    } else {
+      const message = target ? "当前未提供文件候选。" : "当前会话没有可用的项目目标。"
+      setFileState({ key: requestKey, result: { status: "unavailable", items: [], truncated: false, message } })
     }
-    const request = requestCallback.current
-    const sourceScope = { ...scope }
-    const sourceTarget = { ...target }
-    setCandidateState({ key: requestKey, loading: true })
-    void Promise.resolve().then(() => request(sourceScope, sourceTarget, {
-      requestId, draftRevision: draft.revision, tokenStart: token.start, tokenEnd: token.end, query, directory,
-    })).then(result => {
-      if (active && requestSequence.current === requestId && currentRequest.current === requestKey) {
-        setCandidateState({ key: requestKey, loading: false, result })
-      }
-    }).catch(() => {
-      if (active && requestSequence.current === requestId && currentRequest.current === requestKey) {
-        setCandidateState({ key: requestKey, loading: false, result: { status: "error", items: [], truncated: false, message: "文件候选暂不可用。" } })
-      }
-    })
+    if (target && showCollaboration && loadCollaboration) {
+      void Promise.resolve().then(() => {
+        if (isCurrent()) return loadCollaboration(scope, target, query)
+      }).then(result => {
+        if (result && isCurrent()) setCollaborationState({ key: requestKey, result })
+      }).catch(() => {
+        if (isCurrent()) setCollaborationState({ key: requestKey, result: { status: "error", items: [], message: "协作候选暂不可用。" } })
+      })
+    }
     return () => { active = false }
-  }, [requestKey, Boolean(actions.onRequestFileCandidates)])
+  }, [requestKey])
 
   useEffect(() => {
     if (visible) return
     requestSequence.current += 1
-    setCandidateState(null)
+    setFileState(null)
+    setCollaborationState(null)
     setCommandOpen(false)
     setBrowse(null)
     setDismissed(null)
@@ -185,12 +221,26 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     if (!token) return
     invalidateCandidates()
     setBrowse({ targetKey, tokenStart: token.start, baseQuery: token.query, directory: item.relativePath })
-    setSelected(0)
+    setSelected(null)
     setWindowStart(0)
   }
 
-  const selectCandidate = (item: ConversationFileCandidate) => {
-    if (!token || !mentionVisible || !candidateResult || candidateResult.loading || !actions.onPersonalChange) return
+  const selectCandidate = (item: MentionCandidate) => {
+    if (!token || !mentionVisible || !actions.onPersonalChange || !candidates.includes(item)) return
+    if (!("relativePath" in item)) {
+      if (!target || !actions.onSelectCollaborationCandidate) return
+      invalidateCandidates()
+      setDismissed(tokenKey)
+      setBrowse(null)
+      actions.onSelectCollaborationCandidate(scope, target, item, {
+        conversationId: scope.conversationId,
+        draftRevision: draft.revision,
+        tokenStart: token.start,
+        tokenEnd: token.end,
+        tokenText,
+      })
+      return
+    }
     if (item.kind === "directory") { browseDirectory(item); return }
     const next = replaceMentionToken(draft.text, token, item.relativePath)
     invalidateCandidates()
@@ -202,7 +252,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const moveCandidate = (delta: number) => {
     const next = clamp(candidateIndex + delta, candidates.length)
-    setSelected(next)
+    setSelected(candidates[next] ? candidateKey(candidates[next]) : null)
     setWindowStart(mentionWindow(next, candidateWindow.start, candidates.length).start)
   }
 
@@ -299,27 +349,47 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           </div>
         ) : null}
         {mentionVisible && token ? (
-          <div className="wb-mention-menu" aria-label="文件提及菜单" onWheel={event => { event.preventDefault(); moveCandidate(event.deltaY >= 0 ? 1 : -1) }}>
-            <div role="listbox" aria-label="文件候选">
-              {candidateResult?.loading || !candidateResult ? <p className="wb-composer-menu-empty">正在查找文件…</p>
-                : candidateResult.result?.status !== "ready" ? <p className="wb-composer-menu-empty">{candidateResult.result?.message || "文件候选不可用"}</p>
-                  : candidates.length === 0 ? <p className="wb-composer-menu-empty">没有匹配的文件</p>
-                    : candidates.slice(candidateWindow.start, candidateWindow.end).map((item, localIndex) => {
-                      const index = candidateWindow.start + localIndex
-                      return (
-                        <div className="wb-mention-row" key={`${item.kind}:${item.relativePath}`}>
-                          <button type="button" role="option" aria-selected={index === candidateIndex} data-selected={index === candidateIndex} className="wb-mention-item" title={item.relativePath} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSelected(index)} onClick={() => selectCandidate(item)}>
-                            <HighlightedPath item={item} />
-                          </button>
-                          {item.kind !== "directory" ? <span className="wb-mention-open">
-                            <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在右侧预览"} aria-label={`预览 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "preview") }}>预览</button>
-                            <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在中央打开"} aria-label={`打开 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "central") }}>打开</button>
-                          </span> : null}
-                        </div>
-                      )
-                    })}
+          <div className="wb-mention-menu" aria-label={showCollaboration ? "提及菜单" : "文件提及菜单"} onWheel={event => { event.preventDefault(); moveCandidate(event.deltaY >= 0 ? 1 : -1) }}>
+            <div role="listbox" aria-label={showCollaboration ? "提及候选" : "文件候选"}>
+              {showCollaboration && <div role="group" aria-label="协作候选">
+                {!collaborationResult && <p className="wb-composer-menu-empty">正在查找协作候选…</p>}
+                {collaborationResult && collaborationResult.status !== "ready" && <p className="wb-composer-menu-empty">{collaborationResult.message || "协作候选暂不可用"}</p>}
+                {collaborationResult?.status === "ready" && collaborationItems.length === 0 && <p className="wb-composer-menu-empty">没有匹配的协作候选</p>}
+                {collaborationItems.slice(candidateWindow.start, candidateWindow.end).map((item, localIndex) => {
+                  const index = candidateWindow.start + localIndex
+                  const key = candidateKey(item)
+                  return <div className="wb-mention-row" key={key}>
+                    <button type="button" role="option" aria-selected={index === candidateIndex} data-selected={index === candidateIndex} className="wb-mention-item" onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSelected(key)} onClick={() => selectCandidate(item)}>
+                      <span className="wb-mention-path">{item.title}<small> · {item.detail ? `${item.detail} · ` : ""}{collaborationLabels[item.kind]}</small></span>
+                    </button>
+                  </div>
+                })}
+              </div>}
+              <div role="group" aria-label="文件">
+                {!fileResult && <p className="wb-composer-menu-empty">正在查找文件…</p>}
+                {fileResult && fileResult.status !== "ready" && <p className="wb-composer-menu-empty">{fileResult.message || "文件候选不可用"}</p>}
+                {fileResult?.status === "ready" && files.length === 0 && <p className="wb-composer-menu-empty">没有匹配的文件</p>}
+                {files.slice(firstVisibleFile, lastVisibleFile).map((item, localIndex) => {
+                  const index = collaborationItems.length + firstVisibleFile + localIndex
+                  const key = candidateKey(item)
+                  return (
+                    <div className="wb-mention-row" key={key}>
+                      <button type="button" role="option" aria-selected={index === candidateIndex} data-selected={index === candidateIndex} className="wb-mention-item" title={item.relativePath} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSelected(key)} onClick={() => selectCandidate(item)}>
+                        <HighlightedPath item={item} />
+                      </button>
+                      {item.kind !== "directory" ? <span className="wb-mention-open">
+                        <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在右侧预览"} aria-label={`预览 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "preview") }}>预览</button>
+                        <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在中央打开"} aria-label={`打开 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "central") }}>打开</button>
+                      </span> : null}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-            <div className="wb-mention-footer">@ /{directory ? ` ${directory}` : ""}{candidates.length ? ` · ${candidateIndex + 1}/${candidateResult?.result?.total ?? "?"}` : ""}{candidateResult?.result?.truncated || (candidateResult?.result?.items.length ?? 0) > 1000 ? " · 结果已截断（最多展示 1000 项）" : ""}</div>
+            <div className="wb-mention-footer">
+              @ /{directory ? ` ${directory}` : ""}{candidates.length ? ` · ${candidateIndex + 1}/${candidateTotal}` : ""}
+              {fileResult?.truncated || (fileResult?.items.length ?? 0) > 1000 ? " · 文件结果已截断（最多展示 1000 项）" : ""}
+            </div>
           </div>
         ) : null}
         <div className="wb-composer-box">

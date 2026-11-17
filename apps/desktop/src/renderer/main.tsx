@@ -11,6 +11,8 @@ createRoot(document.getElementById("root")!).render(
   <DesktopWorkbench
     host={window.workbench}
     collaboration={window.collaboration}
+    collaborationApps={window.collaborationApps}
+    projectUpdates={window.projectUpdates}
     devices={window.devices}
     organization={window.organization}
     projectConversations={window.projectConversations}

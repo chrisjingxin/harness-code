@@ -1,0 +1,15 @@
+/* Project 外壳分配中央高度，任务与知识在自己的内容槽内滚动。 */
+.collaboration-page-scroll {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.collaboration-unavailable {
+  width: min(100%, 860px);
+  margin-inline: auto;
+  padding: 24px clamp(16px, 4vw, 34px);
+}
+.collaboration-unavailable h1 { margin: 0; font-size: 23px; line-height: 1.4; }
+.collaboration-unavailable p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.collaboration-unavailable p[role="status"] { margin-top: 18px; }
+.collaboration-unavailable > button { margin: 0 0 14px -8px; }

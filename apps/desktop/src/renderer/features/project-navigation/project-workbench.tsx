@@ -38,6 +38,7 @@ const defaultSessions: NavigationSessionSource = {
 }
 
 type NavigationEntry = { status: "loading" | "ready" | "failed"; value: ProjectNavigationPersonal }
+type NavigationChange = (value: ProjectNavigationPersonal) => ProjectNavigationPersonal
 
 export type UseProjectShellOptions = {
   organization: OrganizationHost
@@ -86,7 +87,13 @@ export function useProjectShell({
   const [search, setSearch] = useState("")
   const [navigation, setNavigation] = useState<Record<string, NavigationEntry>>({})
   const navigationRef = useRef(navigation)
-  navigationRef.current = navigation
+  const pendingNavigation = useRef(new Map<string, NavigationChange[]>())
+
+  function setNavigationEntry(id: string, entry: NavigationEntry) {
+    const next = { ...navigationRef.current, [id]: entry }
+    navigationRef.current = next
+    setNavigation(next)
+  }
 
   const saveWorkspace = (value: WorkspacePersonal) => {
     setWorkspace({ status: "ready", value })
@@ -119,26 +126,35 @@ export function useProjectShell({
     if (!projectId || navigationRef.current[projectId]?.status === "ready") return
     let current = true
     const target = projectId
-    setNavigation(previous => ({ ...previous, [target]: { status: "loading", value: previous[target]?.value ?? navigationDefaults } }))
-    void persistence.load({ kind: "projectNavigation", workspaceId, projectId: target }).then(result => {
+    const key = { kind: "projectNavigation", workspaceId, projectId: target } as const
+    setNavigationEntry(target, { status: "loading", value: navigationRef.current[target]?.value ?? navigationDefaults })
+    void persistence.load(key).then(result => {
       if (!current) return
       const stored = result.ok ? result.value.data as ProjectNavigationPersonal | null : null
       let value = stored ?? navigationDefaults
       if (created === target) value = { ...value, page: { kind: "info" } }
-      setNavigation(previous => ({ ...previous, [target]: { status: result.ok ? "ready" : "failed", value } }))
+      // 恢复期间也能切页。把这段时间的点击按顺序应用到旧记录，保留用户已保存的其余偏好。
+      const pending = pendingNavigation.current.get(target)
+      pendingNavigation.current.delete(target)
+      if (pending) value = pending.reduce((state, change) => change(state), value)
+      setNavigationEntry(target, { status: result.ok ? "ready" : "failed", value })
+      if (result.ok && pending) persistence.save(key, value)
     })
     return () => { current = false }
   }, [projectId, persistence, workspaceId])
 
   const personal = (projectId ? navigation[projectId]?.value : undefined) ?? navigationDefaults
-  function updateNavigation(change: (value: ProjectNavigationPersonal) => ProjectNavigationPersonal) {
+  function updateNavigation(change: NavigationChange) {
     if (!projectId) return
     const existing = navigationRef.current[projectId]
     const value = change(existing?.value ?? navigationDefaults)
     const status = existing?.status ?? "loading"
-    const next = { ...navigationRef.current, [projectId]: { status, value } }
-    navigationRef.current = next
-    setNavigation(next)
+    if (status === "loading") {
+      const pending = pendingNavigation.current.get(projectId) ?? []
+      pending.push(change)
+      pendingNavigation.current.set(projectId, pending)
+    }
+    setNavigationEntry(projectId, { status, value })
     // 只有读取成功的记录才写回，避免用默认值覆盖尚未读到的旧记录。
     if (status === "ready") persistence.save({ kind: "projectNavigation", workspaceId, projectId }, value)
   }

@@ -1,9 +1,11 @@
 /** 隔离桥只转发固定桌面/身份/设备方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
+import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import type { PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost, LocalExecutionNotice } from "../local-execution-host.js"
+import { createProjectUpdatesHost } from "./project-updates-api.js"
 
 const host: DesktopHost = {
   chooseDirectory: () => ipcRenderer.invoke("workbench:choose-directory"),
@@ -42,6 +44,26 @@ const projectConversations: ProjectConversationHost = {
 }
 contextBridge.exposeInMainWorld("projectConversations", projectConversations)
 
+const collaborationApps: CollaborationAppsHost = {
+  createSnapshot: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createSnapshot", workspaceId, projectId, request),
+  readSnapshot: (workspaceId, projectId, snapshotId) => ipcRenderer.invoke("workbench:collaboration-apps:readSnapshot", workspaceId, projectId, snapshotId),
+  listTasks: (workspaceId, projectId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listTasks", workspaceId, projectId, afterId),
+  readTask: (workspaceId, projectId, taskId) => ipcRenderer.invoke("workbench:collaboration-apps:readTask", workspaceId, projectId, taskId),
+  createTask: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createTask", workspaceId, projectId, request),
+  editTask: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:editTask", workspaceId, projectId, taskId, request),
+  transitionTask: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:transitionTask", workspaceId, projectId, taskId, request),
+  linkTaskConversation: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:linkTaskConversation", workspaceId, projectId, taskId, request),
+  listKnowledge: (workspaceId, query, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledge", workspaceId, query, afterId),
+  readKnowledge: (workspaceId, knowledgeId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledge", workspaceId, knowledgeId),
+  createKnowledge: (workspaceId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createKnowledge", workspaceId, request),
+  editKnowledge: (workspaceId, knowledgeId, request) => ipcRenderer.invoke("workbench:collaboration-apps:editKnowledge", workspaceId, knowledgeId, request),
+  archiveKnowledge: (workspaceId, knowledgeId, expectedVersion) => ipcRenderer.invoke("workbench:collaboration-apps:archiveKnowledge", workspaceId, knowledgeId, expectedVersion),
+  listKnowledgeVersions: (workspaceId, knowledgeId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledgeVersions", workspaceId, knowledgeId, afterId),
+  readKnowledgeVersion: (workspaceId, knowledgeId, versionId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledgeVersion", workspaceId, knowledgeId, versionId),
+}
+contextBridge.exposeInMainWorld("collaborationApps", collaborationApps)
+contextBridge.exposeInMainWorld("projectUpdates", createProjectUpdatesHost(ipcRenderer))
+
 const localDirectory: LocalDirectoryHost = {
   bindDirectory: (workspaceId, projectId, conversationKey, directoryPath) =>
     ipcRenderer.invoke("workbench:local-directory:bind", workspaceId, projectId, conversationKey, directoryPath),
@@ -52,7 +74,8 @@ contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 
 const localExecution: DesktopLocalExecutionHost = {
   prepare: (scope, directory) => ipcRenderer.invoke("workbench:local-execution:prepare", scope, directory),
-  send: (scope, bindingId, requestId, text) => ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text),
+  send: (scope, bindingId, requestId, text, referenceIds = []) =>
+    ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds),
   cancel: (scope, bindingId, turnId) => ipcRenderer.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),
   answerPermission: (scope, bindingId, turnId, requestId, optionId) =>
     ipcRenderer.invoke("workbench:local-execution:answer-permission", scope, bindingId, turnId, requestId, optionId),

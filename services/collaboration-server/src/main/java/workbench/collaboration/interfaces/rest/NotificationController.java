@@ -1,6 +1,7 @@
 package workbench.collaboration.interfaces.rest;
 
 import jakarta.annotation.PreDestroy;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
@@ -10,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.WebAsyncUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import workbench.collaboration.application.service.NotificationAppService;
 import workbench.collaboration.infrastructure.messaging.NotificationSignal;
@@ -30,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RequestMapping("/api/v1/workspaces/{workspaceId}/notifications")
 public class NotificationController {
     private static final Logger LOGGER = LoggerFactory.getLogger(NotificationController.class);
+    private static final String AUTHORIZED_STREAM = NotificationController.class.getName() + ".authorizedStream";
     private static final long STREAM_MS = 60_000;
     private static final long HEARTBEAT_MS = 15_000;
 
@@ -73,13 +76,22 @@ public class NotificationController {
             streams.release();
             throw new ApiProblem(503, "SERVICE_UNAVAILABLE");
         }
+        request.setAttribute(AUTHORIZED_STREAM, request.getRequestURI());
         return ResponseEntity.ok().header("X-Accel-Buffering", "no").body(emitter);
+    }
+
+    /** Spring 已有异步结果时仅收尾。注销已清除登录态，不能再用旧 Cookie 给收尾请求鉴权。 */
+    public static boolean isStreamCompletion(HttpServletRequest request) {
+        return request.getDispatcherType() == DispatcherType.ASYNC
+                && request.getRequestURI().equals(request.getAttribute(AUTHORIZED_STREAM))
+                && WebAsyncUtils.getAsyncManager(request).hasConcurrentResult();
     }
 
     private void send(String workspace, String user, long cursor, HttpSession session, SseEmitter emitter,
                       AtomicBoolean open) {
         long end = System.currentTimeMillis() + STREAM_MS;
         long nextHeartbeat = 0;
+        boolean writeFailed = false;
         try {
             while (open.get() && signedIn(session, user) && System.currentTimeMillis() < end) {
                 long generation = signal.generation();
@@ -97,15 +109,21 @@ public class NotificationController {
                 }
                 if (!page.hasMore()) signal.await(generation);
             }
-        } catch (IOException | IllegalStateException | ApiProblem closed) {
+        } catch (IOException disconnected) {
+            // 写入失败后由 Servlet 容器通知 Spring 收尾，避免应用重复完成同一次响应。
+            writeFailed = true;
+        } catch (IllegalStateException | ApiProblem closed) {
             // 连接已断或权限变化。客户端重连时会再次经过认证并传回已处理游标。
         } catch (InterruptedException stopping) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException failure) {
             LOGGER.warn("用户通知暂无法读取，连接关闭后可按游标重试", failure);
         } finally {
-            emitter.complete();
-            streams.release();
+            try {
+                if (!writeFailed) emitter.complete();
+            } finally {
+                streams.release();
+            }
         }
     }
 

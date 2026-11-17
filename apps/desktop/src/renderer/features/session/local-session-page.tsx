@@ -22,7 +22,7 @@ import { SessionCentralFilePanels, SessionCentralTabBar } from "./session-center
 import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename } from "./session-model.js"
 import { projectLocalExecution } from "./local-execution-view.js"
-import { textOnlyReason } from "./use-local-execution.js"
+import { attachmentUnavailableReason } from "./use-local-execution.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -41,7 +41,6 @@ export type LocalSessionPageProps = {
   readonly onChooseDirectory: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
-  readonly onReferenceAction?: ConversationActions["onReferenceAction"]
   readonly onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
   readonly onOpenFile?: ConversationActions["onOpenFile"]
 }
@@ -63,19 +62,18 @@ export function LocalSessionPage({
   onChooseDirectory,
   onPersonalChange,
   onCapabilitySelect,
-  onReferenceAction,
   onRequestFileCandidates,
   onOpenFile,
 }: LocalSessionPageProps): ReactElement {
   const viewingFile = Boolean(centralFiles && centralFiles.activeCentral !== null)
   const availability = execution.getAvailability(conversation.conversationId)
-  const hasUnsupportedMaterial = execution.textOnly && (personal.draft.referenceIds.length > 0 || personal.draft.attachmentIds.length > 0)
+  const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
   const folderName = directoryBasename(directoryPath)
   const activeExecution = execution.getView?.(conversation.conversationId)
   const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
-      ? { enabled: false, reason: textOnlyReason }
+      ? { enabled: false, reason: attachmentUnavailableReason }
       : availability.available
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
@@ -83,7 +81,7 @@ export function LocalSessionPage({
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
     primaryActions: canCancel ? "cancel" : "send",
-    statusText: hasUnsupportedMaterial ? textOnlyReason
+    statusText: hasUnsupportedMaterial ? attachmentUnavailableReason
       : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: [],
     controls: [
@@ -97,7 +95,9 @@ export function LocalSessionPage({
         items: [{ id: "default", label: execution.textOnly || availability.available ? "本机 Agent" : "未接入", availability: { enabled: availability.available } }],
       },
     ],
-    projectTarget: directoryPath ? { deviceId: conversation.deviceId, projectId: conversation.projectId } : null,
+    projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
+      ? { deviceId: conversation.deviceId, projectId: conversation.projectId }
+      : null,
     references: hooks?.references ?? [],
     attachments: [],
   }
@@ -137,6 +137,7 @@ export function LocalSessionPage({
       <div className="session-conversation-wrap" hidden={viewingFile}>
         <ConversationView
           {...view}
+          entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
           scope={scope}
           visible={visible && !viewingFile}
           interaction={permission ? {
@@ -191,7 +192,9 @@ export function LocalSessionPage({
               await execution.answerPermission!(conversation.conversationId, id, answer.optionId)
             } : undefined,
             onCapabilitySelect,
-            onReferenceAction,
+            onReferenceAction: hooks?.onReferenceAction,
+            onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
+            onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
             onRequestFileCandidates,
             onOpenFile,
             rendering,

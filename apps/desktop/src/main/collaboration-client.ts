@@ -2,7 +2,7 @@
  * 主进程网络：具名方法 → wire 校验 → 固定服务 origin → 安全结果。
  * 身份、会话与设备共用同一 Cookie/CSRF 实例；SSE 只走具名解析器，不暴露给 renderer。
  */
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { Cookie, CookieJar } from "tough-cookie"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import formats from "ajv-formats"
@@ -12,15 +12,21 @@ import executionSchema from "@workbench/contracts/schema/execution" with { type:
 import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
 import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
 import organizationSchema from "@workbench/contracts/schema/organization" with { type: "json" }
+import collaborationSchema from "@workbench/contracts/schema/collaboration" with { type: "json" }
 import type {
-  BeeResponseEntity, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
+  BeeResponseEntity, BoardResponse, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
   MembersResponse, MetaResponse, WorkspaceListResponse,
   DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceRevokeRequest, DeviceRevokedResponse,
   ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
   DeviceSyncRequest, DeviceSyncResponse, LocalDeviceRegistration,
   ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
   ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
+  KnowledgeCreateRequest, KnowledgeDetail, KnowledgeListResponse, KnowledgeUpdateRequest, KnowledgeVersion,
+  KnowledgeVersionListResponse, NotificationEvent, SnapshotCreateRequest, SnapshotResponse, TaskConversationRequest, TaskCreateRequest,
+  TaskDetail, TaskListResponse, TaskPatchRequest, TaskTransitionRequest,
 } from "@workbench/contracts"
+import { InvalidProjectNotification, readProjectNotifications } from "./project-notification-stream.js"
+import { isNotificationCursor } from "./project-notification-cursor.js"
 
 type Transport = typeof fetch
 type WriteMethod = "POST" | "PATCH" | "PUT" | "DELETE"
@@ -52,6 +58,13 @@ const messages: Record<CollaborationError["code"], string> = {
   PROJECT_CURSOR_EXPIRED: "目录已变化，请重新加载", PROJECT_LIMIT_EXCEEDED: "项目内容超出读取限制",
   PROJECT_GIT_UNAVAILABLE: "Git 状态暂不可用", PROJECT_GIT_ROOT_REQUIRED: "请登记完整仓库根目录",
   PROJECT_GIT_STALE: "Git 状态已变化，请刷新", PROJECT_READ_FAILED: "项目读取失败",
+  SNAPSHOT_EMPTY: "来源会话尚无可取材的同步内容",
+  SNAPSHOT_TOO_LARGE: "快照超过 64 KiB，请缩小取材范围",
+  TASK_STATE_CONFLICT: "任务状态已变化，请刷新后重试",
+  TASK_ROLE_REQUIRED: "当前账号无权执行该任务操作",
+  TASK_CONVERSATION_CONFLICT: "任务或会话已关联，请刷新后确认",
+  KNOWLEDGE_TERM_CONFLICT: "团队内已存在该术语键",
+  KNOWLEDGE_ARCHIVED: "知识条目已归档",
 }
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
@@ -63,6 +76,11 @@ interface CallOptions {
   session?: Session
   device?: Pick<LocalDeviceRegistration, "deviceId" | "secret">
   signal?: AbortSignal
+  notifications?: {
+    afterId: number
+    onConnected(): void
+    onEvent(event: NotificationEvent): Promise<void>
+  }
 }
 
 /** 宿主内部客户端；transport 仅用于同一真实链路的冒烟控制，不通过 renderer 暴露。 */
@@ -84,7 +102,7 @@ export class CollaborationClient {
     this.#transport = transport
     formats.default(this.#ajv)
     // 类型统一按"Schema 名#类型名"定位；只在所有 Schema 中唯一的类型名才允许省略前缀，重名类型必须写全。
-    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, device: deviceSchema, project: projectSchema, organization: organizationSchema }
+    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, device: deviceSchema, project: projectSchema, organization: organizationSchema, collaboration: collaborationSchema }
     const bare = new Map<string, string | null>()
     for (const [key, schema] of Object.entries(schemas)) {
       this.#ajv.addSchema(schema)
@@ -143,60 +161,87 @@ export class CollaborationClient {
   async #call<T>(path: string, schema: string | null, method = "GET", options: CallOptions = {}): Promise<CollaborationResult<T>> {
     const requestId = randomUUID()
     const session = options.session ?? this.#session
+    const notifications = options.notifications
+    const active = () => this.#live(session) && !options.signal?.aborted
     try {
-      if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
+      if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (options.body !== undefined && options.inputSchema && !this.#validator(options.inputSchema)(options.body)) return this.#error("INVALID_REQUEST", requestId)
       const body = options.body === undefined ? undefined : JSON.stringify(options.body)
       if (body && Buffer.byteLength(body) > 1_048_576) return this.#error("PAYLOAD_TOO_LARGE", requestId)
       const query = options.query ? "?" + new URLSearchParams(options.query).toString() : ""
       const headers: Record<string, string> = { Origin: this.#origin, "X-Workbench-Protocol-Version": "1", "X-Request-Id": requestId }
+      if (notifications) {
+        headers.Accept = "text/event-stream"
+        headers["Last-Event-ID"] = String(notifications.afterId)
+      }
       if (options.device) headers.Authorization = `Bearer ${options.device.deviceId}.${options.device.secret}`
       else {
         const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
         if (cookie) headers.Cookie = cookie
         if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
       }
-      if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
+      if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (body) headers["Content-Type"] = "application/json"
-      const signals = [session.abort.signal, AbortSignal.timeout(10_000)]
+      // HC-212 每条通知流最多 60 秒。保留额外时间供最后一帧到达，普通请求仍用原限时。
+      const signals = [session.abort.signal, AbortSignal.timeout(notifications ? 75_000 : 10_000)]
       if (options.signal) signals.push(options.signal)
-      const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal: AbortSignal.any(signals) })
-      if (!this.#live(session)) { void response.body?.cancel().catch(() => {}); throw new ClientProblem("NETWORK_UNAVAILABLE") }
-      if (response.status >= 300 && response.status < 400) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-      for (const header of response.headers.getSetCookie()) {
-        if (options.device) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        const parsed = Cookie.parse(header)
-        if (!parsed || parsed.key !== "WBSESSION" || parsed.domain || parsed.path !== "/") throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        const deleting = parsed.value === "" && (parsed.maxAge === 0 || (parsed.expires instanceof Date && parsed.expires.getTime() <= Date.now()))
-        if (!deleting && (!parsed.httpOnly || parsed.sameSite !== "strict" || (this.#origin.startsWith("https:") && !parsed.secure))) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
-        await session.jar.setCookie(parsed, this.#origin, { http: true })
-        if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
+      const signal = AbortSignal.any(signals)
+      const response = await this.#transport(`${this.#origin}${path}${query}`, { method, headers, body, redirect: "manual", signal })
+      try {
+        if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
+        if (response.status >= 300 && response.status < 400) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        for (const header of response.headers.getSetCookie()) {
+          if (options.device) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          const parsed = Cookie.parse(header)
+          if (!parsed || parsed.key !== "WBSESSION" || parsed.domain || parsed.path !== "/") throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          const deleting = parsed.value === "" && (parsed.maxAge === 0 || (parsed.expires instanceof Date && parsed.expires.getTime() <= Date.now()))
+          if (!deleting && (!parsed.httpOnly || parsed.sameSite !== "strict" || (this.#origin.startsWith("https:") && !parsed.secure))) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
+          await session.jar.setCookie(parsed, this.#origin, { http: true })
+          if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
+        }
+        if (notifications && response.ok) {
+          const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
+          if (response.status !== 200 || mediaType !== "text/event-stream" || !response.body) {
+            throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          }
+          const validate = this.#validator("collaboration#NotificationEvent")
+          const isEvent = (value: unknown): value is NotificationEvent => validate(value)
+          notifications.onConnected()
+          for await (const event of readProjectNotifications(response.body, isEvent)) {
+            signal.throwIfAborted()
+            await notifications.onEvent(event)
+          }
+          return { ok: true, value: null as T }
+        }
+        // 无正文的成功响应只对声明无返回值的写操作有效。
+        if (response.status === 204) {
+          if (schema !== null || method === "GET") throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          return { ok: true, value: null as T }
+        }
+        const data = await this.#readJson(response)
+        if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
+        if (!response.ok) {
+          if (!this.#validator("ErrorEnvelope")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+          const envelope = data as ErrorEnvelope
+          const error = envelope.body
+          if (!options.device && error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
+          if (!options.device && error.code === "CSRF_INVALID") session.csrf = null
+          return { ok: false, error: { ...error, message: messages[error.code] ?? envelope.errorMsg } }
+        }
+        if ((response.status !== 200 && response.status !== 201) || !this.#validator("BeeResponseEntity")(data)
+          || (data as BeeResponseEntity<unknown>).returnCode !== "SUC0000") throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        const value = (data as BeeResponseEntity<unknown>).body
+        if (schema === null) return { ok: true, value: null as T }
+        if (!this.#validator(schema)(value)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
+        return { ok: true, value: value as T }
+      } finally {
+        // 在未读取响应体便拒绝时主动释放连接。
+        if (!response.bodyUsed) void response.body?.cancel().catch(() => {})
       }
-      // 无正文的成功响应只对声明无返回值的写操作有效。
-      if (response.status === 204) {
-        void response.body?.cancel().catch(() => {})
-        if (schema !== null || method === "GET") throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        return { ok: true, value: null as T }
-      }
-      const data = await this.#readJson(response)
-      if (!this.#live(session)) throw new ClientProblem("NETWORK_UNAVAILABLE")
-      if (!response.ok) {
-        if (!this.#validator("ErrorEnvelope")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-        const envelope = data as ErrorEnvelope
-        const error = envelope.body
-        if (!options.device && error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
-        if (!options.device && error.code === "CSRF_INVALID") session.csrf = null
-        return { ok: false, error: { ...error, message: messages[error.code] ?? envelope.errorMsg } }
-      }
-      if ((response.status !== 200 && response.status !== 201) || !this.#validator("BeeResponseEntity")(data)
-        || (data as BeeResponseEntity<unknown>).returnCode !== "SUC0000") throw new ClientProblem("INVALID_SERVER_RESPONSE")
-      const value = (data as BeeResponseEntity<unknown>).body
-      if (schema === null) return { ok: true, value: null as T }
-      if (!this.#validator(schema)(value)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
-      return { ok: true, value: value as T }
     } catch (e) {
       if (e instanceof ClientProblem) return this.#error(e.code, requestId)
+      if (e instanceof InvalidProjectNotification) return this.#error("INVALID_SERVER_RESPONSE", requestId)
       let cause: unknown = e
       for (let depth = 0; depth < 5 && cause && typeof cause === "object"; depth++) {
         const value = cause as { code?: unknown; cause?: unknown }
@@ -226,6 +271,22 @@ export class CollaborationClient {
   listMembers(workspaceId: string): Promise<CollaborationResult<MembersResponse>> {
     if (!this.#validator("Id")(workspaceId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
     return this.#call(`/api/v1/workspaces/${workspaceId}/members`, "MembersResponse")
+  }
+  /** 读取当前项目的成员、简报与未结束任务聚合。访问权限以服务端结果为准。 */
+  async readProjectBoard(workspaceId: string, projectId: string): Promise<CollaborationResult<BoardResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/board`, "collaboration#BoardResponse")
+  }
+
+  /** 使用同一用户 Cookie 续读当前团队通知。调用方决定何时确认事件和重连。 */
+  async streamProjectNotifications(
+    workspaceId: string, afterId: number, signal: AbortSignal,
+    onConnected: () => void, onEvent: (event: NotificationEvent) => Promise<void>,
+  ): Promise<CollaborationResult<null>> {
+    if (!this.#validator("Id")(workspaceId) || !isNotificationCursor(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/notifications/stream`, null, "GET", {
+      signal, notifications: { afterId, onConnected, onEvent },
+    })
   }
   /** 登录响应丢失后只查询同一 Jar 的 /me，绝不盲目再次 POST 登录。 */
   async signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>> {
@@ -310,6 +371,134 @@ export class CollaborationClient {
       "GET",
       { query: { afterSequence: String(afterSequence), limit: String(limit) } },
     )
+  }
+
+  #validIds(...ids: readonly string[]): boolean {
+    const validate = this.#validator("Id")
+    return ids.every(id => validate(id))
+  }
+
+  #verifySnapshot(result: CollaborationResult<SnapshotResponse>, projectId: string,
+    source: { snapshotId?: string; sourceConversationId?: string }): CollaborationResult<SnapshotResponse> {
+    if (!result.ok) return result
+    const snapshot = result.value
+    if (snapshot.projectId !== projectId
+      || (source.snapshotId && snapshot.snapshotId !== source.snapshotId)
+      || (source.sourceConversationId && snapshot.sourceConversationId !== source.sourceConversationId)
+      || createHash("sha256").update(snapshot.text).digest("hex") !== snapshot.sha256) {
+      return this.#error("INVALID_SERVER_RESPONSE")
+    }
+    return result
+  }
+
+  /** HC-212 业务均使用窗口 Cookie、CSRF 与已发布的请求和回包契约。 */
+  async createSnapshot(workspaceId: string, projectId: string, request: SnapshotCreateRequest): Promise<CollaborationResult<SnapshotResponse>> {
+    if (!this.#validIds(workspaceId, projectId) || !this.#validator("organization#SnapshotCreateRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    const result = await this.#write<SnapshotResponse>(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/snapshots`, "organization#SnapshotResponse", { body: request })
+    return this.#verifySnapshot(result, projectId, { sourceConversationId: request.sourceConversationId })
+  }
+
+  async readSnapshot(workspaceId: string, projectId: string, snapshotId: string): Promise<CollaborationResult<SnapshotResponse>> {
+    if (!this.#validIds(workspaceId, projectId, snapshotId)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    const result = await this.#call<SnapshotResponse>(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/snapshots/${snapshotId}`, "organization#SnapshotResponse")
+    return this.#verifySnapshot(result, projectId, { snapshotId })
+  }
+
+  async listTasks(workspaceId: string, projectId: string, afterId: string | null): Promise<CollaborationResult<TaskListResponse>> {
+    if (!this.#validIds(workspaceId, projectId) || (afterId !== null && !this.#validator("Id")(afterId))) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`, "collaboration#TaskListResponse", "GET", afterId ? { query: { afterId } } : {})
+  }
+
+  async readTask(workspaceId: string, projectId: string, taskId: string): Promise<CollaborationResult<TaskDetail>> {
+    if (!this.#validIds(workspaceId, projectId, taskId)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`, "collaboration#TaskDetail")
+  }
+
+  async createTask(workspaceId: string, projectId: string, request: TaskCreateRequest): Promise<CollaborationResult<TaskDetail>> {
+    if (!this.#validIds(workspaceId, projectId) || !this.#validator("collaboration#TaskCreateRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`, "collaboration#TaskDetail", { body: request })
+  }
+
+  async editTask(workspaceId: string, projectId: string, taskId: string, request: TaskPatchRequest): Promise<CollaborationResult<TaskDetail>> {
+    if (!this.#validIds(workspaceId, projectId, taskId) || !this.#validator("collaboration#TaskPatchRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`, "collaboration#TaskDetail", { body: request }, "PATCH")
+  }
+
+  async transitionTask(workspaceId: string, projectId: string, taskId: string, request: TaskTransitionRequest): Promise<CollaborationResult<TaskDetail>> {
+    if (!this.#validIds(workspaceId, projectId, taskId) || !this.#validator("collaboration#TaskTransitionRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}/transitions`, "collaboration#TaskDetail", { body: request })
+  }
+
+  async linkTaskConversation(workspaceId: string, projectId: string, taskId: string, request: TaskConversationRequest): Promise<CollaborationResult<TaskDetail>> {
+    if (!this.#validIds(workspaceId, projectId, taskId) || !this.#validator("collaboration#TaskConversationRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}/conversation`, "collaboration#TaskDetail", { body: request }, "PUT")
+  }
+
+  async listKnowledge(workspaceId: string, query: string, afterId: string | null): Promise<CollaborationResult<KnowledgeListResponse>> {
+    if (!this.#validator("Id")(workspaceId) || (afterId !== null && !this.#validator("Id")(afterId)) || typeof query !== "string") {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge`, "collaboration#KnowledgeListResponse", "GET", { query: { ...(afterId ? { afterId } : {}), ...(query.trim() ? { q: query.trim() } : {}) } })
+  }
+
+  async readKnowledge(workspaceId: string, knowledgeId: string): Promise<CollaborationResult<KnowledgeDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail")
+  }
+
+  async createKnowledge(workspaceId: string, request: KnowledgeCreateRequest): Promise<CollaborationResult<KnowledgeDetail>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("collaboration#KnowledgeCreateRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge`, "collaboration#KnowledgeDetail", { body: request })
+  }
+
+  async editKnowledge(workspaceId: string, knowledgeId: string, request: KnowledgeUpdateRequest): Promise<CollaborationResult<KnowledgeDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId) || !this.#validator("collaboration#KnowledgeUpdateRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail", { body: request }, "PUT")
+  }
+
+  async archiveKnowledge(workspaceId: string, knowledgeId: string, expectedVersion: number): Promise<CollaborationResult<KnowledgeDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId) || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail", { query: { expectedVersion: String(expectedVersion) } }, "DELETE")
+  }
+
+  async listKnowledgeVersions(workspaceId: string, knowledgeId: string, afterId: string | null): Promise<CollaborationResult<KnowledgeVersionListResponse>> {
+    if (!this.#validIds(workspaceId, knowledgeId) || (afterId !== null && !this.#validator("Id")(afterId))) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions`, "collaboration#KnowledgeVersionListResponse", "GET", afterId ? { query: { afterId } } : {})
+  }
+
+  async readKnowledgeVersion(workspaceId: string, knowledgeId: string, versionId: string): Promise<CollaborationResult<KnowledgeVersion>> {
+    if (!this.#validIds(workspaceId, knowledgeId, versionId)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    const result = await this.#call<KnowledgeVersion>(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions/${versionId}`, "collaboration#KnowledgeVersion")
+    return result.ok && (result.value.knowledgeId !== knowledgeId || result.value.version.versionId !== versionId)
+      ? this.#error("INVALID_SERVER_RESPONSE") : result
   }
 
   /** 设备上传只用本机 Bearer；响应按 Java 已发布的同步契约核对。 */

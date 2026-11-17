@@ -16,6 +16,7 @@ const canRetry = (error: CollaborationError) =>
 export type FinalizedTurn = {
   turnId: string
   userText: string
+  referenceIds?: readonly string[]
   reply: string | undefined
   acceptedAtMs: number
   completedAtMs: number
@@ -80,7 +81,8 @@ export class ConversationUploads {
   async enqueue(scope: LocalExecutionScope, turn: FinalizedTurn): Promise<void> {
     const { turnId, userText, reply, acceptedAtMs, completedAtMs } = turn
     const messages: WaitingTurn["messages"] = [
-      { type: "user", occurredAtMs: acceptedAtMs, payload: JSON.stringify({ text: userText }) },
+      { type: "user", occurredAtMs: acceptedAtMs,
+        payload: JSON.stringify({ text: userText, ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}) }) },
       { type: "assistant", occurredAtMs: completedAtMs, payload: JSON.stringify({ text: reply }) },
     ]
     if (reply === undefined || messages.some(message => Buffer.byteLength(message.payload, "utf8") > syncPayloadLimit)) {

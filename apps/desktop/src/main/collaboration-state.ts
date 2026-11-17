@@ -115,20 +115,27 @@ export class CollaborationState {
     return result
   }
   /** 所有会话与项目读取共享窗口身份代次，退出或切换账号后的回包不再送给页面。 */
-  async #readWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>): Promise<CollaborationResult<T>> {
+  async #readWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>,
+    publishConnectionError = true): Promise<CollaborationResult<T>> {
     if (this.#disposed || this.#state.status !== "signedIn") return this.#cancelled()
     if (!this.#state.workspaces.some(workspace => workspace.id === workspaceId)) return identityError("RESOURCE_NOT_FOUND", "工作区不可用。")
     if (!this.#client) return this.#unavailable()
     const generation = this.#generation
     const result = await request(this.#client)
     if (!this.#current(generation)) return this.#cancelled()
-    if (!result.ok) this.#failure(result.error)
+    if (!result.ok && (publishConnectionError || result.error.code === "AUTHENTICATION_REQUIRED")) this.#failure(result.error)
     return result
+  }
+
+  /** 仅主进程使用。业务错误留在当前表单处理，认证失效仍立即收回窗口身份。 */
+  applicationWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>): Promise<CollaborationResult<T>> {
+    return this.#readWorkspace(workspaceId, request, false)
   }
 
   /** 项目级会话只读与登记；与项目/个人视图共享窗口代次隔离。 */
   listProjectConversations(workspaceId: string, projectId: string, query?: { ownerId?: string; status?: ConversationStatus }): Promise<CollaborationResult<ConversationListResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.listProjectConversations(workspaceId, projectId, query))
+    // 简报列表可由后台通知刷新，瞬时错误仍留在会话模块。认证失效继续收回身份。
+    return this.#readWorkspace(workspaceId, client => client.listProjectConversations(workspaceId, projectId, query), false)
   }
   registerProjectConversation(workspaceId: string, projectId: string, request: ConversationRegisterRequest): Promise<CollaborationResult<ConversationDetailResponse>> {
     return this.#readWorkspace(workspaceId, client => client.registerProjectConversation(workspaceId, projectId, request))
@@ -142,13 +149,13 @@ export class CollaborationState {
 
   /** 组织层读写与会话读取共用身份代次和工作区校验；权限由服务端判定，这里不推断角色。 */
   listProjects(workspaceId: string): Promise<CollaborationResult<ProjectListResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.listProjects(workspaceId))
+    return this.#readWorkspace(workspaceId, client => client.listProjects(workspaceId), false)
   }
   createProject(workspaceId: string, request: ProjectCreateRequest): Promise<CollaborationResult<ProjectResponse>> {
     return this.#readWorkspace(workspaceId, client => client.createProject(workspaceId, request))
   }
   getProject(workspaceId: string, projectId: string): Promise<CollaborationResult<ProjectDetailResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.getProject(workspaceId, projectId))
+    return this.#readWorkspace(workspaceId, client => client.getProject(workspaceId, projectId), false)
   }
   updateProject(workspaceId: string, projectId: string, request: ProjectPatchRequest): Promise<CollaborationResult<ProjectResponse>> {
     return this.#readWorkspace(workspaceId, client => client.updateProject(workspaceId, projectId, request))

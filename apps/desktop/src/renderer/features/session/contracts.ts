@@ -7,7 +7,7 @@
  */
 import type { ReactNode } from "react"
 import type { LocalExecutionView } from "./local-execution-view.js"
-import type { ConversationReferenceView } from "@workbench/ui"
+import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationTimelineEntry } from "@workbench/ui"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 
 /** 服务端项目会话状态枚举，对齐 organization.schema.json。 */
@@ -104,25 +104,55 @@ export interface LocalSessionExecutionPort {
   answerPermission?(conversationId: string, id: string, optionId: string): Promise<void>
 }
 
+/** 草稿变更绑定发起会话和本机设备，目标另由用户选择。 */
+export type SessionDraftScope = ProjectNavigationScope & {
+  readonly deviceId: string
+  readonly conversationId: string | null
+}
+
+export type SessionDraftTarget =
+  | { readonly kind: "existing"; readonly conversationId: string }
+  | { readonly kind: "new"; readonly directory: string; readonly requestId: string; readonly preparedConversationId?: string }
+
+/** 草稿只持有引用标识。快照和预览由调用方管理。 */
+export type SessionReferenceDraftChange =
+  | {
+      readonly kind: "add"
+      readonly target: SessionDraftTarget
+      readonly referenceIds: readonly string[]
+      readonly initialText?: string
+      readonly mention?: ConversationMentionOrigin
+    }
+  | { readonly kind: "replace"; readonly referenceId: string; readonly replacementId: string }
+  | { readonly kind: "remove"; readonly referenceId: string }
+
+/** 成功表示个人草稿已更新。保存反馈由 PersonalPersistence 处理。 */
+export type SessionReferenceDraftResult =
+  | { readonly ok: true; readonly value: { readonly conversationId: string; readonly draftRevision: number } }
+  | { readonly ok: false; readonly message: string; readonly preparedConversationId?: string }
+
 /** 供 HC-219 / HC-220 消费的桌面前端内部集成能力。 */
 export type SessionIntegrationApi = {
   /** 仅刷新项目会话列表元数据并对比生成“有更新”标记，绝不下载正文。 */
   refreshMetadata(scope: ProjectNavigationScope): Promise<void>
-  /** 由“引用到我的会话”或“在本机开始任务”触发：切换到指定本机会话或准备页并带入草稿，不自动发送。 */
-  prepareMySession(options: {
-    readonly scope: ProjectNavigationScope
-    readonly targetConversationId?: string | null
-    readonly initialText?: string
-    readonly referenceId?: string
-  }): void
+  /** 返回当前范围内已经取得的会话简报，供选择和定位。 */
+  listProjectConversations(scope: ProjectNavigationScope): readonly ProjectConversationSummary[]
   /** 返回当前项目内归属本人且处于当前设备的会话列表。 */
   listMyLocalConversations(scope: ProjectNavigationScope): readonly ProjectConversationSummary[]
+  /** 合并到本人本机会话的最新草稿，登记后失败时带回已创建会话以供重试。 */
+  applyReferenceDraft(scope: SessionDraftScope, change: SessionReferenceDraftChange): Promise<SessionReferenceDraftResult>
+  /** 定位成功后显示目标会话输入区，保留它已打开的文件页签。 */
+  revealReferenceDraft(scope: SessionDraftScope, conversationId: string): void
 }
 
 /** 允许由 HC-219 等后续卡片注入的外部动作与输入扩展槽。 */
 export type SessionExternalHooks = {
   onCreateTaskFromConversation?(conversation: ProjectConversationSummary): void
   onQuoteConversation?(conversation: ProjectConversationSummary): void
+  readonly onRequestCollaborationCandidates?: ConversationActions["onRequestCollaborationCandidates"]
+  readonly onSelectCollaborationCandidate?: ConversationActions["onSelectCollaborationCandidate"]
+  readonly onReferenceAction?: ConversationActions["onReferenceAction"]
+  readonly renderHistoryReferences?: (entries: readonly ConversationTimelineEntry[]) => readonly ConversationTimelineEntry[]
   readonly references?: readonly ConversationReferenceView[]
   readonly composerExtra?: ReactNode
 }

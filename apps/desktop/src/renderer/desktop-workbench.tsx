@@ -17,10 +17,23 @@ import type {
 import type { AccountPersonal, PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
+import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
+import type { ProjectUpdatesHost } from "../project-updates-host.js"
 import { DeviceRegistrationPanel, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { ProjectPageProviders } from "./features/project-navigation/index.js"
-import { useProjectSessions } from "./features/session/index.js"
+import { createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
+import type { LocalSessionExecutionPort, ProjectConversationSummary } from "./features/session/index.js"
+import { createCollaborationPageProviders } from "./features/collaboration/collaboration-pages.js"
+import { useCollaborationMetadata } from "./features/collaboration/metadata.js"
+import { LiveProjectTasks, ProjectTaskPublication, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
+import type { TasksContext } from "./features/collaboration/tasks/live-project-tasks.js"
+import { LiveTeamKnowledge } from "./features/collaboration/knowledge/live-team-knowledge.js"
+import { createBoardPageProvider } from "./features/board/board-provider.js"
+import { useProjectBoard } from "./features/board/use-project-board.js"
+import { useProjectUpdates } from "./features/project-updates/use-project-updates.js"
+import { useWorkbenchReferences } from "./features/collaboration/references/workbench-references.js"
+import type { ReferenceActions } from "./features/collaboration/references/conversation-references.js"
 import { useLocalDevice } from "./local-device.js"
 import { PersonalPersistence } from "./personal-persistence.js"
 import { resolveUserPhoto } from "./demo-avatars.js"
@@ -32,12 +45,16 @@ import "./desktop-workbench.css"
 type Hosts = {
   host: DesktopHost
   collaboration: CollaborationHost
+  collaborationApps?: CollaborationAppsHost
+  projectUpdates?: ProjectUpdatesHost
   devices: DeviceHost
   organization: OrganizationHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
   localExecution?: DesktopLocalExecutionHost
   personalHost: PersonalHost
+  referenceSnapshots?: ReferenceActions["readSnapshot"]
+  execution?: LocalSessionExecutionPort
 }
 type Identity = ReturnType<typeof useCollaborationIdentity>
 type Preferences = ReturnType<typeof useWindowPreferences>
@@ -98,10 +115,14 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       host={props.host}
       organization={props.organization}
       collaboration={props.collaboration}
+      collaborationApps={props.collaborationApps}
+      projectUpdates={props.projectUpdates}
       devices={props.devices}
       projectConversations={props.projectConversations}
       localDirectory={props.localDirectory}
       localExecution={props.localExecution}
+      referenceSnapshots={props.referenceSnapshots}
+      execution={props.execution}
       persistence={persistence}
       workspaceId={workspace.id}
       workspaceName={workspace.name}
@@ -170,10 +191,14 @@ function WorkspaceProjectWorkbench(props: {
   host: DesktopHost
   organization: OrganizationHost
   collaboration: CollaborationHost
+  collaborationApps?: CollaborationAppsHost
+  projectUpdates?: ProjectUpdatesHost
   devices: DeviceHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
   localExecution?: DesktopLocalExecutionHost
+  referenceSnapshots?: ReferenceActions["readSnapshot"]
+  execution?: LocalSessionExecutionPort
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
@@ -201,6 +226,21 @@ function WorkspaceProjectWorkbench(props: {
   const selectedConversationId = shell.personal.page.kind === "conversation"
     ? shell.personal.page.conversationId
     : null
+  const currentPage = shell.personal.page
+  const { taskRevision, knowledgeRevision, refreshTaskMetadata, refreshKnowledgeMetadata } = useCollaborationMetadata(shell.scope)
+  const taskRows = useProjectTaskMetadata(props.collaborationApps, shell.scope, taskRevision)
+  const taskCount = taskRows.status === "ready" ? taskRows.tasks.filter(task =>
+    task.assigneeId === props.user.id && task.status !== "done" && task.status !== "cancelled").length : null
+  const [publishing, setPublishing] = useState<{ scope: typeof shell.scope; page: typeof currentPage; assigneeId?: string; sourceId?: string } | null>(null)
+
+  function locateConversation(conversation: ProjectConversationSummary): boolean {
+    return shell.locateConversation(conversation.conversationId, [{
+      conversationId: conversation.conversationId,
+      ownerUserId: conversation.ownerUserId,
+      title: conversation.title,
+      timeLabel: "",
+    }])
+  }
 
   const projectSessions = useProjectSessions({
     host: props.host,
@@ -217,27 +257,111 @@ function WorkspaceProjectWorkbench(props: {
     members: shell.team.members,
     devices: localDevice.devices,
     selectedConversationId,
-    onOpenConversation: conversation => {
-      shell.locateConversation(conversation.conversationId, [
-        {
-          conversationId: conversation.conversationId,
-          ownerUserId: conversation.ownerUserId,
-          title: conversation.title,
-          timeLabel: "刚刚",
-          badge: { text: "本机", tone: "neutral" },
-        },
-      ])
+    execution: props.execution,
+    onOpenConversation: locateConversation,
+  })
+  const { pageController, integration } = projectSessions
+  const scope = shell.scope
+  const { refresh: refreshBoard, ...board } = useProjectBoard(props.projectUpdates, scope, currentPage.kind === "board")
+  // 订阅跟随团队外壳。切页面、切项目时只替换刷新目标，正文读取仍在原页面动作内。
+  const notification = useProjectUpdates(props.projectUpdates, props.user.id, props.workspaceId, {
+    projectId: scope?.projectId ?? null,
+    refreshProjectList: () => { void shell.projects.reload() },
+    refreshProjectDetail: () => { void shell.detail.reload() },
+    refreshConversations: () => {
+      if (scope) void integration.refreshMetadata(scope).catch(() => {})
     },
-    onOpenNewSessionPage: () => {
-      shell.openPage({ kind: "new" })
-    },
+    refreshBoard,
+    refreshTasks: () => { if (scope) refreshTaskMetadata(scope) },
+    refreshKnowledge: () => { if (scope) refreshKnowledgeMetadata(scope) },
+  })
+  const canPublish = Boolean(props.collaborationApps && currentProject?.status === "active")
+  const taskMembers = shell.detail.detail?.project.projectId === shell.scope?.projectId
+    ? (shell.detail.detail?.members ?? []).filter(member => member.status === "active")
+      .map(member => ({ id: member.userId, name: pageController.resolveOwnerName(member.userId) }))
+    : []
+  const chooseDirectory = () => props.host.chooseDirectory()
+  const taskContext: TasksContext | undefined = props.collaborationApps && shell.scope ? {
+    host: props.collaborationApps, scope: shell.scope, projectName: currentProject?.name ?? "当前项目", projectActive: canPublish,
+    ownerName: pageController.resolveOwnerName, localDeviceId: pageController.localDeviceId,
+    sessions: integration, directories: pageController.directories,
+    chooseDirectory, locateConversation, refreshTaskMetadata,
+  } : undefined
+  const openTask = (taskId: string) => shell.openPage({ kind: "task", taskId })
+  const references = useWorkbenchReferences({
+    scope: shell.scope,
+    selectedConversationId,
+    pageKey: JSON.stringify(currentPage),
+    pageController,
+    integration,
+    readSnapshot: props.referenceSnapshots,
+    host: props.collaborationApps,
+    members: taskMembers,
+    tasks: taskRows.status === "ready" ? taskRows.tasks : undefined,
+    onChooseMember: canPublish ? assigneeId => setPublishing({ scope: shell.scope, page: currentPage, assigneeId }) : undefined,
+    onOpenTask: taskContext ? openTask : undefined,
+    chooseDirectory,
+    locateConversation,
   })
 
-  // HC-219～220 交付后在此接入任务、引用与看板页面提供者，并消费 `projectSessions.integration`；未交付模块保持未接入。
-  void projectSessions.integration
-  const taskCount: number | null = null
+  const sourceId = publishing?.sourceId
+  const sourceConversations = pageController.conversations.filter(item => item.projectId === shell.scope?.projectId)
+  const publicationSources = sourceId ? [
+    ...sourceConversations.filter(item => item.conversationId === sourceId),
+    ...sourceConversations.filter(item => item.conversationId !== sourceId),
+  ] : sourceConversations
+
+  // 看板复用项目导航和任务发布表单，用会话模块已有的本机缓存水位显示同步状态。
   const providers: ProjectPageProviders = {
-    session: projectSessions.provider,
+    ...(props.projectUpdates ? {
+      board: createBoardPageProvider({
+        ...board,
+        projectName: currentProject?.name ?? "当前项目",
+        description: currentProject?.description,
+        accountId: props.user.id,
+        localDeviceId: pageController.localDeviceId,
+        syncStates: pageController.syncStates,
+        notification,
+        onRefresh: refreshBoard,
+        onCreateTask: canPublish ? () => setPublishing({ scope, page: currentPage }) : undefined,
+      }),
+    } : {}),
+    session: createSessionPageProvider({
+      ...pageController,
+      hooks: {
+        ...references.hooks,
+        onCreateTaskFromConversation: canPublish ? conversation => setPublishing({
+          scope: shell.scope, page: currentPage, sourceId: conversation.conversationId,
+        }) : undefined,
+      },
+    }),
+    ...createCollaborationPageProviders({
+      projectName: currentProject?.name ?? "当前项目",
+      workspaceName: props.workspaceName,
+    }),
+    ...(taskContext ? {
+      tasks: {
+        render({ scope, page, navigator, visible }) {
+          if (!visible || (page.kind !== "tasks" && page.kind !== "task")) return null
+          const id = page.kind === "task" ? page.taskId : undefined
+          return <div className="collaboration-page-scroll" key={JSON.stringify([scope, id])}>
+            <LiveProjectTasks context={taskContext} rows={taskRows} taskId={id} navigator={navigator}
+              onCreate={() => setPublishing({ scope, page: currentPage })} />
+          </div>
+        },
+      },
+      knowledge: {
+        render({ scope, page, visible }) {
+          if (!visible || page.kind !== "knowledge") return null
+          return <div className="collaboration-page-scroll" key={JSON.stringify(scope)}>
+            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName}
+              ownerName={pageController.resolveOwnerName} rendering={pageController.rendering}
+              revision={knowledgeRevision} refreshMetadata={refreshKnowledgeMetadata}
+              canReference={references.canReference} previewFixed={references.previewFixed} />
+          </div>
+        },
+      },
+    } : {}),
   }
 
   const settings = <div className="desktop-settings">
@@ -252,22 +376,31 @@ function WorkspaceProjectWorkbench(props: {
     />
   </div>
 
-  return <ProjectWorkbench
-    shell={shell}
-    organization={props.organization}
-    persistence={props.persistence}
-    workspaceId={props.workspaceId}
-    workspaceName={props.workspaceName}
-    user={props.user}
-    titleBarClassName={props.titleBarClassName}
-    settings={settings}
-    settingsOpen={props.settingsOpen}
-    setSettingsOpen={props.setSettingsOpen}
-    personalError={props.personalError}
-    sessions={projectSessions.navigationSource}
-    taskCount={taskCount}
-    providers={providers}
-  />
+  return <>
+    <ProjectWorkbench
+      shell={shell}
+      organization={props.organization}
+      persistence={props.persistence}
+      workspaceId={props.workspaceId}
+      workspaceName={props.workspaceName}
+      user={props.user}
+      titleBarClassName={props.titleBarClassName}
+      settings={settings}
+      settingsOpen={props.settingsOpen}
+      setSettingsOpen={props.setSettingsOpen}
+      personalError={props.personalError}
+      taskCount={taskCount}
+      sessions={projectSessions.navigationSource}
+      providers={providers}
+    />
+    {references.dialog}
+    {publishing?.scope === shell.scope && publishing?.page === currentPage && taskContext?.projectActive && <ProjectTaskPublication
+      context={taskContext} members={taskMembers} draftMaterials={references.draftMaterials} sources={publicationSources}
+      assigneeId={publishing.assigneeId} onClose={() => setPublishing(null)} onPublished={taskId => {
+        setPublishing(null)
+        openTask(taskId)
+      }} />}
+  </>
 }
 
 /** 宿主回传实际颜色和缩放；读取失败时可继续使用当前窗口。 */

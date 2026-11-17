@@ -8,7 +8,7 @@
  *    以及新会话准备页的目录与草稿 (`projectDraft`)；
  * 4. 任何范围切换、账号退出、网络失败都严格隔离代次并保留已有简报与缓存正文。
  */
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type {
   DesktopHost,
   DeviceSummary,
@@ -25,7 +25,6 @@ import type {
   LocalSessionExecutionPort,
   NewSessionDraft,
   ProjectConversationSummary,
-  SessionExternalHooks,
   SessionIntegrationApi,
   SessionSyncState,
 } from "./contracts.js"
@@ -41,8 +40,8 @@ import {
 import {
   EMPTY_PERSONAL_STATE,
   applyConversationPersonalChange,
-  createSessionPageProvider,
 } from "./session-provider.js"
+import type { SessionPageController } from "./session-provider.js"
 import { useLocalDirectory } from "./use-local-directory.js"
 import { useLocalExecution } from "./use-local-execution.js"
 
@@ -163,10 +162,8 @@ export type UseProjectSessionsOptions = {
   readonly members: readonly MemberSummary[]
   readonly devices: readonly DeviceSummary[]
   readonly selectedConversationId: string | null
-  readonly hooks?: SessionExternalHooks
   readonly execution?: LocalSessionExecutionPort
   readonly onOpenConversation?: (conversation: ProjectConversationSummary) => void
-  readonly onOpenNewSessionPage?: () => void
 }
 
 /** 协调当前项目的会话元数据列表、按需正文增量拉取、草稿与个人同步缓存持久化。 */
@@ -186,15 +183,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     members,
     devices,
     selectedConversationId,
-    hooks,
     execution,
     onOpenConversation,
-    onOpenNewSessionPage,
   } = options
 
   const currentScopeKey = makeScopeKey(scope)
   const activeScopeKeyRef = useRef(currentScopeKey)
   activeScopeKeyRef.current = currentScopeKey
+  const draftContext = useMemo(() => ({ currentScopeKey, localDeviceId, selectedConversationId }), [
+    currentScopeKey, localDeviceId, selectedConversationId, persistence,
+  ])
+  const activeDraftContext = useRef<typeof draftContext | null>(null)
+  useLayoutEffect(() => {
+    activeDraftContext.current = draftContext
+    return () => { activeDraftContext.current = null }
+  }, [draftContext])
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -311,6 +314,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           loaded: false,
           loadError: result.message,
         }
+        recordsRef.current = { ...recordsRef.current, [recKey]: failedRecord }
         setRecordsByKey(prev => ({ ...prev, [recKey]: failedRecord }))
         return null
       }
@@ -322,6 +326,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         directoryPath: saved?.localDirectoryPath ?? null,
         syncState: syncStateFromPersonal(saved),
       }
+      // 等待恢复的草稿动作可能先于 React 重新渲染，直接从同一记录读取最新值。
+      recordsRef.current = { ...recordsRef.current, [recKey]: loadedRecord }
       setRecordsByKey(prev => ({ ...prev, [recKey]: loadedRecord }))
       return loadedRecord
     })().finally(() => {
@@ -606,8 +612,44 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     saveDraftValue(scope, currentScopeKey, { ...currentDraft, draftText: text })
   }, [scope, currentScopeKey, saveDraftValue])
 
+  /** 两条新建路径共用已有登记端口。调用方用同一个请求 ID 重试未确认的登记。 */
+  const registerLocalConversation = useCallback(async (
+    targetScope: ProjectNavigationScope,
+    deviceId: string,
+    title: string,
+    requestId: string,
+  ): Promise<{ ok: true; conversation: ProjectConversationSummary } | { ok: false; message: string }> => {
+    if (creatingRef.current) return { ok: false, message: "已有会话正在登记，请稍后重试。" }
+    creatingRef.current = true
+    try {
+      const result = await projectConversations.registerConversation(targetScope.workspaceId, targetScope.projectId, {
+        deviceId, title, requestId,
+      })
+      if (!result.ok) return { ok: false, message: result.error.message }
+      const created = result.value.conversation
+      if (created.projectId !== targetScope.projectId || classifyConversation(created, targetScope.accountId, deviceId) !== "local") {
+        return { ok: false, message: "登记结果与本人本机会话的范围不符。" }
+      }
+      return { ok: true, conversation: created }
+    } catch {
+      return { ok: false, message: "未能确认会话登记结果，请重试。" }
+    } finally {
+      creatingRef.current = false
+    }
+  }, [projectConversations])
+
+  const includeRegisteredConversation = useCallback((targetKey: string, created: ProjectConversationSummary) => {
+    // 登记前发出的列表请求可能不含新会话，避免它撤销刚登记的条目。
+    listGenRef.current++
+    const others = (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
+      .filter(item => item.conversationId !== created.conversationId)
+    const nextList: ScopeListState = { status: "ready", error: "", conversations: [created, ...others] }
+    listsRef.current = { ...listsRef.current, [targetKey]: nextList }
+    setListsByScope(prev => ({ ...prev, [targetKey]: nextList }))
+  }, [])
+
   const onStartNewSession = useCallback(async () => {
-    if (!scope || !currentScopeKey || !localDeviceId || creatingRef.current) return
+    if (!scope || !currentScopeKey || !localDeviceId || newSessionBusy || creatingRef.current) return
     const targetScope = scope
     const targetKey = currentScopeKey
     const currentDraft = draftsRef.current[targetKey]?.value ?? EMPTY_NEW_DRAFT
@@ -621,35 +663,22 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     }
     const { requestId } = pendingRequestRef.current
 
-    creatingRef.current = true
     setNewSessionBusy(true)
     setNewSessionError(null)
     try {
-      const res = await projectConversations.registerConversation(
-        targetScope.workspaceId,
-        targetScope.projectId,
-        {
-          deviceId: localDeviceId,
-          title: deriveSessionTitle(trimmedPrompt),
-          requestId,
-        },
-      )
-      if (!stillActive(targetKey)) return
+      const res = await registerLocalConversation(targetScope, localDeviceId, deriveSessionTitle(trimmedPrompt), requestId)
+      if (activeDraftContext.current !== draftContext) return
       if (!res.ok) {
-        setNewSessionError(res.error.message)
+        setNewSessionError(res.message)
         return
       }
 
-      const created = res.value.conversation
+      const created = res.conversation
       pendingRequestRef.current = null
-      const currentList = listsRef.current[targetKey] ?? { status: "ready" as const, error: "", conversations: [] }
-      const deduped = currentList.conversations.filter(item => item.conversationId !== created.conversationId)
-      const nextList: ScopeListState = { status: "ready", error: "", conversations: [created, ...deduped] }
-      listsRef.current = { ...listsRef.current, [targetKey]: nextList }
-      setListsByScope(prev => ({ ...prev, [targetKey]: nextList }))
+      includeRegisteredConversation(targetKey, created)
 
       await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
-      if (!stillActive(targetKey)) return
+      if (activeDraftContext.current !== draftContext) return
       updateRecord(targetScope, targetKey, created.conversationId, prev => ({
         ...prev,
         loaded: true,
@@ -669,14 +698,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       saveDraftValue(targetScope, targetKey, EMPTY_NEW_DRAFT)
       onOpenConversation?.(created)
     } finally {
-      creatingRef.current = false
       if (mountedRef.current) setNewSessionBusy(false)
     }
   }, [
     scope,
     currentScopeKey,
     localDeviceId,
-    projectConversations,
+    newSessionBusy,
+    draftContext,
+    registerLocalConversation,
+    includeRegisteredConversation,
     ensureRecordLoaded,
     updateRecord,
     saveDraftValue,
@@ -797,6 +828,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedIsLocal,
   })
 
+  const [draftToReveal, setDraftToReveal] = useState<{ scopeKey: string; deviceId: string; id: string } | null>(null)
+  useLayoutEffect(() => {
+    if (!draftToReveal) return
+    if (!scope || draftToReveal.scopeKey !== currentScopeKey || draftToReveal.deviceId !== localDeviceId
+      || draftToReveal.id !== selectedConversationId || !selectedIsLocal) {
+      setDraftToReveal(null)
+      return
+    }
+    // 文件页签可能仍在恢复。等恢复完成才选中会话页签，避免旧的活动文件覆盖这次定位。
+    const runtime = localDir.getRuntime(scope, draftToReveal.id)
+    if (!runtime.loaded) return
+    if (runtime.personal.activeCentral !== null) localDir.selectConversationCentralTab(scope, draftToReveal.id)
+    setDraftToReveal(null)
+  }, [draftToReveal, scope, currentScopeKey, localDeviceId, selectedConversationId, selectedIsLocal, localDir])
+
   const currentDraft = (currentScopeKey ? draftsByScope[currentScopeKey]?.value : undefined) ?? EMPTY_NEW_DRAFT
   const canCreateConversation = Boolean(localDeviceId)
   const createBlockedReason = canCreateConversation
@@ -807,7 +853,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     copyText: text => host.copyText(text),
   }), [host])
 
-  const provider = useMemo(() => createSessionPageProvider({
+  const pageController: SessionPageController = useMemo(() => ({
     projectName,
     currentUserId: userId,
     localDeviceId,
@@ -823,7 +869,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     newSessionError,
     execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
-    hooks,
     resolveOwnerName: ownerId => memberNameById.get(ownerId) ?? `成员 (${ownerId.slice(0, 6)})`,
     resolveDeviceName: deviceId => deviceNameById.get(deviceId),
     onChooseNewDirectory,
@@ -917,7 +962,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     execution,
     localExecutionPort,
     rendering,
-    hooks,
     memberNameById,
     deviceNameById,
     onChooseNewDirectory,
@@ -930,78 +974,107 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     localDir,
   ])
 
-  const prepareMySession = useCallback<SessionIntegrationApi["prepareMySession"]>(prepareOptions => {
-    const targetKey = makeScopeKey(prepareOptions.scope)
-    if (!targetKey || !stillActive(targetKey)) return
+  const listProjectConversations = useCallback<SessionIntegrationApi["listProjectConversations"]>(targetScope => {
+    const targetKey = makeScopeKey(targetScope)
+    if (!stillActive(targetKey)) return EMPTY_CONVERSATIONS
+    return (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
+      .filter(item => item.projectId === targetScope.projectId)
+  }, [])
 
-    if (prepareOptions.targetConversationId) {
-      const targetConv = (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
-        .find(item => item.conversationId === prepareOptions.targetConversationId)
-      if (targetConv && classifyConversation(targetConv, userId, localDeviceId) === "local") {
-        onOpenConversation?.(targetConv)
-        void (async () => {
-          const rec = await ensureRecordLoaded(prepareOptions.scope, targetKey, targetConv.conversationId)
-          if (!stillActive(targetKey) || !rec) return
-          updateRecord(prepareOptions.scope, targetKey, targetConv.conversationId, prev => {
-            const nextText = prepareOptions.initialText
-              ? (prev.personal.draft.text.trim().length > 0
-                  ? `${prev.personal.draft.text}\n${prepareOptions.initialText}`
-                  : prepareOptions.initialText)
-              : prev.personal.draft.text
-            const nextRefs = prepareOptions.referenceId && !prev.personal.draft.referenceIds.includes(prepareOptions.referenceId)
-              ? [...prev.personal.draft.referenceIds, prepareOptions.referenceId]
-              : prev.personal.draft.referenceIds
-            return {
-              ...prev,
-              personal: {
-                ...prev.personal,
-                draft: {
-                  ...prev.personal.draft,
-                  text: nextText,
-                  selectionStart: nextText.length,
-                  selectionEnd: nextText.length,
-                  referenceIds: nextRefs,
-                  revision: prev.personal.draft.revision + 1,
-                },
-              },
-            }
-          }, true)
-        })()
-        return
-      }
+  const listMyLocalConversations = useCallback<SessionIntegrationApi["listMyLocalConversations"]>(targetScope => {
+    if (!localDeviceId) return EMPTY_CONVERSATIONS
+    return listProjectConversations(targetScope).filter(item => classifyConversation(item, userId, localDeviceId) === "local")
+  }, [listProjectConversations, localDeviceId, userId])
+
+  const applyReferenceDraft = useCallback<SessionIntegrationApi["applyReferenceDraft"]>(async (targetScope, change) => {
+    const targetKey = makeScopeKey(targetScope)
+    const isCurrent = () => activeDraftContext.current === draftContext
+      && draftContext.currentScopeKey === targetKey
+      && draftContext.localDeviceId === targetScope.deviceId
+      && draftContext.selectedConversationId === targetScope.conversationId
+      && (targetScope.conversationId === null
+        || listProjectConversations(targetScope).some(item => item.conversationId === targetScope.conversationId))
+    if (!isCurrent()) return { ok: false, message: "发起会话或设备已变化，请重新选择引用。" }
+
+    const target = change.kind === "add" ? change.target : { kind: "existing" as const, conversationId: targetScope.conversationId }
+    let conversationId = target.kind === "existing" ? target.conversationId : target.preparedConversationId
+    if (target.kind === "new" && !conversationId) {
+      const result = await registerLocalConversation(targetScope, targetScope.deviceId, "新会话", target.requestId)
+      if (!result.ok) return result
+      conversationId = result.conversation.conversationId
+      if (isCurrent()) includeRegisteredConversation(targetKey, result.conversation)
     }
 
-    onOpenNewSessionPage?.()
-    if (prepareOptions.initialText) {
-      const currentDraftValue = draftsRef.current[targetKey]?.value ?? EMPTY_NEW_DRAFT
-      const nextText = currentDraftValue.draftText.trim().length > 0
-        ? `${currentDraftValue.draftText}\n${prepareOptions.initialText}`
-        : prepareOptions.initialText
-      saveDraftValue(prepareOptions.scope, targetKey, {
-        ...currentDraftValue,
-        draftText: nextText,
-      })
+    if (!conversationId) return { ok: false, message: "无法确认目标会话，请重新选择。" }
+    const preparedConversationId = target.kind === "new" ? conversationId : undefined
+    const failure = (message: string) => ({
+      ok: false as const, message, ...(preparedConversationId ? { preparedConversationId } : {}),
+    })
+    const hasLocalTarget = () => listMyLocalConversations(targetScope).some(item => item.conversationId === conversationId)
+    if (!isCurrent() || !hasLocalTarget()) return failure("目标会话已不可用，请重新选择。")
+
+    await ensureRecordLoaded(targetScope, targetKey, conversationId)
+    if (!isCurrent() || !hasLocalTarget()) return failure("目标会话已不可用，请重新选择。")
+
+    // 在恢复完成后读最新值，将片段移除和引用变更放在同一次个人记录更新中。
+    const record = recordsRef.current[makeRecordKey(targetKey, conversationId)]
+    if (!record?.loaded) return failure(record?.loadError ?? "无法恢复目标草稿，请重试。")
+    const previous = record.personal.draft
+    if (change.kind === "replace" && !previous.referenceIds.includes(change.referenceId)) {
+      return failure("原引用已移除，请重新选择。")
     }
+    const referenceIds = change.kind === "add"
+      ? [...new Set([...previous.referenceIds, ...change.referenceIds])]
+      : change.kind === "replace"
+        ? [...new Set(previous.referenceIds.map(id => id === change.referenceId ? change.replacementId : id))]
+        : previous.referenceIds.filter(id => id !== change.referenceId)
+    const mention = change.kind === "add" ? change.mention : undefined
+    const removeToken = mention
+      && mention.conversationId === targetScope.conversationId && mention.conversationId === conversationId
+      && mention.draftRevision === previous.revision
+      && Number.isInteger(mention.tokenStart) && Number.isInteger(mention.tokenEnd)
+      && mention.tokenStart >= 0 && mention.tokenStart < mention.tokenEnd && mention.tokenEnd <= previous.text.length
+      && mention.tokenText.startsWith("@") && previous.text.slice(mention.tokenStart, mention.tokenEnd) === mention.tokenText
+    const textWithoutTrigger = removeToken ? previous.text.slice(0, mention.tokenStart) + previous.text.slice(mention.tokenEnd) : previous.text
+    const initialText = change.kind === "add" ? change.initialText : undefined
+    const text = initialText
+      ? (textWithoutTrigger ? `${textWithoutTrigger}\n\n${initialText}` : initialText)
+      : textWithoutTrigger
+    const draft = {
+      ...previous,
+      text,
+      ...(initialText ? { selectionStart: text.length, selectionEnd: text.length } : removeToken ? {
+        selectionStart: mention.tokenStart,
+        selectionEnd: mention.tokenStart,
+      } : {}),
+      referenceIds,
+      revision: previous.revision + 1,
+    }
+    updateRecord(targetScope, targetKey, conversationId, current => ({
+      ...current,
+      directoryPath: current.directoryPath ?? (target.kind === "new" ? target.directory : null),
+      personal: { ...current.personal, draft },
+    }), true)
+    return { ok: true, value: { conversationId, draftRevision: draft.revision } }
   }, [
-    userId,
-    localDeviceId,
-    onOpenConversation,
-    onOpenNewSessionPage,
+    draftContext,
+    listProjectConversations,
+    listMyLocalConversations,
+    registerLocalConversation,
+    includeRegisteredConversation,
     ensureRecordLoaded,
     updateRecord,
-    saveDraftValue,
   ])
 
   const integration: SessionIntegrationApi = useMemo(() => ({
     refreshMetadata,
-    prepareMySession,
-    listMyLocalConversations: targetScope => {
-      const targetKey = makeScopeKey(targetScope)
-      const list = listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS
-      if (!localDeviceId) return EMPTY_CONVERSATIONS
-      return list.filter(item => item.ownerUserId === userId && item.deviceId === localDeviceId)
+    listProjectConversations,
+    listMyLocalConversations,
+    applyReferenceDraft,
+    revealReferenceDraft: (targetScope, id) => {
+      setDraftToReveal({ scopeKey: makeScopeKey(targetScope), deviceId: targetScope.deviceId, id })
     },
-  }), [refreshMetadata, prepareMySession, localDeviceId, userId])
+  }), [refreshMetadata, listProjectConversations, listMyLocalConversations, applyReferenceDraft])
 
-  return { navigationSource, provider, integration }
+  return { navigationSource, pageController, integration }
 }

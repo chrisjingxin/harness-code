@@ -21,7 +21,7 @@ export type LocalExecutionPermission = {
 }
 export type LocalExecutionReceipt =
   | { readonly status: "accepted"; readonly turnId: string }
-  | { readonly status: "rejected"; readonly reason: string }
+  | { readonly status: "rejected"; readonly reason: string; readonly unavailableReferenceId?: string }
 
 /** 共享结果独立于执行终态。重试成功只清除同一轮的上传失败。 */
 export type LocalExecutionUploadNotice = {
@@ -45,7 +45,8 @@ export type LocalExecutionNotice = LocalExecutionUploadNotice | ({
 
 export interface DesktopLocalExecutionHost {
   prepare(scope: LocalExecutionScope, directory: string): Promise<CollaborationResult<LocalExecutionBinding>>
-  send(scope: LocalExecutionScope, bindingId: string, requestId: string, text: string): Promise<CollaborationResult<LocalExecutionReceipt>>
+  /** 主进程按固定 ID 自行读取材料。发送端始终传用户原文。 */
+  send(scope: LocalExecutionScope, bindingId: string, requestId: string, text: string, referenceIds?: readonly string[]): Promise<CollaborationResult<LocalExecutionReceipt>>
   cancel(scope: LocalExecutionScope, bindingId: string, turnId: string): Promise<CollaborationResult<null>>
   answerPermission(scope: LocalExecutionScope, bindingId: string, turnId: string, requestId: string, optionId: string): Promise<CollaborationResult<null>>
   onNotice(listener: (notice: LocalExecutionNotice) => void): () => void

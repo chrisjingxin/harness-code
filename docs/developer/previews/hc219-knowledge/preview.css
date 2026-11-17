@@ -1,0 +1,10 @@
+/* 预览标识位于独立外壳，知识页面与 Markdown 使用公共主题。 */
+.hc219-knowledge-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px clamp(16px, 4vw, 34px);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.hc219-knowledge-preview-header p { margin: 0; color: var(--muted); font-size: 13px; }

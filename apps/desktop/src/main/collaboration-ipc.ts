@@ -5,9 +5,12 @@ import { CollaborationState, identityError } from "./collaboration-state.js"
 import { DeviceHost } from "./device-host.js"
 import { bindDeviceIpc } from "./device-ipc.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
+import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
 import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { verifyDesktopSource } from "./trusted-source.js"
-import type { ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
+import type { CollaborationResult, ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
+import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
+import { parseFixedReference } from "../collaboration-reference.js"
 import { randomUUID } from "node:crypto"
 import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
@@ -65,9 +68,10 @@ export function bindCollaborationIpc(
   onCloseAborted: () => void,
   runtime: LocalExecutionRuntime,
 ) {
-  const identity = new CollaborationState(process.env.WORKBENCH_SERVICE_ORIGIN)
+  const origin = process.env.WORKBENCH_SERVICE_ORIGIN
+  const identity = new CollaborationState(origin)
   const client = identity.network()
-  const personal = new PersonalStore(identity, client ? process.env.WORKBENCH_SERVICE_ORIGIN! : "", app.getPath("userData"))
+  const personal = new PersonalStore(identity, client ? origin! : "", app.getPath("userData"))
   const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
   const device = client ? new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity, notice => {
     if (identity.personalIdentity()?.accountId === notice.scope.accountId && !window.isDestroyed() && !window.webContents.isDestroyed()) {
@@ -77,6 +81,7 @@ export function bindCollaborationIpc(
   if (device) bindDeviceIpc(window, trustedUrl, device)
   const execution = createLocalExecutionIpc(window, identity, device, runtime)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
+  const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const channels: string[] = []
   const unsubscribe = identity.onStateChanged(state => {
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
@@ -96,6 +101,32 @@ export function bindCollaborationIpc(
   handle("collaboration:sign-in", 1, userNo => typeof userNo === "string" && /^[0-9a-z][0-9a-z_-]{0,31}$/.test(userNo) ? identity.signIn(userNo) : identityError("INVALID_REQUEST", "员工工号无效。"))
   handle("collaboration:sign-out", 0, () => identity.signOut())
   handle("collaboration:members", 1, id => isId(id) ? identity.listMembers(id) : identityError("INVALID_REQUEST", "工作区标识无效。"))
+
+  // 名称由此处逐个登记。路径和请求体随后由同一业务客户端按 HC-212 契约校验。
+  function handleApp(name: keyof CollaborationAppsHost, count: number) {
+    handle(`workbench:collaboration-apps:${name}`, count, (workspaceId, ...args) => {
+      if (!isId(workspaceId)) return identityError("INVALID_REQUEST", "工作区标识无效。")
+      return identity.applicationWorkspace(workspaceId, client => {
+        const method = client[name] as (workspace: string, ...args: unknown[]) => Promise<CollaborationResult<unknown>>
+        return method.call(client, workspaceId, ...args)
+      })
+    })
+  }
+  handleApp("createSnapshot", 3)
+  handleApp("readSnapshot", 3)
+  handleApp("listTasks", 3)
+  handleApp("readTask", 3)
+  handleApp("createTask", 3)
+  handleApp("editTask", 4)
+  handleApp("transitionTask", 4)
+  handleApp("linkTaskConversation", 4)
+  handleApp("listKnowledge", 3)
+  handleApp("readKnowledge", 2)
+  handleApp("createKnowledge", 2)
+  handleApp("editKnowledge", 3)
+  handleApp("archiveKnowledge", 3)
+  handleApp("listKnowledgeVersions", 3)
+  handleApp("readKnowledgeVersion", 3)
 
   handle("workbench:project-conversations:list", 3, (workspaceId, projectId, query) =>
     isId(workspaceId) && isId(projectId) && isConversationQuery(query)
@@ -128,11 +159,14 @@ export function bindCollaborationIpc(
     isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
       ? execution.prepare(scope, directory)
       : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
-  handle("workbench:local-execution:send", 4, (scope, bindingId, requestId, text) =>
+  handle("workbench:local-execution:send", 5, (scope, bindingId, requestId, text, referenceIds) =>
     isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
-      && isNonEmptyString(text, 16_384) && Buffer.byteLength(text, "utf8") <= 32_768
-      ? execution.send(scope, bindingId, requestId, text)
-      : identityError("INVALID_REQUEST", "请输入有效的文本消息，最长 16,384 字符且不超过 32 KiB。"))
+      && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768
+      && Array.isArray(referenceIds) && referenceIds.length <= 2000
+      && referenceIds.every(id => parseFixedReference(id) !== null)
+      && (text.trim() || referenceIds.length)
+      ? execution.send(scope, bindingId, requestId, text, referenceIds as string[])
+      : identityError("INVALID_REQUEST", "请输入有效的文本消息或选择可用的固定引用。文字最长 16,384 字符且不超过 32 KiB。"))
 
   handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
     isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId)
@@ -191,7 +225,10 @@ export function bindCollaborationIpc(
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
     void execution.dispose().catch(() => {})
-    unsubscribe(); unbindOrganization(); identity.dispose()
+    unsubscribe()
+    unbindOrganization()
+    unbindProjectUpdates()
+    identity.dispose()
     for (const channel of [...channels, ...personalChannels]) ipcMain.removeHandler(channel)
   })
   return execution.captureDirectorySelection

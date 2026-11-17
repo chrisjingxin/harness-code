@@ -745,7 +745,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
       targetScope.workspaceId,
       targetScope.projectId,
       conversationId,
-      { kind: "searchCandidates", directory: "", query: request.query, limit: 100 },
+      { kind: "searchCandidates", directory: request.directory, query: request.query, limit: 100 },
     )
     if (!res.ok || res.value.kind !== "searchCandidates") {
       return {

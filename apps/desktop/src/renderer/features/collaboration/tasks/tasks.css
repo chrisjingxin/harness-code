@@ -1,0 +1,113 @@
+/* 项目任务的页面、表单和固定材料沿用工作台的语义色与控件。 */
+.project-task-page {
+  width: min(100%, 860px);
+  margin-inline: auto;
+  padding: 24px clamp(16px, 4vw, 34px) 36px;
+  overflow-wrap: anywhere;
+}
+.project-task-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.project-task-heading > button { flex: none; }
+.project-task-page h1 { margin: 0; font-size: 23px; line-height: 1.4; }
+.project-task-heading p, .project-task-detail-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.project-task-filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.project-task-filters [aria-pressed="true"] { background: var(--accent-soft-2); color: var(--accent-hover); }
+.project-task-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.project-task-list li { border-bottom: 1px solid var(--line); }
+.project-task-row {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 8px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.project-task-row:hover { background: var(--surface-2); }
+.project-task-row strong { display: block; font-size: 14px; font-weight: 600; }
+.project-task-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.project-task-status {
+  flex: none;
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft-2);
+  color: var(--accent-hover);
+  font-size: 12px;
+}
+.project-task-back { margin: 0 0 14px -8px; }
+.project-task-detail-heading { margin-bottom: 15px; }
+.project-task-detail-heading p { margin: 0 0 5px; }
+.project-task-properties {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+.project-task-properties dt { color: var(--muted); }
+.project-task-properties dd { margin: 0; }
+.project-task-detail-section { margin-top: 18px; }
+.project-task-detail-section h2, .project-task-attachments h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.project-task-text { margin: 0; color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.project-task-empty { margin: 8px 0; color: var(--muted); font-size: 13px; }
+.project-task-material {
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-inline-start: 2px solid var(--accent-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+.project-task-material summary { cursor: pointer; font-size: 13px; }
+.project-task-material summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.project-task-material-title { font-weight: 600; }
+.project-task-material summary small { display: inline-block; margin-inline-start: 8px; color: var(--muted); }
+.project-task-material summary .project-task-material-selected { color: var(--accent-hover); }
+.project-task-material-body { padding: 7px 0 1px; }
+.project-task-material-body button { margin-top: 8px; }
+.project-task-missing { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.project-task-dialog {
+  width: min(530px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.project-task-dialog::backdrop { background: var(--overlay-scrim); }
+.project-task-dialog h2 { margin: 0 0 14px; font-size: 17px; }
+.project-task-fields { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.project-task-fields label { display: grid; gap: 4px; color: var(--text-soft); font-size: 13px; }
+.project-task-fields :is(input, select, textarea) {
+  width: 100%;
+  min-height: var(--control-field);
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--field-bg);
+  color: var(--text);
+}
+.project-task-fields textarea { resize: vertical; }
+.project-task-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.project-task-error { margin: 8px 0 0; color: var(--danger-text); font-size: 13px; }

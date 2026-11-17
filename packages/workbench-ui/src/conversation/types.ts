@@ -25,6 +25,8 @@ export type ConversationTimelineEntry =
       readonly text: string
       readonly createdAtMs?: number
       readonly streaming?: boolean
+      /** 消息只持有固定材料标识，装配方经当前权限读取正文。 */
+      readonly referenceIds?: readonly string[]
     }
   | { readonly kind: "reasoning"; readonly id: string; readonly text: string; readonly active: boolean }
   | {
@@ -238,6 +240,29 @@ export interface ConversationFileCandidateResult {
   readonly message?: string
 }
 
+/** 协作候选只展示可读摘要，选中后由装配方打开对应操作。 */
+export interface ConversationCollaborationCandidate {
+  readonly kind: "conversation" | "member" | "task" | "knowledge"
+  readonly id: string
+  readonly title: string
+  readonly detail: string
+}
+
+export interface ConversationCollaborationCandidateResult {
+  readonly status: "ready" | "unavailable" | "error"
+  readonly items: readonly ConversationCollaborationCandidate[]
+  readonly message?: string
+}
+
+/** 用户选中会话时捕获的触发片段，起止索引是原草稿的 UTF-16 半开区间。 */
+export interface ConversationMentionOrigin {
+  readonly conversationId: string
+  readonly draftRevision: number
+  readonly tokenStart: number
+  readonly tokenEnd: number
+  readonly tokenText: string
+}
+
 export type ConversationSendResult =
   | { readonly status: "accepted" }
   | { readonly status: "rejected" | "unknown"; readonly message: string }
@@ -258,6 +283,9 @@ export interface ConversationActions {
   readonly onCommand?: (scope: ConversationScope, itemId: string) => void
   readonly onCapabilitySelect?: (scope: ConversationScope, controlId: string, itemId: string) => void
   readonly onRequestFileCandidates?: (scope: ConversationScope, target: ConversationProjectTarget, request: ConversationFileCandidateRequest) => Promise<ConversationFileCandidateResult>
+  readonly onRequestCollaborationCandidates?: (scope: ConversationScope, target: ConversationProjectTarget, query: string) => Promise<ConversationCollaborationCandidateResult>
+  /** 只上报选中的协作对象和发起位置，草稿由装配方另行确认和更新。 */
+  readonly onSelectCollaborationCandidate?: (scope: ConversationScope, target: ConversationProjectTarget, candidate: ConversationCollaborationCandidate, origin: ConversationMentionOrigin) => void
   readonly onOpenFile?: (scope: ConversationScope, target: ConversationProjectTarget, relativePath: string, destination: "preview" | "central") => void
   readonly onReferenceAction?: (scope: ConversationScope, id: string, action: "open" | "refresh" | "remove") => void
   readonly rendering?: RenderingActions

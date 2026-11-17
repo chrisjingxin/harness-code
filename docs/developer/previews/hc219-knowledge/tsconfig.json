@@ -1,0 +1,4 @@
+{
+  "extends": "../hc219-reference/tsconfig.json",
+  "include": ["main.tsx", "../../../../node_modules/vite/client.d.ts"]
+}

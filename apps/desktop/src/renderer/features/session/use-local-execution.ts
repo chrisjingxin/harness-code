@@ -12,7 +12,7 @@ import type { LocalSessionExecutionPort } from "./contracts.js"
 import { applyLocalExecutionUpdate, emptyLocalExecutionView } from "./local-execution-view.js"
 import type { LocalExecutionView } from "./local-execution-view.js"
 
-export const textOnlyReason = "本机 Agent 首轮仅支持纯文本。移除引用或附件后可发送，当前草稿已保留。"
+export const attachmentUnavailableReason = "本机 Agent 暂不支持附件。移除附件后可发送，当前草稿已保留。"
 const unknownReason = "发送结果待确认。请保留当前草稿，等待本机执行状态更新。"
 const preparing: LocalExecutionAvailability = { available: false, reason: "正在确认本机会话执行能力…" }
 const readyOnOpen: LocalExecutionAvailability = { available: false, reason: "创建后确认本机 Agent" }
@@ -28,6 +28,7 @@ type Flight = {
   readonly scope: ProjectNavigationScope
   readonly bindingId: string
   readonly draftRevision: number
+  readonly referenceIds: readonly string[]
   readonly requestId: string
   turnId?: string
   lastSequence: number
@@ -78,6 +79,7 @@ export function useLocalExecution(
       kind: "accepted",
       turnId,
       text,
+      referenceIds: flight.referenceIds,
       author: { id: flight.scope.accountId, displayName: current.current.ownerName },
     })
     current.current.onAccepted(flight.scope, conversationId, flight.draftRevision)
@@ -207,7 +209,7 @@ export function useLocalExecution(
       }
     },
     async send(input) {
-      if (input.referenceIds.length || input.attachmentIds.length) return { status: "rejected", message: textOnlyReason }
+      if (input.attachmentIds.length) return { status: "rejected", message: attachmentUnavailableReason }
       const source = current.current.target
       const scope = source?.scope
       if (!source || !scope || scope.accountId !== input.scope.accountId || scope.workspaceId !== input.scope.workspaceId
@@ -223,6 +225,7 @@ export function useLocalExecution(
         scope: input.scope,
         bindingId: screen.binding.bindingId,
         draftRevision: input.draftRevision,
+        referenceIds: [...input.referenceIds],
         requestId: crypto.randomUUID(),
         lastSequence: 0,
         unknown: false,
@@ -230,7 +233,7 @@ export function useLocalExecution(
       screen.flight = flight
       refresh()
       try {
-        const result = await host.send(scope, flight.bindingId, flight.requestId, input.text)
+        const result = await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds)
         if (flight.turnId) return { status: "accepted" }
         const receipt = result.ok ? result.value : { status: "rejected" as const, reason: result.error.message }
         if (receipt.status === "accepted") {
@@ -240,6 +243,9 @@ export function useLocalExecution(
           return { status: "accepted" }
         }
         screen.flight = undefined
+        if ("unavailableReferenceId" in receipt && receipt.unavailableReferenceId) {
+          screen.timeline = { ...screen.timeline, referenceFailure: { id: receipt.unavailableReferenceId, message: receipt.reason } }
+        }
         if (mounted.current) refresh()
         return { status: "rejected", message: receipt.reason }
       } catch {

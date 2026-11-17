@@ -1,0 +1,53 @@
+/* 引用弹窗沿用工作台语义色与按钮。正文可单独滚动，短窗口仍可到达确认动作。 */
+.conversation-reference-dialog {
+  width: min(540px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.conversation-reference-dialog::backdrop { background: var(--overlay-scrim); }
+.conversation-reference-dialog h2 { margin: 0 0 14px; font-size: 17px; }
+.conversation-reference-dialog h3 { margin: 0; font-size: 14px; }
+.conversation-reference-dialog p { margin: 8px 0; color: var(--muted); font-size: 13px; }
+.conversation-reference-dialog [role="alert"] { color: var(--danger-text); }
+.conversation-reference-material dl { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 10px; }
+.conversation-reference-material dl div { display: flex; gap: 6px; font-size: 12px; }
+.conversation-reference-material dt { color: var(--muted); }
+.conversation-reference-material dd { margin: 0; }
+.conversation-reference-text {
+  max-height: 12em;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: var(--radius-control);
+  border-left: 2px solid var(--accent-border-strong);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.conversation-reference-targets {
+  min-width: 0;
+  margin: 16px 0 0;
+  padding: 6px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.conversation-reference-targets legend { padding: 0 8px 0 0; color: var(--text-soft); font-size: 13px; font-weight: 600; }
+.conversation-reference-targets label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 7px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 13px;
+}
+.conversation-reference-targets label:has(:checked) { background: var(--accent-soft-2); }
+.conversation-reference-targets input { margin: 0; accent-color: var(--accent); }
+.conversation-reference-targets small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.conversation-reference-targets > button { margin: 4px 0 0 26px; }
+.conversation-reference-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }

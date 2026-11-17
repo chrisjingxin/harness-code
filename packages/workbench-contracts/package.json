@@ -19,6 +19,7 @@
     "./schema/device": "./schema/device.schema.json",
     "./schema/project": "./schema/project.schema.json",
     "./schema/organization": "./schema/organization.schema.json",
+    "./schema/collaboration": "./schema/collaboration.schema.json",
     "./resources": "./resources.json"
   }
 }

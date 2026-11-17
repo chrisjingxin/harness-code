@@ -30,8 +30,9 @@ export type {
   ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft,
   ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,
   ConversationInteractionAnswer, ConversationInteractionView,
-  ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
-  ConversationReferenceView, ConversationScope, ConversationSendResult, ConversationTimelineActivity,
+  ConversationMentionOrigin, ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
+  ConversationReferenceView, ConversationScope, ConversationSendResult, ConversationCollaborationCandidate, ConversationCollaborationCandidateResult,
+  ConversationTimelineActivity,
   ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,
   ConversationViewProps,
 } from "./conversation/index.js"

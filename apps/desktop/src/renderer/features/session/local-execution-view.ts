@@ -16,6 +16,7 @@ export type LocalExecutionView = {
   readonly permissionRetryRevision?: number
   readonly permission?: LocalExecutionPermission | null
   readonly failure: string | null
+  readonly referenceFailure?: { readonly id: string; readonly message: string }
   readonly uploadFailures?: ReadonlyMap<string, string>
 }
 
@@ -28,7 +29,7 @@ export const emptyLocalExecutionView: LocalExecutionView = {
 
 /** 仅供桌面装配使用的显示更新。已明确受理后才追加用户消息。 */
 export type LocalExecutionViewUpdate =
-  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"] }
+  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[] }
   | { readonly kind: "tool"; readonly turnId: string; readonly tool: LocalExecutionTool }
   | { readonly kind: "assistant-text"; readonly turnId: string; readonly text: string }
   | { readonly kind: "finished"; readonly turnId: string; readonly failure?: string }
@@ -49,9 +50,12 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     return {
       ...state,
       activeTurnId: update.turnId,
-      entries: [...state.entries, { kind: "message", id, role: "user", text: update.text, author: update.author }],
+      entries: [...state.entries, {
+        kind: "message", id, role: "user", text: update.text, author: update.author, referenceIds: update.referenceIds,
+      }],
       revision: state.revision + 1,
       failure: null,
+      referenceFailure: undefined,
     }
   }
   // 结束后迟到的分段不能重开这轮对话，也不能写进后来开始的另一轮。

@@ -124,7 +124,6 @@ export type SessionPageController = {
   onRefreshBrief(conversationId: string): void
   onPersonalChange(scope: ConversationScope, change: ConversationPersonalChange): void
   onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
-  onReferenceAction?: ConversationActions["onReferenceAction"]
   onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
   onOpenFile?: ConversationActions["onOpenFile"]
   renderLocalRight?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary; slot: WorkbenchRightSlot }): ReactNode | null
@@ -228,7 +227,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             onPersonalChange={controller.onPersonalChange}
             onCapabilitySelect={controller.onCapabilitySelect}
-            onReferenceAction={controller.onReferenceAction}
             onRequestFileCandidates={controller.onRequestFileCandidates}
             onOpenFile={controller.onOpenFile}
           />
@@ -245,7 +243,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
           deviceName={deviceName}
           syncStatus={syncStatus}
           syncState={syncState}
-          entries={entries}
+          entries={controller.hooks?.renderHistoryReferences?.(entries) ?? entries}
           contentRevision={syncState.localSyncedSequence}
           personal={personal}
           rendering={controller.rendering}

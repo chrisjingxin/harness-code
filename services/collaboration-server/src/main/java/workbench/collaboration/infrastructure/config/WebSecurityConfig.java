@@ -31,6 +31,7 @@ import workbench.collaboration.interfaces.dto.PlatformDtos;
 import workbench.collaboration.interfaces.filter.BoundaryFilter;
 import workbench.collaboration.interfaces.http.ApiResponses;
 import workbench.collaboration.interfaces.http.RouteCatalog;
+import workbench.collaboration.interfaces.rest.NotificationController;
 
 import java.net.URI;
 import java.util.List;
@@ -113,6 +114,7 @@ public class WebSecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .csrf(c -> c.csrfTokenRepository(csrf).ignoringRequestMatchers(deviceRoute))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(NotificationController::isStreamCompletion).permitAll()
                         .requestMatchers(
                                 "/health",
                                 "/api/v1/meta",

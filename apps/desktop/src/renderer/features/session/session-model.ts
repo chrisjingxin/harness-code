@@ -6,6 +6,7 @@
  * 确定性数据结构，不持有网络、React 状态或磁盘读写。
  */
 import type { ConversationTimelineEntry, NavigationSessionEntry } from "@workbench/ui"
+import { parseFixedReference } from "../../../collaboration-reference.js"
 import type {
   ProjectConversationSummary,
   ProjectHistoryMessage,
@@ -171,6 +172,8 @@ export function decodeHistoryToTimelineEntries(
     const parsed = parsePayloadObject(message.payload)
     const id = `seq-${message.sequence}`
     if (message.type === "user") {
+      const ids = parsed?.referenceIds
+      const referenceIds = Array.isArray(ids) ? ids.filter((id): id is string => parseFixedReference(id) !== null) : []
       return {
         kind: "message",
         id,
@@ -178,6 +181,7 @@ export function decodeHistoryToTimelineEntries(
         author: { id: owner.userId, displayName: owner.displayName },
         createdAtMs: message.occurredAtMs,
         text: pickString(parsed, ["text", "content", "message"]) ?? message.payload,
+        ...(referenceIds.length ? { referenceIds } : {}),
       }
     }
     if (message.type === "assistant") {
