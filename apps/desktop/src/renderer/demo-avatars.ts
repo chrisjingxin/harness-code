@@ -1,6 +1,6 @@
 /**
  * 测试团队成员仿真头像兜底映射：
- * 仅在服务端 user.photo 为空时按工号回退到随包静态人像（遵循 desktop CSP `img-src 'self' data:`）。
+ * 仅在服务端 user.photo 为空或远程头像加载失败时，按工号/姓名回退到随包静态人像。
  */
 import avatar80278667 from "./assets/avatars/80278667.jpg"
 import avatar80278668 from "./assets/avatars/80278668.jpg"
@@ -16,9 +16,44 @@ const DEMO_AVATARS_BY_USER_NO: Record<string, string> = {
   "80278671": avatar80278671,
 }
 
-export function resolveUserPhoto(user?: { photo?: string | null; userNo?: string | null } | null): string | null {
-  const explicit = user?.photo?.trim()
-  if (explicit) return explicit
+const DEMO_AVATARS_BY_USER_NAME: Record<string, string> = {
+  "沈北辰": avatar80278667,
+  "张景新": avatar80278668,
+  "王大林": avatar80278669,
+  "冯学茗": avatar80278670,
+  "杨康": avatar80278671,
+}
+
+type AvatarUserLike = {
+  photo?: string | null
+  userNo?: string | null
+  userName?: string | null
+} | null | undefined
+
+function isUsableAvatarUrl(raw: string): boolean {
+  if (/^data:image\//i.test(raw)) return true
+  if (raw.startsWith("/") || raw.startsWith("./") || raw.startsWith("../") || raw.startsWith("assets/")) return true
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === "http:"
+      || parsed.protocol === "https:"
+      || parsed.protocol === "file:"
+      || parsed.protocol === "blob:"
+  } catch {
+    return false
+  }
+}
+
+export function resolveFallbackDemoAvatar(user?: Pick<NonNullable<AvatarUserLike>, "userNo" | "userName"> | null): string | null {
   const userNo = user?.userNo?.trim()
-  return (userNo && DEMO_AVATARS_BY_USER_NO[userNo]) || null
+  if (userNo && DEMO_AVATARS_BY_USER_NO[userNo]) return DEMO_AVATARS_BY_USER_NO[userNo]
+  const userName = user?.userName?.trim()
+  if (userName && DEMO_AVATARS_BY_USER_NAME[userName]) return DEMO_AVATARS_BY_USER_NAME[userName]
+  return null
+}
+
+export function resolveUserPhoto(user?: AvatarUserLike): string | null {
+  const explicit = user?.photo?.trim()
+  if (explicit && isUsableAvatarUrl(explicit)) return explicit
+  return resolveFallbackDemoAvatar(user)
 }

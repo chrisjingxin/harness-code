@@ -54,6 +54,7 @@ type SessionWorkspaceRuntime = {
   readonly loaded: boolean
   readonly directory: DirectoryState
   readonly personal: ProjectPersonal
+  readonly centralMode: "code" | "diff"
   readonly positions: Readonly<Record<string, { area: ScrollArea; path: string; top: number; left: number }>>
   readonly tree: TreeState
   readonly files: Readonly<Record<string, ProjectFileView>>
@@ -83,6 +84,7 @@ const DEFAULT_RUNTIME: SessionWorkspaceRuntime = {
   loaded: false,
   directory: { status: "idle", boundPath: null, isGitRepository: false, error: null },
   personal: DEFAULT_PROJECT_PERSONAL,
+  centralMode: "code",
   positions: {},
   tree: { status: "idle", entriesByDir: {}, loadingDirs: [], truncatedDirs: [], error: null },
   files: {},
@@ -628,6 +630,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     conversationId: string,
     path: string,
     destination: "preview" | "central",
+    mode: "code" | "diff" = "code",
   ) => {
     const name = basenameOf(path)
     mutateRuntime(targetScope, conversationId, prev => {
@@ -638,6 +641,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
           : [...prev.personal.centralPaths.slice(-(MAX_CENTRAL_TABS - 1)), path]
         return {
           ...prev,
+          centralMode: mode,
           personal: {
             ...prev.personal,
             view: { ...prev.personal.view, selectedPath: path },
@@ -880,7 +884,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
         }
       },
       openFile: (_s, path) => {
-        openFileTab(targetScope, conversationId, path, "preview")
+        openFileTab(targetScope, conversationId, path, "central", "code")
       },
       selectFileTab: (_s, path) => {
         mutateRuntime(targetScope, conversationId, prev => ({
@@ -948,15 +952,54 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
       gates,
       personal: personalView,
       actions,
+      preferCentralFileOpen: true,
+      gitDeferred: true,
+      sessionMeta: {
+        updatedLabel: runtime.directory.status === "ready" ? "实时可读" : "目录待确认",
+        modeLabel: "本机可执行",
+      },
+      onOpenDiffInCentral: (path, snapshot) => {
+        openFileTab(targetScope, conversationId, path, "central", "diff")
+        const snap = snapshot ?? runtimesRef.current[makeKey(targetScope, conversationId)]?.changes.repository?.snapshot
+        if (snap) void loadDiff(targetScope, conversationId, snap, path)
+      },
     }
   }, [getRuntime, mutateRuntime, loadDirectoryEntries, loadFilePreview, loadGitStatus, loadDiff, openFileTab])
+
+  const setCentralMode = useCallback((
+    targetScope: ProjectNavigationScope,
+    conversationId: string,
+    mode: "code" | "diff",
+  ) => {
+    mutateRuntime(targetScope, conversationId, prev => ({ ...prev, centralMode: mode }))
+    if (mode !== "diff") return
+    const runtime = runtimesRef.current[makeKey(targetScope, conversationId)]
+    const activePath = runtime?.personal.activeCentral
+    const snapshot = runtime?.changes.repository?.snapshot
+    if (activePath && snapshot && !(runtime.changes.diff?.snapshot === snapshot && runtime.changes.diff?.path === activePath)) {
+      void loadDiff(targetScope, conversationId, snapshot, activePath)
+    }
+  }, [mutateRuntime, loadDiff])
+
+  const openDiffFile = useCallback((
+    targetScope: ProjectNavigationScope,
+    conversationId: string,
+    path: string,
+  ) => {
+    openFileTab(targetScope, conversationId, path, "central", "diff")
+    const runtime = runtimesRef.current[makeKey(targetScope, conversationId)]
+    const snapshot = runtime?.changes.repository?.snapshot
+    if (snapshot) void loadDiff(targetScope, conversationId, snapshot, path)
+  }, [openFileTab, loadDiff])
 
   const getCentralState = useCallback((targetScope: ProjectNavigationScope, conversationId: string) => {
     const runtime = getRuntime(targetScope, conversationId)
     return {
       centralTabs: runtime.personal.centralPaths.map(path => ({ path, name: basenameOf(path) })),
       activeCentral: runtime.personal.activeCentral,
+      mode: runtime.centralMode,
       files: runtime.files,
+      changes: runtime.changes,
       positions: runtime.positions,
       refreshGate: runtime.directory.status === "ready"
         ? ({ enabled: true } as const)
@@ -972,6 +1015,8 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     selectConversationCentralTab,
     selectCentralFileTab,
     closeCentralFileTab,
+    setCentralMode,
+    openDiffFile,
     refreshFile,
     savePosition,
     requestFileCandidates,
@@ -983,6 +1028,8 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     selectConversationCentralTab,
     selectCentralFileTab,
     closeCentralFileTab,
+    setCentralMode,
+    openDiffFile,
     refreshFile,
     savePosition,
     requestFileCandidates,

@@ -1,9 +1,9 @@
 /**
- * 右侧文件/变更 Dock：两个视图均由受控数据驱动。
- * 宿主保存个人状态并处理回调；本模块不执行文件或 Git 操作。
+ * 右侧文件/变更 Dock（1:1 还原原型稿 .rail）：
+ * 支持“文件”与“变更”双 Tab、可拖拽调宽、点击文件直接在中央分屏或右侧预览打开。
  */
-import { FolderTree, GitCompareArrows, PanelRightClose, X } from "lucide-react"
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { Clock, Folder, GitBranch, Lock, X } from "lucide-react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, RefObject } from "react"
 import { ProjectFileExplorer } from "./file-tree.js"
 import { ProjectFileContentView, ProjectFileHeader } from "./file-view.js"
@@ -12,7 +12,7 @@ import type { ProjectDockProps, ProjectScope } from "./types.js"
 
 /** 独立右侧区域；关闭时保持挂载，调用方控制实际开关及宽度。 */
 export function ProjectDock(props: ProjectDockProps): ReactElement {
-  const { scope, projectName, availability, tree, files, changes, gates, personal, actions } = props
+  const { scope, projectName, availability, tree, files, changes, gates, personal, actions, preferCentralFileOpen, sessionMeta } = props
   const uid = useId()
   const treeRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -22,11 +22,19 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
   const showChanges = !denied && (availability.state !== "offline" || changes.freshness === "cached")
   const identity = projectScopeKey(scope)
 
+  const statusByPath = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const f of changes.repository?.files ?? []) {
+      map.set(f.path, f.status)
+    }
+    return map
+  }, [changes.repository?.files])
+
   useEffect(() => {
     if (!dragging) return
     const move = (event: PointerEvent) => {
       const drag = dragRef.current
-      if (drag) actions.setDockWidth(scope, Math.max(330, Math.min(760, drag.width - (event.clientX - drag.x))))
+      if (drag) actions.setDockWidth(scope, Math.max(260, Math.min(480, drag.width - (event.clientX - drag.x))))
     }
     const up = () => { dragRef.current = null; setDragging(false) }
     window.addEventListener("pointermove", move)
@@ -51,6 +59,7 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
     target?.focus()
     if (target?.dataset.panel === "files" || target?.dataset.panel === "changes") actions.selectPanel(scope, target.dataset.panel)
   }
+
   return <aside className="project-context-dock" style={{ width: personal.dockOpen ? personal.dockWidthPx : 0 }}
     data-active-panel={panel} aria-label="项目文件与变更" aria-hidden={personal.dockOpen ? undefined : true} inert={!personal.dockOpen}>
     <div className={`project-dock-resize${dragging ? " is-dragging" : ""}`} role="separator" aria-orientation="vertical"
@@ -59,26 +68,52 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
       <div className="project-dock-tabs" role="tablist" aria-label="项目面板" onKeyDown={onPanelKeys}>
         <button type="button" role="tab" id={`${uid}-files-tab`} aria-controls={`${uid}-files-panel`} aria-selected={panel === "files"}
           tabIndex={panel === "files" ? 0 : -1} data-panel="files" className={panel === "files" ? "project-dock-tab is-selected" : "project-dock-tab"}
-          onClick={() => actions.selectPanel(scope, "files")}><FolderTree size={16} aria-hidden="true" />文件</button>
+          onClick={() => actions.selectPanel(scope, "files")}><Folder size={14} aria-hidden="true" />文件</button>
         <button type="button" role="tab" id={`${uid}-changes-tab`} aria-controls={`${uid}-changes-panel`} aria-selected={panel === "changes"}
           tabIndex={panel === "changes" ? 0 : -1} data-panel="changes" className={panel === "changes" ? "project-dock-tab is-selected" : "project-dock-tab"}
-          onClick={() => actions.selectPanel(scope, "changes")}><GitCompareArrows size={16} aria-hidden="true" />变更
+          onClick={() => actions.selectPanel(scope, "changes")}><GitBranch size={14} aria-hidden="true" />变更
           {showChanges && changes.repository ? <span className="project-git-count">{changes.repository.files.length}</span> : null}
         </button>
       </div>
-      <button type="button" className="wb-icon-button project-dock-close" aria-label="关闭右侧面板"
-        onClick={() => actions.setDockOpen(scope, false)}><PanelRightClose aria-hidden="true" /></button>
+      <button type="button" className="wb-icon-button project-dock-close" aria-label="关闭右侧面板" title="关闭右栏"
+        onClick={() => actions.setDockOpen(scope, false)}><X size={15} aria-hidden="true" /></button>
     </header>
     {availability.state !== "available" ? <p className="project-availability" role="status">{availability.message}</p> : null}
+
     <div id={`${uid}-files-panel`} role="tabpanel" aria-labelledby={`${uid}-files-tab`}
-      className="project-dock-body project-dock-code-body" hidden={panel !== "files"} inert={panel !== "files"}>
-      {denied ? <p className="project-panel-empty">当前无权查看项目文件。</p> : <div className={`project-code-layout${personal.fileTabs.length ? " has-file-preview" : ""}`} key={identity}>
-        <ProjectFileExplorer scope={scope} projectName={projectName} tree={tree} selectedPath={personal.selectedPath}
-          refresh={gates.refreshTree} open={gates.openFile} actions={actions} treeRef={treeRef} />
-        <ProjectDockFiles {...props} treeRef={treeRef} uid={uid} />
-      </div>}
-      {!denied && personal.fileTabs.length === 0 ? <p className="project-file-empty">从上方文件树打开文件查看预览</p> : null}
+      className={`project-dock-body${preferCentralFileOpen ? " is-tree-only" : " project-dock-code-body"}`} hidden={panel !== "files"} inert={panel !== "files"}>
+      {denied ? <p className="project-panel-empty">当前无权查看项目文件。</p> : preferCentralFileOpen ? (
+        <div className="project-dock-files-scroll" key={identity}>
+          <ProjectFileExplorer
+            scope={scope}
+            projectName={projectName}
+            tree={tree}
+            selectedPath={personal.selectedPath}
+            refresh={gates.refreshTree}
+            open={gates.openFile}
+            actions={actions}
+            treeRef={treeRef}
+            preferCentralFileOpen
+            statusByPath={statusByPath}
+          />
+          {sessionMeta && (
+            <div className="project-rail-block">
+              <span className="project-rail-title">会话</span>
+              <div className="project-dir-line"><Clock size={12} aria-hidden="true" /><span>最近更新 {sessionMeta.updatedLabel}</span></div>
+              <div className="project-dir-line"><Lock size={12} aria-hidden="true" /><span>{sessionMeta.modeLabel}</span></div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className={`project-code-layout${personal.fileTabs.length ? " has-file-preview" : ""}`} key={identity}>
+          <ProjectFileExplorer scope={scope} projectName={projectName} tree={tree} selectedPath={personal.selectedPath}
+            refresh={gates.refreshTree} open={gates.openFile} actions={actions} treeRef={treeRef} statusByPath={statusByPath} />
+          <ProjectDockFiles {...props} treeRef={treeRef} uid={uid} />
+        </div>
+      )}
+      {!denied && !preferCentralFileOpen && personal.fileTabs.length === 0 ? <p className="project-file-empty">从上方文件树打开文件查看预览</p> : null}
     </div>
+
     <div id={`${uid}-changes-panel`} role="tabpanel" aria-labelledby={`${uid}-changes-tab`}
       className="project-dock-body" hidden={panel !== "changes"} inert={panel !== "changes"}>
       {denied ? <p className="project-panel-empty">当前无权查看项目变更。</p>
@@ -117,7 +152,6 @@ function ProjectDockFiles({ scope, files, gates, personal, actions, treeRef, uid
     const target = tabs[next]
     if (target) { actions.selectFileTab(scope, target.path); buttonRefs.current.get(target.path)?.focus() }
   }
-  // 最后一个页签关闭时组件仍挂载一轮，以便把焦点还给文件树。
   if (tabs.length === 0) return <></>
   return <div className="project-code-panel">
     <div className="project-file-tabs" role="tablist" aria-label="右侧已打开文件" onKeyDown={onKeys}>

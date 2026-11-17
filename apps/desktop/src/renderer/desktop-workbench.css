@@ -1,8 +1,8 @@
-/* 正式窗口的原生标题区、空态与设置，只消费公共主题颜色。 */
+/* 正式窗口的原生标题区、空态与设置弹窗，消费公共主题令牌并保持原型稿克制层次。 */
 html, body, #root { height: 100%; overflow: hidden; }
 
 .desktop-titlebar {
-  min-height: max(48px, env(titlebar-area-height, 0px));
+  min-height: max(54px, env(titlebar-area-height, 0px));
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -13,60 +13,162 @@ html, body, #root { height: 100%; overflow: hidden; }
 
 .desktop-navigation { height: 100%; display: flex; flex-direction: column; background: var(--sidebar-bg); }
 .desktop-navigation .project-navigation { flex: 1; min-height: 0; }
-.desktop-workspace-choice { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.desktop-navigation-note { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 11px; }
+.desktop-workspace-choice { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.desktop-navigation-note { margin: 0; padding: 0 12px 10px; color: var(--muted); font-size: var(--text-xs); }
 
-.desktop-empty { height: 100%; overflow: auto; padding: 20px; }
-.desktop-empty h1, .desktop-empty h2, .desktop-settings > h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.desktop-empty p { color: var(--muted); font-size: 13px; margin: 8px 0 12px; }
+.desktop-empty { height: 100%; overflow: auto; padding: 28px; background: var(--bg); }
+.desktop-empty h1, .desktop-empty h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--text); }
+.desktop-empty p { color: var(--muted); font-size: var(--text-base); margin: 8px 0 16px; max-width: 44ch; line-height: 1.7; }
 .desktop-conversation { display: grid; place-content: center; justify-items: center; text-align: center; }
-.desktop-project { background: var(--surface); border-left: 1px solid var(--line); }
+
+.desktop-project { background: var(--surface); box-shadow: inset 1px 0 0 var(--line); }
 .desktop-project header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .desktop-history { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 10px 20px 12px; }
-.desktop-history-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-bottom: 10px; color: var(--muted); font-size: 12px; }
+.desktop-history-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-bottom: 10px; color: var(--muted); font-size: var(--text-xs); }
 .desktop-history-toolbar button { margin-left: auto; }
 .desktop-project-center { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.desktop-center-tabs { display: flex; flex: 0 0 auto; align-items: stretch; min-height: 44px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.desktop-center-tabs { display: flex; flex: 0 0 auto; align-items: stretch; min-height: 44px; overflow-x: auto; box-shadow: inset 0 -1px 0 var(--line); scrollbar-width: thin; }
 .desktop-conversation-tab { display: flex; flex: 0 0 auto; border-bottom: 2px solid transparent; }
 .desktop-conversation-tab[data-selected="true"] { border-bottom-color: var(--accent); }
-.desktop-conversation-tab button { border: 0; background: transparent; color: var(--muted); padding: 0 16px; font: inherit; font-size: 13px; cursor: pointer; }
-.desktop-conversation-tab[data-selected="true"] button { color: var(--accent); }
+.desktop-conversation-tab button { border: 0; background: transparent; color: var(--muted); padding: 0 16px; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.desktop-conversation-tab[data-selected="true"] button { color: var(--text); font-weight: 600; }
 .desktop-center-conversation, .desktop-project-center .project-workbench-file-panel { flex: 1 1 auto; min-height: 0; }
 .desktop-center-conversation[hidden] { display: none; }
 .desktop-project-dock { position: relative; height: 100%; min-height: 0; }
 .desktop-project-retry { position: absolute; z-index: 2; right: 48px; top: 12px; }
 
-.desktop-settings { width: min(530px, 100%); font-size: 12px; }
-.desktop-settings > h2 { padding-right: 32px; margin-bottom: 12px; }
-.desktop-settings .identity-panel, .desktop-settings .device-panel { margin-top: 12px; padding: 14px; border-radius: var(--radius-surface); }
-.desktop-settings .identity-heading { gap: 4px 12px; margin-bottom: 10px; }
-.desktop-settings .identity-heading h2, .desktop-settings .device-panel h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.desktop-settings .identity-panel p, .desktop-settings .device-panel p { margin: 8px 0; line-height: 1.5; }
-.desktop-settings .identity-panel h3 { margin: 12px 0 6px; font-size: 13px; }
-.desktop-settings .identity-panel ul { margin: 6px 0 0; line-height: 1.6; }
-.desktop-settings .identity-actions, .desktop-settings .identity-actions label, .desktop-settings .device-actions { gap: 6px 8px; }
-.desktop-settings .identity-actions select, .desktop-settings .device-row input { min-height: var(--control-standard); padding: 4px 8px; border-radius: var(--radius-control); }
-.desktop-settings .device-row { gap: 8px; margin-top: 10px; }
-.desktop-settings .device-actions button { min-height: var(--control-compact); padding: 4px 9px; border-radius: var(--radius-control); font-size: 12px; }
-.desktop-settings .wb-button { min-height: var(--control-compact); padding: 0 9px; font-size: 12px; }
-.desktop-settings .hint { color: var(--muted); font-size: 12px; }
-.desktop-settings .error, .desktop-empty .error { color: var(--danger); }
-.desktop-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 13px; }
-.desktop-preferences label, .desktop-zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.desktop-preferences select {
-  min-height: var(--control-compact);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  padding: 0 8px;
+/* 设置弹窗（对齐原型稿 #dlgSettings） */
+.desktop-settings {
+  width: min(560px, 88vw);
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: var(--text-sm); color: var(--text);
 }
+.desktop-settings-head {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding-right: 36px; padding-bottom: 8px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.desktop-settings-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.4; }
+.desktop-settings-sub { margin: 2px 0 0; font-size: var(--text-sm); color: var(--muted); }
+
+.desktop-set-section {
+  margin-top: 8px; padding-top: 6px;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
+  letter-spacing: .08em; text-transform: uppercase; color: var(--subtle);
+}
+.desktop-preferences { display: flex; flex-direction: column; }
+.desktop-set-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px;
+  padding: 10px 0;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.desktop-set-row:last-of-type { box-shadow: none; }
+.desktop-set-main { display: grid; gap: 2px; flex: 1 1 200px; min-width: 0; }
+.desktop-set-label { font-size: var(--text-base); font-weight: 500; color: var(--fg, var(--text)); }
+.desktop-set-help { font-size: var(--text-xs); color: var(--muted); }
+.desktop-zoom button { min-width: 34px; font-variant-numeric: tabular-nums; }
+
+.swatch-row { display: flex; gap: 8px; flex: none; }
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+}
+.swatch:hover { transform: scale(1.06); }
+.swatch.is-on {
+  border-color: var(--bg);
+  box-shadow: 0 0 0 1.5px var(--fg, var(--text));
+}
+
+.kbd-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  padding: 10px 0 6px;
+}
+.kbd-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--fg-2, var(--text-soft));
+}
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.kbd kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.desktop-settings .identity-panel,
+.desktop-settings .device-panel {
+  margin-top: 2px;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.desktop-settings .identity-heading { gap: 4px 10px; margin-bottom: 8px; }
+.desktop-settings .identity-heading h2,
+.desktop-settings .device-panel h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.desktop-settings .identity-panel p,
+.desktop-settings .device-panel p { margin: 6px 0; line-height: 1.55; }
+.desktop-settings .identity-panel h3 { margin: 10px 0 6px; font-size: var(--text-sm); font-weight: 600; }
+.desktop-settings .identity-panel ul { margin: 6px 0 0; line-height: 1.6; }
+.desktop-settings .identity-actions,
+.desktop-settings .identity-actions label,
+.desktop-settings .device-actions { gap: 8px; }
+.desktop-settings .identity-actions select,
+.desktop-settings .device-row input {
+  min-height: var(--control-standard);
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.desktop-settings .device-row { gap: 8px; margin-top: 8px; }
+.desktop-settings .device-actions button {
+  min-height: var(--control-compact);
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.desktop-settings .device-actions button:hover:not(:disabled) {
+  background: var(--hover);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.desktop-settings .wb-button { min-height: var(--control-compact); padding: 0 10px; font-size: var(--text-sm); }
+.desktop-settings .hint { color: var(--muted); font-size: var(--text-xs); }
+.desktop-settings .error, .desktop-empty .error { color: var(--danger-fg); }
 
 @media (max-height: 560px) {
   .desktop-history { padding: 8px 16px 10px; }
   .desktop-history-toolbar { padding-bottom: 6px; }
-  .desktop-history .wb-composer-inner { padding-top: 6px; }
-  .desktop-history .wb-composer-tabs { height: 30px; }
-  .desktop-history .wb-composer-tab { line-height: 30px; }
-  .desktop-history .wb-composer-rail { padding-top: 2px; padding-bottom: 7px; }
+  .desktop-history .wb-composer-inner { padding-top: 4px; }
+  .desktop-history .wb-composer-rail { padding-top: 2px; }
 }

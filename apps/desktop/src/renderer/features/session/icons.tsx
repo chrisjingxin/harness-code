@@ -126,3 +126,50 @@ export function AlertIcon({ size = 13 }: IconProps): ReactElement {
     <path key="3" d="M12 17h.01" />,
   ])
 }
+
+export function ArrowLeftIcon({ size = 15 }: IconProps): ReactElement {
+  return svg(size, [
+    <path key="1" d="M19 12H5" />,
+    <path key="2" d="m12 19-7-7 7-7" />,
+  ])
+}
+
+export function MaximizeIcon({ size = 14 }: IconProps): ReactElement {
+  return svg(size, [
+    <path key="1" d="M15 3h6v6" />,
+    <path key="2" d="m21 3-7 7" />,
+    <path key="3" d="M9 21H3v-6" />,
+    <path key="4" d="m3 21 7-7" />,
+  ])
+}
+
+export function MinimizeIcon({ size = 14 }: IconProps): ReactElement {
+  return svg(size, [
+    <path key="1" d="M4 14h6v6" />,
+    <path key="2" d="m10 14-7 7" />,
+    <path key="3" d="M20 10h-6V4" />,
+    <path key="4" d="m14 10 7-7" />,
+  ])
+}
+
+export function CloseIcon({ size = 15 }: IconProps): ReactElement {
+  return svg(size, [
+    <path key="1" d="M18 6 6 18" />,
+    <path key="2" d="m6 6 12 12" />,
+  ])
+}
+
+export function FileDocIcon({ size = 12 }: IconProps): ReactElement {
+  return svg(size, [
+    <path key="1" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />,
+    <path key="2" d="M14 2v6h6" />,
+  ])
+}
+
+export function ChevronLeftIcon({ size = 13 }: IconProps): ReactElement {
+  return svg(size, <path d="m15 18-6-6 6-6" />)
+}
+
+export function ChevronRightIcon({ size = 13 }: IconProps): ReactElement {
+  return svg(size, <path d="m9 18 6-6-6-6" />)
+}

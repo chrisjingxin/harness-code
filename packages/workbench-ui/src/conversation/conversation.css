@@ -115,29 +115,99 @@
   .wb-conversation-spin, .wb-conversation-streaming-cursor { animation: none; }
 }
 
-/* 输入区复用旧 Web 最终生效的平面盒、聊天标签和上弹菜单。 */
+/* 输入区 1:1 还原原型稿 .composer 悬浮圆角卡片、@ 快捷按钮与 30px 圆形发送键。 */
 .wb-conversation-view { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; width: 100%; }
 .wb-conversation-view[hidden] { display: none; }
 .wb-composer-bar { flex: 0 0 auto; min-width: 0; background: transparent; }
-.wb-composer-inner { position: relative; width: 100%; max-width: 880px; margin-inline: auto; padding-top: 12px; }
-.wb-composer-box { border: 1px solid var(--line-strong); border-radius: var(--radius-surface); background: var(--surface); }
-.wb-composer-box:focus-within { border-color: var(--accent); }
-.wb-composer-tabs { display: flex; align-items: center; height: 38px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-.wb-composer-tab { position: relative; color: var(--accent-hover); font-size: 12px; font-weight: 650; line-height: 38px; }
-.wb-composer-tab::after { position: absolute; inset-inline: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); content: ""; }
-.wb-composer-textarea { display: block; width: 100%; min-width: 0; min-height: 52px; max-height: max(52px, min(186px, 20dvh)); resize: none; padding: 12px 16px 6px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.wb-composer-inner { position: relative; width: 100%; max-width: 740px; margin-inline: auto; padding-top: 8px; }
+.wb-composer-box {
+  border: 0;
+  border-radius: var(--radius-lg, 10px);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border, var(--line)), 0 2px 6px -4px rgba(0, 0, 0, .16);
+  padding: 10px 10px 8px 12px;
+  transition: box-shadow 120ms ease;
+}
+.wb-composer-box:focus-within {
+  box-shadow: 0 0 0 1px var(--border-strong, var(--line-strong)), 0 0 0 3px var(--selected);
+}
+.wb-composer-textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  max-height: max(46px, min(186px, 20dvh));
+  resize: none;
+  padding: 2px 4px 6px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg, var(--text));
+  font: inherit;
+  font-size: var(--text-md, 14px);
+  line-height: 1.7;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.wb-composer-textarea::placeholder { color: var(--meta, var(--subtle)); }
 .wb-composer-textarea:focus-visible { outline: 0; }
-.wb-composer-rail { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px 11px; }
-.wb-composer-rail-left { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.wb-composer-rail-right { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
-.wb-composer-send, .wb-composer-cancel { display: inline-grid; place-items: center; width: var(--control-standard); height: var(--control-standard); padding: 0; border: 1px solid var(--action); border-radius: var(--radius-control); cursor: pointer; }
-.wb-composer-send { border-color: var(--action); background: var(--action); color: var(--action-text); }
-.wb-composer-send:hover:not(:disabled) { border-color: var(--action-hover); background: var(--action-hover); }
-.wb-composer-cancel { border-color: var(--danger-vivid); border-radius: var(--radius-surface); background: transparent; color: var(--danger-vivid); }
-.wb-composer-cancel:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-vivid) 8%, transparent); }
-.wb-composer-send svg { width: var(--icon-sm); height: var(--icon-sm); }
-.wb-composer-cancel svg { width: 24px; height: 24px; }
-.wb-composer-send:disabled, .wb-composer-cancel:disabled { opacity: .5; cursor: not-allowed; }
+.wb-composer-rail { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
+.wb-composer-rail-left { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.wb-composer-rail-right { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; }
+.wb-composer-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-2, var(--text-soft));
+  font: inherit;
+  font-size: var(--text-xs, 12px);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.wb-composer-tool:hover:not(:disabled) { background: var(--hover); color: var(--fg, var(--text)); }
+.wb-composer-tool:disabled { opacity: .45; cursor: not-allowed; }
+.wb-composer-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+  color: var(--meta, var(--muted));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+}
+.wb-composer-hint { color: var(--meta, var(--subtle)); font-size: var(--text-xs, 12px); white-space: nowrap; }
+.wb-composer-send, .wb-composer-cancel {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+.wb-composer-send { background: var(--accent, var(--action)); color: var(--accent-fg, var(--action-text)); }
+.wb-composer-send:hover:not(:disabled) { background: var(--accent-hover, var(--action-hover)); }
+.wb-composer-cancel {
+  background: var(--danger-soft);
+  color: var(--danger-vivid);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger-vivid) 35%, transparent);
+}
+.wb-composer-cancel:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-vivid) 14%, transparent); }
+.wb-composer-send svg { width: 15px; height: 15px; }
+.wb-composer-cancel svg { width: 14px; height: 14px; }
+.wb-composer-send:disabled, .wb-composer-cancel:disabled { opacity: .45; cursor: not-allowed; }
 .wb-composer-status { display: flex; align-items: center; gap: 5px; margin: 6px 2px 0; color: var(--muted); font-size: 13px; }
 .wb-composer-status svg { width: 13px; height: 13px; color: var(--warning); }
 
@@ -160,11 +230,11 @@
 .wb-mention-footer { overflow: hidden; padding: 5px 8px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
 .wb-composer-control { position: relative; flex: 0 0 auto; min-width: 0; }
-.wb-composer-chip { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control-compact); max-width: 220px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; }
-.wb-composer-chip:hover:not(:disabled), .wb-composer-chip[aria-expanded="true"] { background: var(--accent-soft); color: var(--text); }
+.wb-composer-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; max-width: 220px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--fg-2, var(--muted)); font-size: var(--text-xs, 12px); cursor: pointer; }
+.wb-composer-chip:hover:not(:disabled), .wb-composer-chip[aria-expanded="true"] { background: var(--hover); color: var(--fg, var(--text)); }
 .wb-composer-chip:disabled { opacity: .55; cursor: not-allowed; }
 .wb-composer-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-composer-chip svg { flex: 0 0 auto; width: 13px; height: 13px; color: var(--subtle); }
+.wb-composer-chip svg { flex: 0 0 auto; width: 12px; height: 12px; color: var(--meta, var(--subtle)); }
 .wb-capability-menu { position: absolute; bottom: calc(100% + 6px); inset-inline-start: 0; z-index: 20; display: flex; flex-direction: column; gap: 1px; min-width: 180px; max-width: 300px; max-height: 320px; overflow-y: auto; padding: 5px; border: 1px solid var(--line-strong); border-radius: var(--radius-surface); background: var(--drawer-bg); box-shadow: var(--shadow); }
 .wb-capability-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: var(--control-compact); padding: 3px 10px; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--text-soft); text-align: left; font-size: 13px; cursor: pointer; }
 .wb-capability-menu button:hover:not(:disabled), .wb-capability-menu button:focus-visible, .wb-capability-menu button[aria-checked="true"] { background: var(--accent-soft); color: var(--text); }

@@ -3,14 +3,36 @@
  * 1. useProjectShell：恢复团队个人记录 → 读取项目列表确定当前项目与导航范围（scope）→ 读取项目详情与本项目导航记录。
  * 2. ProjectWorkbench：左栏 ProjectNavigation + 按 page.kind 选择提供者；会话提供者在项目范围内常驻挂载（切页只改 visible），右栏与顶栏上下文由当前提供者决定。
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { CollaborationHost, UserSummary } from "@workbench/contracts"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "@workbench/ui"
-import type { CollaborationContextView, NavigationPageKind, ProjectNavigationActions } from "@workbench/ui"
+import type {
+  CollaborationContextView,
+  NavigationPageKind,
+  NavigationWorkspaceItem,
+  ProjectNavigationActions,
+} from "@workbench/ui"
 import type { OrganizationHost } from "../../../organization-host.js"
 import type { ProjectNavigationPersonal, ProjectPage, WorkspacePersonal } from "../../../personal-host.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
+import type { ProjectConversationSummary, SessionIntegrationApi } from "../session/index.js"
+import {
+  ArrowLeftIcon,
+  CollabMembersPopover,
+  CommandPaletteModal,
+  DispatchTaskDialog,
+  KnowledgeCreateDialog,
+  ProjectBoardPage,
+  ProjectTasksPage,
+  StartTaskDialog,
+  TeamKnowledgePage,
+  TopbarCollabButton,
+  memberRoleLabel,
+  useCollabStore,
+} from "../collaboration-views/index.js"
+import type { CollabTask } from "../collaboration-views/index.js"
+import "../collaboration-views/collab-views.css"
 import type {
   NavigationSessionEntry,
   NavigationSessionSource,
@@ -234,6 +256,11 @@ export type ProjectWorkbenchProps = {
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
+  workspaces?: readonly NavigationWorkspaceItem[]
+  onSelectWorkspace?(workspaceId: string): void
+  colorScheme?: "light" | "dark"
+  onToggleTheme?(): void
+  localDeviceName?: string | null
   user: UserSummary
   titleBarClassName: string
   settings: ReactNode
@@ -242,6 +269,11 @@ export type ProjectWorkbenchProps = {
   /** 个人记录保存失败时的提示，由上层持久化统一产生。 */
   personalError: string
   sessions?: NavigationSessionSource
+  sessionIntegration?: SessionIntegrationApi
+  onBindSessionHooks?(handlers: {
+    onQuoteConversation?: (conversation: ProjectConversationSummary) => void
+    onCreateTaskFromConversation?: (conversation: ProjectConversationSummary) => void
+  }): void
   taskCount?: number | null
   providers?: ProjectPageProviders
 }
@@ -265,6 +297,75 @@ function resolveProvider(page: ProjectPage, providers: ProjectPageProviders): Pr
 
 export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const { shell, organization, persistence, workspaceId, user } = props
+  const members = useMemo(
+    () => projectMembers(shell.detail.detail, shell.team.members),
+    [shell.detail.detail, shell.team.members],
+  )
+  const collab = useCollabStore(workspaceId, shell.projectId, user.id, members)
+  const [collabPopoverOpen, setCollabPopoverOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [startTaskTarget, setStartTaskTarget] = useState<CollabTask | null>(null)
+  const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false)
+  const [dispatchDialogContext, setDispatchDialogContext] = useState<{ subtitle: string; defaultAssigneeId?: string } | null>(null)
+  const [selectedKnowledgeId, setSelectedKnowledgeId] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message)
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null
+      setToastMessage(null)
+    }, 2400)
+  }, [])
+
+  useEffect(() => () => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        setCollabPopoverOpen(false)
+        setPaletteOpen(prev => !prev)
+      } else if ((event.metaKey || event.ctrlKey) && event.key === "\\" && shell.workspace.status === "ready") {
+        event.preventDefault()
+        const ws = shell.workspace.value
+        shell.saveWorkspace({
+          ...ws,
+          panels: { ...ws.panels, left: { ...ws.panels.left, open: !ws.panels.left.open } },
+        })
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [shell.workspace.status, shell.workspace.value, shell.saveWorkspace])
+
+  useEffect(() => {
+    props.onBindSessionHooks?.({
+      onQuoteConversation: conversation => {
+        if (!shell.scope) return
+        const ownerName = members.find(m => m.userId === conversation.ownerUserId)?.userName ?? "队友"
+        const snippet = conversation.briefText.trim() ? `\n${conversation.briefText.trim()}` : ""
+        const initialText = `> 引用 ${ownerName} 的会话「${conversation.title}」：${snippet}\n\n`
+        if (props.sessionIntegration) {
+          props.sessionIntegration.prepareMySession({ scope: shell.scope, initialText })
+        } else {
+          shell.openPage({ kind: "new" })
+        }
+        showToast("已引用会话背景到本机新对话草稿")
+      },
+      onCreateTaskFromConversation: conversation => {
+        setDispatchDialogContext({
+          subtitle: `来源：会话「${conversation.title}」`,
+          defaultAssigneeId: conversation.ownerUserId !== user.id ? conversation.ownerUserId : undefined,
+        })
+      },
+    })
+  }, [props.onBindSessionHooks, props.sessionIntegration, shell.scope, shell.openPage, members, user.id, showToast])
+
   if (shell.workspace.status !== "ready") {
     const failed = shell.workspace.status === "failed"
     return <section className="desktop-empty desktop-conversation">
@@ -291,7 +392,6 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     locateConversation: conversationId => shell.locateConversation(conversationId, sessions.entries),
   }
 
-  const members = projectMembers(shell.detail.detail, shell.team.members)
   const groups = buildMemberGroups({
     members,
     entries: sessions.entries,
@@ -300,16 +400,46 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     selfCollapsed: personal.selfCollapsed,
     search: shell.search,
   })
+  const myEntries = sessions.entries.filter(item => item.ownerUserId === user.id)
+  const peerEntries = sessions.entries.filter(item => item.ownerUserId !== user.id)
+  const myLocalEntries = sessions.entries.filter(item => item.ownerUserId === user.id && item.badge?.text === "本机")
+
   const activePage: NavigationPageKind | null = !projectId ? null : page.kind === "task" ? "tasks" : page.kind
   const current = shell.projects.projects.find(item => item.projectId === projectId)
+  const currentRepoLabel = shell.detail.detail?.repositories?.length
+    ? shell.detail.detail.repositories.map(r => r.name).join(" · ")
+    : undefined
+
   const actions: ProjectNavigationActions = {
-    selectProject: shell.selectProject,
+    ...(props.onSelectWorkspace ? { selectWorkspace: props.onSelectWorkspace } : {}),
+    selectProject: id => {
+      setCollabPopoverOpen(false)
+      shell.selectProject(id)
+    },
     createProject: shell.openCreateDialog,
     openProjectSettings: () => shell.openPage({ kind: "info" }),
-    openPage: kind => shell.openPage({ kind }),
-    selectConversation: conversationId => shell.openPage({ kind: "conversation", conversationId }),
+    openPage: kind => {
+      setCollabPopoverOpen(false)
+      shell.openPage({ kind })
+    },
+    createSession: () => {
+      setCollabPopoverOpen(false)
+      shell.openPage({ kind: "new" })
+    },
+    selectConversation: conversationId => {
+      setCollabPopoverOpen(false)
+      shell.openPage({ kind: "conversation", conversationId })
+    },
     toggleMember: shell.toggleMember,
     setSearch: shell.setSearch,
+    openCommandPalette: () => {
+      setCollabPopoverOpen(false)
+      setPaletteOpen(true)
+    },
+    toggleLeftSidebar: () => shell.saveWorkspace({
+      ...workspace,
+      panels: { ...workspace.panels, left: { ...workspace.panels.left, open: !workspace.panels.left.open } },
+    }),
     retry: area => {
       if (area === "projects") void shell.projects.reload()
       else if (area === "members") { void shell.detail.reload(); void shell.team.reload() }
@@ -345,11 +475,15 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       key={projectId}
       host={organization}
       workspaceId={workspaceId}
+      workspaceName={props.workspaceName}
       detail={shell.detail.detail}
       availability={shell.detail.availability}
       team={shell.team.members}
       selfUserId={user.id}
       justCreated={shell.created === projectId}
+      sessionCount={sessions.entries.length}
+      taskCount={collab.tasks.length}
+      knowledgeCount={collab.knowledge.length}
       onChanged={shell.reloadProject}
       onRetry={() => { void shell.detail.reload() }}
     />
@@ -359,6 +493,62 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     pageView = <div className="pnav-page-slot">
       {activeProvider.render({ scope, page, navigator, visible: true })}
     </div>
+  } else if (page.kind === "board") {
+    pageView = <ProjectBoardPage
+      projectName={current?.name ?? "当前项目"}
+      members={members}
+      tasks={collab.tasks}
+      onGoTasks={() => shell.openPage({ kind: "tasks" })}
+      onOpenTask={taskId => shell.openPage({ kind: "task", taskId })}
+    />
+  } else if (page.kind === "tasks" || page.kind === "task") {
+    pageView = <ProjectTasksPage
+      projectName={current?.name ?? "当前项目"}
+      selfUserId={user.id}
+      members={members}
+      tasks={collab.tasks}
+      sessions={sessions.entries}
+      selectedTaskId={page.kind === "task" ? page.taskId : null}
+      onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
+      onClaimTask={taskId => {
+        collab.claimTask(taskId)
+        showToast("已认领任务")
+      }}
+      onOpenStartDialog={task => setStartTaskTarget(task)}
+      onFinishTask={taskId => {
+        collab.finishTask(taskId)
+        showToast("任务已标记完成")
+      }}
+      onOpenDispatchDialog={() => setDispatchDialogContext({ subtitle: `当前 Project：${current?.name ?? "当前项目"}` })}
+      onGotoSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
+    />
+  } else if (page.kind === "knowledge") {
+    pageView = <TeamKnowledgePage
+      workspaceName={props.workspaceName}
+      projectName={current?.name ?? "当前项目"}
+      members={members}
+      knowledge={collab.knowledge}
+      selectedId={selectedKnowledgeId}
+      onSelect={id => setSelectedKnowledgeId(id)}
+      onCreateClick={() => setKnowledgeDialogOpen(true)}
+      onSaveEdit={(id, sum, body) => {
+        const updated = collab.updateKnowledge(id, sum, body)
+        showToast(updated ? `已保存并更新到 ${updated.version}` : "知识已更新")
+      }}
+      onCiteToSession={item => {
+        const snippet = `[知识:${item.title}(${item.version})] `
+        if (scope && props.sessionIntegration) {
+          props.sessionIntegration.prepareMySession({
+            scope,
+            targetConversationId: myLocalEntries[0]?.conversationId ?? null,
+            initialText: snippet,
+          })
+        } else {
+          shell.openPage({ kind: "new" })
+        }
+        showToast(`已将《${item.title}》带入会话草稿`)
+      }}
+    />
   } else {
     pageView = <section className="pnav-page" aria-label={pageNames[page.kind]}>
       <h1>{pageNames[page.kind]}</h1>
@@ -369,22 +559,202 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const selectedEntry = page.kind === "conversation"
     ? sessions.entries.find(item => item.conversationId === page.conversationId)
     : undefined
-  const headerContext: CollaborationContextView = current && scope
-    ? activeProvider?.context?.({ scope, page }) ?? { title: selectedEntry?.title ?? pageNames[page.kind], projectName: current.name }
-    : { title: "协作工作台" }
+  const selectedOwner = selectedEntry ? members.find(m => m.userId === selectedEntry.ownerUserId) : undefined
+  const isRemoteSession = Boolean(
+    page.kind === "conversation"
+      && selectedEntry
+      && !(selectedEntry.ownerUserId === user.id && selectedEntry.badge?.text === "本机"),
+  )
+
+  const headerContext: CollaborationContextView = !current
+    ? { title: "协作工作台" }
+    : page.kind === "knowledge"
+      ? {
+          title: "团队知识库",
+          subtitle: `${props.workspaceName} · 双层沉淀`,
+        }
+      : {
+          title: current.name,
+          subtitle: isRemoteSession
+            ? selectedEntry?.ownerUserId !== user.id
+              ? `${props.workspaceName} · ${selectedOwner?.userName ?? "队友"} · 跨机只读同步`
+              : `${props.workspaceName} · 本人其他设备 · 只读`
+            : `${props.workspaceName}${currentRepoLabel ? ` · ${currentRepoLabel}` : ""}`,
+        }
+
+  const backButton = isRemoteSession ? (
+    <button
+      type="button"
+      className="collab-back-btn"
+      onClick={() => {
+        const target = myLocalEntries[0]
+        if (target) shell.openPage({ kind: "conversation", conversationId: target.conversationId })
+        else shell.openPage({ kind: "new" })
+      }}
+    >
+      <ArrowLeftIcon size={14} />
+      <span>返回我的会话</span>
+    </button>
+  ) : undefined
+
+  const headerExtra = projectId && members.length > 0 ? (
+    <TopbarCollabButton
+      members={members}
+      selfUserId={user.id}
+      peerEntries={peerEntries}
+      expanded={collabPopoverOpen}
+      onClick={() => setCollabPopoverOpen(v => !v)}
+    />
+  ) : undefined
+
+  const overlays = (
+    <>
+      {current && (
+        <CollabMembersPopover
+          open={collabPopoverOpen}
+          projectName={current.name}
+          members={members}
+          selfUserId={user.id}
+          peerEntries={peerEntries}
+          onClose={() => setCollabPopoverOpen(false)}
+          onOpenConversation={conversationId => {
+            setCollabPopoverOpen(false)
+            shell.openPage({ kind: "conversation", conversationId })
+          }}
+        />
+      )}
+      {current && (
+        <CommandPaletteModal
+          open={paletteOpen}
+          projectName={current.name}
+          members={members}
+          selfUserId={user.id}
+          mySessions={myEntries}
+          peerSessions={peerEntries}
+          tasks={collab.tasks}
+          knowledge={collab.knowledge}
+          onClose={() => setPaletteOpen(false)}
+          onSelectSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
+          onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
+          onSelectKnowledge={knowledgeId => {
+            setSelectedKnowledgeId(knowledgeId)
+            shell.openPage({ kind: "knowledge" })
+          }}
+        />
+      )}
+      <StartTaskDialog
+        task={startTaskTarget}
+        localSessions={myLocalEntries}
+        onClose={() => setStartTaskTarget(null)}
+        onConfirm={({ mode, existingSessionId }) => {
+          const target = startTaskTarget
+          setStartTaskTarget(null)
+          if (!target) return
+          if (mode === "existing" && existingSessionId) {
+            collab.startTask(target.id, existingSessionId)
+            if (scope && props.sessionIntegration) {
+              props.sessionIntegration.prepareMySession({
+                scope,
+                targetConversationId: existingSessionId,
+                initialText: `[任务:${target.title}] `,
+              })
+            } else {
+              shell.openPage({ kind: "conversation", conversationId: existingSessionId })
+            }
+            showToast("任务已转入进行中")
+          } else {
+            collab.startTask(target.id, "")
+            const initialText = `围绕任务「${target.title}」：${target.desc ? `\n${target.desc}` : ""}\n`
+            if (scope && props.sessionIntegration) {
+              props.sessionIntegration.prepareMySession({ scope, initialText })
+            } else {
+              shell.openPage({ kind: "new" })
+            }
+            showToast("已切换到新会话准备页")
+          }
+        }}
+      />
+      <KnowledgeCreateDialog
+        open={knowledgeDialogOpen}
+        projectName={current?.name ?? "当前项目"}
+        onClose={() => setKnowledgeDialogOpen(false)}
+        onSubmit={input => {
+          setKnowledgeDialogOpen(false)
+          const createdItem = collab.createKnowledge(input)
+          if (createdItem) {
+            setSelectedKnowledgeId(createdItem.id)
+            shell.openPage({ kind: "knowledge" })
+            showToast(`已保存知识《${createdItem.title}》`)
+          }
+        }}
+      />
+      <DispatchTaskDialog
+        open={dispatchDialogContext !== null}
+        subtitle={dispatchDialogContext?.subtitle ?? ""}
+        members={members}
+        defaultAssigneeId={dispatchDialogContext?.defaultAssigneeId}
+        onClose={() => setDispatchDialogContext(null)}
+        onSubmit={input => {
+          setDispatchDialogContext(null)
+          const task = collab.dispatchTask(input)
+          if (task) {
+            const toName = members.find(m => m.userId === task.toUserId)?.userName ?? "成员"
+            showToast(`已向 @${toName} 派发任务「${task.title}」`)
+          }
+        }}
+      />
+      {toastMessage && (
+        <div className="toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
+    </>
+  )
+
+  const selfMember = members.find(m => m.userId === user.id) ?? shell.team.members.find(m => m.user.id === user.id)?.user ?? user
+  const teamPhotos = shell.team.members.slice(0, 3).map(m => ({
+    initial: (m.user.userName || "?").slice(0, 1),
+    photo: resolveUserPhoto(m.user),
+  }))
+  const enrichedWorkspaces = (props.workspaces ?? [{ workspaceId, name: props.workspaceName }]).map(ws =>
+    ws.workspaceId === workspaceId
+      ? {
+          ...ws,
+          ...(shell.team.members.length ? { memberCount: shell.team.members.length } : {}),
+          ...(teamPhotos.length ? { memberPhotos: teamPhotos } : {}),
+        }
+      : ws,
+  )
 
   return <>
     <WorkbenchLayout
       titleBarClassName={props.titleBarClassName}
       context={headerContext}
+      backButton={backButton}
+      headerExtra={headerExtra}
+      colorScheme={props.colorScheme}
+      onToggleTheme={props.onToggleTheme}
+      overlays={overlays}
       navigation={<div className="desktop-navigation">
         <ProjectNavigation view={{
           accountName: user.userName,
           accountPhoto: resolveUserPhoto(user),
+          accountRole: memberRoleLabel(selfMember),
           workspaceName: props.workspaceName,
-          projects: shell.projects.projects.map(item => ({ projectId: item.projectId, name: item.name, archived: item.status === "archived" })),
+          workspaces: enrichedWorkspaces,
+          currentWorkspaceId: workspaceId,
+          projects: shell.projects.projects.map(item => ({
+            projectId: item.projectId,
+            name: item.name,
+            archived: item.status === "archived",
+            memberCount: item.memberCount,
+            ...(item.projectId === projectId && currentRepoLabel ? { repo: currentRepoLabel } : {}),
+          })),
           projectsAvailability: shell.projects.availability,
           currentProjectId: projectId,
+          currentProjectRepo: currentRepoLabel,
+          currentProjectMemberCount: members.length,
+          localDeviceName: props.localDeviceName ?? undefined,
           groups,
           membersAvailability: shell.detail.availability.state === "ready" && shell.team.availability.state === "failed"
             ? shell.team.availability
@@ -393,7 +763,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           search: shell.search,
           activePage,
           selectedConversationId: page.kind === "conversation" ? page.conversationId : null,
-          taskCount: props.taskCount ?? null,
+          taskCount: props.taskCount ?? (projectId ? collab.todoCount : null),
+          knowledgeCount: projectId ? collab.wsKnowledgeCount : null,
         }} actions={actions} />
         {shell.notice && <p className="desktop-navigation-note" role="status">{shell.notice}</p>}
         {props.personalError && <p className="desktop-navigation-note" role="alert">{props.personalError}{" "}
@@ -415,6 +786,9 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     {shell.creating && <CreateProjectDialog
       host={organization}
       workspaceId={workspaceId}
+      workspaceName={props.workspaceName}
+      teamMembers={shell.team.members}
+      selfUserId={user.id}
       onClose={shell.closeCreateDialog}
       onCreated={shell.finishCreateProject}
     />}

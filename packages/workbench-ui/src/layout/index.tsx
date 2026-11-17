@@ -1,5 +1,5 @@
-/** 三栏仅管理空间和临时覆盖；业务选择、个人草稿及右侧偏好由宿主持有。 */
-import { PanelLeft, PanelRight, X } from "lucide-react";
+/** 工作台外壳：通顶左侧栏 + 右侧(顶栏 + 舞台/右栏)，仅管理空间、响应折叠与浮层。 */
+import { Moon, PanelLeft, PanelLeftClose, PanelRight, Sun, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ReactElement,
@@ -14,6 +14,8 @@ export type CollaborationContextView = {
   projectName?: string;
   connection?: string;
   handoff?: string;
+  /** 可选副标题覆写；用于完整展示原型稿 .tb-path 格式。 */
+  subtitle?: string;
 };
 export type WorkbenchPanelMode = "docked" | "overlay" | "hidden";
 /** 右侧插槽将 open/widthPx 投影到 ProjectPersonalView；动作接回同一个宿主状态。 */
@@ -28,6 +30,13 @@ export type WorkbenchLayoutProps = {
   /** 正式窗口按平台给原生按钮和拖动区留空间。 */
   titleBarClassName?: string;
   context: CollaborationContextView | null;
+  /** 顶栏返回按钮（如查看队友跨机只读会话时“← 返回我的会话”）。 */
+  backButton?: ReactNode;
+  /** 顶栏右侧协作成员区（如头像叠放触发器 + 数量）。 */
+  headerExtra?: ReactNode;
+  /** 顶栏一键切换浅/深色回调及当前实际主题。 */
+  onToggleTheme?: () => void;
+  colorScheme?: "light" | "dark";
   navigation: ReactNode;
   center: ReactNode;
   right: (slot: WorkbenchRightSlot) => ReactNode;
@@ -40,15 +49,19 @@ export type WorkbenchLayoutProps = {
   settingsOpen: boolean;
   settings: ReactNode;
   closeSettings(): void;
+  /** 与工作台外壳同级的全局浮层（协作成员浮层、命令面板、弹窗、Toast）。 */
+  overlays?: ReactNode;
 };
+
 const LEFT_MIN = 220,
-  LEFT_MAX = 400,
-  RIGHT_MIN = 330,
-  RIGHT_MAX = 760,
-  CENTER_MIN = 400;
+  LEFT_MAX = 380,
+  RIGHT_MIN = 260,
+  RIGHT_MAX = 560,
+  CENTER_MIN = 380;
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
-/** 面板保持挂载；自动收合只改变显示，不修改宿主的手动开合偏好。 */
+
+/** 通顶左栏工作台布局；面板保持挂载，自动收合不修改宿主开合偏好。 */
 export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLElement>(null),
@@ -63,8 +76,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   const [overlayRightWidth, setOverlayRightWidth] = useState<number | null>(
     null,
   );
-  const leftWidth = clamp(props.leftWidthPx || 280, LEFT_MIN, LEFT_MAX);
-  const rightWidth = clamp(props.rightWidthPx || 340, RIGHT_MIN, RIGHT_MAX);
+  const [leftDragging, setLeftDragging] = useState(false);
+  const leftWidth = clamp(props.leftWidthPx || 256, LEFT_MIN, LEFT_MAX);
+  const rightWidth = clamp(props.rightWidthPx || 300, RIGHT_MIN, RIGHT_MAX);
   const leftFits = width >= leftWidth + CENTER_MIN;
   const rightFits =
     width >= (props.leftOpen ? leftWidth : 0) + CENTER_MIN + rightWidth;
@@ -84,6 +98,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     rightMode === "overlay"
       ? Math.min(overlayRightWidth ?? rightWidth, Math.max(0, width - 32))
       : rightWidth;
+
   const closeRight = (open: boolean) => {
     if (rightMode === "overlay") {
       if (!open) {
@@ -111,6 +126,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   const hasRight =
     rightContent !== null && rightContent !== undefined && rightContent !== false;
   const visibleRightMode: WorkbenchPanelMode = hasRight ? rightMode : "hidden";
+
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
@@ -120,6 +136,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
   const previous = useRef({ leftMode, rightMode: visibleRightMode });
   useLayoutEffect(() => {
     if (
@@ -136,6 +153,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       rightButton.current?.focus();
     previous.current = { leftMode, rightMode: visibleRightMode };
   }, [leftMode, visibleRightMode]);
+
   useEffect(() => {
     if (
       (overlay === "left" && leftFits) ||
@@ -143,6 +161,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     )
       setOverlay(null);
   }, [overlay, leftFits, rightFits, hasRight]);
+
   useEffect(() => {
     if (!props.settingsOpen) return;
     settingsReturn.current =
@@ -158,6 +177,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       settingsReturn.current?.focus();
     };
   }, [props.settingsOpen]);
+
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (drag.current)
@@ -172,6 +192,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     };
     const up = () => {
       drag.current = null;
+      setLeftDragging(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -180,6 +201,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       window.removeEventListener("pointerup", up);
     };
   }, [props.setPanelWidth]);
+
   const toggle = (side: "left" | "right") => {
     if (side === "right" && !hasRight) return;
     const fits = side === "left" ? leftFits : rightFits;
@@ -192,6 +214,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         !(side === "left" ? props.leftOpen : props.rightOpen),
       );
   };
+
   const keyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
       if (props.settingsOpen) {
@@ -227,87 +250,161 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       }
     }
   };
+
+  const subtitle = props.context?.subtitle ?? (
+    props.context
+      ? [
+          props.context.projectName,
+          props.context.deviceName,
+          props.context.connection,
+          props.context.handoff,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : ""
+  );
+
+  const isMac = props.titleBarClassName?.includes("macos") ?? false;
+  const isWin = props.titleBarClassName?.includes("windows") ?? false;
+
   return (
-    <div className="collaboration-layout" ref={root} onKeyDown={keyDown}>
-      <header className={props.titleBarClassName ? `collaboration-header ${props.titleBarClassName}` : "collaboration-header"}>
-        <button
-          ref={leftButton}
-          onClick={() => toggle("left")}
-          aria-label="切换导航"
-          aria-expanded={leftMode !== "hidden"}
+    <div
+      className={[
+        "collaboration-layout",
+        isMac ? "is-macos" : "",
+        isWin ? "is-windows" : "",
+      ].filter(Boolean).join(" ")}
+      data-left-mode={leftMode}
+      data-right-mode={visibleRightMode}
+      ref={root}
+      onKeyDown={keyDown}
+    >
+      {/* 左栏折叠/展开按钮固定于左上角红绿灯旁（非 macOS 在左上角），收起与展开不来回跳动 */}
+      <button
+        ref={leftButton}
+        type="button"
+        className="collaboration-header-toggle"
+        data-active={leftMode === "overlay" ? "true" : "false"}
+        onClick={() => toggle("left")}
+        aria-label="切换导航"
+        aria-expanded={leftMode !== "hidden"}
+        title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
+      >
+        {leftMode !== "hidden" ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+      </button>
+
+      {/* 左侧边栏：通顶布局，直接触达顶部与底部 */}
+      <aside
+        ref={left}
+        className="collaboration-left"
+        data-mode={leftMode}
+        style={{
+          width:
+            leftMode === "hidden"
+              ? 0
+              : Math.min(leftWidth, Math.max(0, width - 32)),
+        }}
+        aria-label="工作台导航"
+        aria-hidden={leftMode === "hidden" || undefined}
+        inert={leftMode === "hidden"}
+      >
+        <div className="collaboration-traffic-drag" aria-hidden="true" />
+        {props.navigation}
+        {leftMode === "docked" && (
+          <div
+            className="collaboration-left-resize"
+            data-dragging={leftDragging ? "true" : undefined}
+            role="separator"
+            aria-label="调整导航宽度"
+            aria-orientation="vertical"
+            onPointerDown={(event: ReactPointerEvent) => {
+              event.preventDefault();
+              drag.current = { x: event.clientX, width: leftWidth };
+              setLeftDragging(true);
+            }}
+          />
+        )}
+      </aside>
+
+      {/* 右侧主容器：顶栏 + 舞台/右栏 */}
+      <div className="collaboration-main">
+        <header
+          className={
+            props.titleBarClassName
+              ? `collaboration-header ${props.titleBarClassName}`
+              : "collaboration-header"
+          }
         >
-          <PanelLeft size={18} />
-        </button>
-        <div className="collaboration-header-context">
-          <strong>{props.context?.title ?? "请选择会话"}</strong>
-          {props.context && (
-            <span>
-              {[
-                props.context.deviceName,
-                props.context.projectName,
-                props.context.connection,
-                props.context.handoff,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-          )}
-        </div>
-        <button
-          ref={rightButton}
-          onClick={() => toggle("right")}
-          disabled={!hasRight}
-          tabIndex={hasRight ? undefined : -1}
-          aria-hidden={!hasRight || undefined}
-          style={hasRight ? undefined : { visibility: "hidden" }}
-          aria-label="切换项目面板"
-          aria-expanded={visibleRightMode !== "hidden"}
-        >
-          <PanelRight size={18} />
-        </button>
-      </header>
-      <div className="collaboration-body">
-        <aside
-          ref={left}
-          className="collaboration-left"
-          data-mode={leftMode}
-          style={{
-            width:
-              leftMode === "hidden"
-                ? 0
-                : Math.min(leftWidth, Math.max(0, width - 32)),
-          }}
-          aria-hidden={leftMode === "hidden" || undefined}
-          inert={leftMode === "hidden"}
-        >
-          {props.navigation}
-          {leftMode === "docked" && (
-            <div
-              className="collaboration-left-resize"
-              role="separator"
-              aria-label="调整导航宽度"
-              aria-orientation="vertical"
-              onPointerDown={(event: ReactPointerEvent) => {
-                event.preventDefault();
-                drag.current = { x: event.clientX, width: leftWidth };
-              }}
-            />
-          )}
-        </aside>
-        <main className="collaboration-center">{props.center}</main>
-        <div
-          ref={right}
-          className="collaboration-right"
-          data-mode={visibleRightMode}
-          style={{ width: visibleRightMode === "hidden" ? 0 : effectiveRight }}
-          aria-hidden={visibleRightMode === "hidden" || undefined}
-          inert={visibleRightMode === "hidden"}
-        >
-          {rightContent}
+          {props.backButton}
+          <div className="collaboration-header-context">
+            <strong>{props.context?.title ?? "请选择会话"}</strong>
+            {subtitle ? <span>{subtitle}</span> : null}
+          </div>
+          {props.headerExtra ? (
+            <div className="collaboration-header-collab">{props.headerExtra}</div>
+          ) : null}
+          <div className="collaboration-header-right">
+            {props.onToggleTheme && (
+              <button
+                type="button"
+                className="collaboration-header-icon"
+                onClick={props.onToggleTheme}
+                aria-label="切换浅色/深色"
+                title="切换浅色/深色"
+              >
+                {props.colorScheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+            )}
+            <button
+              ref={rightButton}
+              type="button"
+              className="collaboration-header-icon"
+              data-active={visibleRightMode !== "hidden" ? "true" : "false"}
+              onClick={() => toggle("right")}
+              disabled={!hasRight}
+              tabIndex={hasRight ? undefined : -1}
+              aria-hidden={!hasRight || undefined}
+              title={
+                !hasRight
+                  ? "当前页面无本机文件栏"
+                  : visibleRightMode !== "hidden"
+                    ? "收起本机文件栏"
+                    : "展开本机文件栏"
+              }
+              aria-label="切换项目面板"
+              aria-expanded={visibleRightMode !== "hidden"}
+            >
+              <PanelRight size={16} />
+            </button>
+          </div>
+        </header>
+
+        <div className="collaboration-body">
+          <main className="collaboration-center" tabIndex={-1}>
+            {props.center}
+          </main>
+          <div
+            ref={right}
+            className="collaboration-right"
+            data-mode={visibleRightMode}
+            style={{ width: visibleRightMode === "hidden" ? 0 : effectiveRight }}
+            aria-hidden={visibleRightMode === "hidden" || undefined}
+            inert={visibleRightMode === "hidden"}
+          >
+            {rightContent}
+          </div>
         </div>
       </div>
+
+      {props.overlays}
+
       {props.settingsOpen && (
-        <div className="collaboration-modal-backdrop">
+        <div
+          className="collaboration-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) props.closeSettings();
+          }}
+        >
           <div
             ref={dialog}
             className="collaboration-modal"
@@ -317,11 +414,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
             tabIndex={-1}
           >
             <button
+              type="button"
               className="collaboration-modal-close"
               onClick={props.closeSettings}
               aria-label="关闭设置"
             >
-              <X size={18} />
+              <X size={16} />
             </button>
             {props.settings}
           </div>

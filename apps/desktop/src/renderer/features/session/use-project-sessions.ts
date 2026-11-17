@@ -889,7 +889,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         targetConvScope.conversationId,
         request,
       ),
-    onOpenFile: (targetConvScope, targetProject, relativePath, destination) => {
+    onOpenFile: (targetConvScope, targetProject, relativePath, _destination) => {
       localDir.openFileTab(
         {
           namespace: targetConvScope.namespace,
@@ -899,7 +899,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         },
         targetConvScope.conversationId,
         relativePath,
-        destination,
+        "central",
+        "code",
       )
     },
     getCentralFiles: ({ scope: pageScope, conversation }): SessionCentralFilesState => {
@@ -914,7 +915,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         },
         tabs: central.centralTabs,
         activeCentral: central.activeCentral,
+        mode: central.mode,
         files: central.files,
+        changes: central.changes,
         refreshGate: central.refreshGate,
         positions: central.positions,
         rendering,
@@ -922,6 +925,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         onSelectFile: path => localDir.selectCentralFileTab(pageScope, conversation.conversationId, path),
         onCloseFile: path => localDir.closeCentralFileTab(pageScope, conversation.conversationId, path),
         onRefreshFile: path => localDir.refreshFile(pageScope, conversation.conversationId, path),
+        onSetMode: mode => localDir.setCentralMode(pageScope, conversation.conversationId, mode),
+        onOpenDiffFile: path => localDir.openDiffFile(pageScope, conversation.conversationId, path),
         onSaveScroll: (area, path, top, left) =>
           localDir.savePosition(pageScope, conversation.conversationId, area, path, top, left),
       }

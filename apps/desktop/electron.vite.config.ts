@@ -26,7 +26,7 @@ export function desktopConfig(preview: PreviewTarget | null = null) {
           // 仅开发页面允许 React 刷新脚本和本机 HMR；生产页面没有 websocket 连接许可。
           const script = context.server ? "'self' 'unsafe-inline'" : "'self'"
           const connect = context.server ? "'self' ws://127.0.0.1:*" : "'self'"
-          return html.replace("__WORKBENCH_CSP__", `default-src 'self'; script-src ${script}; style-src 'self' 'unsafe-inline'; connect-src ${connect}; img-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'`)
+          return html.replace("__WORKBENCH_CSP__", `default-src 'self'; script-src ${script}; style-src 'self' 'unsafe-inline'; connect-src ${connect}; img-src 'self' data: blob: https: http:; object-src 'none'; frame-src 'none'; base-uri 'none'`)
         },
       }],
       resolve: { dedupe: ["react", "react-dom"] },

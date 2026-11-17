@@ -93,10 +93,11 @@ export function projectMembers(detail: ProjectDetailResponse | null, team: reado
   const users = new Map(team.map(item => [item.user.id, item.user]))
   return detail.members.map(member => {
     const user = users.get(member.userId)
-    const photo = resolveUserPhoto(user)
+    const fallbackName = `成员 ${member.userId.slice(0, 8)}`
+    const photo = resolveUserPhoto(user ?? { userName: fallbackName })
     return {
       userId: member.userId,
-      userName: user?.userName ?? `成员 ${member.userId.slice(0, 8)}`,
+      userName: user?.userName ?? fallbackName,
       userNo: user?.userNo ?? "",
       ...(photo ? { photo } : {}),
       ...(user?.orgName ? { orgName: user.orgName } : {}),

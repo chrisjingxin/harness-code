@@ -23,7 +23,7 @@ export { ProjectDock, ProjectFileTab, ProjectFilePanel } from "./project/index.j
 export type {
   ProjectFilePanelProps, ProjectFileTabProps, ProjectScope, ProjectAvailability, ProjectActionAvailability,
   ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileView, ProjectChangedFile, ProjectChangesView,
-  ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps,
+  ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps, ProjectGitCommitItem,
 } from "./project/index.js"
 export { ConversationView } from "./conversation/index.js"
 export type {
@@ -39,8 +39,8 @@ export type {
 export { MemberAvatar, ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
 export type {
   MemberGroupInput, NavigationAvailability, NavigationMember, NavigationMemberGroup, NavigationPageKind,
-  NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, ProjectNavigationActions,
-  ProjectNavigationProps, ProjectNavigationView,
+  NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, NavigationWorkspaceItem,
+  ProjectNavigationActions, ProjectNavigationProps, ProjectNavigationView,
 } from "./navigation/index.js"
 export { WorkbenchLayout } from "./layout/index.js"
 export type { CollaborationContextView, WorkbenchLayoutProps, WorkbenchPanelMode, WorkbenchRightSlot } from "./layout/index.js"

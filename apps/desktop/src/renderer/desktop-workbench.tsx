@@ -20,6 +20,7 @@ import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import type { ProjectUpdatesHost } from "../project-updates-host.js"
 import { DeviceRegistrationPanel, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
+import type { NavigationWorkspaceItem } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { ProjectPageProviders } from "./features/project-navigation/index.js"
 import { createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
@@ -103,9 +104,32 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
   const titleBarClassName = "desktop-titlebar" + (navigator.platform.startsWith("Mac") ? " desktop-titlebar-macos"
     : navigator.platform.startsWith("Win") ? " desktop-titlebar-windows" : "")
 
+  const workspaceItems: NavigationWorkspaceItem[] = workspaces.map(item => ({
+    workspaceId: item.id,
+    name: item.name,
+  }))
+  const selectWorkspace = (workspaceId: string) => {
+    setChosen(workspaceId)
+    persistence.save({ kind: "account" }, { workspaceId })
+  }
+
   const baseSettings = <>
-    <h2>设置</h2>
+    <div className="desktop-settings-head">
+      <div>
+        <h2>系统设置</h2>
+        <p className="desktop-settings-sub">外观、强调色、界面密度、快捷键、账号与团队</p>
+      </div>
+    </div>
+    <div className="desktop-set-section">外观与布局</div>
     <WindowPreferences {...props.preferences} />
+    <div className="desktop-set-section">快捷键</div>
+    <div className="kbd-grid" aria-label="快捷键一览">
+      <div className="kbd-item"><span>命令面板</span><span className="kbd"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+      <div className="kbd-item"><span>收起 / 展开左栏</span><span className="kbd"><kbd>⌘</kbd><kbd>\</kbd></span></div>
+      <div className="kbd-item"><span>发送消息</span><span className="kbd"><kbd>Enter</kbd></span></div>
+      <div className="kbd-item"><span>关闭弹窗 / 浮层</span><span className="kbd"><kbd>Esc</kbd></span></div>
+    </div>
+    <div className="desktop-set-section">账号与团队</div>
     <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />
   </>
 
@@ -126,6 +150,10 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       persistence={persistence}
       workspaceId={workspace.id}
       workspaceName={workspace.name}
+      workspaces={workspaceItems}
+      onSelectWorkspace={selectWorkspace}
+      colorScheme={props.preferences.state.colorScheme}
+      onToggleTheme={props.preferences.toggleTheme}
       user={signedIn.user}
       titleBarClassName={titleBarClassName}
       baseSettings={baseSettings}
@@ -137,6 +165,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
 
   const settings = <div className="desktop-settings">
     {baseSettings}
+    <div className="desktop-set-section">本机设备</div>
     <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />
   </div>
 
@@ -150,13 +179,17 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
   return <WorkbenchLayout
     titleBarClassName={titleBarClassName}
     context={{ title: "协作工作台" }}
+    colorScheme={props.preferences.state.colorScheme}
+    onToggleTheme={props.preferences.toggleTheme}
     navigation={<div className="desktop-navigation">
       <ProjectNavigation view={{
-        accountName: signedIn?.user.userName ?? null, accountPhoto: resolveUserPhoto(signedIn?.user), workspaceName: null, projects: [],
+        accountName: signedIn?.user.userName ?? null, accountPhoto: resolveUserPhoto(signedIn?.user),
+        workspaceName: null, workspaces: workspaceItems, projects: [],
         projectsAvailability: { state: status === "loading" ? "loading" : "unavailable", message },
         currentProjectId: null, groups: [], membersAvailability: { state: "unavailable" }, sessionsAvailability: { state: "unavailable" },
         search: "", activePage: null, selectedConversationId: null, taskCount: null,
       }} actions={{
+        selectWorkspace,
         selectProject: noop, createProject: noop, openProjectSettings: noop, openPage: noop, selectConversation: noop,
         toggleMember: noop, setSearch: noop, retry: noop, openSettings: () => setSettingsOpen(true),
       }} />
@@ -167,10 +200,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       {!signedIn && status !== "loading" && <button className="wb-button wb-button-primary" onClick={() => setSettingsOpen(true)}>{status === "connectionError" ? "查看连接" : "演示登录"}</button>}
       {signedIn && account === "failed" && <button className="wb-button wb-button-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button>}
       {signedIn && account === "ready" && workspaces.length > 1 && <div className="desktop-workspace-choice">
-        {workspaces.map(item => <button key={item.id} className="wb-button wb-button-secondary" onClick={() => {
-          setChosen(item.id)
-          persistence.save({ kind: "account" }, { workspaceId: item.id })
-        }}>{item.name}</button>)}
+        {workspaces.map(item => <button key={item.id} className="wb-button wb-button-secondary" onClick={() => selectWorkspace(item.id)}>{item.name}</button>)}
       </div>}
       {!settingsOpen && identity.notice && <p className="error" role="alert">{identity.notice}</p>}
     </section>}
@@ -202,6 +232,10 @@ function WorkspaceProjectWorkbench(props: {
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
+  workspaces?: readonly NavigationWorkspaceItem[]
+  onSelectWorkspace?(workspaceId: string): void
+  colorScheme?: "light" | "dark"
+  onToggleTheme?(): void
   user: UserSummary
   titleBarClassName: string
   baseSettings: React.ReactNode
@@ -366,6 +400,7 @@ function WorkspaceProjectWorkbench(props: {
 
   const settings = <div className="desktop-settings">
     {props.baseSettings}
+    <div className="desktop-set-section">本机设备</div>
     <DeviceRegistrationPanel
       host={props.devices}
       workspaceId={props.workspaceId}
@@ -383,6 +418,11 @@ function WorkspaceProjectWorkbench(props: {
       persistence={props.persistence}
       workspaceId={props.workspaceId}
       workspaceName={props.workspaceName}
+      workspaces={props.workspaces}
+      onSelectWorkspace={props.onSelectWorkspace}
+      colorScheme={props.colorScheme}
+      onToggleTheme={props.onToggleTheme}
+      localDeviceName={validLocalDevice?.name ?? null}
       user={props.user}
       titleBarClassName={props.titleBarClassName}
       settings={settings}
@@ -391,6 +431,7 @@ function WorkspaceProjectWorkbench(props: {
       personalError={props.personalError}
       taskCount={taskCount}
       sessions={projectSessions.navigationSource}
+      sessionIntegration={projectSessions.integration}
       providers={providers}
     />
     {references.dialog}
@@ -403,9 +444,33 @@ function WorkspaceProjectWorkbench(props: {
   </>
 }
 
+const ACCENT_OPTIONS = [
+  { id: "violet", label: "紫檀", color: "#7c5cff" },
+  { id: "indigo", label: "靛蓝", color: "#2563eb" },
+  { id: "teal", label: "青碧", color: "#0f766e" },
+  { id: "ink", label: "炭墨", color: "#18181b" },
+] as const
+type AccentOption = (typeof ACCENT_OPTIONS)[number]["id"]
+type DensityOption = "compact" | "standard" | "wide"
+
+const readStoredPref = <T extends string>(key: string, valid: readonly T[], fallback: T): T => {
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw && (valid as readonly string[]).includes(raw) ? (raw as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeStoredPref = (key: string, value: string) => {
+  try { window.localStorage.setItem(key, value) } catch { /* 隔离环境无 localStorage 时忽略 */ }
+}
+
 /** 宿主回传实际颜色和缩放；读取失败时可继续使用当前窗口。 */
 function useWindowPreferences(host: DesktopHost) {
   const [state, setState] = useState<WindowState>({ themeMode: "system", colorScheme: "light", zoomPercent: 100 })
+  const [accent, setAccentState] = useState<AccentOption>(() => readStoredPref("wb.ui.accent", ["violet", "indigo", "teal", "ink"], "violet"))
+  const [density, setDensityState] = useState<DensityOption>(() => readStoredPref("wb.ui.density", ["compact", "standard", "wide"], "standard"))
   const [error, setError] = useState("")
   const revision = useRef(0)
   useEffect(() => {
@@ -420,6 +485,8 @@ function useWindowPreferences(host: DesktopHost) {
     return () => { revision.current++; unsubscribe() }
   }, [host])
   useEffect(() => { document.documentElement.dataset.theme = state.colorScheme }, [state.colorScheme])
+  useEffect(() => { document.documentElement.dataset.accent = accent }, [accent])
+  useEffect(() => { document.documentElement.dataset.density = density }, [density])
 
   async function update(request: () => Promise<WindowState>) {
     const attempt = ++revision.current
@@ -433,25 +500,100 @@ function useWindowPreferences(host: DesktopHost) {
   }
   return {
     state,
+    accent,
+    density,
     error,
     setThemeMode: (mode: ThemeMode) => update(() => host.setThemeMode(mode)),
+    toggleTheme: () => update(() => host.setThemeMode(state.colorScheme === "dark" ? "light" : "dark")),
+    setAccent: (next: AccentOption) => { setAccentState(next); writeStoredPref("wb.ui.accent", next) },
+    setDensity: (next: DensityOption) => { setDensityState(next); writeStoredPref("wb.ui.density", next) },
     adjustZoom: (action: ZoomAction) => update(() => host.adjustZoom(action)),
   }
 }
 
-function WindowPreferences({ state, error, setThemeMode, adjustZoom }: Preferences) {
+function WindowPreferences({ state, accent, density, error, setThemeMode, setAccent, setDensity, adjustZoom }: Preferences) {
+  const themeModes: ReadonlyArray<{ id: ThemeMode; label: string }> = [
+    { id: "system", label: "跟随系统" },
+    { id: "light", label: "浅色" },
+    { id: "dark", label: "深色" },
+  ]
+  const densities: ReadonlyArray<{ id: DensityOption; label: string }> = [
+    { id: "compact", label: "紧凑" },
+    { id: "standard", label: "标准" },
+    { id: "wide", label: "宽松" },
+  ]
   return <section className="desktop-preferences" aria-label="窗口外观">
-    <label>外观<select aria-label="外观" value={state.themeMode} onChange={event => {
-      const mode = event.target.value as ThemeMode
-      void setThemeMode(mode)
-    }}>
-      <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
-    </select></label>
-    <div className="desktop-zoom" aria-label="窗口缩放">
-      <span>窗口缩放</span>
-      <button className="wb-button wb-button-secondary wb-button-small" aria-label="缩小" disabled={state.zoomPercent <= 80} onClick={() => { void adjustZoom("out") }}>−</button>
-      <button className="wb-button wb-button-secondary wb-button-small" aria-label="恢复缩放" onClick={() => { void adjustZoom("reset") }}>{state.zoomPercent}%</button>
-      <button className="wb-button wb-button-secondary wb-button-small" aria-label="放大" disabled={state.zoomPercent >= 150} onClick={() => { void adjustZoom("in") }}>+</button>
+    <div className="desktop-set-row">
+      <div className="desktop-set-main">
+        <span className="desktop-set-label">外观主题</span>
+        <span className="desktop-set-help">浅色是默认；深色单独配色，不是简单反色。</span>
+      </div>
+      <div className="seg" role="radiogroup" aria-label="外观主题">
+        {themeModes.map(mode => (
+          <button
+            key={mode.id}
+            type="button"
+            role="radio"
+            aria-checked={state.themeMode === mode.id}
+            className={state.themeMode === mode.id ? "is-active" : undefined}
+            onClick={() => { void setThemeMode(mode.id) }}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div className="desktop-set-row">
+      <div className="desktop-set-main">
+        <span className="desktop-set-label">强调色</span>
+        <span className="desktop-set-help">用于高亮激活态、徽章与主要行动按钮。</span>
+      </div>
+      <div className="swatch-row" role="radiogroup" aria-label="强调色">
+        {ACCENT_OPTIONS.map(opt => (
+          <button
+            key={opt.id}
+            type="button"
+            role="radio"
+            aria-checked={accent === opt.id}
+            aria-label={opt.label}
+            title={opt.label}
+            className={`swatch${accent === opt.id ? " is-on" : ""}`}
+            style={{ background: opt.color }}
+            onClick={() => setAccent(opt.id)}
+          />
+        ))}
+      </div>
+    </div>
+    <div className="desktop-set-row">
+      <div className="desktop-set-main">
+        <span className="desktop-set-label">界面密度</span>
+        <span className="desktop-set-help">调节阅读间距与页面内边距。</span>
+      </div>
+      <div className="seg" role="radiogroup" aria-label="界面密度">
+        {densities.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            role="radio"
+            aria-checked={density === item.id}
+            className={density === item.id ? "is-active" : undefined}
+            onClick={() => setDensity(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div className="desktop-set-row">
+      <div className="desktop-set-main">
+        <span className="desktop-set-label">窗口缩放</span>
+        <span className="desktop-set-help">小窗口或高分屏可用，调整工作台整体比例。</span>
+      </div>
+      <div className="seg desktop-zoom" role="group" aria-label="窗口缩放">
+        <button type="button" aria-label="缩小" disabled={state.zoomPercent <= 80} onClick={() => { void adjustZoom("out") }}>−</button>
+        <button type="button" aria-label="恢复缩放" onClick={() => { void adjustZoom("reset") }}>{state.zoomPercent}%</button>
+        <button type="button" aria-label="放大" disabled={state.zoomPercent >= 150} onClick={() => { void adjustZoom("in") }}>+</button>
+      </div>
     </div>
     {error && <p className="error" role="alert">{error}</p>}
   </section>

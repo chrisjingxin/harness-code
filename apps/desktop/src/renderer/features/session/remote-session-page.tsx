@@ -2,7 +2,7 @@
  * 跨机器只读会话页（涵盖他人会话与本人其他设备会话）。
  *
  * 【功能定义】
- * 默认仅展示简报与元数据；只有用户点击「同步会话」或「同步更新」后才主动拉取历史正文，
+ * 默认仅展示简报卡片与元数据；只有用户点击「同步会话」或「同步更新」后才主动拉取历史正文，
  * 并使用只读模式 ConversationView 展示消息与工具摘要；失败时保留已有简报与历史缓存。
  */
 import { useState } from "react"
@@ -91,82 +91,95 @@ export function RemoteSessionPage({
   const briefUploadedLabel = formatShortTime(conversation.briefUpdatedAtMs || conversation.updatedAt)
   const localSyncedLabel = syncState.lastSyncedAtMs ? formatShortTime(syncState.lastSyncedAtMs) : "—"
   const busy = syncStatus === "syncing"
+  const syncTone = syncStatus === "has_update" ? "accent" : syncStatus === "sync_failed" ? "danger" : hasDownloadedMessages ? "success" : "warning"
+  const syncText = syncStatus === "has_update"
+    ? "有更新"
+    : syncStatus === "sync_failed"
+      ? "同步失败"
+      : hasDownloadedMessages
+        ? "已同步"
+        : "未同步"
 
   return (
     <section
       className="session-center session-remote-readonly"
       aria-label={`${conversation.title || "未命名会话"}（只读）`}
     >
-      <header className="session-heading">
-        <div>
-          <h1>{conversation.title || "未命名会话"}</h1>
-          <div className="session-subtitle">
-            <span>{ownerName}</span>
-            <span>·</span>
-            <span>{deviceName}</span>
-            <span className="session-tag">
-              <LockIcon size={11} />
-              <span>{kind === "remote_self" ? "其他设备 · 只读" : "只读"}</span>
-            </span>
+      <div className="session-head-wrap">
+        <header className="session-heading">
+          <div className="session-heading-main">
+            <h1>{conversation.title || "未命名会话"}</h1>
+            <div className="session-subtitle">
+              <span>{ownerName}</span>
+              <span>·</span>
+              <span>{deviceName}</span>
+              <span>·</span>
+              <span>{kind === "remote_self" ? "跨机只读 · 本人其他设备" : "队友会话 · 只读"}</span>
+              <span>·</span>
+              <span>更新于 {briefUploadedLabel}</span>
+            </div>
           </div>
-        </div>
-        <div className="session-heading-actions">
-          {hasDownloadedMessages ? (
-            <button
-              type="button"
-              className="wb-button wb-button-secondary wb-button-small"
-              disabled={busy}
-              onClick={onSyncConversation}
-            >
-              <RefreshIcon size={13} />
-              <span>{busy ? "正在同步…" : syncStatus === "has_update" ? "同步更新" : "重新同步"}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="wb-button wb-button-quiet wb-button-small"
-              disabled={busy}
-              onClick={onRefreshBrief}
-            >
-              <RefreshIcon size={13} />
-              <span>刷新简报</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      {hasDownloadedMessages ? (
-        <>
-          <div
-            className="session-remote-synced-note"
-            data-tone={syncStatus === "sync_failed" ? "danger" : syncStatus === "has_update" ? "warning" : undefined}
-            role="status"
-          >
-            <CheckDoubleIcon size={13} />
-            {syncStatus === "sync_failed" ? (
-              <span>
-                同步失败：{syncState.syncError || "无法拉取最新消息"} · 当前保留已同步至第 {syncState.localSyncedSequence} 条的内容
-              </span>
-            ) : syncStatus === "has_update" ? (
-              <span>
-                发现新消息（云端已上传至第 {conversation.syncedSequence} 条，本机已同步至第 {syncState.localSyncedSequence} 条）
-              </span>
-            ) : (
-              <span>
-                已同步至 {localSyncedLabel}（第 {syncState.localSyncedSequence} 条）· 当前显示已下载的定稿消息
-                {syncState.cacheTruncated ? " · 本机缓存已保留最近片段，点击重新同步可查看最新全量" : ""}
-              </span>
-            )}
-            {syncStatus === "sync_failed" || syncStatus === "has_update" ? (
+          <div className="session-heading-actions">
+            <span className="wb-status-badge" data-tone={syncTone}>{syncText}</span>
+            {hasDownloadedMessages ? (
               <button
                 type="button"
-                className="wb-button wb-button-secondary wb-button-small session-note-action"
+                className="wb-button wb-button-secondary wb-button-small"
                 disabled={busy}
                 onClick={onSyncConversation}
               >
-                {busy ? "正在同步…" : "立即同步"}
+                <RefreshIcon size={13} />
+                <span>{busy ? "正在同步…" : syncStatus === "has_update" ? "同步更新" : "重新同步"}</span>
               </button>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                className="wb-button wb-button-quiet wb-button-small"
+                disabled={busy}
+                onClick={onRefreshBrief}
+              >
+                <RefreshIcon size={13} />
+                <span>刷新简报</span>
+              </button>
+            )}
+          </div>
+        </header>
+      </div>
+
+      {hasDownloadedMessages ? (
+        <>
+          <div className="session-ro-strip-wrap">
+            <div
+              className="session-remote-synced-note"
+              data-tone={syncStatus === "sync_failed" ? "danger" : syncStatus === "has_update" ? "warning" : undefined}
+              role="status"
+            >
+              <CheckDoubleIcon size={13} />
+              {syncStatus === "sync_failed" ? (
+                <span>
+                  同步失败：{syncState.syncError || "无法拉取最新消息"} · 当前保留已同步至第 {syncState.localSyncedSequence} 条的内容
+                </span>
+              ) : syncStatus === "has_update" ? (
+                <span>
+                  发现新消息（云端第 {conversation.syncedSequence} 条，本机第 {syncState.localSyncedSequence} 条）
+                </span>
+              ) : (
+                <span>
+                  只读快照 · 已同步至 {localSyncedLabel}（第 {syncState.localSyncedSequence} 条）
+                  {syncState.cacheTruncated ? " · 缓存已截断，点击重新同步可拉取全量" : ""}
+                </span>
+              )}
+              {syncStatus === "sync_failed" || syncStatus === "has_update" ? (
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary wb-button-small session-note-action"
+                  disabled={busy}
+                  onClick={onSyncConversation}
+                >
+                  {busy ? "正在同步…" : "立即同步"}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="session-conversation-wrap">
@@ -185,9 +198,12 @@ export function RemoteSessionPage({
       ) : (
         <div className="session-remote-body">
           <div className="session-remote-brief">
-            <div className="session-eyebrow">
-              <span>会话简报</span>
-              <span className="session-tag">
+            <div className="session-brief-top">
+              <div className="session-brief-title-group">
+                <h2>{ownerName} 的会话简报</h2>
+                <span className="session-brief-meta">{deviceName} · 最近上传于 {briefUploadedLabel}</span>
+              </div>
+              <span className="wb-status-badge">
                 {conversation.briefSource === "agent" ? "Agent 摘要" : "规则摘要"}
               </span>
             </div>
@@ -215,18 +231,7 @@ export function RemoteSessionPage({
               ))}
             </div>
 
-            <div className="session-remote-download">
-              <span className="session-download-icon">
-                <MessageIcon size={18} />
-              </span>
-              <div>
-                <h2>{hasRemoteMessages ? "正文尚未同步到这台电脑" : "原设备暂未上传消息正文"}</h2>
-                <p>
-                  {hasRemoteMessages
-                    ? "主动同步后，查看已上传的对话和工具摘要。"
-                    : "当前只有会话摘要；你可以点击刷新简报确认是否有新消息上传。"}
-                </p>
-              </div>
+            <div className="session-brief-foot">
               {hasRemoteMessages ? (
                 <button
                   type="button"
@@ -248,6 +253,11 @@ export function RemoteSessionPage({
                   <span>刷新简报</span>
                 </button>
               )}
+              <span className="session-brief-hint">
+                {hasRemoteMessages
+                  ? "正文尚未同步到这台电脑 · 同步只拉取对话与工具摘要，不会在对方机器执行任何操作。"
+                  : "原设备暂未上传消息正文 · 可点击刷新简报确认是否有新消息上传。"}
+              </span>
             </div>
 
             {syncStatus === "sync_failed" && syncState.syncError ? (
@@ -256,11 +266,11 @@ export function RemoteSessionPage({
                 <span>同步失败：{syncState.syncError}</span>
               </div>
             ) : null}
+          </div>
 
-            <div className="session-remote-footnote">
-              <ShieldCheckIcon size={13} />
-              <span>查看会话不会操作对方的 Agent 或文件。</span>
-            </div>
+          <div className="session-remote-note-card">
+            <ShieldCheckIcon size={14} />
+            <span>同步之后是只读视图：没有输入框，也不能在这里继续对话。查看会话不会操作对方的 Agent 或文件。</span>
           </div>
         </div>
       )}
@@ -268,41 +278,43 @@ export function RemoteSessionPage({
       {notice ? <p className="session-inline-notice" role="status">{notice}</p> : null}
 
       <footer className="session-remote-action-bar">
-        <span>
-          <LockIcon size={13} />
-          <span>跨机器会话仅供阅读</span>
-        </span>
-        <div className="session-remote-actions">
-          <button
-            type="button"
-            className="wb-button wb-button-quiet wb-button-small"
-            onClick={() => {
-              if (hooks?.onCreateTaskFromConversation) {
-                setNotice("")
-                hooks.onCreateTaskFromConversation(conversation)
-              } else {
-                setNotice("创建任务入口将在项目任务模块接入后可用。")
-              }
-            }}
-          >
-            <PlusIcon size={13} />
-            <span>创建任务</span>
-          </button>
-          <button
-            type="button"
-            className="wb-button wb-button-secondary wb-button-small"
-            onClick={() => {
-              if (hooks?.onQuoteConversation) {
-                setNotice("")
-                hooks.onQuoteConversation(conversation)
-              } else {
-                setNotice("固定引用入口将在引用模块接入后可用。")
-              }
-            }}
-          >
-            <LinkIcon size={13} />
-            <span>引用到我的会话</span>
-          </button>
+        <div className="session-peer-foot-inner">
+          <span className="session-ro-hint">
+            <LockIcon size={13} />
+            <span>跨机器会话仅供阅读 · 无输入框</span>
+          </span>
+          <div className="session-remote-actions">
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-small"
+              onClick={() => {
+                if (hooks?.onQuoteConversation) {
+                  setNotice("")
+                  hooks.onQuoteConversation(conversation)
+                } else {
+                  setNotice("固定引用入口将在引用模块接入后可用。")
+                }
+              }}
+            >
+              <LinkIcon size={13} />
+              <span>引用到我的会话</span>
+            </button>
+            <button
+              type="button"
+              className="wb-button wb-button-primary wb-button-small"
+              onClick={() => {
+                if (hooks?.onCreateTaskFromConversation) {
+                  setNotice("")
+                  hooks.onCreateTaskFromConversation(conversation)
+                } else {
+                  setNotice("创建任务入口将在项目任务模块接入后可用。")
+                }
+              }}
+            >
+              <PlusIcon size={13} />
+              <span>创建任务</span>
+            </button>
+          </div>
         </div>
       </footer>
     </section>

@@ -7,17 +7,26 @@
  * 2. `SessionCentralFileTabs` / `SessionCentralFilePanels`：复用 `@workbench/ui` 的 `ProjectFileTab` 与
  *    `ProjectFilePanel` 在中央对话区旁边打开多个源代码文件，同时保持 `ConversationView` 常驻挂载不丢位置。
  */
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef } from "react"
 import type { ReactElement } from "react"
 import { ProjectDock, ProjectFilePanel, ProjectFileTab } from "@workbench/ui"
 import type {
   ProjectActionAvailability,
+  ProjectChangesView,
   ProjectDockProps,
   ProjectFileView,
   ProjectScope,
   RenderingActions,
 } from "@workbench/ui"
-import { FolderIcon } from "./icons.js"
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  FileDocIcon,
+  FolderIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+} from "./icons.js"
 
 export type CentralFileTabItem = {
   readonly path: string
@@ -28,7 +37,9 @@ export type SessionCentralFilesState = {
   readonly uiScope: ProjectScope
   readonly tabs: readonly CentralFileTabItem[]
   readonly activeCentral: string | null
+  readonly mode?: "code" | "diff"
   readonly files: Readonly<Record<string, ProjectFileView>>
+  readonly changes?: ProjectChangesView
   readonly refreshGate: ProjectActionAvailability
   readonly positions: Readonly<Record<string, { area: "central" | "dock" | "tree"; path: string; top: number; left: number }>>
   readonly rendering: RenderingActions
@@ -36,6 +47,8 @@ export type SessionCentralFilesState = {
   readonly onSelectFile: (path: string) => void
   readonly onCloseFile: (path: string) => void
   readonly onRefreshFile: (path: string) => void
+  readonly onSetMode?: (mode: "code" | "diff") => void
+  readonly onOpenDiffFile?: (path: string) => void
   readonly onSaveScroll: (area: "central" | "dock" | "tree", path: string, top: number, left: number) => void
 }
 
@@ -124,14 +137,242 @@ function CentralFilePanelWithScroll({
   )
 }
 
-export function SessionCentralFilePanels({ state }: { readonly state: SessionCentralFilesState }): ReactElement | null {
-  if (state.tabs.length === 0) return null
+function fileStatusCode(status?: string): { code: string; cls: "m" | "a" | "u" } | null {
+  if (!status) return null
+  if (status === "??" || status === "U") return { code: "U", cls: "u" }
+  if (status === "A") return { code: "A", cls: "a" }
+  if (status === "D") return { code: "D", cls: "m" }
+  return { code: "M", cls: "m" }
+}
+
+function CentralDiffContent({
+  path,
+  state,
+}: {
+  readonly path: string
+  readonly state: SessionCentralFilesState
+}): ReactElement {
+  const diff = state.changes?.diff
+  if (diff && diff.path === path && diff.text) {
+    const lines = diff.text.split("\n")
+    return (
+      <div className="filepane-diff-scroll">
+        <pre className="code">
+          {lines.map((line, i) => {
+            const cls = line.startsWith("@@")
+              ? "hunk"
+              : line.startsWith("+") && !line.startsWith("+++")
+                ? "add"
+                : line.startsWith("-") && !line.startsWith("---")
+                  ? "del"
+                  : ""
+            return (
+              <Fragment key={i}>
+                <span className="ln">{i + 1}</span>
+                <span className={cls}>{line}</span>
+                {i < lines.length - 1 ? "\n" : null}
+              </Fragment>
+            )
+          })}
+        </pre>
+        {diff.truncated && <p className="filepane-diff-empty">Diff 内容较长，已截断展示。</p>}
+      </div>
+    )
+  }
+
+  const fileView = state.files[path]
+  const changed = state.changes?.repository?.files.find(f => f.path === path)
+  if ((changed?.status === "??" || changed?.status === "U" || changed?.status === "A") && fileView?.status === "ready") {
+    const lines = fileView.file.content.split("\n")
+    return (
+      <div className="filepane-diff-scroll">
+        <pre className="code">
+          {lines.map((line, i) => (
+            <Fragment key={i}>
+              <span className="ln">{i + 1}</span>
+              <span className="add">+{line}</span>
+              {i < lines.length - 1 ? "\n" : null}
+            </Fragment>
+          ))}
+        </pre>
+      </div>
+    )
+  }
+
+  if (state.changes?.busy) {
+    return <p className="filepane-diff-empty">正在加载 Git 差异…</p>
+  }
   return (
-    <>
-      {state.tabs.map(tab => (
-        <CentralFilePanelWithScroll key={tab.path} tab={tab} state={state} />
-      ))}
-    </>
+    <p className="filepane-diff-empty">
+      {state.changes?.message || "当前文件在 HEAD 中无未提交差异；可切回「代码」浏览完整内容。"}
+    </p>
+  )
+}
+
+export function SessionCentralFilePanels({
+  state,
+  maximized = false,
+  onToggleMaximized,
+}: {
+  readonly state: SessionCentralFilesState
+  readonly maximized?: boolean
+  readonly onToggleMaximized?: () => void
+}): ReactElement | null {
+  const paneRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!state.activeCentral) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      if (paneRef.current && paneRef.current.contains(document.activeElement)) {
+        event.stopPropagation()
+        state.onSelectConversation()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [state.activeCentral, state.onSelectConversation])
+
+  if (state.tabs.length === 0 || state.activeCentral === null) return null
+
+  const activePath = state.activeCentral
+  const activeFile = state.files[activePath]
+  const mode = state.mode ?? "code"
+  const changedFiles = state.changes?.repository?.files ?? []
+  const cIdx = changedFiles.findIndex(f => f.path === activePath)
+  const st = fileStatusCode(cIdx >= 0 ? changedFiles[cIdx]?.status : undefined)
+
+  return (
+    <section ref={paneRef} className="filepane" aria-label="文件预览">
+      <div className="filepane-head">
+        <div className="fp-tabs" role="tablist" aria-label="打开的文件">
+          {state.tabs.map(tab => {
+            const on = tab.path === activePath
+            return (
+              <div key={tab.path} className={`fp-tab-wrap${on ? " is-active" : ""}`} role="presentation">
+                <button
+                  type="button"
+                  role="tab"
+                  className={`fp-tab${on ? " is-active" : ""}`}
+                  aria-selected={on}
+                  title={tab.path}
+                  onClick={() => state.onSelectFile(tab.path)}
+                >
+                  <FileDocIcon size={12} />
+                  <span className="t-mono">{tab.name}</span>
+                </button>
+                <button
+                  type="button"
+                  className="fp-tab-x"
+                  aria-label={`关闭 ${tab.name}`}
+                  title="关闭"
+                  onClick={() => state.onCloseFile(tab.path)}
+                >
+                  <CloseIcon size={11} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <div className="fp-tools">
+          {state.onSetMode && (
+            <div className="seg" role="tablist" aria-label="预览方式">
+              <button
+                type="button"
+                role="tab"
+                className={mode === "code" ? "is-active" : undefined}
+                aria-selected={mode === "code"}
+                onClick={() => state.onSetMode?.("code")}
+              >
+                代码
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={mode === "diff" ? "is-active" : undefined}
+                aria-selected={mode === "diff"}
+                onClick={() => state.onSetMode?.("diff")}
+              >
+                Diff
+              </button>
+            </div>
+          )}
+          {onToggleMaximized && (
+            <button
+              type="button"
+              className={`icon-btn${maximized ? " is-on" : ""}`}
+              aria-label={maximized ? "还原分屏" : "放大预览"}
+              title={maximized ? "还原分屏" : "放大预览"}
+              onClick={onToggleMaximized}
+            >
+              {maximized ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="关闭预览"
+            title="关闭预览"
+            onClick={state.onSelectConversation}
+          >
+            <CloseIcon size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div className="fp-meta">
+        <span className="fp-full" title={activePath}>{activePath}</span>
+        <span style={{ flex: "1 1 0" }} />
+        {activeFile?.status === "ready" && (
+          <>
+            {activeFile.file.language && <span className="fp-info">{activeFile.file.language}</span>}
+            <span className="fp-info">{activeFile.file.lineCount} 行</span>
+          </>
+        )}
+        {st && <span className={`f-badge ${st.cls}`}>{st.code}</span>}
+        {changedFiles.length > 1 && cIdx >= 0 && state.onOpenDiffFile && (
+          <div className="fp-step-group" role="group" aria-label="变更文件步进">
+            <button
+              type="button"
+              className="fp-step-btn"
+              aria-label="上一个变更文件"
+              title="上一个变更文件"
+              onClick={() => {
+                const nextIdx = (cIdx - 1 + changedFiles.length) % changedFiles.length
+                const target = changedFiles[nextIdx]
+                if (target) state.onOpenDiffFile?.(target.path)
+              }}
+            >
+              <ChevronLeftIcon size={13} />
+            </button>
+            <span className="fp-step-count">{cIdx + 1}/{changedFiles.length}</span>
+            <button
+              type="button"
+              className="fp-step-btn"
+              aria-label="下一个变更文件"
+              title="下一个变更文件"
+              onClick={() => {
+                const nextIdx = (cIdx + 1) % changedFiles.length
+                const target = changedFiles[nextIdx]
+                if (target) state.onOpenDiffFile?.(target.path)
+              }}
+            >
+              <ChevronRightIcon size={13} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="filepane-body">
+        {mode === "diff" ? (
+          <CentralDiffContent path={activePath} state={state} />
+        ) : (
+          state.tabs.map(tab => (
+            <CentralFilePanelWithScroll key={tab.path} tab={tab} state={state} />
+          ))
+        )}
+      </div>
+    </section>
   )
 }
 

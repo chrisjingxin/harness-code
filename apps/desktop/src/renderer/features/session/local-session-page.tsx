@@ -5,6 +5,7 @@
  * 中央复用 @workbench/ui 的 ConversationView 展示消息时间线、工具与输入区；
  * 上方显示本地工作目录切换条与云端共享范围提示；发送与取消严格受控于真实 Agent 执行端口。
  */
+import { useEffect, useState } from "react"
 import type { ReactElement } from "react"
 import { ConversationView } from "@workbench/ui"
 import type {
@@ -17,8 +18,8 @@ import type {
   RenderingActions,
 } from "@workbench/ui"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
-import { ChevronDownIcon, FolderIcon, LaptopIcon, UsersIcon } from "./icons.js"
-import { SessionCentralFilePanels, SessionCentralTabBar } from "./session-center.js"
+import { ChevronDownIcon, FolderIcon, UsersIcon } from "./icons.js"
+import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename } from "./session-model.js"
 import { projectLocalExecution } from "./local-execution-view.js"
@@ -66,6 +67,10 @@ export function LocalSessionPage({
   onOpenFile,
 }: LocalSessionPageProps): ReactElement {
   const viewingFile = Boolean(centralFiles && centralFiles.activeCentral !== null)
+  const [pvMax, setPvMax] = useState(false)
+  useEffect(() => {
+    if (!viewingFile) setPvMax(false)
+  }, [viewingFile])
   const availability = execution.getAvailability(conversation.conversationId)
   const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
   const folderName = directoryBasename(directoryPath)
@@ -105,41 +110,52 @@ export function LocalSessionPage({
   const view = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
+  const isRunning = Boolean(activeExecution?.activeTurnId)
 
   return (
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
-      <header className="session-heading">
-        <div>
-          <h1>{conversation.title || "未命名会话"}</h1>
-          <div className="session-subtitle">
-            <span>{ownerName}</span>
-            <span>·</span>
-            <span>{deviceName}</span>
-            <span className="session-tag" data-tone="success">
-              <LaptopIcon size={11} />
-              <span>本机会话</span>
+      <div className="session-head-wrap">
+        <header className="session-heading">
+          <div className="session-heading-main">
+            <h1>{conversation.title || "未命名会话"}</h1>
+            <div className="session-subtitle" title={`会话所有者：${ownerName} · 设备：${deviceName}`}>
+              <span>本机执行 · {deviceName}</span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                className="session-directory-button"
+                onClick={onChooseDirectory}
+                title={directoryPath ? `当前工作目录（仅本机可用）：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
+              >
+                <FolderIcon size={12} />
+                <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
+                <ChevronDownIcon size={11} />
+              </button>
+            </div>
+          </div>
+          <div className="session-heading-actions">
+            <span className={`session-status-badge${isRunning ? " is-running" : ""}`}>
+              <span className="session-status-dot" aria-hidden="true" />
+              <span>{isRunning ? "本机运行中" : "本机空闲"}</span>
+            </span>
+            <span
+              className="session-tag"
+              title="项目成员仅可主动同步已上传的简报与定稿消息；你本机选择的目录不会暴露给他人。"
+            >
+              <UsersIcon size={12} />
+              <span>Project 内共享</span>
             </span>
           </div>
-        </div>
-        <div className="session-heading-actions">
-          <span
-            className="session-tag"
-            title="项目成员仅可主动同步已上传的简报与定稿消息；你本机选择的目录不会暴露给他人。"
-          >
-            <UsersIcon size={12} />
-            <span>Project 内共享</span>
-          </span>
-        </div>
-      </header>
+        </header>
+      </div>
 
-      {centralFiles ? <SessionCentralTabBar state={centralFiles} /> : null}
-
-      <div className="session-conversation-wrap" hidden={viewingFile}>
-        <ConversationView
-          {...view}
-          entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
-          scope={scope}
-          visible={visible && !viewingFile}
+      <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
+        <div className="session-conversation-wrap">
+          <ConversationView
+            {...view}
+            entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
+            scope={scope}
+            visible={visible && !(viewingFile && pvMax)}
           interaction={permission ? {
             kind: "approval", id: permission.id, title: permission.title, readOnly: false,
             availability: { enabled: true },
@@ -199,27 +215,19 @@ export function LocalSessionPage({
             onOpenFile,
             rendering,
           }}
-          slots={{
-            aboveTimeline: (
-              <div className="session-directory-row">
-                <button
-                  type="button"
-                  className="session-directory-button"
-                  onClick={onChooseDirectory}
-                  title={directoryPath ?? "选择一个本机文件夹（支持普通非 Git 目录）"}
-                >
-                  <FolderIcon size={13} />
-                  <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
-                  <ChevronDownIcon size={12} />
-                </button>
-                <span className="session-tag">本机目录 · 仅当前电脑</span>
-              </div>
-            ),
-            ...(hooks?.composerExtra ? { composer: hooks.composerExtra } : {}),
-          }}
+          slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
         />
+        </div>
+        {centralFiles && viewingFile ? (
+          <div className="session-central-file-pane">
+            <SessionCentralFilePanels
+              state={centralFiles}
+              maximized={pvMax}
+              onToggleMaximized={() => setPvMax(value => !value)}
+            />
+          </div>
+        ) : null}
       </div>
-      {centralFiles ? <SessionCentralFilePanels state={centralFiles} /> : null}
     </section>
   )
 }

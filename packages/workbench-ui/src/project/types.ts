@@ -127,6 +127,16 @@ export type ProjectActions = {
   push(scope: ProjectScope, input: { snapshot: string; commitSha: string }): void
 }
 
+export type ProjectGitCommitItem = {
+  sha: string
+  message: string
+  author: string
+  timeLabel: string
+  head?: boolean
+  ahead?: boolean
+  files?: readonly { path: string; status: string }[]
+}
+
 /** 一个右侧项目区域的全部受控输入和动作。 */
 export type ProjectDockProps = {
   scope: ProjectScope
@@ -138,4 +148,14 @@ export type ProjectDockProps = {
   gates: ProjectGates
   personal: ProjectPersonalView
   actions: ProjectActions
+  /** 为 true 时点击文件直接触发中央分屏打开，右栏只保留干净文件树与会话信息块。 */
+  preferCentralFileOpen?: boolean
+  /** 为 true 时变更面板底部渲染产品暂缓态紧凑提交栏，否则保留完整提交表单。 */
+  gitDeferred?: boolean
+  /** 变更面板“提交记录”子视图数据（可选；为空时诚实提示未接入）。 */
+  gitCommits?: readonly ProjectGitCommitItem[]
+  /** 可选会话信息块，渲染于右栏文件树底部。 */
+  sessionMeta?: { updatedLabel: string; modeLabel: string }
+  /** 点击变更文件或历史提交文件时，回调用于在中央分屏以 Diff 模式打开。 */
+  onOpenDiffInCentral?: (path: string, snapshot?: string) => void
 }
