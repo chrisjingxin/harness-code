@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: 历史未记录
 priority: P0
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 按最终架构方案 §13/§14 建立全量验收闭环：A-01~A-12 逐项自动化验证、架构测试（§13.2）合并固化、直接承接已过时 HC-105 的 Browser E2E 范围并落地 Playwright fixture（真实 Host + fake Agent，无真实凭据），覆盖 TUI→Web→TUI 连续性、功能 parity、生命周期异常、安全边界与双视口/双主题。
@@ -13,9 +13,11 @@ acceptance: A-01~A-12 每项有可重复执行的自动化断言与证据（记�
 user_docs: docs/user/交互使用.md、docs/user/故障排查.md
 developer_docs: docs/developer/architecture/架构总览.md、docs/developer/architecture/adr/0002-project-host-multi-connection.md
 test_evidence: -
-references: docs/developer/task/HC-105-建立WebBrowserE2E.md、docs/developer/task/archive/HC-108-收敛迁移子进程强制清理与残留文.md、docs/developer/task/archive/HC-109-修复旧版PromptEpoch.md、docs/developer/task/archive/HC-110-修复compact操作门禁与超.md、docs/developer/task/archive/HC-111-让手动压缩按正收益提交.md、docs/developer/task/archive/HC-112-Skill安全文件层与AGEN.md、docs/developer/task/archive/HC-113-InteractiveCont.md、docs/developer/task/archive/HC-114-WebUiGateway与Pr.md
+references: docs/developer/task/HC-105-建立WebBrowserE2E.md、docs/developer/task/archive/HC-108-收敛迁移子进程强制清理与残留文.md、docs/developer/task/archive/HC-109-修复旧版PromptEpoch.md、docs/developer/task/archive/HC-110-修复compact操作门禁与超.md、docs/developer/task/archive/HC-111-让手动压缩按正收益提交.md、docs/developer/task/archive/HC-112-Skill安全文件层与AGEN.md、docs/developer/task/archive/HC-113-InteractiveCont.md、docs/developer/task/archive/HC-114-WebUiGateway与Pr.md、docs/developer/task/HC-192-协作工作台与会话交接.md、docs/developer/task/HC-204-双平台交付与内网演示.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本分支不再以旧 TUI、独立 Web 和浏览器接管作为产品入口，本卡针对旧链路的验收矩阵不再执行。当前桌面产品和统一验收方向见 [HC-192](HC-192-协作工作台与会话交接.md) 与 [HC-204](HC-204-双平台交付与内网演示.md)。原安全及生命周期检查中仍适用于桌面的部分需重新核对，不因本卡过时而视为通过；以下内容保留历史记录。
 
 ## 背景
 

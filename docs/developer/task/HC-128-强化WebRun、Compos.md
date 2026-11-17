@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P1
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 让当前 Run 状态和下一步可执行动作成为工作台核心层级，统一 Topbar/Composer 状态、空 Thread quick prompt、active Run 草稿与取消、pending approval/question 的信息和决策顺序，同时保持既有业务 intent 与安全门禁。
@@ -13,9 +13,11 @@ acceptance: Topbar 与 Composer 上方分别表达全局 Run 和当前动作且�
 user_docs: docs/user/交互使用.md、docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: -
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md、docs/developer/task/HC-218-会话只读与主动同步.md、docs/developer/task/HC-222-Agent会话界面优化.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡针对旧 Web 的运行状态、输入和交互布局，不再作为本分支的独立任务。当前桌面会话与交互见 [HC-218](HC-218-会话只读与主动同步.md) 和 [HC-222](HC-222-Agent会话界面优化.md)；原草稿、审批与键盘要求中仍适用的部分需按桌面实现核对，不视为已通过。
 
 ## 背景
 

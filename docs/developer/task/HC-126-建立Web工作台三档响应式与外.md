@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P0
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 移除 1280px 固定最小宽度，建立 wide/compact/narrow 三档 viewport 状态和 Sidebar/Context Dock column、overlay、drawer/fullscreen 行为，保证 Conversation 与 Composer 在窄屏、缩放和面板切换时始终可达。
@@ -13,9 +13,11 @@ acceptance: 1440×900 列式 Conversation 不低于 640px；1280×800/1024×768 
 user_docs: docs/user/Web界面.md、docs/user/交互使用.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: -
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-204-双平台交付与内网演示.md、docs/developer/task/HC-222-Agent会话界面优化.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡针对旧 Web 的三档视口和移动端面板，不再作为本分支的独立任务。桌面布局及统一验收方向见 [HC-222](HC-222-Agent会话界面优化.md) 和 [HC-204](HC-204-双平台交付与内网演示.md)；仍适用的窗口尺寸、缩放和操作可达性须按桌面实际情况核对，不视为已通过。
 
 ## 背景
 

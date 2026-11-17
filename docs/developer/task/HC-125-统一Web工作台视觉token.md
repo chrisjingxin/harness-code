@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P1
-status: 进行中
+status: 已过时
 owner: DeepSeek
 branch: master
 scope: 将当前视觉收敛为暖中性色画布加绿色交互强调的扁平专业工作台风（2026-08-17 与用户确认，以参考设计稿的绿色主题为准），统一 light/dark token、控件尺寸、Topbar、Sidebar 与 Context Dock chrome；清理 d56baad 追加的样式覆盖层，使 styles.css 回到单一 token 来源，消除硬编码色、大圆角与卡片阴影堆叠，补齐 dark 主题覆盖；并消除新建 Thread 和外围面板抢占当前 Run 注意力的问题。
@@ -13,9 +13,11 @@ acceptance: styles.css 不存在多套互相覆盖的视觉层，组件颜色只
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: "focused: cd packages/cli && bun test --isolate tests/web/presentation/styles.test.ts tests/web/presentation/web-app.test.tsx tests/web/presentation/workspace-sidebar.test.tsx tests/web/presentation/context-dock.test.tsx（49 pass, 0 fail）；bun run typecheck（通过）；bun run build（通过）；bun run project:check（通过）；bun run docs:check（通过）；bun run tasks:check（通过）；git diff --check（通过）。bun test --isolate tests/web（193 pass, 6 fail）：5 个 loopback EADDRINUSE、1 个 bundle EISDIR。bun run test（CLI 533 pass, 1 skip, 7 fail）：另有 sidecar 集成失败；Python 未由聚合脚本执行，直接 bun run test:py 因 packages/agent/.venv/bin/python 不存在退出 127。"
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-106-按蓝色工作台设计整改WebUI.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-106-按蓝色工作台设计整改WebUI.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md、docs/developer/task/archive/HC-221-工作台原型UI对齐.md、docs/developer/task/HC-222-Agent会话界面优化.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡的旧 Web 绿色主题及外围视觉目标已被后续设计覆盖；当前桌面外壳与会话区方向见 [HC-221](archive/HC-221-工作台原型UI对齐.md) 和 [HC-222](HC-222-Agent会话界面优化.md)。原验证证据保留，不据此认定当前桌面已通过相同验收。
 
 ## 2026-10-29 设计覆盖说明
 

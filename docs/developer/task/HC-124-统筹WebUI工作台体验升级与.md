@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-079
 decomposed_by: Codex
 priority: P0
-status: 进行中
+status: 已过时
 owner: Codex (Luna Max)
 branch: codex/zc-124-web-ui-upgrade
 scope: 以当前 React DOM Web 工作台为基础，统一视觉语言、响应式布局、Timeline/Tool、Run/Composer/Interaction、可访问性和功能性动效，并协调 HC-125～HC-130 与既有 Browser E2E/最终架构验收形成一个可观察的用户结果。
@@ -13,9 +13,11 @@ acceptance: HC-125～HC-130 全部完成或有依据地标记过时；HC-115 的
 user_docs: docs/user/交互使用.md、docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/architecture/架构总览.md
 test_evidence: -
-references: docs/developer/task/archive/HC-079-提供本地WebUI与受令牌保护.md、docs/developer/task/archive/HC-104-实现WebInteractiv.md、docs/developer/task/HC-106-按蓝色工作台设计整改WebUI.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md、docs/developer/task/HC-115-最终架构验收矩阵与Browse.md
+references: docs/developer/task/archive/HC-079-提供本地WebUI与受令牌保护.md、docs/developer/task/archive/HC-104-实现WebInteractiv.md、docs/developer/task/HC-106-按蓝色工作台设计整改WebUI.md、docs/developer/task/archive/HC-107-修复WebComposer、补.md、docs/developer/task/HC-115-最终架构验收矩阵与Browse.md、docs/developer/task/HC-192-协作工作台与会话交接.md、docs/developer/task/HC-204-双平台交付与内网演示.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡统筹的是旧独立 Web 工作台，本分支已转为独立桌面产品，不再按原 Web 任务组推进。当前产品与统一验收方向见 [HC-192](HC-192-协作工作台与会话交接.md) 和 [HC-204](HC-204-双平台交付与内网演示.md)。原要求中仍适用于桌面的可用性与质量项需结合当前实现核对，不视为已经通过；以下内容保留历史记录。
 
 ## 2026-10-29 设计覆盖说明
 

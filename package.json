@@ -17,6 +17,7 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/acp-runtime --workspace @workbench/runner-core --workspace @workbench/project-service --workspace @workbench/runner --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
+    "dev:remote": "node scripts/workbench/remote-desktop.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "check:boundaries": "node scripts/workbench/check-boundaries.mjs",
     "project:tool": "node --no-warnings --experimental-loader ./scripts/typescript_loader.mjs scripts/project/index.ts",
@@ -30,6 +31,7 @@
     "release:check": "npm run project:tool -- release:check",
     "project:check": "npm run check:boundaries && npm run project:tool -- project:check",
     "server:build": "node scripts/workbench/server.mjs build",
+    "server:deploy": "node scripts/workbench/deploy-remote.mjs",
     "server:init-demo": "node scripts/workbench/server.mjs init-demo",
     "server:start": "node scripts/workbench/server.mjs start",
     "server:contracts": "node scripts/workbench/server.mjs contracts",

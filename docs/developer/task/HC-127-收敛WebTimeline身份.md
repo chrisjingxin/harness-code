@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P1
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 在不改变 canonical Timeline 数据的前提下，删除重复角色 avatar，统一 User/Assistant/System 阅读边，并把同一 Run 的连续 Tool 纯投影为可展开 Activity Group，降低长会话噪声且保持 running/failed/Interaction 可见。
@@ -13,9 +13,11 @@ acceptance: User/Assistant 各只有一种清晰身份表达；短 User surface 
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: -
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md、docs/developer/task/HC-222-Agent会话界面优化.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡针对旧 Web 时间线，当前桌面会话版面与连续工具分组由 [HC-222](HC-222-Agent会话界面优化.md) 推进。两卡验收细节不完全相同，原 Web 要求不能据此视为已通过；以下内容保留历史记录。
 
 ## 背景
 

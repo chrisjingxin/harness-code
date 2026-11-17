@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P1
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 对完成结构整改后的 Web 工作台执行跨组件可访问性收敛，补齐 skip link、Tab/焦点顺序、overlay focus trap/restore、键盘可调 separator、窄屏 44px target、双主题对比度、ARIA 状态和 live region 策略。
@@ -13,9 +13,11 @@ acceptance: 键盘可从页面入口跳到 Timeline/Composer并完成 Thread/文
 user_docs: docs/user/Web界面.md、docs/user/交互使用.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: -
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md、docs/developer/task/HC-127-收敛WebTimeline身份.md、docs/developer/task/HC-128-强化WebRun、Compos.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-125-统一Web工作台视觉token.md、docs/developer/task/HC-126-建立Web工作台三档响应式与外.md、docs/developer/task/HC-127-收敛WebTimeline身份.md、docs/developer/task/HC-128-强化WebRun、Compos.md、docs/developer/task/HC-204-双平台交付与内网演示.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡针对旧 Web 工作台，不再按原界面结构实施。键盘操作、焦点管理、对比度和辅助功能对桌面仍然重要，须在 [HC-204](HC-204-双平台交付与内网演示.md) 的验收准备中结合实际界面核对；本次不表示这些要求已纳入具体验收清单或已通过。
 
 ## 背景
 

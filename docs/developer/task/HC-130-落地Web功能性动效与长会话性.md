@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P2
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 在稳定 Web UI 结构上统一 hover/menu/drawer/Tool/new-output/Run 状态动效，完整支持 reduced-motion，并用 500/1000 item 与 streaming 场景测量 render、Markdown/高亮和滚动成本，仅在证据表明需要时实施 windowing 或局部优化。
@@ -13,9 +13,11 @@ acceptance: 动效时长、easing 和允许属性符合 HC-124；历史恢复不
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-124-统筹WebUI工作台体验升级与.md
 test_evidence: -
-references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-127-收敛WebTimeline身份.md、docs/developer/task/HC-128-强化WebRun、Compos.md、docs/developer/task/HC-129-完成Web工作台键盘与可访问性.md
+references: docs/developer/task/HC-124-统筹WebUI工作台体验升级与.md、docs/developer/task/HC-127-收敛WebTimeline身份.md、docs/developer/task/HC-128-强化WebRun、Compos.md、docs/developer/task/HC-129-完成Web工作台键盘与可访问性.md、docs/developer/task/HC-204-双平台交付与内网演示.md、docs/developer/task/HC-222-Agent会话界面优化.md
 completed_at: -
 ---
+
+> **已过时（2026-11-17）**：本卡针对旧 Web 动效和长会话性能，不再按旧界面实施。当前会话动效方向见 [HC-222](HC-222-Agent会话界面优化.md)；长会话性能及减少动态效果仍需结合桌面实际情况和 [HC-204](HC-204-双平台交付与内网演示.md) 验收准备核对，本次不表示已完成性能测量或验收。
 
 ## 背景
 
