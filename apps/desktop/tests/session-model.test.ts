@@ -32,10 +32,10 @@ const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {})
   ...overrides,
 })
 
-test("classifyConversation 严格区分本人本机与同账号其他设备/他人会话", () => {
+test("classifyConversation 按人区分本人可执行会话与队友只读会话", () => {
   assert.equal(classifyConversation(sampleConversation(), "user-self", "dev-local"), "local")
-  assert.equal(classifyConversation(sampleConversation({ deviceId: "dev-other" }), "user-self", "dev-local"), "remote_self")
-  assert.equal(classifyConversation(sampleConversation(), "user-self", null), "remote_self")
+  assert.equal(classifyConversation(sampleConversation({ deviceId: "dev-other" }), "user-self", "dev-local"), "local")
+  assert.equal(classifyConversation(sampleConversation(), "user-self", null), "local")
   assert.equal(classifyConversation(sampleConversation({ ownerUserId: "user-peer" }), "user-self", "dev-local"), "remote_other")
 })
 

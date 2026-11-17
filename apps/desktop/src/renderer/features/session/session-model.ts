@@ -21,18 +21,15 @@ export function emptySyncState(): SessionSyncState {
 }
 
 /**
- * 判定一条会话在本机应按“本人本机”还是“跨机器只读”处理：
- * 只有 ownerUserId 与当前登录用户一致、且 deviceId 与本机已登记未吊销设备一致时，才是本人本机会话；
- * 同账号其他设备（或本机未登记时）一律只读。
+ * 按人判定会话归属（基于人共享会话）：
+ * ownerUserId 与当前登录用户一致即视为本人可执行会话 ("local")；其余成员会话为只读 ("remote_other")。
  */
 export function classifyConversation(
   conversation: Pick<ProjectConversationSummary, "ownerUserId" | "deviceId">,
   currentUserId: string,
-  localDeviceId: string | null,
+  _localDeviceId: string | null,
 ): SessionKind {
-  if (conversation.ownerUserId !== currentUserId) return "remote_other"
-  if (localDeviceId !== null && conversation.deviceId === localDeviceId) return "local"
-  return "remote_self"
+  return conversation.ownerUserId === currentUserId ? "local" : "remote_other"
 }
 
 /** 根据云端水位、本地缓存水位与最近操作状态推导当前同步五态。 */

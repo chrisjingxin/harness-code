@@ -5,7 +5,7 @@ import { RunnerSupervisor } from "./runner-supervisor.js"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { createDesktopLocalAcpHost } from "./local-acp-host.js"
+import { createDesktopLocalAcpHost, resolveDesktopLocalAcpCommand } from "./local-acp-host.js"
 import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 if (__WORKBENCH_UI_PREVIEW__) {
@@ -27,11 +27,13 @@ let quitAllowed = false
 let quitRequested = false
 
 function configureLocalExecution(): LocalExecutionRuntime {
-  if (!process.env.WORKBENCH_ACP_EXECUTABLE?.trim()) {
-    return { error: "尚未配置本机 Agent。请设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
-  }
-  try { return { host: createDesktopLocalAcpHost(process.env, join(app.getPath("userData"), "local-acp-bindings")) } }
-  catch {
+  try {
+    const command = resolveDesktopLocalAcpCommand(process.env)
+    if (!command) {
+      return { error: "尚未配置本机 Agent。请确认本机已安装 harness-agent，或设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
+    }
+    return { host: createDesktopLocalAcpHost(process.env, join(app.getPath("userData"), "local-acp-bindings")) }
+  } catch {
     return { error: "本机 Agent 配置无效。请检查可执行文件的绝对路径及 WORKBENCH_ACP_ARGS_JSON 字符串数组。" }
   }
 }

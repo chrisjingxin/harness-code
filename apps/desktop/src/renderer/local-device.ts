@@ -1,4 +1,4 @@
-/** 设置页的本机设备状态：本机登记 + 当前团队的设备列表，用于判断本机是否属于当前账号与团队。 */
+/** 静默维护当前账号在本机的上传凭据；无需用户手动登记或选择目录。 */
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { DeviceHost, DeviceState, DeviceSummary } from "@workbench/contracts"
 
@@ -6,26 +6,36 @@ export function useLocalDevice(host: DeviceHost, workspaceId: string, userId: st
   const [local, setLocal] = useState<{ state: DeviceState | null; message?: string }>({ state: null })
   const [devices, setDevices] = useState<{ rows: readonly DeviceSummary[]; loaded: boolean; message?: string }>({ rows: [], loaded: false })
   const request = useRef(0)
-  const loadDevices = useCallback(async () => {
+  const ensure = useCallback(async () => {
     const current = ++request.current
-    const result = await host.listDevices(workspaceId).catch(() => null)
+    const ensured = await host.registerDevice(workspaceId, "").catch(() => null)
     if (current !== request.current) return
-    if (!result?.ok || result.value.workspaceId !== workspaceId) setDevices({ rows: [], loaded: true, message: result?.ok === false ? result.error.message : "无法确认本机设备，请重试。" })
-    else setDevices({ rows: result.value.devices, loaded: true })
+    if (ensured && !ensured.ok) {
+      setLocal({ state: null, message: ensured.error.message })
+      setDevices({ rows: [], loaded: true, message: ensured.error.message })
+      return
+    }
+    const [stateRes, listRes] = await Promise.all([
+      host.getState().catch(() => null),
+      host.listDevices(workspaceId).catch(() => null),
+    ])
+    if (current !== request.current) return
+    setLocal(stateRes?.ok ? { state: stateRes.value } : { state: null, message: stateRes?.ok === false ? stateRes.error.message : "无法准备本机对话环境。" })
+    if (!listRes?.ok || listRes.value.workspaceId !== workspaceId) {
+      setDevices({ rows: [], loaded: true, message: listRes?.ok === false ? listRes.error.message : "无法确认团队会话环境，请重试。" })
+    } else {
+      setDevices({ rows: listRes.value.devices, loaded: true })
+    }
   }, [host, workspaceId])
   useEffect(() => {
-    void loadDevices()
-    let initial = true
-    const unsubscribe = host.onStateChanged(state => { initial = false; setLocal({ state }) })
-    void host.getState().then(result => {
-      if (initial) setLocal(result.ok ? { state: result.value } : { state: null, message: result.error.message })
-    }).catch(() => { if (initial) setLocal({ state: null, message: "无法确认本机设备状态。" }) })
-    return () => { initial = false; request.current++; unsubscribe() }
-  }, [host, loadDevices])
+    void ensure()
+    const unsubscribe = host.onStateChanged(state => { setLocal({ state }) })
+    return () => { request.current++; unsubscribe() }
+  }, [host, ensure])
   const state = local.state
-  const owned = !state?.deviceId || devices.rows.some(device => device.deviceId === state.deviceId && device.ownerUserId === userId)
-  const blockedReason = local.message ?? (!state ? "正在确认本机设备状态。"
-    : !devices.loaded ? "正在确认本机设备所属团队。"
-    : devices.message ?? (owned ? undefined : "当前团队未确认本机设备登记。"))
-  return { device: owned ? state : null, devices: devices.rows, blockedReason, refresh: () => { void loadDevices() } }
+  const owned = Boolean(state?.deviceId) && devices.rows.some(device => device.deviceId === state?.deviceId && device.ownerUserId === userId && device.revokedAt === null)
+  const blockedReason = local.message ?? (!state ? "正在准备本机对话环境…"
+    : !devices.loaded ? "正在确认团队会话环境…"
+    : devices.message ?? (owned ? undefined : "正在初始化当前用户的会话凭据…"))
+  return { device: owned ? state : null, devices: devices.rows, blockedReason, refresh: () => { void ensure() } }
 }

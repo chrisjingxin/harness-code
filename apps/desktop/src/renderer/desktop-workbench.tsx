@@ -19,7 +19,7 @@ import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import type { ProjectUpdatesHost } from "../project-updates-host.js"
-import { DeviceRegistrationPanel, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
+import { IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import type { NavigationWorkspaceItem } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { ProjectPageProviders } from "./features/project-navigation/index.js"
@@ -170,8 +170,6 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     {settingsHead}
     <div className="desktop-settings-body">
       {settingsBody}
-      <div className="desktop-set-section">本机设备</div>
-      <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />
     </div>
   </div>
 
@@ -293,7 +291,6 @@ function WorkspaceProjectWorkbench(props: {
     projectName: currentProject?.name ?? "当前项目",
     userId: props.user.id,
     localDeviceId: validLocalDevice?.deviceId ?? null,
-    ...(validLocalDevice?.name ? { localDeviceName: validLocalDevice.name } : {}),
     ...(localDevice.blockedReason ? { localDeviceBlockedReason: localDevice.blockedReason } : {}),
     members: shell.team.members,
     devices: localDevice.devices,
@@ -409,15 +406,6 @@ function WorkspaceProjectWorkbench(props: {
     {props.settingsHead}
     <div className="desktop-settings-body">
       {props.settingsBody}
-      <div className="desktop-set-section">本机设备</div>
-      <DeviceRegistrationPanel
-        host={props.devices}
-        workspaceId={props.workspaceId}
-        device={localDevice.device}
-        devices={localDevice.devices}
-        blockedReason={localDevice.blockedReason}
-        onChanged={localDevice.refresh}
-      />
     </div>
   </div>
 
@@ -432,7 +420,6 @@ function WorkspaceProjectWorkbench(props: {
       onSelectWorkspace={props.onSelectWorkspace}
       colorScheme={props.colorScheme}
       onToggleTheme={props.onToggleTheme}
-      localDeviceName={validLocalDevice?.name ?? null}
       user={props.user}
       titleBarClassName={props.titleBarClassName}
       settings={settings}

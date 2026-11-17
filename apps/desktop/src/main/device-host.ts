@@ -1,8 +1,8 @@
-/** 原生设备入口。窗口身份用于当前所有者授权，Runner 和账本按固定服务独立存活。 */
-import { dialog, app, type BrowserWindow } from "electron"
+/** 原生设备入口。按人静默维护本机上传凭据，无需手动登记或选择目录。 */
+import { app, type BrowserWindow } from "electron"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { lstat, realpath } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import type {
   CollaborationResult, DeviceState, DeviceListResponse, DeviceRevokedResponse, ProjectSavedResponse,
   DeviceProjectPublishRequest, DeviceSyncRequest, IdentityState, LocalDeviceRegistration,
@@ -37,6 +37,7 @@ export class DeviceHost {
   #generation = 0
   #identityKey: string | null = null
   #busy = false
+  #ensuring = new Map<string, Promise<CollaborationResult<SavedDevice>>>()
 
   constructor(client: CollaborationClient, supervisor: RunnerSupervisor, window: () => BrowserWindow | null, identity: IdentitySource,
     onUpload: (notice: LocalExecutionUploadNotice) => void) {
@@ -111,14 +112,13 @@ export class DeviceHost {
     if (!detail.ok) return detail
     const { conversation } = detail.value
     if (signal.aborted || conversation.conversationId !== scope.conversationId || conversation.projectId !== scope.projectId
-      || conversation.ownerUserId !== scope.accountId || conversation.deviceId !== scope.deviceId) return denied()
+      || conversation.ownerUserId !== scope.accountId) return denied()
     return { ok: true, value: conversation.syncedSequence }
   }
 
   async #sendConversationBatch(scope: LocalExecutionScope, request: DeviceSyncRequest, signal: AbortSignal) {
-    const device = await this.#load()
-    if (signal.aborted || !device?.registered || device.origin !== this.#origin || device.ownerUserId !== scope.accountId
-      || device.deviceId !== scope.deviceId) return denied()
+    const device = await this.#loadForAccount(scope.accountId)
+    if (signal.aborted || !device?.registered || device.origin !== this.#origin || device.ownerUserId !== scope.accountId) return denied()
     return this.#client.syncDeviceConversation(scope.conversationId, device, request, signal)
   }
   async revokeDevice(workspaceId: string, deviceId: string, requestId: string): Promise<CollaborationResult<DeviceRevokedResponse>> {
@@ -127,44 +127,88 @@ export class DeviceHost {
     return result
   }
 
-  /** 本机显式选择目录。响应丢失时用原登记 ID 与秘密重试，不能自动换设备或根目录。 */
-  async registerDevice(workspaceId: string, name: string): Promise<CollaborationResult<DeviceState>> {
-    if (this.#busy) return failure("INVALID_REQUEST", "已有设备操作正在进行。")
-    this.#busy = true
-    try {
-      const owner = await this.#owner(workspaceId)
-      if (!owner) return denied()
-      const existing = await this.#load()
-      if (existing && (existing.ownerUserId !== owner.userId || existing.workspaceId !== workspaceId)) return denied()
-      if (existing?.registered) return { ok: true, value: this.#view() }
-      let device = existing
-      if (!device) {
-        const window = this.#window()
-        if (!window) return denied()
-        const picked = await dialog.showOpenDialog(window, { title: "选择本机项目", properties: ["openDirectory"] })
-        if (picked.canceled || picked.filePaths.length !== 1) return failure("INVALID_REQUEST", "已取消选择目录。")
-        const projectRoot = await realpath(picked.filePaths[0]!)
-        const projectName = name.trim() || basename(projectRoot)
-        if (!projectName || Array.from(projectName).length > 80 || !(await lstat(projectRoot)).isDirectory()) return failure("INVALID_REQUEST", "项目目录或名称无效。")
-        if (!this.#current(owner)) return denied()
-        device = { deviceId: randomUUID(), installationId: randomUUID(), ledgerId: randomUUID(), registrationId: randomUUID(), origin: this.#origin,
-          ownerUserId: owner.userId, registered: false, secret: randomBytes(32).toString("base64url"), workspaceId,
-          projectId: randomUUID(), projectRoot, projectName, shareEnabled: false, shareVersion: "0", pendingPublishId: null }
-        await this.#save(device)
-      }
-      if (!this.#current(owner)) return denied()
-      const result = await this.#client.registerDevice(workspaceId, {
-        registrationId: device.registrationId, deviceId: device.deviceId, installationId: device.installationId,
-        ledgerId: device.ledgerId, name: process.platform === "darwin" ? "macOS 本机" : "Windows 本机", secret: device.secret,
-      })
-      if (!this.#current(owner)) return denied()
-      if (!result.ok) return result
-      if (result.value.device.ownerUserId !== device.ownerUserId || result.value.device.deviceId !== device.deviceId
-        || result.value.registrationId !== device.registrationId) return failure("INVALID_SERVER_RESPONSE", "登记结果与本机设备不一致。")
-      await this.#save({ ...device, registered: true })
+  /** 为当前登录人在当前团队静默准备本机上传凭据；若尚未登记或已失效则自动登记，不弹窗打扰用户。 */
+  ensureLocalDevice(workspaceId: string): Promise<CollaborationResult<SavedDevice>> {
+    const key = `${this.#generation}:${this.#identityKey ?? ""}:${workspaceId}`
+    const pending = this.#ensuring.get(key)
+    if (pending) return pending
+    const task = this.#ensureLocalDeviceImpl(workspaceId).finally(() => {
+      if (this.#ensuring.get(key) === task) this.#ensuring.delete(key)
+    })
+    this.#ensuring.set(key, task)
+    return task
+  }
+
+  async #ensureLocalDeviceImpl(workspaceId: string): Promise<CollaborationResult<SavedDevice>> {
+    const owner = await this.#owner(workspaceId)
+    if (!owner) return denied()
+    const listed = await this.#client.listDevices(workspaceId, { limit: "50" })
+    if (!this.#current(owner)) return denied()
+    if (!listed.ok) return listed
+
+    let device = await this.#loadForAccount(owner.userId)
+    if (!this.#current(owner)) return denied()
+    const activeOnServer = device?.registered
+      && listed.value.devices.some(item => item.deviceId === device!.deviceId && item.ownerUserId === owner.userId && item.revokedAt === null)
+    if (activeOnServer && device) {
+      this.#device = device
       this.#publish()
-      return { ok: true, value: this.#view() }
-    } finally { this.#busy = false }
+      return { ok: true, value: device }
+    }
+
+    if (!device || device.registered || device.workspaceId !== workspaceId) {
+      device = {
+        deviceId: randomUUID(),
+        installationId: randomUUID(),
+        ledgerId: randomUUID(),
+        registrationId: randomUUID(),
+        origin: this.#origin,
+        ownerUserId: owner.userId,
+        registered: false,
+        secret: randomBytes(32).toString("base64url"),
+        workspaceId,
+        projectId: randomUUID(),
+        projectRoot: app.getPath("userData"),
+        projectName: "workbench",
+        shareEnabled: false,
+        shareVersion: "0",
+        pendingPublishId: null,
+      }
+      await this.#saveForAccount(device)
+    }
+    if (!this.#current(owner)) return denied()
+
+    const result = await this.#client.registerDevice(workspaceId, {
+      registrationId: device.registrationId,
+      deviceId: device.deviceId,
+      installationId: device.installationId,
+      ledgerId: device.ledgerId,
+      name: process.platform === "darwin" ? "macOS 本机" : process.platform === "win32" ? "Windows 本机" : "Linux 本机",
+      secret: device.secret,
+    })
+    if (!this.#current(owner)) return denied()
+    if (!result.ok) {
+      if (result.error.code === "REGISTRATION_CONFLICT") {
+        await this.#clearAccountFile(owner.userId)
+      }
+      return result
+    }
+    if (result.value.device.ownerUserId !== device.ownerUserId || result.value.device.deviceId !== device.deviceId
+      || result.value.registrationId !== device.registrationId) {
+      return failure("INVALID_SERVER_RESPONSE", "登记结果与本机凭据不一致。")
+    }
+    const saved: SavedDevice = { ...device, registered: true }
+    await this.#saveForAccount(saved)
+    this.#device = saved
+    this.#publish()
+    return { ok: true, value: saved }
+  }
+
+  /** 兼容既有 IPC 入口：静默确认或登记本机上传凭据，不再弹窗要求选择项目目录。 */
+  async registerDevice(workspaceId: string, _name: string): Promise<CollaborationResult<DeviceState>> {
+    const ensured = await this.ensureLocalDevice(workspaceId)
+    if (!ensured.ok) return ensured
+    return { ok: true, value: this.#view() }
   }
 
   /** 用固定设备凭据发布无路径元数据。只有真实云端确认后才允许启动已共享项目。 */
@@ -240,13 +284,54 @@ export class DeviceHost {
     return this.#generation === owner.generation && this.#identityKey === owner.userId && this.#window() !== null
   }
 
+  #accountFile(accountId: string): string | null {
+    return /^[0-9a-f]{32}$/.test(accountId) ? join(this.#root, "local-devices", `${accountId}.json`) : null
+  }
+
+  async #clearAccountFile(accountId: string): Promise<void> {
+    const file = this.#accountFile(accountId)
+    if (file) await rm(file, { force: true }).catch(() => {})
+  }
+
+  async #loadForAccount(accountId: string): Promise<SavedDevice | null> {
+    const file = this.#accountFile(accountId)
+    if (file) {
+      try {
+        const parsed = JSON.parse(await readFile(file, "utf8")) as SavedDevice
+        if (parsed && parsed.origin === this.#origin && parsed.ownerUserId === accountId && typeof parsed.deviceId === "string") {
+          return parsed
+        }
+      } catch { /* 无记录或解析失败时尝试回退旧账本 */ }
+    }
+    try {
+      const legacy = await this.#supervisor.deviceStore(this.#root, this.#origin)
+      if (legacy && legacy.origin === this.#origin && legacy.ownerUserId === accountId) {
+        if (legacy.registered) await this.#saveForAccount(legacy)
+        return legacy
+      }
+    } catch { /* Runner 不可用时忽略旧账本 */ }
+    return null
+  }
+
+  async #saveForAccount(device: SavedDevice): Promise<void> {
+    const file = this.#accountFile(device.ownerUserId)
+    if (!file) return
+    await mkdir(join(this.#root, "local-devices"), { recursive: true, mode: 0o700 })
+    await writeFile(file, JSON.stringify(device), { mode: 0o600 })
+    if (this.#identityKey === device.ownerUserId) this.#device = device
+  }
+
   async #load(): Promise<SavedDevice | null> {
-    this.#device = await this.#supervisor.deviceStore(this.#root, this.#origin)
+    if (!this.#identityKey) {
+      this.#device = null
+      return null
+    }
+    this.#device = await this.#loadForAccount(this.#identityKey)
     return this.#device
   }
 
   async #save(device: SavedDevice): Promise<void> {
-    this.#device = await this.#supervisor.deviceStore(this.#root, this.#origin, device)
+    await this.#saveForAccount(device)
   }
 }
 

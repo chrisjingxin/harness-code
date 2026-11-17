@@ -567,7 +567,9 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 const hasUnread = entry.badge?.tone === "accent" || entry.badge?.tone === "warning";
                 const deviceLabel = isOtherDevice
                   ? "其他设备 · 只读"
-                  : `本机 · ${view.localDeviceName || "当前设备"}`;
+                  : view.localDeviceName
+                    ? `本机 · ${view.localDeviceName}`
+                    : "本机";
                 const metaText = `${deviceLabel} · ${entry.timeLabel}`;
                 return (
                   <button

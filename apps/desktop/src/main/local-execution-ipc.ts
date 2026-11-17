@@ -56,7 +56,7 @@ function availability(session: LocalAcpSession) {
 }
 
 const ok = <T>(value: T): CollaborationResult<T> => ({ ok: true, value })
-const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号在本机设备创建的会话可以执行。")
+const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号自己的会话可以执行。")
 
 /** 窗口绑定独占订阅，应用级 HC-197 宿主可在新窗口打开时继续接受新的绑定。 */
 export function createLocalExecutionIpc(
@@ -104,20 +104,14 @@ export function createLocalExecutionIpc(
 
   async function authorize(scope: LocalExecutionScope, login: Login) {
     if (!device || !isCurrent(login) || login.accountId !== scope.accountId || !login.workspaces.includes(scope.workspaceId)) return forbidden()
-    const local = await device.getState()
-    if (!local.ok) return local
-    if (!isCurrent(login) || local.value.deviceId !== scope.deviceId) return forbidden()
-    const [detail, devices] = await Promise.all([
-      identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId),
-      device.listDevices(scope.workspaceId),
-    ])
+    const ensured = await device.ensureLocalDevice(scope.workspaceId)
+    if (!ensured.ok) return ensured
+    if (!isCurrent(login) || ensured.value.deviceId !== scope.deviceId) return forbidden()
+    const detail = await identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId)
     if (!detail.ok) return detail
-    if (!devices.ok) return devices
     const session = detail.value.conversation
-    return isCurrent(login) && session.ownerUserId === login.accountId && session.deviceId === scope.deviceId
+    return isCurrent(login) && session.ownerUserId === login.accountId
       && session.projectId === scope.projectId && session.conversationId === scope.conversationId
-      && devices.value.workspaceId === scope.workspaceId
-      && devices.value.devices.some(item => item.deviceId === scope.deviceId && item.ownerUserId === login.accountId && item.revokedAt === null)
       ? ok(null) : forbidden()
   }
 

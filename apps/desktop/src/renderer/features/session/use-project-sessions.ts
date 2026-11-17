@@ -223,6 +223,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [newSessionBusy, setNewSessionBusy] = useState(false)
   const [newSessionError, setNewSessionError] = useState<string | null>(null)
   const pendingRequestRef = useRef<{ signature: string; requestId: string } | null>(null)
+  const pendingAutoSendRef = useRef<{
+    readonly scope: ProjectNavigationScope
+    readonly conversationId: string
+    readonly directoryPath: string
+    readonly draftRevision: number
+    readonly text: string
+  } | null>(null)
   const creatingRef = useRef(false)
 
   const stillActive = (targetKey: string) =>
@@ -679,22 +686,33 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
 
       await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
       if (activeDraftContext.current !== draftContext) return
-      updateRecord(targetScope, targetKey, created.conversationId, prev => ({
-        ...prev,
-        loaded: true,
-        directoryPath: chosenDir,
-        personal: {
-          ...prev.personal,
-          draft: {
-            ...prev.personal.draft,
-            text: currentDraft.draftText,
-            selectionStart: currentDraft.draftText.length,
-            selectionEnd: currentDraft.draftText.length,
-            revision: prev.personal.draft.revision + 1,
+      let nextDraftRevision = 1
+      updateRecord(targetScope, targetKey, created.conversationId, prev => {
+        nextDraftRevision = prev.personal.draft.revision + 1
+        return {
+          ...prev,
+          loaded: true,
+          directoryPath: chosenDir,
+          personal: {
+            ...prev.personal,
+            draft: {
+              ...prev.personal.draft,
+              text: currentDraft.draftText,
+              selectionStart: currentDraft.draftText.length,
+              selectionEnd: currentDraft.draftText.length,
+              revision: nextDraftRevision,
+            },
           },
-        },
-      }), true)
+        }
+      }, true)
 
+      pendingAutoSendRef.current = {
+        scope: targetScope,
+        conversationId: created.conversationId,
+        directoryPath: chosenDir,
+        draftRevision: nextDraftRevision,
+        text: currentDraft.draftText,
+      }
       saveDraftValue(targetScope, targetKey, EMPTY_NEW_DRAFT)
       onOpenConversation?.(created)
     } finally {
@@ -819,6 +837,34 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我", commitAcceptedDraft,
   )
 
+  const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
+  const selectedRecord = selectedRecKey ? recordsByKey[selectedRecKey] : undefined
+  useEffect(() => {
+    if (!selectedConv || !selectedIsLocal || !selectedRecord?.loaded) return
+    if (selectedConv.syncedSequence <= selectedRecord.syncState.localSyncedSequence) return
+    if (selectedRecord.syncState.syncing || selectedRecord.syncState.syncError) return
+    void syncConversation(selectedConv.conversationId)
+  }, [selectedConv, selectedIsLocal, selectedRecord, syncConversation])
+
+  const selectedAvailability = selectedIsLocal && selectedConversationId
+    ? localExecutionPort?.getAvailability(selectedConversationId)
+    : undefined
+  useEffect(() => {
+    const pending = pendingAutoSendRef.current
+    if (!pending || pending.conversationId !== selectedConversationId || !selectedIsLocal) return
+    if (!localExecutionPort?.send || !selectedAvailability?.available) return
+    pendingAutoSendRef.current = null
+    void localExecutionPort.send({
+      scope: pending.scope,
+      conversationId: pending.conversationId,
+      directoryPath: pending.directoryPath,
+      draftRevision: pending.draftRevision,
+      text: pending.text,
+      referenceIds: [],
+      attachmentIds: [],
+    })
+  }, [selectedConversationId, selectedIsLocal, localExecutionPort, selectedAvailability?.available])
+
   const localDir = useLocalDirectory({
     localDirectory,
     persistence,
@@ -847,7 +893,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const canCreateConversation = Boolean(localDeviceId)
   const createBlockedReason = canCreateConversation
     ? undefined
-    : (localDeviceBlockedReason || "本机设备尚未在当前团队登记（或已吊销），暂不可新建共享会话；可先选择目录并保留草稿。")
+    : (localDeviceBlockedReason || "正在准备本机对话环境，请稍候；可先选择目录并保留草稿。")
 
   const rendering: RenderingActions = useMemo(() => ({
     copyText: text => host.copyText(text),
