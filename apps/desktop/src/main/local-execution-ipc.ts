@@ -8,8 +8,7 @@ import { localExecutionKey } from "../local-execution-host.js"
 import type { LocalExecutionBinding, LocalExecutionNotice, LocalExecutionReceipt, LocalExecutionScope } from "../local-execution-host.js"
 import type { CollaborationState } from "./collaboration-state.js"
 import { identityError } from "./collaboration-state.js"
-import type { DeviceHost } from "./device-host.js"
-import { syncPayloadLimit, type FinalizedTurn } from "./conversation-uploads.js"
+import { syncPayloadLimit, type ConversationUploads, type FinalizedTurn } from "./conversation-uploads.js"
 import { parseFixedReference } from "../collaboration-reference.js"
 
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
@@ -62,7 +61,7 @@ const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号自己�
 export function createLocalExecutionIpc(
   window: BrowserWindow,
   identity: CollaborationState,
-  device: DeviceHost | null,
+  uploads: ConversationUploads | null,
   runtime: LocalExecutionRuntime,
 ) {
   const grants = new Map<string, DirectoryGrant>()
@@ -103,10 +102,7 @@ export function createLocalExecutionIpc(
   })
 
   async function authorize(scope: LocalExecutionScope, login: Login) {
-    if (!device || !isCurrent(login) || login.accountId !== scope.accountId || !login.workspaces.includes(scope.workspaceId)) return forbidden()
-    const ensured = await device.ensureLocalDevice(scope.workspaceId)
-    if (!ensured.ok) return ensured
-    if (!isCurrent(login) || ensured.value.deviceId !== scope.deviceId) return forbidden()
+    if (!isCurrent(login) || login.accountId !== scope.accountId || !login.workspaces.includes(scope.workspaceId)) return forbidden()
     const detail = await identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId)
     if (!detail.ok) return detail
     const session = detail.value.conversation
@@ -231,9 +227,9 @@ export function createLocalExecutionIpc(
                 failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
               } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
             })
-            // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开设备。
+            // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
             if (event.type === "completed" && event.shareable && isCurrent(login)) {
-              void device?.enqueueConversationTurn(scope, { ...turn, completedAtMs: Date.now() })
+              void uploads?.enqueue(scope, { ...turn, completedAtMs: Date.now() })
             }
           }) }
           bindings.set(key, binding)
@@ -285,7 +281,8 @@ export function createLocalExecutionIpc(
     async dispose(): Promise<void> {
       disposed = true
       unsubscribe()
-      await Promise.all([reset(), device?.pauseConversationUploads()])
+      uploads?.useAccount(null)
+      await Promise.all([reset(), uploads?.flush()])
     },
   }
 }

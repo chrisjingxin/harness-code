@@ -7,7 +7,6 @@ import tools.jackson.databind.json.JsonMapper;
 import workbench.collaboration.application.port.IdempotencyPort;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.domain.conversation.MessageStorePort;
-import workbench.collaboration.domain.device.DeviceHeartbeatPort;
 import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAdapter;
 
 import java.util.List;
@@ -18,10 +17,9 @@ import java.util.Optional;
  *
  * <p>【功能定义】
  * 集群生产模式下基于 JedisPool 实现的分布式协作状态中心。
- * 承接三大分布式热态能力，消除数据库写放大与轮询：
+ * 承接两大分布式热态能力，消除数据库写放大与轮询：
  * 1. 1小时请求幂等池 (Idempotency)：采用 Redis 原生 SET key value NX EX 实现分布式互斥占位；
- * 2. 设备在线心跳 (Heartbeat)：String 结构存最近心跳毫秒时间，TTL 45 秒，仅用于在线展示；
- * 3. 定稿消息热滑窗 (Messages)：采用 ZSet 结构按 sequence 得分存储最近 100 条定稿消息，点查联动 ES 7.6.0。
+ * 2. 定稿消息热滑窗 (Messages)：采用 ZSet 结构按 sequence 得分存储最近 100 条定稿消息，点查联动 ES 7.6.0。
  *
  * <p>【高可用容灾与鲁棒性原则 (Why)】
  * - 拒绝静默降级：Jedis 连接在 Spring 引导时已经过探活；运行期间若 Redis 故障直接抛出异常（Fail-Closed），
@@ -37,7 +35,6 @@ public final class JedisCollaborationState {
     private final ElasticsearchMessageStoreAdapter search;
     private final JsonMapper json = JsonMapper.builder().build();
     private final Idempotency idempotency = new Idempotency();
-    private final Heartbeat heartbeats = new Heartbeat();
     private final Messages messages = new Messages();
 
     public JedisCollaborationState(JedisPool pool) {
@@ -51,10 +48,6 @@ public final class JedisCollaborationState {
 
     public IdempotencyPort idempotency() {
         return idempotency;
-    }
-
-    public DeviceHeartbeatPort heartbeats() {
-        return heartbeats;
     }
 
     public MessageStorePort messages() {
@@ -127,34 +120,6 @@ public final class JedisCollaborationState {
             try (Jedis jedis = pool.getResource()) {
                 Receipt current = read(jedis.get(CacheKeys.idempotency(workspaceId, actorId, operation, requestId)));
                 return current == null || current.responseJson == null ? Optional.empty() : Optional.of(current.responseJson);
-            }
-        }
-    }
-
-    /**
-     * 设备在线心跳实现内部类。
-     * String 键存最近心跳毫秒时间，TTL 45 秒惰性过期；仅作在线展示，不参与授权判断。
-     */
-    private final class Heartbeat implements DeviceHeartbeatPort {
-        @Override
-        public void beat(String deviceId, long atMs) {
-            try (Jedis jedis = pool.getResource()) {
-                jedis.setex(CacheKeys.deviceHeartbeat(deviceId), CacheKeys.HEARTBEAT_TTL_SECONDS, Long.toString(atMs));
-            }
-        }
-
-        @Override
-        public Optional<Long> lastSeen(String deviceId) {
-            try (Jedis jedis = pool.getResource()) {
-                String raw = jedis.get(CacheKeys.deviceHeartbeat(deviceId));
-                return raw == null ? Optional.empty() : Optional.of(Long.parseLong(raw));
-            }
-        }
-
-        @Override
-        public void remove(String deviceId) {
-            try (Jedis jedis = pool.getResource()) {
-                jedis.del(CacheKeys.deviceHeartbeat(deviceId));
             }
         }
     }

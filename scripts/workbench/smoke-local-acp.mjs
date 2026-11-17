@@ -10,7 +10,7 @@ const firstOnly = process.argv.includes("--first")
 const root = await mkdtemp(join(tmpdir(), "hc197-"))
 const scope = {
   accountId: "smoke-account", workspaceId: "smoke-team",
-  projectId: "smoke-project", deviceId: "smoke-device", conversationId: "smoke-session",
+  projectId: "smoke-project", conversationId: "smoke-session",
 }
 
 async function send(session, prompt) {

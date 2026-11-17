@@ -94,26 +94,6 @@ CREATE TABLE wb_workspace_member (
   KEY idx_user_id_workspace_id (user_id, workspace_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作区成员关联表';
 
--- ============ 设备（D11：属人不属团队，无 workspace_id） ============
-
-CREATE TABLE wb_device (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
-  device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备全局唯一业务标识(UUID)',
-  owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备所属用户标识',
-  installation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '本机客户端安装实例标识',
-  ledger_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '本机客户端状态账本标识',
-  name VARCHAR(80) NOT NULL COMMENT '设备展示别名',
-  secret_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '设备凭据 SHA-256 摘要(不存明文)',
-  registration_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '首次注册请求标识(幂等)',
-  registration_body_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '首次注册报文主体 SHA-256',
-  revoked TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否已吊销：0=正常,1=已吊销(禁止上传与同步)',
-  created_at DATETIME(3) NOT NULL COMMENT '注册时间',
-  updated_at DATETIME(3) NOT NULL COMMENT '最近修改时间',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_device_id (device_id),
-  KEY idx_owner_user_id_created_at_device_id (owner_user_id, created_at, device_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='本机执行设备档案表';
-
 -- ============ 团队仓库目录（D3：团队级资产） ============
 
 CREATE TABLE wb_repository (
@@ -176,18 +156,6 @@ CREATE TABLE wb_project_repository (
   KEY idx_repository_id (repository_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目仓库引用表';
 
--- ============ 本机仓库登记（设备×仓库；本地绝对路径只存本机，不上云） ============
-
-CREATE TABLE wb_local_repo_binding (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
-  device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '登记设备标识',
-  repository_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '团队仓库目录条目标识',
-  created_at DATETIME(3) NOT NULL COMMENT '最近一次登记时间(重复upsert刷新)',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_device_id_repository_id (device_id, repository_id),
-  KEY idx_repository_id (repository_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='设备本机仓库登记表';
-
 -- ============ 会话（新形态：owner 固定 + 项目归属 + 简报 + 已同步序号） ============
 
 CREATE TABLE wb_conversation (
@@ -196,7 +164,6 @@ CREATE TABLE wb_conversation (
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属工作区标识',
   project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属业务项目标识',
   owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '会话主人用户标识(创建者,固定不变)',
-  device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '主人执行设备标识',
   agent_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '绑定的Agent配置标识(''表示未绑定)',
   task_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '关联任务卡片标识(''表示无,HC-212写入)',
   status TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '会话状态：1=idle,2=running,3=waiting_approval,4=error',

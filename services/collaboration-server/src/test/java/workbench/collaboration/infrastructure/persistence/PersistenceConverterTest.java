@@ -2,14 +2,12 @@ package workbench.collaboration.infrastructure.persistence;
 
 import org.junit.jupiter.api.Test;
 import workbench.collaboration.domain.conversation.Conversation;
-import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.identity.User;
 import workbench.collaboration.domain.project.MemberStatus;
 import workbench.collaboration.domain.project.Project;
 import workbench.collaboration.domain.project.ProjectMember;
 import workbench.collaboration.domain.project.ProjectRepositoryRef;
 import workbench.collaboration.domain.project.ProjectStatus;
-import workbench.collaboration.domain.repository.LocalRepoBinding;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryStatus;
 import workbench.collaboration.infrastructure.contract.Digests;
@@ -36,18 +34,10 @@ class PersistenceConverterTest {
   }
 
   @Test
-  void deviceRevokedFlagRoundTrips() {
-    Device device = new Device("d1", "u1", "inst", "ledger", "本机", "aa", "reg", "body", true, 1L, 2L);
-    DevicePO po = DeviceConverter.toPo(device);
-    assertThat(po.getRevoked()).isEqualTo(1);
-    assertThat(DeviceConverter.toDevice(po)).isEqualTo(device);
-  }
-
-  @Test
   void conversationKeepsEmptyBriefTaskAndSession() {
     // 全列 NOT NULL：未绑定/无简报统一 '' 空串哨兵，进出领域不丢
     Conversation conversation = new Conversation(
-      "c1", "w1", "p1", "u1", "d1", "", "", "idle", "标题", "", "rule", 1L, 0L, "", 1L, 2L);
+      "c1", "w1", "p1", "u1", "", "", "idle", "标题", "", "rule", 1L, 0L, "", 1L, 2L);
     ConversationPO po = ConversationConverter.toPo(conversation);
     assertThat(po.getNativeSessionId()).isEmpty();
     assertThat(po.getTaskId()).isEmpty();
@@ -85,18 +75,13 @@ class PersistenceConverterTest {
   }
 
   @Test
-  void repositoryAndBindingRoundTrips() {
+  void repositoryRoundTrips() {
     Repository repository = new Repository("r1", "w1", "中台", "git@x:y.git", "main", RepositoryStatus.ACTIVE, "u1", 1L, 2L);
     RepositoryPO po = RepositoryConverter.toPo(repository);
     assertThat(po.getStatus()).isEqualTo(1);
     // remote_url 唯一约束落摘要列：写入侧必须算好 SHA-256
     assertThat(po.getRemoteUrlSha256()).isEqualTo(Digests.sha256Hex("git@x:y.git"));
     assertThat(RepositoryConverter.toRepository(po)).isEqualTo(repository);
-
-    LocalRepoBinding binding = new LocalRepoBinding("d1", "r1", 5L);
-    LocalRepoBindingPO bindingPo = RepositoryConverter.toPo(binding);
-    assertThat(bindingPo.getId()).isNull();
-    assertThat(RepositoryConverter.toBinding(bindingPo)).isEqualTo(binding);
   }
 
   @Test

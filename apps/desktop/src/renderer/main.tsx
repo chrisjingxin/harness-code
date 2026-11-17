@@ -13,7 +13,6 @@ createRoot(document.getElementById("root")!).render(
     collaboration={window.collaboration}
     collaborationApps={window.collaborationApps}
     projectUpdates={window.projectUpdates}
-    devices={window.devices}
     organization={window.organization}
     projectConversations={window.projectConversations}
     localDirectory={window.localDirectory}

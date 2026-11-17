@@ -6,7 +6,6 @@ import org.springframework.transaction.annotation.Transactional;
 import workbench.collaboration.application.port.IdempotencyPort;
 import workbench.collaboration.application.port.NotificationPort;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
-import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.identity.IdentityRepository;
 import workbench.collaboration.domain.project.MemberStatus;
 import workbench.collaboration.domain.project.Project;
@@ -14,7 +13,6 @@ import workbench.collaboration.domain.project.ProjectMember;
 import workbench.collaboration.domain.project.ProjectRepository;
 import workbench.collaboration.domain.project.ProjectRepositoryRef;
 import workbench.collaboration.domain.project.ProjectStatus;
-import workbench.collaboration.domain.repository.LocalRepoBindingRepository;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryCatalog;
 import workbench.collaboration.infrastructure.contract.Contracts;
@@ -33,8 +31,7 @@ import java.util.stream.Collectors;
  *
  * <p>【功能定义】
  * 承载"Team → Project"组织面的全部用例：项目创建/查询/CAS 修改归档、
- * 项目成员加入与移出、项目对团队仓库目录的引用管理，
- * 以及项目引用视图下"调用者哪些本机设备已克隆该仓库"的聚合展示。
+ * 项目成员加入与移出，以及项目对团队仓库目录的引用管理。
  *
  * <p>【安全原则 (Why)】
  * - 非项目成员一律 404（requireActiveMember），不泄露项目存在性；
@@ -45,7 +42,7 @@ import java.util.stream.Collectors;
  * <p>【协作边界】
  * - 上游调用方：ProjectController。
  * - 下游依赖方：ProjectAccessPolicy、ProjectRepository、RepositoryCatalog、
- *   LocalRepoBindingRepository、DeviceRepository、IdentityRepository、IdempotencyPort、Contracts。
+ *   IdentityRepository、IdempotencyPort、Contracts。
  */
 @Service
 public class ProjectAppService {
@@ -53,8 +50,6 @@ public class ProjectAppService {
     private final ProjectAccessPolicy policy;
     private final ProjectRepository projects;
     private final RepositoryCatalog repositories;
-    private final LocalRepoBindingRepository bindings;
-    private final DeviceRepository devices;
     private final IdentityRepository identity;
     private final IdempotencyPort idempotency;
     private final Contracts contracts;
@@ -64,8 +59,6 @@ public class ProjectAppService {
             ProjectAccessPolicy policy,
             ProjectRepository projects,
             RepositoryCatalog repositories,
-            LocalRepoBindingRepository bindings,
-            DeviceRepository devices,
             IdentityRepository identity,
             IdempotencyPort idempotency,
             Contracts contracts,
@@ -74,8 +67,6 @@ public class ProjectAppService {
         this.policy = policy;
         this.projects = projects;
         this.repositories = repositories;
-        this.bindings = bindings;
-        this.devices = devices;
         this.identity = identity;
         this.idempotency = idempotency;
         this.contracts = contracts;
@@ -236,30 +227,21 @@ public class ProjectAppService {
     }
 
     /**
-     * 项目仓库引用视图：目录条目 + 引用时间 + 调用者未吊销设备中已登记克隆的设备列表。
+     * 项目仓库引用视图：目录条目 + 引用时间。
      */
     @Transactional(readOnly = true)
     public String listRepositories(String userId, String workspaceId, String projectId) {
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
-        Set<String> callerDevices = devices.listByOwner(userId, null, null, 200).stream()
-                .filter(device -> !device.revoked())
-                .map(workbench.collaboration.domain.device.Device::id)
-                .collect(Collectors.toSet());
         List<ProjectDtos.ProjectRepositoryItem> items = projects.listReferences(projectId).stream()
                 .map(ref -> {
                     Repository repository = repositories.findById(ref.repositoryId()).orElse(null);
                     if (repository == null) {
                         return null;
                     }
-                    List<ProjectDtos.ClonedDeviceSummary> clones = bindings.listByRepository(ref.repositoryId()).stream()
-                            .filter(binding -> callerDevices.contains(binding.deviceId()))
-                            .map(binding -> new ProjectDtos.ClonedDeviceSummary(
-                                    binding.deviceId(), TimeCodec.utc(binding.createdAtMs())))
-                            .toList();
                     return new ProjectDtos.ProjectRepositoryItem(
                             repository.id(), repository.name(), repository.remoteUrl(), repository.defaultBranch(),
-                            repository.status().code(), TimeCodec.utc(ref.createdAtMs()), clones);
+                            repository.status().code(), TimeCodec.utc(ref.createdAtMs()));
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();

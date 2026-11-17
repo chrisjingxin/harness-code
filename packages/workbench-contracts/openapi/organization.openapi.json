@@ -1249,12 +1249,28 @@
         }
       }
     },
-    "/api/v1/device/repo-bindings/{repositoryId}": {
-      "put": {
-        "operationId": "put__repo_binding",
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/sync": {
+      "post": {
+        "operationId": "post__conversation_sync",
         "parameters": [
           {
-            "name": "repositoryId",
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
             "in": "path",
             "required": true,
             "schema": {
@@ -1262,37 +1278,38 @@
             }
           }
         ],
-        "responses": {
-          "204": {
-            "description": "本机仓库已登记"
-          },
-          "default": {
-            "description": "安全错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
-                }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/organization.schema.json#/$defs/ConversationSyncRequest"
               }
             }
           }
-        }
-      },
-      "delete": {
-        "operationId": "delete__repo_binding",
-        "parameters": [
-          {
-            "name": "repositoryId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        },
         "responses": {
-          "204": {
-            "description": "本机仓库登记已移除"
+          "200": {
+            "description": "服务端确认水位",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationSyncResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "default": {
             "description": "安全错误",

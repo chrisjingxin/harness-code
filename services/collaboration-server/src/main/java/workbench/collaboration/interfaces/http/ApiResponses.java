@@ -66,6 +66,7 @@ public final class ApiResponses {
             Map.entry("PROJECT_OWNER_REQUIRED", "CLB2004"),
             Map.entry("DEVICE_ACTION_REJECTED", "CLB2005"),
             Map.entry("OWNER_CANNOT_LEAVE", "CLB2006"),
+            Map.entry("CONVERSATION_FORBIDDEN", "CLB2007"),
             Map.entry("RESOURCE_NOT_FOUND", "CLB3001"),
             Map.entry("VERSION_CONFLICT", "CLB3002"),
             Map.entry("SEQUENCE_CONFLICT", "CLB3003"),
@@ -190,6 +191,7 @@ public final class ApiResponses {
             case "WORKSPACE_MEMBER_REQUIRED" -> "请先加入该团队";
             case "PROJECT_OWNER_REQUIRED" -> "仅项目负责人可执行该操作";
             case "DEVICE_FORBIDDEN" -> "设备无权执行该操作";
+            case "CONVERSATION_FORBIDDEN" -> "仅会话创建者可执行该操作";
             case "REPOSITORY_CONFLICT" -> "仓库地址已被登记";
             case "VERSION_CONFLICT" -> "数据已被他人修改，请刷新后重试";
             case "PROJECT_ARCHIVED" -> "项目已归档";

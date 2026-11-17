@@ -4,7 +4,6 @@ export type LocalExecutionScope = {
   readonly accountId: string
   readonly workspaceId: string
   readonly projectId: string
-  readonly deviceId: string
   readonly conversationId: string
 }
 export type LocalExecutionAvailability = { readonly available: boolean; readonly reason?: string }
@@ -53,5 +52,5 @@ export interface DesktopLocalExecutionHost {
 }
 
 export function localExecutionKey(scope: LocalExecutionScope): string {
-  return JSON.stringify([scope.accountId, scope.workspaceId, scope.projectId, scope.deviceId, scope.conversationId])
+  return JSON.stringify([scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId])
 }

@@ -1,6 +1,6 @@
-/** 隔离桥只转发固定桌面/身份/设备方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
+/** 隔离桥只转发固定桌面/身份方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
-import type { CollaborationHost, DesktopHost, DeviceHost, DeviceState, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
+import type { CollaborationHost, DesktopHost, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import type { PersonalHost } from "../personal-host.js"
 import type { OrganizationHost } from "../organization-host.js"
@@ -117,19 +117,3 @@ const personal: PersonalHost = {
   },
 }
 contextBridge.exposeInMainWorld("personal", personal)
-
-const devices: DeviceHost = {
-  getState: () => ipcRenderer.invoke("devices:get-state"),
-  listDevices: workspaceId => ipcRenderer.invoke("devices:list-devices", workspaceId),
-  registerDevice: (workspaceId, name) => ipcRenderer.invoke("devices:register", workspaceId, name),
-  revokeDevice: (workspaceId, deviceId, requestId) => ipcRenderer.invoke("devices:revoke", workspaceId, deviceId, requestId),
-  shareProject: () => ipcRenderer.invoke("devices:share"),
-  startRunner: () => ipcRenderer.invoke("devices:start"),
-  stopRunner: () => ipcRenderer.invoke("devices:stop"),
-  onStateChanged: listener => {
-    const receive = (_event: unknown, state: DeviceState) => listener(state)
-    ipcRenderer.on("devices:state", receive)
-    return () => { ipcRenderer.removeListener("devices:state", receive) }
-  },
-}
-contextBridge.exposeInMainWorld("devices", devices)

@@ -44,11 +44,10 @@ type Screen = {
   flight?: Flight
 }
 
-/** 只为当前选中的本人原设备会话准备执行，其他本人本机会话仍可完成已受理的一轮。 */
+/** 只为当前选中的本人会话准备执行，其他本人会话仍可完成已受理的一轮。 */
 export function useLocalExecution(
   host: DesktopLocalExecutionHost | undefined,
   project: ProjectNavigationScope | null,
-  deviceId: string | null,
   conversationId: string | null,
   directory: string | null,
   selectionRevision: number,
@@ -59,10 +58,10 @@ export function useLocalExecution(
   const workspaceId = project?.workspaceId
   const projectId = project?.projectId
   const target = useMemo<Target | null>(() => {
-    if (!accountId || !workspaceId || !projectId || !deviceId || !conversationId) return null
-    const scope = { accountId, workspaceId, projectId, deviceId, conversationId }
+    if (!accountId || !workspaceId || !projectId || !conversationId) return null
+    const scope = { accountId, workspaceId, projectId, conversationId }
     return { scope, key: localExecutionKey(scope), directory, selectionRevision }
-  }, [accountId, workspaceId, projectId, deviceId, conversationId, directory, selectionRevision])
+  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision])
   const screens = useRef(new Map<string, Screen>())
   const current = useRef({ target, onAccepted, ownerName })
   const mounted = useRef(false)

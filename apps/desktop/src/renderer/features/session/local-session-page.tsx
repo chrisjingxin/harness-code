@@ -30,7 +30,6 @@ export type LocalSessionPageProps = {
   readonly visible: boolean
   readonly conversation: ProjectConversationSummary
   readonly ownerName: string
-  readonly deviceName: string
   readonly directoryPath: string | null
   readonly entries: readonly ConversationTimelineEntry[]
   readonly contentRevision: number
@@ -51,7 +50,6 @@ export function LocalSessionPage({
   visible,
   conversation,
   ownerName,
-  deviceName,
   directoryPath,
   entries,
   contentRevision,
@@ -101,7 +99,7 @@ export function LocalSessionPage({
       },
     ],
     projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
-      ? { deviceId: conversation.deviceId, projectId: conversation.projectId }
+      ? { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
       : null,
     references: hooks?.references ?? [],
     attachments: [],
@@ -125,7 +123,7 @@ export function LocalSessionPage({
                   className="session-subtitle"
                   title={`会话所有者：${ownerName} · Project 内共享（仅同步已上传的简报与定稿消息）`}
                 >
-                  <span>本机执行 · {deviceName} · 最近更新 {updatedLabel}</span>
+                  <span>本机执行 · 最近更新 {updatedLabel}</span>
                   <button
                     type="button"
                     className="session-directory-button"

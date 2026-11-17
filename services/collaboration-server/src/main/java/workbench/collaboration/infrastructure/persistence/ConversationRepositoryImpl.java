@@ -105,7 +105,6 @@ public class ConversationRepositoryImpl implements ConversationRepository {
                 .set("workspace_id", conversation.workspaceId())
                 .set("project_id", conversation.projectId())
                 .set("owner_user_id", conversation.ownerUserId())
-                .set("device_id", conversation.deviceId())
                 .set("agent_config_id", conversation.agentConfigId())
                 .set("task_id", conversation.taskId())
                 .set("status", ConversationStatus.dbOf(conversation.status()))

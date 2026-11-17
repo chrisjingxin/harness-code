@@ -350,11 +350,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         const ownerName = members.find(m => m.userId === conversation.ownerUserId)?.userName ?? "队友"
         const snippet = conversation.briefText.trim() ? `\n${conversation.briefText.trim()}` : ""
         const initialText = `> 引用 ${ownerName} 的会话「${conversation.title}」：${snippet}\n\n`
-        if (props.sessionIntegration) {
-          props.sessionIntegration.prepareMySession({ scope: shell.scope, initialText })
-        } else {
-          shell.openPage({ kind: "new" })
-        }
+        shell.openPage({ kind: "new" })
         showToast("已引用会话背景到本机新对话草稿")
       },
       onCreateTaskFromConversation: conversation => {
@@ -536,13 +532,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         showToast(updated ? `已保存并更新到 ${updated.version}` : "知识已更新")
       }}
       onCiteToSession={item => {
-        const snippet = `[知识:${item.title}(${item.version})] `
-        if (scope && props.sessionIntegration) {
-          props.sessionIntegration.prepareMySession({
-            scope,
-            targetConversationId: myLocalEntries[0]?.conversationId ?? null,
-            initialText: snippet,
-          })
+        if (myLocalEntries[0]) {
+          shell.openPage({ kind: "conversation", conversationId: myLocalEntries[0].conversationId })
         } else {
           shell.openPage({ kind: "new" })
         }
@@ -652,24 +643,11 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           if (!target) return
           if (mode === "existing" && existingSessionId) {
             collab.startTask(target.id, existingSessionId)
-            if (scope && props.sessionIntegration) {
-              props.sessionIntegration.prepareMySession({
-                scope,
-                targetConversationId: existingSessionId,
-                initialText: `[任务:${target.title}] `,
-              })
-            } else {
-              shell.openPage({ kind: "conversation", conversationId: existingSessionId })
-            }
+            shell.openPage({ kind: "conversation", conversationId: existingSessionId })
             showToast("任务已转入进行中")
           } else {
             collab.startTask(target.id, "")
-            const initialText = `围绕任务「${target.title}」：${target.desc ? `\n${target.desc}` : ""}\n`
-            if (scope && props.sessionIntegration) {
-              props.sessionIntegration.prepareMySession({ scope, initialText })
-            } else {
-              shell.openPage({ kind: "new" })
-            }
+            shell.openPage({ kind: "new" })
             showToast("已切换到新会话准备页")
           }
         }}

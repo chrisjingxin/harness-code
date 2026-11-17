@@ -8,27 +8,29 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import workbench.collaboration.application.service.ConversationAppService;
+import workbench.collaboration.application.service.ConversationSyncAppService;
 import workbench.collaboration.interfaces.ApiProblem;
 import workbench.collaboration.interfaces.http.ApiResponses;
 
 /**
- * 模块：项目内会话只读共享 REST 控制器 (ProjectConversationController)
+ * 模块：项目内会话共享 REST 控制器 (ProjectConversationController)
  *
  * <p>【功能定义】
- * 用户会话侧的项目内会话端点：登记会话头、简报列表/详情、序号增量历史。
- * 项目成员只读共享"已上传"的会话面；写通道在设备侧（DeviceSyncController）。
+ * 用户会话侧的项目内会话端点：登记会话头、简报列表/详情、序号增量历史，以及会话创建者上传同步批次。
  *
  * <p>【协作边界】
  * - 上游调用方：前端桌面工作台。
- * - 下游依赖方：ConversationAppService、CurrentSession、ApiResponses。
+ * - 下游依赖方：ConversationAppService、ConversationSyncAppService、CurrentSession、ApiResponses。
  */
 @RestController
 public class ProjectConversationController {
 
     private final ConversationAppService conversations;
+    private final ConversationSyncAppService sync;
 
-    public ProjectConversationController(ConversationAppService conversations) {
+    public ProjectConversationController(ConversationAppService conversations, ConversationSyncAppService sync) {
         this.conversations = conversations;
+        this.sync = sync;
     }
 
     /** 项目成员登记会话头（owner=调用者）。 */
@@ -68,6 +70,18 @@ public class ProjectConversationController {
         return ApiResponses.json(200, conversations.history(
                 CurrentSession.userId(), workspaceId, projectId, conversationId,
                 after(afterSequence), limit(limit)));
+    }
+
+    /** 会话创建者上传定稿消息批次与简报。 */
+    @PostMapping("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/sync")
+    public ResponseEntity<String> sync(
+            @PathVariable String workspaceId,
+            @PathVariable String projectId,
+            @PathVariable String conversationId,
+            @RequestBody String body
+    ) {
+        return ApiResponses.json(200, sync.sync(
+                CurrentSession.userId(), workspaceId, projectId, conversationId, body));
     }
 
     private static long after(String raw) {

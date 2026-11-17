@@ -50,11 +50,11 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 21 张控制面表 */
+    /** 必须存在的 19 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
-            "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
+            "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
-            "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository", "wb_snapshot",
+            "wb_conversation", "wb_conversation_repository", "wb_snapshot",
             "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
             "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox"
     );
@@ -65,11 +65,9 @@ public final class Foundation {
             Map.entry("wb_user_org", List.of("user_id", "position_type", "org_id", "org_no", "status", "updated_at")),
             Map.entry("wb_org", List.of("org_id", "org_no", "org_name", "parent_org_id", "path_id", "path_name", "updated_at")),
             Map.entry("wb_workspace", List.of("workspace_id")),
-            Map.entry("wb_device", List.of("device_id", "owner_user_id")),
             Map.entry("wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status")),
             Map.entry("wb_project", List.of("project_id", "owner_user_id", "version")),
             Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence")),
-            Map.entry("wb_local_repo_binding", List.of("device_id", "repository_id")),
             Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id")),
             Map.entry("wb_snapshot", List.of("snapshot_id", "project_id", "source_conversation_id",
                     "source_owner_user_id", "source_title", "source_synced_sequence", "source_synced_at",
@@ -87,6 +85,7 @@ public final class Foundation {
 
     /** 严禁存在的已废弃表集合（历史流水表 + 旧协作模型表，防架构倒退） */
     private static final List<String> REMOVED_TABLES = List.of(
+            "wb_device", "wb_local_repo_binding",
             "wb_message", "wb_execution", "wb_execution_event", "wb_execution_receipt",
             "wb_request_receipt", "wb_device_request", "wb_outbox_event",
             "wb_device_project", "wb_handoff", "wb_message_reference"
@@ -94,8 +93,7 @@ public final class Foundation {
 
     /** 严禁残留的旧语义列：表 -> 禁止列 */
     private static final Map<String, List<String>> REMOVED_COLUMNS = Map.ofEntries(
-            Map.entry("wb_device", List.of("workspace_id", "pk_id", "created_at_ms", "updated_at_ms")),
-            Map.entry("wb_conversation", List.of("created_by_user_id", "current_user_id", "active_execution_id", "next_sequence", "pk_id",
+            Map.entry("wb_conversation", List.of("device_id", "created_by_user_id", "current_user_id", "active_execution_id", "next_sequence", "pk_id",
                     "created_at_ms", "updated_at_ms", "brief_updated_at_ms")),
             Map.entry("wb_user", List.of("pk_id", "created_at_ms", "username", "display_name")),
             Map.entry("wb_workspace", List.of("pk_id", "created_at_ms")),
@@ -104,7 +102,6 @@ public final class Foundation {
             Map.entry("wb_project", List.of("pk_id", "created_at_ms", "updated_at_ms")),
             Map.entry("wb_project_member", List.of("pk_id", "created_at_ms", "updated_at_ms")),
             Map.entry("wb_project_repository", List.of("pk_id", "created_at_ms")),
-            Map.entry("wb_local_repo_binding", List.of("pk_id", "created_at_ms")),
             Map.entry("wb_conversation_repository", List.of("pk_id", "created_at_ms"))
     );
 

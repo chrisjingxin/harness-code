@@ -1,6 +1,5 @@
 package workbench.collaboration.infrastructure.persistence;
 
-import workbench.collaboration.domain.repository.LocalRepoBinding;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryStatus;
 import workbench.collaboration.infrastructure.contract.Digests;
@@ -9,12 +8,12 @@ import workbench.collaboration.infrastructure.contract.Digests;
  * 模块：团队仓库目录持久化对象与领域模型转换器 (RepositoryConverter)
  *
  * <p>【功能定义】
- * 提供 Repository / LocalRepoBinding 领域实体与对应 PO 之间的双向转换。
+ * 提供 Repository 领域实体与对应 PO 之间的双向转换。
  * status 列与 RepositoryStatus 枚举互转；未知枚举值在读取侧直接抛错（数据完整性哨兵）。
  *
  * <p>【协作边界】
- * - 上游调用方：RepositoryCatalogImpl、LocalRepoBindingRepositoryImpl。
- * - 下游依赖方：Repository、LocalRepoBinding、RepositoryPO、LocalRepoBindingPO。
+ * - 上游调用方：RepositoryCatalogImpl。
+ * - 下游依赖方：Repository、RepositoryPO。
  */
 final class RepositoryConverter {
 
@@ -48,17 +47,5 @@ final class RepositoryConverter {
                 Times.ms(po.getCreatedAt()),
                 Times.ms(po.getUpdatedAt())
         );
-    }
-
-    static LocalRepoBindingPO toPo(LocalRepoBinding binding) {
-        LocalRepoBindingPO po = new LocalRepoBindingPO();
-        po.setDeviceId(binding.deviceId());
-        po.setRepositoryId(binding.repositoryId());
-        po.setCreatedAt(Times.ofMs(binding.createdAtMs()));
-        return po;
-    }
-
-    static LocalRepoBinding toBinding(LocalRepoBindingPO po) {
-        return new LocalRepoBinding(po.getDeviceId(), po.getRepositoryId(), Times.ms(po.getCreatedAt()));
     }
 }

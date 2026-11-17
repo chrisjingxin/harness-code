@@ -54,7 +54,6 @@ export type RemoteSessionPageProps = {
   readonly kind: Exclude<SessionKind, "local">
   readonly conversation: ProjectConversationSummary
   readonly ownerName: string
-  readonly deviceName: string
   readonly syncStatus: SessionSyncStatus
   readonly syncState: SessionSyncState
   readonly entries: readonly ConversationTimelineEntry[]
@@ -73,7 +72,6 @@ export function RemoteSessionPage({
   kind,
   conversation,
   ownerName,
-  deviceName,
   syncStatus,
   syncState,
   entries,
@@ -112,9 +110,7 @@ export function RemoteSessionPage({
             <div className="session-subtitle">
               <span>{ownerName}</span>
               <span>·</span>
-              <span>{deviceName}</span>
-              <span>·</span>
-              <span>{kind === "remote_self" ? "跨机只读 · 本人其他设备" : "队友会话 · 只读"}</span>
+              <span>{kind === "remote_self" ? "本人会话 · 只读" : "队友会话 · 只读"}</span>
               <span>·</span>
               <span>更新于 {briefUploadedLabel}</span>
             </div>
@@ -201,7 +197,7 @@ export function RemoteSessionPage({
             <div className="session-brief-top">
               <div className="session-brief-title-group">
                 <h2>{ownerName} 的会话简报</h2>
-                <span className="session-brief-meta">{deviceName} · 最近上传于 {briefUploadedLabel}</span>
+                <span className="session-brief-meta">最近上传于 {briefUploadedLabel}</span>
               </div>
               <span className="wb-status-badge">
                 {conversation.briefSource === "agent" ? "Agent 摘要" : "规则摘要"}

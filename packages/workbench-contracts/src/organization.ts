@@ -117,11 +117,6 @@ export interface RepositoryDetailResponse {
   projects: ReferencingProjectSummary[]
 }
 
-export interface ClonedDeviceSummary {
-  deviceId: string
-  boundAt: string
-}
-
 export interface ProjectRepositoryItem {
   repositoryId: string
   name: string
@@ -129,8 +124,6 @@ export interface ProjectRepositoryItem {
   defaultBranch: string
   status: RepositoryStatus
   referencedAt: string
-  /** 调用者名下未吊销设备中已登记本机仓库的设备 */
-  clonedDevices: ClonedDeviceSummary[]
 }
 
 export interface ProjectRepositoryListResponse {
@@ -160,7 +153,6 @@ export interface ConversationSummary {
   conversationId: string
   projectId: string
   ownerUserId: string
-  deviceId: string
   title: string
   status: ConversationStatus
   /** 最近简报正文；空串表示无简报 */
@@ -176,8 +168,6 @@ export interface ConversationSummary {
 }
 
 export interface ConversationRegisterRequest {
-  /** 必须是调用者本人未吊销设备 */
-  deviceId: string
   title?: string
   /** 必须是项目已引用仓库的子集，否则 400 */
   repositoryIds?: string[]
@@ -219,13 +209,13 @@ export interface SyncBrief {
   briefSource?: ConversationBriefSource
 }
 
-/** 设备上传通道：序号必须从水位+1 起连续；整批 ≤ 水位时幂等回执 */
-export interface DeviceSyncRequest {
+/** 会话定稿上传通道：序号必须从水位+1 起连续；整批 ≤ 水位时幂等回执 */
+export interface ConversationSyncRequest {
   messages: SyncMessage[]
   brief?: SyncBrief
 }
 
-export interface DeviceSyncResponse {
+export interface ConversationSyncResponse {
   syncedSequence: number
 }
 

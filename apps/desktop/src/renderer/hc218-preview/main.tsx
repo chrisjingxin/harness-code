@@ -63,7 +63,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: LOCAL_EXECUTION_FIXTURE_ID,
     projectId: "p-retail",
     ownerUserId: SELF_ID,
-    deviceId: LOCAL_DEVICE_ID,
     title: localExecutionFixtureTitle,
     status: "idle",
     briefText: "",
@@ -77,7 +76,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-local-1",
     projectId: "p-retail",
     ownerUserId: SELF_ID,
-    deviceId: LOCAL_DEVICE_ID,
     title: "支付失败重试方案",
     status: "idle",
     briefText: "梳理支付与订单调用链的幂等键边界。",
@@ -91,7 +89,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-self-other-1",
     projectId: "p-retail",
     ownerUserId: SELF_ID,
-    deviceId: "dev-shen-home",
     title: "支付异常复盘（家里电脑）",
     status: "idle",
     briefText: "已复盘上周五晚间通道超时波动，汇总了监控阈值调整建议；当前在办公室电脑查看须保持只读。",
@@ -105,7 +102,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-zhang-unsynced",
     projectId: "p-retail",
     ownerUserId: "u-zhang",
-    deviceId: "dev-zhang",
     title: "服务 A · 幂等接口设计",
     status: "running",
     briefText: "已确认支付服务使用业务请求号作为幂等键，重复请求返回首次结果；正在补充超时重试的边界说明与工具摘要校验。",
@@ -119,7 +115,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-zhang-update",
     projectId: "p-retail",
     ownerUserId: "u-zhang",
-    deviceId: "dev-zhang",
     title: "支付超时监控补充",
     status: "idle",
     briefText: "先缓存了第 1~2 条历史，随后原设备继续上传了第 3~4 条定稿，因此状态呈现「有更新」。",
@@ -133,7 +128,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-wang-synced",
     projectId: "p-retail",
     ownerUserId: "u-wang",
-    deviceId: "dev-wang",
     title: "服务 B · 错误码约定",
     status: "idle",
     briefText: "已完成订单侧与支付侧错误码映射定稿。",
@@ -147,7 +141,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-feng-failed",
     projectId: "p-retail",
     ownerUserId: "u-feng",
-    deviceId: "dev-feng",
     title: "对账脚本校验（同步失败可重试）",
     status: "error",
     briefText: "首次点同步演示网络异常保留简报与错误提示，再次点击同步可成功恢复并拉取正文。",
@@ -161,7 +154,6 @@ const initialConversations: ProjectConversationSummary[] = [
     conversationId: "c-yang-empty",
     projectId: "p-retail",
     ownerUserId: "u-yang",
-    deviceId: "dev-yang",
     title: "灰度开关设计（仅简报未传正文）",
     status: "idle",
     briefText: "刚创建会话并登记了标题与简报，原设备尚未上传消息正文。",
@@ -291,8 +283,6 @@ function Preview(): ReactElement {
   const provider = createSessionPageProvider({
     projectName: "零售核心架构演进",
     currentUserId: SELF_ID,
-    localDeviceId: LOCAL_DEVICE_ID,
-    localDeviceName: DEVICE_NAMES[LOCAL_DEVICE_ID],
     conversations,
     syncStates,
     personalStates,
@@ -303,7 +293,6 @@ function Preview(): ReactElement {
     execution: { getAvailability: () => ({ available: false, reason: "本机 Agent 与 ACP 内核尚未接入，支持选择普通目录与保存草稿。" }) },
     rendering: { copyText: text => window.workbench.copyText(text) },
     resolveOwnerName: userId => members.find(m => m.userId === userId)?.userName ?? userId,
-    resolveDeviceName: deviceId => DEVICE_NAMES[deviceId],
     onChooseNewDirectory: () => { void pickDirectory(path => setNewDraft(prev => ({ ...prev, directoryPath: path }))) },
     onNewDraftChange: text => setNewDraft(prev => ({ ...prev, draftText: text })),
     onStartNewSession: () => {
@@ -313,7 +302,6 @@ function Preview(): ReactElement {
         conversationId: id,
         projectId: "p-retail",
         ownerUserId: SELF_ID,
-        deviceId: LOCAL_DEVICE_ID,
         title,
         status: "idle",
         briefText: newDraft.draftText.trim().slice(0, 120),
@@ -355,7 +343,7 @@ function Preview(): ReactElement {
     },
   })
 
-  const entries = toNavigationSessionEntries(conversations, SELF_ID, LOCAL_DEVICE_ID, syncStates)
+  const entries = toNavigationSessionEntries(conversations, SELF_ID, syncStates)
   const groups = buildMemberGroups({
     members,
     entries,

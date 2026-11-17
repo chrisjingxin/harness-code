@@ -115,7 +115,7 @@
     }
   },
   {
-    "name": "valid-ProjectRepositoryListResponse-cloned-devices",
+    "name": "valid-ProjectRepositoryListResponse",
     "schema": "ProjectRepositoryListResponse",
     "valid": true,
     "data": {
@@ -127,13 +127,7 @@
           "remoteUrl": "git@example.com:team/middle.git",
           "defaultBranch": "main",
           "status": "active",
-          "referencedAt": "2026-11-08T02:03:04.005Z",
-          "clonedDevices": [
-            {
-              "deviceId": "33333333-3333-4333-8333-333333333333",
-              "boundAt": "2026-11-08T03:04:05.006Z"
-            }
-          ]
+          "referencedAt": "2026-11-08T02:03:04.005Z"
         }
       ]
     }
@@ -151,7 +145,6 @@
     "schema": "ConversationRegisterRequest",
     "valid": true,
     "data": {
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "title": "账单服务联调",
       "repositoryIds": ["77777777-7777-4777-8777-777777777777"],
       "requestId": "66666666-6666-4666-8666-666666666666"
@@ -162,7 +155,6 @@
     "schema": "ConversationRegisterRequest",
     "valid": true,
     "data": {
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "requestId": "66666666-6666-4666-8666-666666666666"
     }
   },
@@ -171,7 +163,6 @@
     "schema": "ConversationRegisterRequest",
     "valid": false,
     "data": {
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "repositoryIds": ["not-a-uuid"],
       "requestId": "66666666-6666-4666-8666-666666666666"
     }
@@ -184,7 +175,6 @@
       "conversationId": "88888888-8888-4888-8888-888888888888",
       "projectId": "55555555-5555-4555-8555-555555555555",
       "ownerUserId": "11111111111141118111111111111111",
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "title": "账单服务联调",
       "status": "running",
       "briefText": "正在核对对账接口",
@@ -205,7 +195,6 @@
       "conversationId": "88888888-8888-4888-8888-888888888888",
       "projectId": "55555555-5555-4555-8555-555555555555",
       "ownerUserId": "11111111111141118111111111111111",
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "title": "未命名会话",
       "status": "idle",
       "briefText": "",
@@ -224,7 +213,6 @@
       "conversationId": "88888888-8888-4888-8888-888888888888",
       "projectId": "55555555-5555-4555-8555-555555555555",
       "ownerUserId": "11111111111141118111111111111111",
-      "deviceId": "33333333-3333-4333-8333-333333333333",
       "title": "x",
       "status": "paused",
       "briefText": "",
@@ -246,7 +234,6 @@
           "conversationId": "88888888-8888-4888-8888-888888888888",
           "projectId": "55555555-5555-4555-8555-555555555555",
           "ownerUserId": "11111111111141118111111111111111",
-          "deviceId": "33333333-3333-4333-8333-333333333333",
           "title": "账单服务联调",
           "status": "running",
           "briefText": "正在核对对账接口",
@@ -268,7 +255,6 @@
         "conversationId": "88888888-8888-4888-8888-888888888888",
         "projectId": "55555555-5555-4555-8555-555555555555",
         "ownerUserId": "11111111111141118111111111111111",
-        "deviceId": "33333333-3333-4333-8333-333333333333",
         "title": "账单服务联调",
         "status": "idle",
         "briefText": "",
@@ -307,8 +293,8 @@
     }
   },
   {
-    "name": "valid-DeviceSyncRequest",
-    "schema": "DeviceSyncRequest",
+    "name": "valid-ConversationSyncRequest",
+    "schema": "ConversationSyncRequest",
     "valid": true,
     "data": {
       "messages": [
@@ -323,8 +309,8 @@
     }
   },
   {
-    "name": "valid-DeviceSyncRequest-brief-only",
-    "schema": "DeviceSyncRequest",
+    "name": "valid-ConversationSyncRequest-brief-only",
+    "schema": "ConversationSyncRequest",
     "valid": true,
     "data": {
       "messages": [],
@@ -332,8 +318,8 @@
     }
   },
   {
-    "name": "invalid-DeviceSyncRequest-bad-type",
-    "schema": "DeviceSyncRequest",
+    "name": "invalid-ConversationSyncRequest-bad-type",
+    "schema": "ConversationSyncRequest",
     "valid": false,
     "data": {
       "messages": [
@@ -342,8 +328,8 @@
     }
   },
   {
-    "name": "valid-DeviceSyncResponse",
-    "schema": "DeviceSyncResponse",
+    "name": "valid-ConversationSyncResponse",
+    "schema": "ConversationSyncResponse",
     "valid": true,
     "data": {
       "syncedSequence": 5

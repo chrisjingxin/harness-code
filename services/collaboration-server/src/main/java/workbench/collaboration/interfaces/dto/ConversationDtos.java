@@ -13,7 +13,7 @@ import java.util.List;
  * tool_summary 载荷只含摘要字段，不含完整输出（D2）。
  *
  * <p>【协作边界】
- * - 上游调用方：ProjectConversationController、DeviceSyncController、
+ * - 上游调用方：ProjectConversationController、
  *   ConversationAppService、ConversationSyncAppService。
  * - 下游依赖方：Contracts 校验中心。
  */
@@ -32,7 +32,6 @@ public final class ConversationDtos {
             String conversationId,
             String projectId,
             String ownerUserId,
-            String deviceId,
             String title,
             String status,
             String briefText,
@@ -43,10 +42,9 @@ public final class ConversationDtos {
             List<ConversationRepositoryItem> repositories
     ) {}
 
-    /** 登记会话请求：deviceId 必须是调用者本人未吊销设备；repositoryIds ⊆ 项目引用 */
+    /** 登记会话请求：repositoryIds ⊆ 项目引用 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ConversationRegisterRequest(
-            String deviceId,
             String title,
             List<String> repositoryIds,
             String requestId
@@ -78,7 +76,7 @@ public final class ConversationDtos {
             List<HistoryMessage> messages
     ) {}
 
-    /** 设备同步上传的消息项 */
+    /** 会话同步上传的消息项 */
     public record SyncMessage(
             long sequence,
             String type,
@@ -86,7 +84,7 @@ public final class ConversationDtos {
             String payload
     ) {}
 
-    /** 设备同步批次中的简报载荷 */
+    /** 会话同步批次中的简报载荷 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record SyncBrief(
             String status,
@@ -94,15 +92,15 @@ public final class ConversationDtos {
             String briefSource
     ) {}
 
-    /** 设备同步请求：消息批次 + 可选简报 */
+    /** 会话同步请求：消息批次 + 可选简报 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record DeviceSyncRequest(
+    public record ConversationSyncRequest(
             List<SyncMessage> messages,
             SyncBrief brief
     ) {}
 
-    /** 设备同步响应：服务端确认后的水位 */
-    public record DeviceSyncResponse(
+    /** 会话同步响应：服务端确认后的水位 */
+    public record ConversationSyncResponse(
             long syncedSequence
     ) {}
 }

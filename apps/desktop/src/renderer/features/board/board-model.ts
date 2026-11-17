@@ -39,7 +39,7 @@ export function getBoardSyncLabel(
   localDeviceId: string | null,
   state: SessionSyncState = emptySyncState(),
 ): string {
-  const kind = classifyConversation(row.conversation, accountId, localDeviceId)
+  const kind = classifyConversation(row.conversation, accountId)
   if (kind === "local") return "本机会话"
   const status = deriveSyncStatus({
     kind,

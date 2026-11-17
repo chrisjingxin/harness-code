@@ -8,8 +8,6 @@ import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.conversation.ConversationRepository;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.domain.conversation.MessageStorePort;
-import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.project.Project;
 import workbench.collaboration.domain.project.ProjectRepository;
 import workbench.collaboration.domain.repository.RepositoryCatalog;
@@ -24,22 +22,22 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * 模块：项目内会话只读共享应用服务 (ConversationAppService)
+ * 模块：项目内会话共享应用服务 (ConversationAppService)
  *
  * <p>【功能定义】
  * 承载用户会话侧的项目内会话面：登记会话头、按人/状态过滤的简报列表、
  * 单条简报详情与序号增量历史。会话正文只覆盖"主人已上传"的部分（D10），
- * Java 只读不回写消息（写通道在 ConversationSyncAppService 设备侧）。
+ * 写通道由 ConversationSyncAppService 在同一用户会话鉴权下受理。
  *
  * <p>【安全原则 (Why)】
  * - 所有读前置 requireProject + requireActiveMember：非成员/已移出一律 404；
- * - 登记的 deviceId 必须是调用者本人未吊销设备，repositoryIds ⊆ 项目引用集合；
+ * - repositoryIds ⊆ 项目引用集合；
  * - 归档项目禁止登记（requireActiveProject → 409 PROJECT_ARCHIVED）。
  *
  * <p>【协作边界】
  * - 上游调用方：ProjectConversationController。
  * - 下游依赖方：ProjectAccessPolicy、ConversationRepository、MessageStorePort、
- *   ProjectRepository、RepositoryCatalog、DeviceRepository、IdempotencyPort、Contracts。
+ *   ProjectRepository、RepositoryCatalog、IdempotencyPort、Contracts。
  */
 @Service
 public class ConversationAppService {
@@ -51,7 +49,6 @@ public class ConversationAppService {
     private final MessageStorePort messages;
     private final ProjectRepository projects;
     private final RepositoryCatalog repositories;
-    private final DeviceRepository devices;
     private final IdempotencyPort idempotency;
     private final Contracts contracts;
 
@@ -61,7 +58,6 @@ public class ConversationAppService {
             MessageStorePort messages,
             ProjectRepository projects,
             RepositoryCatalog repositories,
-            DeviceRepository devices,
             IdempotencyPort idempotency,
             Contracts contracts
     ) {
@@ -70,14 +66,13 @@ public class ConversationAppService {
         this.messages = messages;
         this.projects = projects;
         this.repositories = repositories;
-        this.devices = devices;
         this.idempotency = idempotency;
         this.contracts = contracts;
     }
 
     /**
      * 项目成员登记会话头（owner=调用者）。
-     * deviceId 必须是本人未吊销设备；repositoryIds 为空或 ⊆ 项目引用，否则 400。
+     * repositoryIds 为空或 ⊆ 项目引用，否则 400。
      */
     @Transactional
     public String register(String userId, String workspaceId, String projectId, String rawBody) {
@@ -87,11 +82,6 @@ public class ConversationAppService {
                 "ConversationRegisterRequest", rawBody, ConversationDtos.ConversationRegisterRequest.class);
         return IdempotentCalls.run(idempotency, workspaceId, userId, "conversation.register", request.requestId(),
                 IdempotentCalls.fingerprint(projectId, rawBody), () -> {
-                    Device device = devices.findById(request.deviceId())
-                            .orElseThrow(() -> new ApiProblem(400, "INVALID_REQUEST"));
-                    if (!device.ownerUserId().equals(userId) || device.revoked()) {
-                        throw new ApiProblem(400, "INVALID_REQUEST");
-                    }
                     List<String> repositoryIds = request.repositoryIds() == null ? List.of() : request.repositoryIds();
                     Set<String> referenced = projects.listReferences(projectId).stream()
                             .map(ref -> ref.repositoryId())
@@ -102,7 +92,7 @@ public class ConversationAppService {
                     long now = System.currentTimeMillis();
                     Conversation conversation = new Conversation(
                             UUID.randomUUID().toString(), workspaceId, projectId, userId,
-                            request.deviceId(), "", "", "idle",
+                            "", "", "idle",
                             request.title() != null ? request.title() : "未命名会话",
                             "", "rule", now, 0L, "", now, now);
                     conversations.insert(conversation);
@@ -174,7 +164,7 @@ public class ConversationAppService {
                 })
                 .toList();
         return new ConversationDtos.ConversationSummary(
-                conversation.id(), conversation.projectId(), conversation.ownerUserId(), conversation.deviceId(),
+                conversation.id(), conversation.projectId(), conversation.ownerUserId(),
                 conversation.title(), conversation.status(), conversation.briefText(), conversation.briefSource(),
                 conversation.briefUpdatedAtMs(), conversation.syncedSequence(),
                 TimeCodec.utc(conversation.updatedAtMs()), refs);

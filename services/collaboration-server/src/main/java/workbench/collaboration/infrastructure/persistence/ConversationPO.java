@@ -42,10 +42,6 @@ public class ConversationPO {
     @TableField("owner_user_id")
     private String ownerUserId;
 
-    /** 主人执行设备标识 */
-    @TableField("device_id")
-    private String deviceId;
-
     /** 绑定的 Agent 运行配置标识（允许为空） */
     @TableField("agent_config_id")
     private String agentConfigId;
@@ -128,14 +124,6 @@ public class ConversationPO {
 
     public void setOwnerUserId(String ownerUserId) {
         this.ownerUserId = ownerUserId;
-    }
-
-    public String getDeviceId() {
-        return deviceId;
-    }
-
-    public void setDeviceId(String deviceId) {
-        this.deviceId = deviceId;
     }
 
     public String getAgentConfigId() {

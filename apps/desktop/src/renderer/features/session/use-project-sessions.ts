@@ -11,7 +11,6 @@
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type {
   DesktopHost,
-  DeviceSummary,
   LocalDirectoryHost,
   MemberSummary,
   ProjectConversationHost,
@@ -156,11 +155,7 @@ export type UseProjectSessionsOptions = {
   readonly scope: ProjectNavigationScope | null
   readonly projectName: string
   readonly userId: string
-  readonly localDeviceId: string | null
-  readonly localDeviceName?: string
-  readonly localDeviceBlockedReason?: string
   readonly members: readonly MemberSummary[]
-  readonly devices: readonly DeviceSummary[]
   readonly selectedConversationId: string | null
   readonly execution?: LocalSessionExecutionPort
   readonly onOpenConversation?: (conversation: ProjectConversationSummary) => void
@@ -177,11 +172,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     scope,
     projectName,
     userId,
-    localDeviceId,
-    localDeviceName,
-    localDeviceBlockedReason,
     members,
-    devices,
     selectedConversationId,
     execution,
     onOpenConversation,
@@ -190,8 +181,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const currentScopeKey = makeScopeKey(scope)
   const activeScopeKeyRef = useRef(currentScopeKey)
   activeScopeKeyRef.current = currentScopeKey
-  const draftContext = useMemo(() => ({ currentScopeKey, localDeviceId, selectedConversationId }), [
-    currentScopeKey, localDeviceId, selectedConversationId, persistence,
+  const draftContext = useMemo(() => ({ currentScopeKey, userId, selectedConversationId }), [
+    currentScopeKey, userId, selectedConversationId, persistence,
   ])
   const activeDraftContext = useRef<typeof draftContext | null>(null)
   useLayoutEffect(() => {
@@ -622,7 +613,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   /** 两条新建路径共用已有登记端口。调用方用同一个请求 ID 重试未确认的登记。 */
   const registerLocalConversation = useCallback(async (
     targetScope: ProjectNavigationScope,
-    deviceId: string,
     title: string,
     requestId: string,
   ): Promise<{ ok: true; conversation: ProjectConversationSummary } | { ok: false; message: string }> => {
@@ -630,11 +620,11 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     creatingRef.current = true
     try {
       const result = await projectConversations.registerConversation(targetScope.workspaceId, targetScope.projectId, {
-        deviceId, title, requestId,
+        title, requestId,
       })
       if (!result.ok) return { ok: false, message: result.error.message }
       const created = result.value.conversation
-      if (created.projectId !== targetScope.projectId || classifyConversation(created, targetScope.accountId, deviceId) !== "local") {
+      if (created.projectId !== targetScope.projectId || classifyConversation(created, targetScope.accountId) !== "local") {
         return { ok: false, message: "登记结果与本人本机会话的范围不符。" }
       }
       return { ok: true, conversation: created }
@@ -656,7 +646,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [])
 
   const onStartNewSession = useCallback(async () => {
-    if (!scope || !currentScopeKey || !localDeviceId || newSessionBusy || creatingRef.current) return
+    if (!scope || !currentScopeKey || newSessionBusy || creatingRef.current) return
     const targetScope = scope
     const targetKey = currentScopeKey
     const currentDraft = draftsRef.current[targetKey]?.value ?? EMPTY_NEW_DRAFT
@@ -664,7 +654,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     const trimmedPrompt = currentDraft.draftText.trim()
     if (!chosenDir || !trimmedPrompt) return
 
-    const signature = `${targetKey}\0${localDeviceId}\0${chosenDir}\0${trimmedPrompt}`
+    const signature = `${targetKey}\0${chosenDir}\0${trimmedPrompt}`
     if (!pendingRequestRef.current || pendingRequestRef.current.signature !== signature) {
       pendingRequestRef.current = { signature, requestId: crypto.randomUUID() }
     }
@@ -673,7 +663,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     setNewSessionBusy(true)
     setNewSessionError(null)
     try {
-      const res = await registerLocalConversation(targetScope, localDeviceId, deriveSessionTitle(trimmedPrompt), requestId)
+      const res = await registerLocalConversation(targetScope, deriveSessionTitle(trimmedPrompt), requestId)
       if (activeDraftContext.current !== draftContext) return
       if (!res.ok) {
         setNewSessionError(res.message)
@@ -721,7 +711,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [
     scope,
     currentScopeKey,
-    localDeviceId,
     newSessionBusy,
     draftContext,
     registerLocalConversation,
@@ -794,19 +783,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [members])
 
-  const deviceNameById = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const device of devices) map.set(device.deviceId, device.name)
-    return map
-  }, [devices])
-
   const navigationSource: NavigationSessionSource = useMemo(() => {
     if (!scope || !currentScopeKey) {
       return { entries: [], availability: { state: "unavailable", message: "请先选择项目。" }, retry: () => {} }
     }
     const status = activeList?.status ?? "loading"
     return {
-      entries: toNavigationSessionEntries(activeConversations, userId, localDeviceId, currentSyncStates),
+      entries: toNavigationSessionEntries(activeConversations, userId, currentSyncStates),
       availability: status === "failed"
         ? { state: "failed", message: activeList?.error || "无法加载会话列表。" }
         : status === "ready"
@@ -814,13 +797,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           : { state: "loading" },
       retry: () => { void refreshMetadata(scope) },
     }
-  }, [scope, currentScopeKey, activeList, activeConversations, userId, localDeviceId, currentSyncStates, refreshMetadata])
+  }, [scope, currentScopeKey, activeList, activeConversations, userId, currentSyncStates, refreshMetadata])
 
   const selectedConv = selectedConversationId
     ? activeConversations.find(item => item.conversationId === selectedConversationId) ?? null
     : null
   const selectedIsLocal = Boolean(
-    selectedConv && classifyConversation(selectedConv, userId, localDeviceId) === "local",
+    selectedConv && classifyConversation(selectedConv, userId) === "local",
   )
   const selectedDirectoryPath = selectedIsLocal && selectedConversationId
     ? (currentDirectories[selectedConversationId] ?? null)
@@ -833,7 +816,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     }), true)
   }, [updateRecord])
   const localExecutionPort = useLocalExecution(
-    localExecution, scope, localDeviceId, selectedIsLocal ? selectedConversationId : null,
+    localExecution, scope, selectedIsLocal ? selectedConversationId : null,
     selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我", commitAcceptedDraft,
   )
 
@@ -877,7 +860,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [draftToReveal, setDraftToReveal] = useState<{ scopeKey: string; deviceId: string; id: string } | null>(null)
   useLayoutEffect(() => {
     if (!draftToReveal) return
-    if (!scope || draftToReveal.scopeKey !== currentScopeKey || draftToReveal.deviceId !== localDeviceId
+    if (!scope || draftToReveal.scopeKey !== currentScopeKey || draftToReveal.deviceId !== userId
       || draftToReveal.id !== selectedConversationId || !selectedIsLocal) {
       setDraftToReveal(null)
       return
@@ -887,13 +870,11 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     if (!runtime.loaded) return
     if (runtime.personal.activeCentral !== null) localDir.selectConversationCentralTab(scope, draftToReveal.id)
     setDraftToReveal(null)
-  }, [draftToReveal, scope, currentScopeKey, localDeviceId, selectedConversationId, selectedIsLocal, localDir])
+  }, [draftToReveal, scope, currentScopeKey, userId, selectedConversationId, selectedIsLocal, localDir])
 
   const currentDraft = (currentScopeKey ? draftsByScope[currentScopeKey]?.value : undefined) ?? EMPTY_NEW_DRAFT
-  const canCreateConversation = Boolean(localDeviceId)
-  const createBlockedReason = canCreateConversation
-    ? undefined
-    : (localDeviceBlockedReason || "正在准备本机对话环境，请稍候；可先选择目录并保留草稿。")
+  const canCreateConversation = Boolean(scope)
+  const createBlockedReason = undefined
 
   const rendering: RenderingActions = useMemo(() => ({
     copyText: text => host.copyText(text),
@@ -902,8 +883,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const pageController: SessionPageController = useMemo(() => ({
     projectName,
     currentUserId: userId,
-    localDeviceId,
-    ...(localDeviceName ? { localDeviceName } : {}),
     conversations: activeConversations,
     syncStates: currentSyncStates,
     personalStates: currentPersonalStates,
@@ -916,7 +895,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
     resolveOwnerName: ownerId => memberNameById.get(ownerId) ?? `成员 (${ownerId.slice(0, 6)})`,
-    resolveDeviceName: deviceId => deviceNameById.get(deviceId),
     onChooseNewDirectory,
     onNewDraftChange,
     onStartNewSession: () => { void onStartNewSession() },
@@ -956,7 +934,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           namespace: pageScope.namespace,
           accountId: pageScope.accountId,
           workspaceId: pageScope.workspaceId,
-          deviceId: conversation.deviceId,
+          deviceId: conversation.ownerUserId,
           projectId: pageScope.projectId,
         },
         tabs: central.centralTabs,
@@ -983,7 +961,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       const dockProps = localDir.buildDockProps({
         scope: pageScope,
         conversationId: conversation.conversationId,
-        deviceId: conversation.deviceId,
+        deviceId: conversation.ownerUserId,
         projectName,
         directoryPath: dirPath,
         slot,
@@ -999,8 +977,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }), [
     projectName,
     userId,
-    localDeviceId,
-    localDeviceName,
     activeConversations,
     currentSyncStates,
     currentPersonalStates,
@@ -1014,7 +990,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     localExecutionPort,
     rendering,
     memberNameById,
-    deviceNameById,
     onChooseNewDirectory,
     onNewDraftChange,
     onStartNewSession,
@@ -1033,24 +1008,23 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [])
 
   const listMyLocalConversations = useCallback<SessionIntegrationApi["listMyLocalConversations"]>(targetScope => {
-    if (!localDeviceId) return EMPTY_CONVERSATIONS
-    return listProjectConversations(targetScope).filter(item => classifyConversation(item, userId, localDeviceId) === "local")
-  }, [listProjectConversations, localDeviceId, userId])
+    return listProjectConversations(targetScope).filter(item => classifyConversation(item, userId) === "local")
+  }, [listProjectConversations, userId])
 
   const applyReferenceDraft = useCallback<SessionIntegrationApi["applyReferenceDraft"]>(async (targetScope, change) => {
     const targetKey = makeScopeKey(targetScope)
     const isCurrent = () => activeDraftContext.current === draftContext
       && draftContext.currentScopeKey === targetKey
-      && draftContext.localDeviceId === targetScope.deviceId
+      && draftContext.userId === targetScope.deviceId
       && draftContext.selectedConversationId === targetScope.conversationId
       && (targetScope.conversationId === null
         || listProjectConversations(targetScope).some(item => item.conversationId === targetScope.conversationId))
-    if (!isCurrent()) return { ok: false, message: "发起会话或设备已变化，请重新选择引用。" }
+    if (!isCurrent()) return { ok: false, message: "发起会话已变化，请重新选择引用。" }
 
     const target = change.kind === "add" ? change.target : { kind: "existing" as const, conversationId: targetScope.conversationId }
     let conversationId = target.kind === "existing" ? target.conversationId : target.preparedConversationId
     if (target.kind === "new" && !conversationId) {
-      const result = await registerLocalConversation(targetScope, targetScope.deviceId, "新会话", target.requestId)
+      const result = await registerLocalConversation(targetScope, "新会话", target.requestId)
       if (!result.ok) return result
       conversationId = result.conversation.conversationId
       if (isCurrent()) includeRegisteredConversation(targetKey, result.conversation)

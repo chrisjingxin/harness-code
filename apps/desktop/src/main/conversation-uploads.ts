@@ -1,11 +1,11 @@
 /**
- * 本机文本定稿上传。成功终态 → 写入本机待传文件 → 固定连续序号 → 设备 POST → 确认后移除。
- * 由 DeviceHost 提供已授权会话的水位和设备发送能力。只保存待传数据，回复与发送按钮不等待网络。
+ * 本机文本定稿上传。成功终态 → 写入本机待传文件 → 固定连续序号 → 用户会话 POST → 确认后移除。
+ * 只保存待传数据，回复与发送按钮不等待网络。
  */
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import type { CollaborationError, CollaborationResult, DeviceSyncRequest, DeviceSyncResponse, SyncMessage } from "@workbench/contracts"
+import type { CollaborationError, CollaborationResult, ConversationSyncRequest, ConversationSyncResponse, SyncMessage } from "@workbench/contracts"
 import { localExecutionKey, type LocalExecutionScope, type LocalExecutionUploadNotice } from "../local-execution-host.js"
 
 export const syncPayloadLimit = 32 * 1024
@@ -34,9 +34,9 @@ type Pending = {
   turns: WaitingTurn[]
 }
 
-interface DevicePort {
+interface ConversationUploadPort {
   watermark(scope: LocalExecutionScope, signal: AbortSignal): Promise<CollaborationResult<number>>
-  upload(scope: LocalExecutionScope, request: DeviceSyncRequest, signal: AbortSignal): Promise<CollaborationResult<DeviceSyncResponse>>
+  upload(scope: LocalExecutionScope, request: ConversationSyncRequest, signal: AbortSignal): Promise<CollaborationResult<ConversationSyncResponse>>
 }
 
 class UploadFailure extends Error {
@@ -52,7 +52,7 @@ function briefExcerpt(text: string): string {
   return text.slice(0, 800).replace(/\s+/g, " ").trim().slice(0, 240)
 }
 
-/** 同一设备的待传文件按账号隔离。切换账号时取消旧网络请求，保留其本机文件。 */
+/** 待传文件按账号隔离。切换账号时取消旧网络请求，保留其本机文件。 */
 export class ConversationUploads {
   #account: { id: string; controller: AbortController } | null = null
   #writing: Promise<void> = Promise.resolve()
@@ -63,7 +63,7 @@ export class ConversationUploads {
 
   constructor(
     private readonly root: string,
-    private readonly device: DevicePort,
+    private readonly port: ConversationUploadPort,
     private readonly notify: (notice: LocalExecutionUploadNotice) => void,
   ) {}
 
@@ -183,7 +183,7 @@ export class ConversationUploads {
   }
 
   async #send(path: string, scope: LocalExecutionScope, turn: WaitingTurn, signal: AbortSignal): Promise<void> {
-    const watermark = unwrap(await this.device.watermark(scope, signal))
+    const watermark = unwrap(await this.port.watermark(scope, signal))
     signal.throwIfAborted()
     const firstSequence = turn.firstSequence ?? watermark + 1
     const finalSequence = firstSequence + turn.messages.length - 1
@@ -196,7 +196,7 @@ export class ConversationUploads {
       await this.#editHead(path, turn.turnId, pending => { pending.turns[0]!.firstSequence = firstSequence })
     }
     signal.throwIfAborted()
-    const receipt = unwrap(await this.device.upload(scope, {
+    const receipt = unwrap(await this.port.upload(scope, {
       messages: turn.messages.map((message, index) => ({ ...message, sequence: firstSequence + index })),
       brief: { status: "idle", briefSource: "rule", briefText: turn.briefText },
     }, signal))

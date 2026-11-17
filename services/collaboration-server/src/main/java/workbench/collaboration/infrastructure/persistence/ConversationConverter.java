@@ -26,7 +26,6 @@ final class ConversationConverter {
         po.setWorkspaceId(conversation.workspaceId());
         po.setProjectId(conversation.projectId());
         po.setOwnerUserId(conversation.ownerUserId());
-        po.setDeviceId(conversation.deviceId());
         po.setAgentConfigId(conversation.agentConfigId());
         po.setTaskId(conversation.taskId());
         po.setStatus(ConversationStatus.dbOf(conversation.status()));
@@ -47,7 +46,6 @@ final class ConversationConverter {
                 po.getWorkspaceId(),
                 po.getProjectId(),
                 po.getOwnerUserId(),
-                po.getDeviceId(),
                 po.getAgentConfigId(),
                 po.getTaskId(),
                 ConversationStatus.codeOf(po.getStatus()),

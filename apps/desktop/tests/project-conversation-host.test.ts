@@ -15,7 +15,6 @@ const USER_ID = "11111111111111111111111111111111"
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111"
 const PROJECT_ID = "22222222-2222-4222-8222-222222222222"
 const CONV_ID = "33333333-3333-4333-8333-333333333333"
-const DEVICE_ID = "44444444-4444-4444-8444-444444444444"
 const REQ_ID = "55555555-5555-4555-8555-555555555555"
 
 const jsonOk = (body: unknown, status = 200, extraHeaders: Record<string, string> = {}) =>
@@ -30,7 +29,6 @@ test("CollaborationClient 按 organization Schema 校验项目会话四接口", 
     conversationId: CONV_ID,
     projectId: PROJECT_ID,
     ownerUserId: USER_ID,
-    deviceId: DEVICE_ID,
     title: "幂等设计",
     status: "idle",
     briefText: "已完成简报",
@@ -46,6 +44,9 @@ test("CollaborationClient 按 organization Schema 校验项目会话四接口", 
     requests.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined })
     if (url.endsWith("/api/v1/auth/csrf")) {
       return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+    }
+    if (url.includes(`/projects/${PROJECT_ID}/conversations/${CONV_ID}/sync`) && method === "POST") {
+      return jsonOk({ syncedSequence: 2 })
     }
     if (url.includes(`/projects/${PROJECT_ID}/conversations/${CONV_ID}/history`)) {
       return jsonOk({
@@ -79,7 +80,6 @@ test("CollaborationClient 按 organization Schema 校验项目会话四接口", 
   )
 
   const registered = await client.registerProjectConversation(WORKSPACE_ID, PROJECT_ID, {
-    deviceId: DEVICE_ID,
     title: "幂等设计",
     requestId: REQ_ID,
   })
@@ -94,6 +94,13 @@ test("CollaborationClient 按 organization Schema 校验项目会话四接口", 
     assert.equal(history.value.messages.length, 2)
     assert.equal(history.value.syncedSequence, 2)
   }
+
+  const synced = await client.syncConversation(WORKSPACE_ID, PROJECT_ID, CONV_ID, {
+    messages: [{ sequence: 1, type: "user", occurredAtMs: 1_700_000_000_001, payload: '{"text":"你好"}' }],
+    brief: { status: "idle", briefSource: "rule", briefText: "已完成简报" },
+  })
+  assert.equal(synced.ok, true)
+  if (synced.ok) assert.equal(synced.value.syncedSequence, 2)
 
   const badId = await client.getProjectConversation(WORKSPACE_ID, PROJECT_ID, "not-a-uuid")
   assert.equal(badId.ok, false)
@@ -147,7 +154,6 @@ test("PersonalStore 支持 projectDraft 与 conversation 超 800KB 正文自动�
             conversationId: CONV_ID,
             projectId: PROJECT_ID,
             ownerUserId: USER_ID,
-            deviceId: DEVICE_ID,
             title: "长历史会话",
             status: "idle",
             briefText: "简报",

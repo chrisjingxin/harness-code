@@ -3,7 +3,6 @@ package workbench.collaboration.domain.access;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import workbench.collaboration.domain.conversation.Conversation;
-import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.identity.IdentityRepository;
 import workbench.collaboration.domain.identity.User;
 import workbench.collaboration.domain.identity.Workspace;
@@ -14,7 +13,6 @@ import workbench.collaboration.domain.project.ProjectMember;
 import workbench.collaboration.domain.project.ProjectRepository;
 import workbench.collaboration.domain.project.ProjectRepositoryRef;
 import workbench.collaboration.domain.project.ProjectStatus;
-import workbench.collaboration.domain.repository.LocalRepoBinding;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryCatalog;
 import workbench.collaboration.domain.repository.RepositoryStatus;
@@ -152,52 +150,21 @@ class ProjectAccessPolicyTest {
         assertEquals("REPOSITORY_ARCHIVED", error.code);
     }
 
-    // ---------- requireBindingAuthority / requireSyncAuthority ----------
+    // ---------- requireConversationOwner ----------
 
     @Test
-    void 已吊销设备登记资格拒绝401() {
-        Device revoked = device("d-1", MEMBER, true);
-        Repository repo = new Repository("r-1", WS, "x", "u", "main", RepositoryStatus.ACTIVE, OWNER, 1L, 1L);
-        assertEquals(401, assertThrows(ApiProblem.class, () -> policy.requireBindingAuthority(revoked, repo)).status);
-    }
-
-    @Test
-    void 设备owner非仓库团队成员拒绝403() {
-        Repository repo = new Repository("r-1", OTHER_WS, "x", "u", "main", RepositoryStatus.ACTIVE, OWNER, 1L, 1L);
-        ApiProblem error = assertThrows(ApiProblem.class, () -> policy.requireBindingAuthority(device("d-1", MEMBER, false), repo));
-        assertEquals(403, error.status);
-        assertEquals("DEVICE_FORBIDDEN", error.code);
-        // 本人仓库所在团队有成员资格则放行
-        Repository own = new Repository("r-2", WS, "x", "u", "main", RepositoryStatus.ACTIVE, OWNER, 1L, 1L);
-        policy.requireBindingAuthority(device("d-1", MEMBER, false), own);
-    }
-
-    @Test
-    void 非会话owner的设备同步拒绝403() {
+    void 非会话owner同步拒绝403() {
         Conversation conversation = conversation(PROJECT, OWNER);
-        ApiProblem error = assertThrows(ApiProblem.class, () -> policy.requireSyncAuthority(device("d-1", MEMBER, false), conversation));
+        ApiProblem error = assertThrows(ApiProblem.class, () -> policy.requireConversationOwner(conversation, MEMBER));
         assertEquals(403, error.status);
-        assertEquals("DEVICE_FORBIDDEN", error.code);
-    }
-
-    @Test
-    void owner被移出项目后其设备同步拒绝403() {
-        Conversation conversation = conversation(PROJECT, MEMBER);
-        projects.members.put(PROJECT + ":" + MEMBER, new ProjectMember(PROJECT, MEMBER, MemberStatus.REMOVED, 1L, 2L));
-        assertEquals(403, assertThrows(ApiProblem.class, () -> policy.requireSyncAuthority(device("d-1", MEMBER, false), conversation)).status);
-        // owner 仍是活跃成员时放行
-        projects.members.put(PROJECT + ":" + MEMBER, new ProjectMember(PROJECT, MEMBER, MemberStatus.ACTIVE, 1L, 1L));
-        policy.requireSyncAuthority(device("d-1", MEMBER, false), conversation);
+        assertEquals("CONVERSATION_FORBIDDEN", error.code);
+        policy.requireConversationOwner(conversation, OWNER);
     }
 
     // ---------- 测试夹具 ----------
 
-    private static Device device(String id, String owner, boolean revoked) {
-        return new Device(id, owner, "inst", "ledger", "本机", "hash", "reg", "body", revoked, 1L, 1L);
-    }
-
     private static Conversation conversation(String projectId, String owner) {
-        return new Conversation("c-1", WS, projectId, owner, "d-1", "", "", "idle", "t", "", "rule", 1L, 0L, "", 1L, 1L);
+        return new Conversation("c-1", WS, projectId, owner, "", "", "idle", "t", "", "rule", 1L, 0L, "", 1L, 1L);
     }
 
     private static final class FakeIdentity implements IdentityRepository {

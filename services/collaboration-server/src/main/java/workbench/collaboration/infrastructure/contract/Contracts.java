@@ -1,7 +1,6 @@
 package workbench.collaboration.infrastructure.contract;
 
 import workbench.collaboration.interfaces.dto.ConversationDtos;
-import workbench.collaboration.interfaces.dto.DeviceDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
 import workbench.collaboration.interfaces.dto.ProjectDtos;
 import workbench.collaboration.interfaces.dto.RepositoryDtos;
@@ -195,11 +194,6 @@ public final class Contracts {
                 Map.entry("BeeResponseEntity", PlatformDtos.BeeResponseEntity.class),
                 Map.entry("ErrorEnvelope", PlatformDtos.BeeResponseEntity.class),
                 Map.entry("PlatformMessageHeader", PlatformDtos.PlatformMessageHeader.class),
-                Map.entry("DeviceSummary", DeviceDtos.DeviceSummary.class),
-                Map.entry("DeviceRegistrationRequest", DeviceDtos.DeviceRegistrationRequest.class),
-                Map.entry("DeviceRegistrationResponse", DeviceDtos.DeviceRegistrationResponse.class),
-                Map.entry("DeviceListResponse", DeviceDtos.DeviceListResponse.class),
-                Map.entry("DeviceRevokedResponse", DeviceDtos.DeviceRevokedResponse.class),
                 Map.entry("ProjectCreateRequest", ProjectDtos.ProjectCreateRequest.class),
                 Map.entry("ProjectPatchRequest", ProjectDtos.ProjectPatchRequest.class),
                 Map.entry("ProjectMemberAddRequest", ProjectDtos.ProjectMemberAddRequest.class),
@@ -212,8 +206,8 @@ public final class Contracts {
                 Map.entry("ConversationListResponse", ConversationDtos.ConversationListResponse.class),
                 Map.entry("ConversationDetailResponse", ConversationDtos.ConversationDetailResponse.class),
                 Map.entry("ConversationHistoryResponse", ConversationDtos.ConversationHistoryResponse.class),
-                Map.entry("DeviceSyncRequest", ConversationDtos.DeviceSyncRequest.class),
-                Map.entry("DeviceSyncResponse", ConversationDtos.DeviceSyncResponse.class),
+                Map.entry("ConversationSyncRequest", ConversationDtos.ConversationSyncRequest.class),
+                Map.entry("ConversationSyncResponse", ConversationDtos.ConversationSyncResponse.class),
                 Map.entry("SnapshotCreateRequest", SnapshotDtos.SnapshotCreateRequest.class),
                 Map.entry("SnapshotResponse", SnapshotDtos.SnapshotResponse.class),
                 Map.entry("TaskCreateRequest", TaskDtos.TaskCreateRequest.class),

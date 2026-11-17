@@ -32,9 +32,9 @@ class FoundationTest {
     }
 
     private static Set<String> compliantTables() {
-        return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_device",
+        return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member",
                 "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
-                "wb_local_repo_binding", "wb_conversation", "wb_conversation_repository", "wb_snapshot",
+                "wb_conversation", "wb_conversation_repository", "wb_snapshot",
                 "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
                 "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox");
     }
@@ -47,13 +47,11 @@ class FoundationTest {
                 "wb_org.org_id", "wb_org.org_no", "wb_org.org_name",
                 "wb_org.parent_org_id", "wb_org.path_id", "wb_org.path_name", "wb_org.updated_at",
                 "wb_workspace.workspace_id",
-                "wb_device.device_id", "wb_device.owner_user_id",
                 "wb_repository.repository_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
                 "wb_repository.status", "wb_project.project_id", "wb_project.owner_user_id", "wb_project.version",
                 "wb_conversation.conversation_id", "wb_conversation.project_id", "wb_conversation.owner_user_id",
                 "wb_conversation.status", "wb_conversation.brief_source", "wb_conversation.brief_updated_at",
                 "wb_conversation.synced_sequence",
-                "wb_local_repo_binding.device_id", "wb_local_repo_binding.repository_id",
                 "wb_conversation_repository.conversation_id", "wb_conversation_repository.repository_id",
                 "wb_snapshot.snapshot_id", "wb_snapshot.project_id", "wb_snapshot.source_conversation_id",
                 "wb_snapshot.source_owner_user_id", "wb_snapshot.source_title", "wb_snapshot.source_synced_sequence",
@@ -76,7 +74,7 @@ class FoundationTest {
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("21"));
+        assertTrue(error.getMessage().contains("19"));
     }
 
     @Test
@@ -87,6 +85,8 @@ class FoundationTest {
     @Test
     void 探测到旧协作表拒绝启动() {
         Set<String> tables = new HashSet<>(compliantTables());
+        tables.add("wb_device");
+        tables.add("wb_local_repo_binding");
         tables.add("wb_device_project");
         tables.add("wb_message");
         assertThrows(IllegalStateException.class,
@@ -96,7 +96,7 @@ class FoundationTest {
     @Test
     void 探测到旧语义列拒绝启动() {
         Set<String> columns = new HashSet<>(compliantColumns());
-        columns.add("wb_device.workspace_id");
+        columns.add("wb_conversation.device_id");
         columns.add("wb_conversation.next_sequence");
         assertThrows(IllegalStateException.class,
                 () -> foundation(compliantTables(), columns).validate());

@@ -101,18 +101,12 @@ public class WebSecurityConfig {
                 new CsrfAuthenticationStrategy(csrf)
         )));
 
-        // 识别属于设备专属的端点路由（免除浏览器 CSRF 检查）
-        RequestMatcher deviceRoute = request -> {
-            var match = catalog.match(request.getRequestURI());
-            return match != null && match.route().auth() == RouteCatalog.Auth.DEVICE;
-        };
-
         return http.securityContext(c -> c.securityContextRepository(contexts))
                 .requestCache(AbstractHttpConfigurer::disable)
                 .anonymous(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
-                .csrf(c -> c.csrfTokenRepository(csrf).ignoringRequestMatchers(deviceRoute))
+                .csrf(c -> c.csrfTokenRepository(csrf))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(NotificationController::isStreamCompletion).permitAll()
                         .requestMatchers(
@@ -123,7 +117,6 @@ public class WebSecurityConfig {
                                 "/api/v1/auth/demo-login",
                                 "/api/v1/auth/logout"
                         ).permitAll()
-                        .requestMatchers(deviceRoute).permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(handler -> handler

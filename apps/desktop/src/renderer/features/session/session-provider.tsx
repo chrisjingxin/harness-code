@@ -29,7 +29,6 @@ import {
   decodeHistoryToTimelineEntries,
   deriveSyncStatus,
   emptySyncState,
-  shortDeviceLabel,
 } from "./session-model.js"
 
 export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {
@@ -100,8 +99,6 @@ export function applyConversationPersonalChange(
 export type SessionPageController = {
   readonly projectName: string
   readonly currentUserId: string
-  readonly localDeviceId: string | null
-  readonly localDeviceName?: string
   readonly conversations: readonly ProjectConversationSummary[]
   readonly syncStates: Readonly<Record<string, SessionSyncState>>
   readonly personalStates: Readonly<Record<string, ConversationPersonalState>>
@@ -115,7 +112,6 @@ export type SessionPageController = {
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
   resolveOwnerName(userId: string): string
-  resolveDeviceName?(deviceId: string): string | undefined
   onChooseNewDirectory(): void
   onNewDraftChange(text: string): void
   onStartNewSession(): void
@@ -136,7 +132,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
     controller.conversations.find(item => item.conversationId === conversationId)
 
   const classify = (conversation: ProjectConversationSummary): SessionKind =>
-    classifyConversation(conversation, controller.currentUserId, controller.localDeviceId)
+    classifyConversation(conversation, controller.currentUserId)
 
   return {
     render({ scope, page, navigator, visible }): ReactElement | null {
@@ -183,11 +179,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       const kind = classify(conversation)
       const ownerName = controller.resolveOwnerName(conversation.ownerUserId)
       const isLocal = kind === "local"
-      const deviceName = shortDeviceLabel(
-        conversation.deviceId,
-        isLocal ? controller.localDeviceName : controller.resolveDeviceName?.(conversation.deviceId),
-        isLocal,
-      )
       const syncState = controller.syncStates[conversation.conversationId] ?? emptySyncState()
       const syncStatus = deriveSyncStatus({
         kind,
@@ -215,7 +206,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             visible={visible}
             conversation={conversation}
             ownerName={ownerName}
-            deviceName={deviceName}
             directoryPath={controller.directories[conversation.conversationId] ?? null}
             entries={entries}
             contentRevision={syncState.localSyncedSequence}
@@ -240,7 +230,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
           kind={kind}
           conversation={conversation}
           ownerName={ownerName}
-          deviceName={deviceName}
           syncStatus={syncStatus}
           syncState={syncState}
           entries={controller.hooks?.renderHistoryReferences?.(entries) ?? entries}
@@ -279,11 +268,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       const isLocal = kind === "local"
       return {
         title: conversation.title || "未命名会话",
-        deviceName: shortDeviceLabel(
-          conversation.deviceId,
-          isLocal ? controller.localDeviceName : controller.resolveDeviceName?.(conversation.deviceId),
-          isLocal,
-        ),
+        deviceName: isLocal ? "本机" : "只读共享",
         projectName: controller.projectName,
         connection: isLocal ? "本机会话" : "只读简报与主动同步",
       }

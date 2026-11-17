@@ -1,9 +1,10 @@
-/** 身份/设备/项目会话 IPC 只接受固定方法；来源/数量/参数 → 窗口独有状态 → 不含凭据的结果。 */
+/** 身份/项目会话 IPC 只接受固定方法；来源/数量/参数 → 窗口独有状态 → 不含凭据的结果。 */
 import { app, dialog, ipcMain } from "electron"
 import type { BrowserWindow } from "electron"
+import { randomUUID } from "node:crypto"
+import { join } from "node:path"
 import { CollaborationState, identityError } from "./collaboration-state.js"
-import { DeviceHost } from "./device-host.js"
-import { bindDeviceIpc } from "./device-ipc.js"
+import { ConversationUploads } from "./conversation-uploads.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
 import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
 import type { RunnerSupervisor } from "./runner-supervisor.js"
@@ -11,7 +12,6 @@ import { verifyDesktopSource } from "./trusted-source.js"
 import type { CollaborationResult, ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
 import { parseFixedReference } from "../collaboration-reference.js"
-import { randomUUID } from "node:crypto"
 import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
 import { createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
@@ -58,7 +58,7 @@ function isHistoryLimit(value: unknown): value is number | undefined {
 
 function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
   return isObject(value) && isUserId(value.accountId) && isId(value.workspaceId) && isId(value.projectId)
-    && isId(value.deviceId) && isId(value.conversationId)
+    && isId(value.conversationId)
 }
 
 export function bindCollaborationIpc(
@@ -68,22 +68,40 @@ export function bindCollaborationIpc(
   onCloseAborted: () => void,
   runtime: LocalExecutionRuntime,
 ) {
+  void supervisor
   const origin = process.env.WORKBENCH_SERVICE_ORIGIN
   const identity = new CollaborationState(origin)
   const client = identity.network()
   const personal = new PersonalStore(identity, client ? origin! : "", app.getPath("userData"))
   const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
-  const device = client ? new DeviceHost(client, supervisor, () => window.isDestroyed() ? null : window, identity, notice => {
-    if (identity.personalIdentity()?.accountId === notice.scope.accountId && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-      try { window.webContents.send("workbench:local-execution:notice", notice) } catch { /* 窗口可能正好关闭。 */ }
-    }
-  }) : null
-  if (device) bindDeviceIpc(window, trustedUrl, device)
-  const execution = createLocalExecutionIpc(window, identity, device, runtime)
+  const uploads = client
+    ? new ConversationUploads(
+        join(app.getPath("userData"), "conversation-uploads"),
+        {
+          watermark: async (scope, signal) => {
+            const detail = await client.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId, signal)
+            if (!detail.ok) return detail
+            if (detail.value.conversation.ownerUserId !== scope.accountId) {
+              return identityError("CONVERSATION_FORBIDDEN", "仅会话创建者可执行该操作。")
+            }
+            return { ok: true, value: detail.value.conversation.syncedSequence }
+          },
+          upload: (scope, request, signal) =>
+            client.syncConversation(scope.workspaceId, scope.projectId, scope.conversationId, request, signal),
+        },
+        notice => {
+          if (identity.personalIdentity()?.accountId === notice.scope.accountId && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try { window.webContents.send("workbench:local-execution:notice", notice) } catch { /* 窗口可能正好关闭。 */ }
+          }
+        },
+      )
+    : null
+  const execution = createLocalExecutionIpc(window, identity, uploads, runtime)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const channels: string[] = []
   const unsubscribe = identity.onStateChanged(state => {
+    uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
   })
   function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {

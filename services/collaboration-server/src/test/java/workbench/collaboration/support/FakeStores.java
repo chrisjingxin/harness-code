@@ -2,8 +2,6 @@ package workbench.collaboration.support;
 
 import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.conversation.ConversationRepository;
-import workbench.collaboration.domain.device.Device;
-import workbench.collaboration.domain.device.DeviceRepository;
 import workbench.collaboration.domain.identity.IdentityRepository;
 import workbench.collaboration.domain.identity.Org;
 import workbench.collaboration.domain.identity.User;
@@ -15,8 +13,6 @@ import workbench.collaboration.domain.project.Project;
 import workbench.collaboration.domain.project.ProjectMember;
 import workbench.collaboration.domain.project.ProjectRepository;
 import workbench.collaboration.domain.project.ProjectRepositoryRef;
-import workbench.collaboration.domain.repository.LocalRepoBinding;
-import workbench.collaboration.domain.repository.LocalRepoBindingRepository;
 import workbench.collaboration.domain.repository.Repository;
 import workbench.collaboration.domain.repository.RepositoryCatalog;
 import workbench.collaboration.domain.repository.RepositoryStatus;
@@ -141,26 +137,6 @@ public final class FakeStores {
         }
     }
 
-    public static final class FakeBindings implements LocalRepoBindingRepository {
-        public final Map<String, LocalRepoBinding> items = new HashMap<>();
-
-        @Override public void upsert(LocalRepoBinding binding) {
-            items.put(binding.deviceId() + ":" + binding.repositoryId(), binding);
-        }
-        @Override public int delete(String deviceId, String repositoryId) {
-            return items.remove(deviceId + ":" + repositoryId) != null ? 1 : 0;
-        }
-        @Override public boolean exists(String deviceId, String repositoryId) {
-            return items.containsKey(deviceId + ":" + repositoryId);
-        }
-        @Override public List<LocalRepoBinding> listByDevice(String deviceId) {
-            return items.values().stream().filter(b -> b.deviceId().equals(deviceId)).toList();
-        }
-        @Override public List<LocalRepoBinding> listByRepository(String repositoryId) {
-            return items.values().stream().filter(b -> b.repositoryId().equals(repositoryId)).toList();
-        }
-    }
-
     public static final class FakeConversations implements ConversationRepository {
         public final Map<String, Conversation> items = new HashMap<>();
         public final Map<String, List<String>> refs = new HashMap<>();
@@ -189,20 +165,6 @@ public final class FakeStores {
         }
         @Override public List<String> listRepositoryIds(String conversationId) {
             return refs.getOrDefault(conversationId, List.of());
-        }
-    }
-
-    public static final class FakeDevices implements DeviceRepository {
-        public final Map<String, Device> items = new HashMap<>();
-
-        @Override public Optional<Device> findById(String id) { return Optional.ofNullable(items.get(id)); }
-        @Override public void insert(Device device) { items.put(device.id(), device); }
-        @Override public void update(Device device) { items.put(device.id(), device); }
-        @Override public List<Device> listByOwner(String ownerUserId, Long beforeCreatedAtMs, String beforeId, int limit) {
-            return items.values().stream()
-                    .filter(d -> d.ownerUserId().equals(ownerUserId))
-                    .limit(limit)
-                    .toList();
         }
     }
 }

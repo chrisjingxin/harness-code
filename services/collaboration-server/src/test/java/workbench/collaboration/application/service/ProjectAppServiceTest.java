@@ -14,8 +14,6 @@ import workbench.collaboration.domain.repository.RepositoryStatus;
 import workbench.collaboration.infrastructure.cache.MemoryIdempotency;
 import workbench.collaboration.infrastructure.contract.Contracts;
 import workbench.collaboration.interfaces.ApiProblem;
-import workbench.collaboration.support.FakeStores.FakeBindings;
-import workbench.collaboration.support.FakeStores.FakeDevices;
 import workbench.collaboration.support.FakeStores.FakeIdentity;
 import workbench.collaboration.support.FakeStores.FakeProjects;
 import workbench.collaboration.support.FakeStores.FakeRepositories;
@@ -25,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 项目应用服务全链路核对：权限矩阵（403/404/409）、CAS 版本、
- * 成员翻转语义、引用幂等与克隆设备聚合。
+ * 成员翻转语义与仓库引用幂等。
  */
 class ProjectAppServiceTest {
 
@@ -41,8 +39,6 @@ class ProjectAppServiceTest {
     private final FakeIdentity identity = new FakeIdentity();
     private final FakeProjects projects = new FakeProjects();
     private final FakeRepositories repositories = new FakeRepositories();
-    private final FakeBindings bindings = new FakeBindings();
-    private final FakeDevices devices = new FakeDevices();
     private ProjectAppService service;
 
     @BeforeEach
@@ -57,7 +53,7 @@ class ProjectAppServiceTest {
                 RepositoryStatus.ACTIVE, OWNER, 1L, 1L));
         service = new ProjectAppService(
                 new ProjectAccessPolicy(identity, projects, repositories),
-                projects, repositories, bindings, devices, identity,
+                projects, repositories, identity,
                 new MemoryIdempotency(), new Contracts(), (type, subject, payload) -> {});
     }
 
@@ -175,26 +171,18 @@ class ProjectAppServiceTest {
     }
 
     @Test
-    void 仓库引用幂等且聚合调用者已克隆设备() {
+    void 仓库引用幂等且对项目成员可见() {
         String projectId = projectIdOf(service.create(OWNER, WS, createBody()));
         service.addReference(OWNER, WS, projectId, REPO);
         service.addReference(OWNER, WS, projectId, REPO); // 幂等
         assertThat(projects.listReferences(projectId)).hasSize(1);
 
-        String memberDevice = "44444444-4444-4444-8444-444444444444";
-        devices.items.put(memberDevice, new workbench.collaboration.domain.device.Device(
-                memberDevice, MEMBER, "i", "l", "成员本机", "h", "r", "b", false, 1L, 1L));
         service.addMember(OWNER, WS, projectId, memberBody(MEMBER));
-        bindings.upsert(new workbench.collaboration.domain.repository.LocalRepoBinding(memberDevice, REPO, 5L));
 
         String listed = service.listRepositories(MEMBER, WS, projectId);
         var repos = JSON.readTree(listed).path("repositories");
         assertThat(repos.size()).isEqualTo(1);
-        assertThat(repos.get(0).path("clonedDevices").size()).isEqualTo(1);
-        assertThat(repos.get(0).path("clonedDevices").get(0).path("deviceId").asString()).isEqualTo(memberDevice);
-        // 非本人设备的克隆对调用者不可见
-        String ownerView = service.listRepositories(OWNER, WS, projectId);
-        assertThat(JSON.readTree(ownerView).path("repositories").get(0).path("clonedDevices").size()).isEqualTo(0);
+        assertThat(repos.get(0).path("repositoryId").asString()).isEqualTo(REPO);
     }
 
     @Test

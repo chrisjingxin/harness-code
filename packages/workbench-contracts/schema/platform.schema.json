@@ -308,6 +308,7 @@
             "WORKSPACE_MEMBER_REQUIRED",
             "PROJECT_OWNER_REQUIRED",
             "DEVICE_FORBIDDEN",
+            "CONVERSATION_FORBIDDEN",
             "REPOSITORY_CONFLICT",
             "VERSION_CONFLICT",
             "PROJECT_ARCHIVED",

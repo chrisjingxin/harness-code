@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type {
   CollaborationHost,
   DesktopHost,
-  DeviceHost,
   LocalDirectoryHost,
   ProjectConversationHost,
   ThemeMode,
@@ -35,7 +34,6 @@ import { useProjectBoard } from "./features/board/use-project-board.js"
 import { useProjectUpdates } from "./features/project-updates/use-project-updates.js"
 import { useWorkbenchReferences } from "./features/collaboration/references/workbench-references.js"
 import type { ReferenceActions } from "./features/collaboration/references/conversation-references.js"
-import { useLocalDevice } from "./local-device.js"
 import { PersonalPersistence } from "./personal-persistence.js"
 import { resolveUserPhoto } from "./demo-avatars.js"
 import "@workbench/ui/layout.css"
@@ -48,7 +46,6 @@ type Hosts = {
   collaboration: CollaborationHost
   collaborationApps?: CollaborationAppsHost
   projectUpdates?: ProjectUpdatesHost
-  devices: DeviceHost
   organization: OrganizationHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
@@ -143,7 +140,6 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       collaboration={props.collaboration}
       collaborationApps={props.collaborationApps}
       projectUpdates={props.projectUpdates}
-      devices={props.devices}
       projectConversations={props.projectConversations}
       localDirectory={props.localDirectory}
       localExecution={props.localExecution}
@@ -227,7 +223,6 @@ function WorkspaceProjectWorkbench(props: {
   collaboration: CollaborationHost
   collaborationApps?: CollaborationAppsHost
   projectUpdates?: ProjectUpdatesHost
-  devices: DeviceHost
   projectConversations: ProjectConversationHost
   localDirectory?: LocalDirectoryHost
   localExecution?: DesktopLocalExecutionHost
@@ -255,12 +250,6 @@ function WorkspaceProjectWorkbench(props: {
     workspaceId: props.workspaceId,
     user: props.user,
   })
-  const localDevice = useLocalDevice(props.devices, props.workspaceId, props.user.id)
-  const validLocalDevice = localDevice.device?.deviceId
-    ? localDevice.devices.find(
-        item => item.deviceId === localDevice.device?.deviceId && item.ownerUserId === props.user.id && item.revokedAt === null,
-      ) ?? null
-    : null
   const currentProject = shell.projects.projects.find(item => item.projectId === shell.projectId)
   const selectedConversationId = shell.personal.page.kind === "conversation"
     ? shell.personal.page.conversationId
@@ -290,10 +279,7 @@ function WorkspaceProjectWorkbench(props: {
     scope: shell.scope,
     projectName: currentProject?.name ?? "当前项目",
     userId: props.user.id,
-    localDeviceId: validLocalDevice?.deviceId ?? null,
-    ...(localDevice.blockedReason ? { localDeviceBlockedReason: localDevice.blockedReason } : {}),
     members: shell.team.members,
-    devices: localDevice.devices,
     selectedConversationId,
     execution: props.execution,
     onOpenConversation: locateConversation,
@@ -321,7 +307,7 @@ function WorkspaceProjectWorkbench(props: {
   const chooseDirectory = () => props.host.chooseDirectory()
   const taskContext: TasksContext | undefined = props.collaborationApps && shell.scope ? {
     host: props.collaborationApps, scope: shell.scope, projectName: currentProject?.name ?? "当前项目", projectActive: canPublish,
-    ownerName: pageController.resolveOwnerName, localDeviceId: pageController.localDeviceId,
+    ownerName: pageController.resolveOwnerName, localDeviceId: props.user.id,
     sessions: integration, directories: pageController.directories,
     chooseDirectory, locateConversation, refreshTaskMetadata,
   } : undefined
@@ -357,7 +343,7 @@ function WorkspaceProjectWorkbench(props: {
         projectName: currentProject?.name ?? "当前项目",
         description: currentProject?.description,
         accountId: props.user.id,
-        localDeviceId: pageController.localDeviceId,
+        localDeviceId: props.user.id,
         syncStates: pageController.syncStates,
         notification,
         onRefresh: refreshBoard,

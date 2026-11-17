@@ -20,7 +20,6 @@ const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {})
   conversationId: "conv-1",
   projectId: "proj-1",
   ownerUserId: "user-self",
-  deviceId: "dev-local",
   title: "测试会话",
   status: "idle",
   briefText: "简报内容",
@@ -33,10 +32,8 @@ const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {})
 })
 
 test("classifyConversation 按人区分本人可执行会话与队友只读会话", () => {
-  assert.equal(classifyConversation(sampleConversation(), "user-self", "dev-local"), "local")
-  assert.equal(classifyConversation(sampleConversation({ deviceId: "dev-other" }), "user-self", "dev-local"), "local")
-  assert.equal(classifyConversation(sampleConversation(), "user-self", null), "local")
-  assert.equal(classifyConversation(sampleConversation({ ownerUserId: "user-peer" }), "user-self", "dev-local"), "remote_other")
+  assert.equal(classifyConversation(sampleConversation(), "user-self"), "local")
+  assert.equal(classifyConversation(sampleConversation({ ownerUserId: "user-peer" }), "user-self"), "remote_other")
 })
 
 test("deriveSyncStatus 与 buildSessionBadge 正确表达五种本地同步状态", () => {
@@ -111,10 +108,10 @@ test("boundCachedMessages 超限时从头裁剪最早消息并标明 cacheTrunca
 
 test("toNavigationSessionEntries 正确映射多成员会话条目", () => {
   const items = [
-    sampleConversation({ conversationId: "c1", ownerUserId: "u1", deviceId: "d1", syncedSequence: 2 }),
-    sampleConversation({ conversationId: "c2", ownerUserId: "u2", deviceId: "d2", syncedSequence: 2 }),
+    sampleConversation({ conversationId: "c1", ownerUserId: "u1", syncedSequence: 2 }),
+    sampleConversation({ conversationId: "c2", ownerUserId: "u2", syncedSequence: 2 }),
   ]
-  const projected = toNavigationSessionEntries(items, "u1", "d1", { c2: { ...emptySyncState(), localSyncedSequence: 2 } })
+  const projected = toNavigationSessionEntries(items, "u1", { c2: { ...emptySyncState(), localSyncedSequence: 2 } })
   assert.equal(projected[0]?.badge?.text, "本机")
   assert.equal(projected[1]?.badge?.text, "已同步")
 })

@@ -25,9 +25,8 @@ export function emptySyncState(): SessionSyncState {
  * ownerUserId 与当前登录用户一致即视为本人可执行会话 ("local")；其余成员会话为只读 ("remote_other")。
  */
 export function classifyConversation(
-  conversation: Pick<ProjectConversationSummary, "ownerUserId" | "deviceId">,
+  conversation: Pick<ProjectConversationSummary, "ownerUserId">,
   currentUserId: string,
-  _localDeviceId: string | null,
 ): SessionKind {
   return conversation.ownerUserId === currentUserId ? "local" : "remote_other"
 }
@@ -78,12 +77,11 @@ export function buildSessionBadge(input: {
 export function toNavigationSessionEntries(
   conversations: readonly ProjectConversationSummary[],
   currentUserId: string,
-  localDeviceId: string | null,
   syncStates: Readonly<Record<string, SessionSyncState>>,
   nowMs = Date.now(),
 ): NavigationSessionEntry[] {
   return conversations.map(item => {
-    const kind = classifyConversation(item, currentUserId, localDeviceId)
+    const kind = classifyConversation(item, currentUserId)
     const state = syncStates[item.conversationId] ?? emptySyncState()
     const syncStatus = deriveSyncStatus({
       kind,
@@ -245,12 +243,6 @@ export function directoryBasename(directoryPath: string | null): string {
   if (!trimmed) return directoryPath
   const parts = trimmed.split(/[\\/]/)
   return parts.at(-1) || directoryPath
-}
-
-export function shortDeviceLabel(deviceId: string, knownName: string | undefined, isLocal: boolean): string {
-  if (isLocal) return knownName ? `${knownName}（当前设备）` : "当前设备"
-  if (knownName) return knownName
-  return `其他设备 (${deviceId.slice(0, 6)})`
 }
 
 function parsePayloadObject(raw: string): Record<string, unknown> | null {

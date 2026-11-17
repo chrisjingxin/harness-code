@@ -45,7 +45,7 @@ interface WorkbenchReferenceOptions {
 export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
   const { scope, selectedConversationId, pageKey, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
     members, tasks, onChooseMember, onOpenTask } = options
-  const { localDeviceId, conversations, directories, resolveOwnerName } = pageController
+  const { currentUserId: localDeviceId, conversations, directories, resolveOwnerName } = pageController
   const sourceIsListed = selectedConversationId === null || conversations.some(item =>
     item.conversationId === selectedConversationId && item.projectId === scope?.projectId)
   const referenceScope = useMemo((): ReferenceScope | null =>

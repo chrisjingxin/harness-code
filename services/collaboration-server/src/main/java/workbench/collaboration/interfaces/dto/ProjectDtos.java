@@ -80,21 +80,14 @@ public final class ProjectDtos {
             ProjectMemberSummary member
     ) {}
 
-    /** 项目内单个仓库引用视图：含调用者本机已登记克隆的设备 */
+    /** 项目内单个仓库引用视图 */
     public record ProjectRepositoryItem(
             String repositoryId,
             String name,
             String remoteUrl,
             String defaultBranch,
             String status,
-            String referencedAt,
-            List<ClonedDeviceSummary> clonedDevices
-    ) {}
-
-    /** 本机仓库登记视图：只暴露设备标识与登记时间，绝不含本地路径 */
-    public record ClonedDeviceSummary(
-            String deviceId,
-            String boundAt
+            String referencedAt
     ) {}
 
     /** 项目仓库引用列表响应 */

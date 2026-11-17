@@ -9,16 +9,14 @@ import formats from "ajv-formats"
 import platform from "@workbench/contracts/schema/platform" with { type: "json" }
 import conversationSchema from "@workbench/contracts/schema/conversation" with { type: "json" }
 import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
-import deviceSchema from "@workbench/contracts/schema/device" with { type: "json" }
 import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
 import organizationSchema from "@workbench/contracts/schema/organization" with { type: "json" }
 import collaborationSchema from "@workbench/contracts/schema/collaboration" with { type: "json" }
 import type {
   BeeResponseEntity, BoardResponse, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
   MembersResponse, MetaResponse, WorkspaceListResponse,
-  DeviceListResponse, DeviceRegistrationRequest, DeviceRegistrationResponse, DeviceRevokeRequest, DeviceRevokedResponse,
   ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
-  DeviceSyncRequest, DeviceSyncResponse, LocalDeviceRegistration,
+  ConversationSyncRequest, ConversationSyncResponse,
   ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
   ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
   KnowledgeCreateRequest, KnowledgeDetail, KnowledgeListResponse, KnowledgeUpdateRequest, KnowledgeVersion,
@@ -44,7 +42,7 @@ const messages: Record<CollaborationError["code"], string> = {
   TARGET_UNAVAILABLE: "目标设备或执行配置不可用", EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新",
   SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
   WORKSPACE_MEMBER_REQUIRED: "请先加入该团队", PROJECT_OWNER_REQUIRED: "仅项目负责人可执行该操作",
-  DEVICE_FORBIDDEN: "设备无权执行该操作", REPOSITORY_CONFLICT: "仓库地址已被登记",
+  DEVICE_FORBIDDEN: "设备无权执行该操作", CONVERSATION_FORBIDDEN: "仅会话创建者可执行该操作", REPOSITORY_CONFLICT: "仓库地址已被登记",
   VERSION_CONFLICT: "数据已被他人修改，请刷新后重试", PROJECT_ARCHIVED: "项目已归档",
   REPOSITORY_ARCHIVED: "仓库已归档", OWNER_CANNOT_LEAVE: "项目负责人不能移出自己",
   SEQUENCE_CONFLICT: "消息序号与服务端水位不一致，请按 expectedSequence 续传",
@@ -74,7 +72,6 @@ interface CallOptions {
   inputSchema?: string
   query?: Record<string, string>
   session?: Session
-  device?: Pick<LocalDeviceRegistration, "deviceId" | "secret">
   signal?: AbortSignal
   notifications?: {
     afterId: number
@@ -102,7 +99,7 @@ export class CollaborationClient {
     this.#transport = transport
     formats.default(this.#ajv)
     // 类型统一按"Schema 名#类型名"定位；只在所有 Schema 中唯一的类型名才允许省略前缀，重名类型必须写全。
-    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, device: deviceSchema, project: projectSchema, organization: organizationSchema, collaboration: collaborationSchema }
+    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, project: projectSchema, organization: organizationSchema, collaboration: collaborationSchema }
     const bare = new Map<string, string | null>()
     for (const [key, schema] of Object.entries(schemas)) {
       this.#ajv.addSchema(schema)
@@ -174,12 +171,9 @@ export class CollaborationClient {
         headers.Accept = "text/event-stream"
         headers["Last-Event-ID"] = String(notifications.afterId)
       }
-      if (options.device) headers.Authorization = `Bearer ${options.device.deviceId}.${options.device.secret}`
-      else {
-        const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
-        if (cookie) headers.Cookie = cookie
-        if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
-      }
+      const cookie = await session.jar.getCookieString(this.#origin, { http: true, sameSiteContext: "strict" })
+      if (cookie) headers.Cookie = cookie
+      if (method !== "GET" && session.csrf) headers["X-CSRF-TOKEN"] = session.csrf
       if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
       if (body) headers["Content-Type"] = "application/json"
       // HC-212 每条通知流最多 60 秒。保留额外时间供最后一帧到达，普通请求仍用原限时。
@@ -191,7 +185,6 @@ export class CollaborationClient {
         if (!active()) throw new ClientProblem("NETWORK_UNAVAILABLE")
         if (response.status >= 300 && response.status < 400) throw new ClientProblem("INVALID_SERVER_RESPONSE")
         for (const header of response.headers.getSetCookie()) {
-          if (options.device) throw new ClientProblem("INVALID_SERVER_RESPONSE")
           const parsed = Cookie.parse(header)
           if (!parsed || parsed.key !== "WBSESSION" || parsed.domain || parsed.path !== "/") throw new ClientProblem("INVALID_SERVER_RESPONSE")
           const deleting = parsed.value === "" && (parsed.maxAge === 0 || (parsed.expires instanceof Date && parsed.expires.getTime() <= Date.now()))
@@ -225,8 +218,8 @@ export class CollaborationClient {
           if (!this.#validator("ErrorEnvelope")(data)) throw new ClientProblem("INVALID_SERVER_RESPONSE")
           const envelope = data as ErrorEnvelope
           const error = envelope.body
-          if (!options.device && error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
-          if (!options.device && error.code === "CSRF_INVALID") session.csrf = null
+          if (error.code === "AUTHENTICATION_REQUIRED" && response.status === 401 && session === this.#session) this.#discardSession()
+          if (error.code === "CSRF_INVALID") session.csrf = null
           return { ok: false, error: { ...error, message: messages[error.code] ?? envelope.errorMsg } }
         }
         if ((response.status !== 200 && response.status !== 201) || !this.#validator("BeeResponseEntity")(data)
@@ -501,23 +494,22 @@ export class CollaborationClient {
       ? this.#error("INVALID_SERVER_RESPONSE") : result
   }
 
-  /** 设备上传只用本机 Bearer；响应按 Java 已发布的同步契约核对。 */
-  syncDeviceConversation(conversationId: string, device: Pick<LocalDeviceRegistration, "deviceId" | "secret">,
-    request: DeviceSyncRequest, signal: AbortSignal): Promise<CollaborationResult<DeviceSyncResponse>> {
-    if (!this.#validator("Id")(conversationId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
-    return this.#call(`/api/v1/device/conversations/${conversationId}/sync`, "organization#DeviceSyncResponse", "POST", {
-      device, body: request, inputSchema: "organization#DeviceSyncRequest", signal,
-    })
-  }
-
-  registerDevice(workspaceId: string, request: DeviceRegistrationRequest): Promise<CollaborationResult<DeviceRegistrationResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/devices`, "DeviceRegistrationResponse", { body: request, inputSchema: "DeviceRegistrationRequest" })
-  }
-  listDevices(workspaceId: string, query: Record<string, string> = {}): Promise<CollaborationResult<DeviceListResponse>> {
-    return this.#call(`/api/v1/workspaces/${workspaceId}/devices`, "DeviceListResponse", "GET", { query })
-  }
-  revokeDevice(workspaceId: string, deviceId: string, request: DeviceRevokeRequest): Promise<CollaborationResult<DeviceRevokedResponse>> {
-    return this.#write(`/api/v1/workspaces/${workspaceId}/devices/${deviceId}/revoke`, "DeviceRevokedResponse", { body: request, inputSchema: "DeviceRevokeRequest" })
+  /** 会话创建者上传定稿消息与简报；走当前登录会话 Cookie + CSRF。 */
+  syncConversation(
+    workspaceId: string,
+    projectId: string,
+    conversationId: string,
+    request: ConversationSyncRequest,
+    signal?: AbortSignal,
+  ): Promise<CollaborationResult<ConversationSyncResponse>> {
+    if (!this.#validator("Id")(workspaceId) || !this.#validator("Id")(projectId) || !this.#validator("Id")(conversationId)) {
+      return Promise.resolve(this.#error("INVALID_REQUEST"))
+    }
+    return this.#write(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations/${conversationId}/sync`,
+      "organization#ConversationSyncResponse",
+      { body: request, inputSchema: "organization#ConversationSyncRequest", signal },
+    )
   }
 
   /** 组织层：项目、成员与仓库目录。路径参数由 IPC 先校验为 UUID，请求体按组织层 Schema 校验。 */

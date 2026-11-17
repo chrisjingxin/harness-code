@@ -1,7 +1,6 @@
 package workbench.collaboration.domain.access;
 
 import workbench.collaboration.domain.conversation.Conversation;
-import workbench.collaboration.domain.device.Device;
 import workbench.collaboration.domain.identity.IdentityRepository;
 import workbench.collaboration.domain.identity.User;
 import workbench.collaboration.domain.project.MemberStatus;
@@ -24,8 +23,8 @@ import java.util.Optional;
  * 对外暴露两类方法：require*（不通过直接抛受控异常）与 is*（纯判读返回布尔）。
  *
  * <p>【错误语义】
- * - 401：身份/设备凭据本身无效（用户停用、设备已吊销）；
- * - 403：已认证但角色不足（非团队成员、非负责人、设备越权）；
+ * - 401：身份凭据本身无效（用户停用或未登录）；
+ * - 403：已认证但角色不足（非团队成员、非负责人、非会话创建者）；
  * - 404：资源不存在，或**非项目成员访问项目资源**——不泄露项目存在性；
  * - 409：目标存在但状态不可写（已归档、owner 不能移出自己等）。
  *
@@ -35,8 +34,8 @@ import java.util.Optional;
  * 领域策略直接复用；ApiProblem 自身是无框架依赖的纯数据异常，不引入分层倒置风险。
  *
  * <p>【协作边界】
- * - 上游调用方：ProjectAppService、RepositoryAppService、RepoBindingAppService、ConversationSyncAppService。
- * - 下游依赖方：IdentityRepository、ProjectRepository、RepositoryCatalog（设备/会话实体由调用方传入）。
+ * - 上游调用方：ProjectAppService、RepositoryAppService、ConversationAppService、ConversationSyncAppService。
+ * - 下游依赖方：IdentityRepository、ProjectRepository、RepositoryCatalog（会话实体由调用方传入）。
  */
 public final class ProjectAccessPolicy {
 
@@ -137,30 +136,13 @@ public final class ProjectAccessPolicy {
     }
 
     /**
-     * 设备仓库登记资格（PUT /device/repo-bindings 前置）。
-     * 设备已吊销 → 401；设备 owner 不是该仓库所属团队的成员 → 403 DEVICE_FORBIDDEN。
-     * 仓库本身的存在性与活跃校验由 requireActiveRepository 负责。
+     * 会话同步资格（POST .../conversations/{c}/sync 前置）。
+     * 调用者不是会话创建者 → 403 CONVERSATION_FORBIDDEN。
+     * 项目与活跃成员校验由调用方先通过 requireProject / requireActiveMember 完成。
      */
-    public void requireBindingAuthority(Device device, Repository repository) {
-        if (device.revoked()) {
-            throw new ApiProblem(401, "DEVICE_AUTHENTICATION_REQUIRED");
-        }
-        if (!identity.memberExists(repository.workspaceId(), device.ownerUserId())) {
-            throw new ApiProblem(403, "DEVICE_FORBIDDEN");
-        }
-    }
-
-    /**
-     * 会话同步资格（POST /device/conversations/{c}/sync 前置，D9）。
-     * 设备不属于会话 owner → 403；owner 已被移出项目（无活跃成员记录）→ 403。
-     * 被移出成员的既有会话保留只读，但其设备不得再推进水位。
-     */
-    public void requireSyncAuthority(Device device, Conversation conversation) {
-        if (!device.ownerUserId().equals(conversation.ownerUserId())) {
-            throw new ApiProblem(403, "DEVICE_FORBIDDEN");
-        }
-        if (!isActiveMember(conversation.projectId(), conversation.ownerUserId())) {
-            throw new ApiProblem(403, "DEVICE_FORBIDDEN");
+    public void requireConversationOwner(Conversation conversation, String userId) {
+        if (!conversation.ownerUserId().equals(userId)) {
+            throw new ApiProblem(403, "CONVERSATION_FORBIDDEN");
         }
     }
 

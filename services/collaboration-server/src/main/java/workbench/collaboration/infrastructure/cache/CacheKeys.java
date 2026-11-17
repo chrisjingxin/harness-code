@@ -6,10 +6,10 @@ package workbench.collaboration.infrastructure.cache;
  * <p>【功能定义】
  * 统一定义协作中继服务在 Redis（及单机内存映射）中所使用的命名空间键规范、容量上限及过期生存时间 (TTL)。
  * 保证单机内存模式（Memory*）与生产 Redis 集群模式（Jedis*）在数据结构与容量语义上完全对齐。
- * 旧的设备 WSS 在线路由、执行热快照与事件补齐窗口键已随远程派发链路拆除（HC-211）。
+ * 旧的设备 WSS 在线路由、设备心跳、执行热快照与事件补齐窗口键已拆除。
  *
  * <p>【协作边界】
- * - 上游调用方：JedisCollaborationState、MemoryIdempotency、MemoryDeviceHeartbeat、MemoryHotWindow。
+ * - 上游调用方：JedisCollaborationState、MemoryIdempotency、MemoryHotWindow。
  * - 下游依赖方：无外部依赖。
  */
 public final class CacheKeys {
@@ -19,9 +19,6 @@ public final class CacheKeys {
 
     /** 请求幂等占位与响应回执 TTL（1 小时，3600 秒） */
     public static final int IDEMPOTENCY_TTL_SECONDS = 3600;
-
-    /** 设备 HTTPS 心跳在线展示 TTL（45 秒，超时未续期即判为离线，仅展示用途） */
-    public static final int HEARTBEAT_TTL_SECONDS = 45;
 
     /** 会话定稿消息 Redis ZSet 热滑窗 TTL（7 天，超期由 ES 承接历史翻页） */
     public static final int MESSAGE_TTL_SECONDS = 7 * 24 * 3600;
@@ -33,13 +30,6 @@ public final class CacheKeys {
      */
     public static String idempotency(String workspaceId, String actorId, String operation, String requestId) {
         return "wb:idemp:" + workspaceId + ":" + actorId + ":" + operation + ":" + requestId;
-    }
-
-    /**
-     * 生成设备在线心跳键：wb:device:hb:{deviceId}
-     */
-    public static String deviceHeartbeat(String deviceId) {
-        return "wb:device:hb:" + deviceId;
     }
 
     /**

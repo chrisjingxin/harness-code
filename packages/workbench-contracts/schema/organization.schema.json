@@ -184,15 +184,6 @@
       "required": ["repository", "projects"],
       "additionalProperties": false
     },
-    "ClonedDeviceSummary": {
-      "type": "object",
-      "properties": {
-        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
-        "boundAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
-      },
-      "required": ["deviceId", "boundAt"],
-      "additionalProperties": false
-    },
     "ProjectRepositoryItem": {
       "type": "object",
       "properties": {
@@ -201,10 +192,9 @@
         "remoteUrl": { "type": "string" },
         "defaultBranch": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "archived"] },
-        "referencedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
-        "clonedDevices": { "type": "array", "items": { "$ref": "#/$defs/ClonedDeviceSummary" } }
+        "referencedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
       },
-      "required": ["repositoryId", "name", "remoteUrl", "defaultBranch", "status", "referencedAt", "clonedDevices"],
+      "required": ["repositoryId", "name", "remoteUrl", "defaultBranch", "status", "referencedAt"],
       "additionalProperties": false
     },
     "ProjectRepositoryListResponse": {
@@ -253,7 +243,6 @@
         "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "projectId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "ownerUserId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId" },
-        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "type": "string" },
         "status": { "$ref": "#/$defs/ConversationStatus" },
         "briefText": { "type": "string", "maxLength": 2000 },
@@ -263,13 +252,12 @@
         "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "repositories": { "type": "array", "items": { "$ref": "#/$defs/ConversationRepositoryItem" } }
       },
-      "required": ["conversationId", "projectId", "ownerUserId", "deviceId", "title", "status", "briefText", "briefSource", "briefUpdatedAtMs", "syncedSequence", "updatedAt", "repositories"],
+      "required": ["conversationId", "projectId", "ownerUserId", "title", "status", "briefText", "briefSource", "briefUpdatedAtMs", "syncedSequence", "updatedAt", "repositories"],
       "additionalProperties": false
     },
     "ConversationRegisterRequest": {
       "type": "object",
       "properties": {
-        "deviceId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "repositoryIds": {
           "type": "array",
@@ -278,7 +266,7 @@
         },
         "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
       },
-      "required": ["deviceId", "requestId"],
+      "required": ["requestId"],
       "additionalProperties": false
     },
     "ConversationListResponse": {
@@ -511,7 +499,7 @@
       },
       "additionalProperties": false
     },
-    "DeviceSyncRequest": {
+    "ConversationSyncRequest": {
       "type": "object",
       "properties": {
         "messages": { "type": "array", "items": { "$ref": "#/$defs/SyncMessage" }, "maxItems": 500 },
@@ -520,7 +508,7 @@
       "required": ["messages"],
       "additionalProperties": false
     },
-    "DeviceSyncResponse": {
+    "ConversationSyncResponse": {
       "type": "object",
       "properties": {
         "syncedSequence": { "type": "integer", "minimum": 0 }

@@ -224,65 +224,6 @@
         }
       }
     },
-    "/api/v1/device/conversations/{conversationId}/sync": {
-      "post": {
-        "operationId": "post__conversation_sync",
-        "parameters": [
-          {
-            "name": "conversationId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "服务端确认水位",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "$ref": "../schema/organization.schema.json#/$defs/DeviceSyncResponse"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "安全错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/device/heartbeat": {
       "post": {
         "operationId": "post__device_heartbeat",

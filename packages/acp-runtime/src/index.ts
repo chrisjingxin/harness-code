@@ -10,12 +10,11 @@ export type AgentCommand = {
   readonly env?: NodeJS.ProcessEnv
 }
 
-/** 五个标识共同区分属于不同账号、设备或项目的同名会话。由受信任的宿主提供。 */
+/** 四个标识共同区分属于不同账号、团队、项目或会话的本地执行作用域。由受信任的宿主提供。 */
 export type LocalAcpScope = {
   readonly accountId: string
   readonly workspaceId: string
   readonly projectId: string
-  readonly deviceId: string
   readonly conversationId: string
 }
 
@@ -104,7 +103,7 @@ export class LocalAcpHost {
 
   /** cwd 必须来自主进程认可的目录选择。绑定后改变目录需先关闭旧句柄。 */
   async bind(scope: LocalAcpScope, cwd: string): Promise<LocalAcpSession> {
-    const ids = [scope.accountId, scope.workspaceId, scope.projectId, scope.deviceId, scope.conversationId]
+    const ids = [scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId]
     if (ids.some(id => !id.trim())) throw new Error("缺少本机会话标识。")
     if (!isAbsolute(cwd)) throw new Error("本机工作目录必须使用绝对路径。")
     const root = await realpath(cwd)

@@ -10,9 +10,7 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 import workbench.collaboration.application.port.IdempotencyPort;
 import workbench.collaboration.domain.conversation.MessageStorePort;
-import workbench.collaboration.domain.device.DeviceHeartbeatPort;
 import workbench.collaboration.infrastructure.cache.JedisCollaborationState;
-import workbench.collaboration.infrastructure.cache.MemoryDeviceHeartbeat;
 import workbench.collaboration.infrastructure.cache.MemoryHotWindow;
 import workbench.collaboration.infrastructure.cache.MemoryIdempotency;
 import workbench.collaboration.infrastructure.messaging.KafkaEventBus;
@@ -25,7 +23,7 @@ import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAd
  *
  * <p>【功能定义】
  * 根据 workbench.middleware.mode 配置属性，决定加载"进程内内存实现"还是"外部分布式生产中间件"：
- * - standalone 模式：装配 MemoryIdempotency、MemoryDeviceHeartbeat、MemoryHotWindow 与 LocalEventBus，
+ * - standalone 模式：装配 MemoryIdempotency、MemoryHotWindow 与 LocalEventBus，
  *   无需任何外部 Redis/Kafka/ES 即可单机极速启动，保障开发与测试开箱即用；
  * - cluster 模式：严格装配 JedisPool、KafkaEventBus、ElasticsearchMessageStoreAdapter。
  *   采用 Fail-Closed 策略：启动即对 Redis 进行 ping 连通性探测，失败立即抛出异常阻止启动，严防多节点脑裂与状态孤岛。
@@ -72,19 +70,14 @@ public class MiddlewareConfig {
                 jedis.ping();
             }
             JedisCollaborationState state = new JedisCollaborationState(pool, search);
-            return new Ports(state.idempotency(), state.heartbeats(), state.messages());
+            return new Ports(state.idempotency(), state.messages());
         }
-        return new Ports(new MemoryIdempotency(), new MemoryDeviceHeartbeat(), new MemoryHotWindow());
+        return new Ports(new MemoryIdempotency(), new MemoryHotWindow());
     }
 
     @Bean
     IdempotencyPort idempotency(Ports ports) {
         return ports.idempotency();
-    }
-
-    @Bean
-    DeviceHeartbeatPort deviceHeartbeats(Ports ports) {
-        return ports.heartbeats();
     }
 
     @Bean
@@ -119,7 +112,6 @@ public class MiddlewareConfig {
      */
     public record Ports(
             IdempotencyPort idempotency,
-            DeviceHeartbeatPort heartbeats,
             MessageStorePort messages
     ) {}
 }

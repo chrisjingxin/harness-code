@@ -29,7 +29,6 @@ export type ProjectConversationSummary = {
   readonly conversationId: string
   readonly projectId: string
   readonly ownerUserId: string
-  readonly deviceId: string
   readonly title: string
   readonly status: ProjectConversationStatus
   readonly briefText: string
