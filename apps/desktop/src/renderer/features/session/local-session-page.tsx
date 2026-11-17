@@ -18,10 +18,10 @@ import type {
   RenderingActions,
 } from "@workbench/ui"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
-import { ChevronDownIcon, FolderIcon, UsersIcon } from "./icons.js"
+import { ChevronDownIcon, FolderIcon } from "./icons.js"
 import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
-import { directoryBasename } from "./session-model.js"
+import { directoryBasename, formatShortTime } from "./session-model.js"
 import { projectLocalExecution } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 
@@ -111,112 +111,111 @@ export function LocalSessionPage({
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
   const isRunning = Boolean(activeExecution?.activeTurnId)
+  const updatedLabel = formatShortTime(conversation.updatedAt)
 
   return (
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
-      <div className="session-head-wrap">
-        <header className="session-heading">
-          <div className="session-heading-main">
-            <h1>{conversation.title || "未命名会话"}</h1>
-            <div className="session-subtitle" title={`会话所有者：${ownerName} · 设备：${deviceName}`}>
-              <span>本机执行 · {deviceName}</span>
-              <span aria-hidden="true">·</span>
-              <button
-                type="button"
-                className="session-directory-button"
-                onClick={onChooseDirectory}
-                title={directoryPath ? `当前工作目录（仅本机可用）：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
-              >
-                <FolderIcon size={12} />
-                <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
-                <ChevronDownIcon size={11} />
-              </button>
-            </div>
-          </div>
-          <div className="session-heading-actions">
-            <span className={`session-status-badge${isRunning ? " is-running" : ""}`}>
-              <span className="session-status-dot" aria-hidden="true" />
-              <span>{isRunning ? "本机运行中" : "本机空闲"}</span>
-            </span>
-            <span
-              className="session-tag"
-              title="项目成员仅可主动同步已上传的简报与定稿消息；你本机选择的目录不会暴露给他人。"
-            >
-              <UsersIcon size={12} />
-              <span>Project 内共享</span>
-            </span>
-          </div>
-        </header>
-      </div>
-
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
-        <div className="session-conversation-wrap">
-          <ConversationView
-            {...view}
-            entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
-            scope={scope}
-            visible={visible && !(viewingFile && pvMax)}
-          interaction={permission ? {
-            kind: "approval", id: permission.id, title: permission.title, readOnly: false,
-            availability: { enabled: true },
-            retryRevision: activeExecution?.permissionRetryRevision,
-            options: permission.options.map(option => ({
-              id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
-              behavior: "immediate", feedback: "none", availability: { enabled: true },
-            })),
-          } : null}
-          personal={personal}
-          actions={{
-            onPersonalChange: (targetScope, change) => {
-              if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
-            },
-            ...(execution.send
-              ? {
-                  onSend: async (targetScope, draftRevision, text, referenceIds, attachmentIds) =>
-                    execution.send!({
-                      scope: {
-                        namespace: targetScope.namespace,
-                        accountId: targetScope.accountId,
-                        workspaceId: targetScope.workspaceId,
-                        projectId: conversation.projectId,
-                      },
-                      conversationId: conversation.conversationId,
-                      directoryPath,
-                      draftRevision,
-                      text,
-                      referenceIds,
-                      attachmentIds,
-                    }),
-                }
-              : {}),
-            ...(execution.cancel
-              ? {
-                  onCancel: async targetScope =>
-                    execution.cancel!(
-                      {
-                        namespace: targetScope.namespace,
-                        accountId: targetScope.accountId,
-                        workspaceId: targetScope.workspaceId,
-                        projectId: conversation.projectId,
-                      },
-                      conversation.conversationId,
-                    ),
-                }
-              : {}),
-            onInteractionSubmit: execution.answerPermission ? async (targetScope, id, answer) => {
-              if (answer.kind !== "approval" || targetScope.conversationId !== scope.conversationId) throw new Error("审批目标已变更。")
-              await execution.answerPermission!(conversation.conversationId, id, answer.optionId)
-            } : undefined,
-            onCapabilitySelect,
-            onReferenceAction: hooks?.onReferenceAction,
-            onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
-            onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
-            onRequestFileCandidates,
-            onOpenFile,
-            rendering,
-          }}
-          slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
-        />
+        <div className="session-conversation-column">
+          <div className="session-head-wrap">
+            <header className="session-heading">
+              <div className="session-heading-main">
+                <h1>{conversation.title || "未命名会话"}</h1>
+                <div
+                  className="session-subtitle"
+                  title={`会话所有者：${ownerName} · Project 内共享（仅同步已上传的简报与定稿消息）`}
+                >
+                  <span>本机执行 · {deviceName} · 最近更新 {updatedLabel}</span>
+                  <button
+                    type="button"
+                    className="session-directory-button"
+                    onClick={onChooseDirectory}
+                    title={directoryPath ? `当前工作目录（仅本机可用）：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
+                  >
+                    <FolderIcon size={12} />
+                    <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
+                    <ChevronDownIcon size={11} />
+                  </button>
+                </div>
+              </div>
+              <div className="session-heading-actions">
+                <span
+                  className={`status-badge session-status-badge${isRunning ? " running is-running" : ""}`}
+                  title="项目成员仅可主动同步已上传的简报与定稿消息；你本机选择的目录不会暴露给他人。"
+                >
+                  {isRunning ? "本机运行中" : "本机空闲"}
+                </span>
+              </div>
+            </header>
+          </div>
+          <div className="session-conversation-wrap">
+            <ConversationView
+              {...view}
+              entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
+              scope={scope}
+              visible={visible && !(viewingFile && pvMax)}
+              interaction={permission ? {
+                kind: "approval", id: permission.id, title: permission.title, readOnly: false,
+                availability: { enabled: true },
+                retryRevision: activeExecution?.permissionRetryRevision,
+                options: permission.options.map(option => ({
+                  id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
+                  behavior: "immediate", feedback: "none", availability: { enabled: true },
+                })),
+              } : null}
+              personal={personal}
+              actions={{
+                onPersonalChange: (targetScope, change) => {
+                  if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
+                },
+                ...(execution.send
+                  ? {
+                      onSend: async (targetScope, draftRevision, text, referenceIds, attachmentIds) =>
+                        execution.send!({
+                          scope: {
+                            namespace: targetScope.namespace,
+                            accountId: targetScope.accountId,
+                            workspaceId: targetScope.workspaceId,
+                            projectId: conversation.projectId,
+                          },
+                          conversationId: conversation.conversationId,
+                          directoryPath,
+                          draftRevision,
+                          text,
+                          referenceIds,
+                          attachmentIds,
+                        }),
+                    }
+                  : {}),
+                ...(execution.cancel
+                  ? {
+                      onCancel: async targetScope =>
+                        execution.cancel!(
+                          {
+                            namespace: targetScope.namespace,
+                            accountId: targetScope.accountId,
+                            workspaceId: targetScope.workspaceId,
+                            projectId: conversation.projectId,
+                          },
+                          conversation.conversationId,
+                        ),
+                    }
+                  : {}),
+                onInteractionSubmit: execution.answerPermission ? async (targetScope, id, answer) => {
+                  if (answer.kind !== "approval" || targetScope.conversationId !== scope.conversationId) throw new Error("审批目标已变更。")
+                  await execution.answerPermission!(conversation.conversationId, id, answer.optionId)
+                } : undefined,
+                onCapabilitySelect,
+                onReferenceAction: hooks?.onReferenceAction,
+                onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
+                onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
+                onRequestFileCandidates,
+                onOpenFile,
+                rendering,
+              }}
+              slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
+            />
+          </div>
         </div>
         {centralFiles && viewingFile ? (
           <div className="session-central-file-pane">

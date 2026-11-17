@@ -23,14 +23,14 @@
 
 .project-dock-header {
   flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
-  padding: 6px 8px 0 12px;
+  padding: 8px 8px 0 12px;
   box-shadow: inset 0 -1px 0 var(--line);
   background: var(--rail-bg);
 }
 .project-dock-tabs { min-width: 0; flex: 1 1 auto; display: flex; align-items: stretch; gap: 14px; overflow-x: auto; }
 .project-dock-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 0 9px; border: 0;
+  padding: 3px 0 9px; border: 0;
   box-shadow: inset 0 -2px 0 transparent;
   background: transparent; color: var(--muted);
   font: inherit; font-size: var(--text-sm); font-weight: 500;

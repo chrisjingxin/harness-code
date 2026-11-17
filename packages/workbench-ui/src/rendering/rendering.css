@@ -4,7 +4,7 @@
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p { margin: 7px 0; }
-.markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 16px 0 7px; font-family: var(--font-serif); letter-spacing: -.02em; line-height: 1.25; }
+.markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 16px 0 7px; font-family: var(--font-display); font-weight: 600; letter-spacing: 0; line-height: var(--leading-tight, 1.35); text-wrap: balance; }
 .markdown h2 { font-size: 1.25rem; }
 .markdown h3 { font-size: 1.1rem; }
 .markdown h4, .markdown h5, .markdown h6 { font-size: .95rem; }
@@ -12,7 +12,7 @@
 .markdown li { margin: 3px 0; }
 .markdown li > p { margin: 0; }
 .markdown li > p + p { margin-top: 6px; }
-.markdown blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--line-strong); color: var(--muted); }
+.markdown blockquote { margin: 10px 0; padding: 8px 12px; border: 0; border-radius: var(--radius-sm, 6px); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border, var(--line)); color: var(--fg-2, var(--muted)); }
 .markdown code { padding: 1px 5px; border-radius: var(--radius-control); background: var(--code-bg); color: var(--inline-code-text); font-size: .86em; }
 .markdown a { color: var(--link-text); text-decoration: underline; text-underline-offset: 2px; }
 .markdown a:hover { color: var(--link-text-hover); }
@@ -58,7 +58,7 @@
   color: var(--subtle);
 }
 .code-block-lang {
-  font-family: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   text-transform: lowercase;
   letter-spacing: .04em;

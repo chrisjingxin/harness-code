@@ -7,7 +7,7 @@
   background: var(--surface);
   box-shadow: var(--elev-ring);
 }
-.device-panel h2 { margin: 0 0 6px; font-size: var(--text-md); font-weight: 600; }
+.device-panel h2 { margin: 0 0 6px; font-size: var(--text-sm); font-weight: 600; }
 .device-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .device-row input {
   flex: 1 1 200px; min-width: 150px;

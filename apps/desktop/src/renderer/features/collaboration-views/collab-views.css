@@ -372,6 +372,7 @@
   width: min(92vw, 480px);
   background: var(--surface);
   border-radius: var(--radius-xl);
+  overflow: hidden;
   box-shadow: var(--elev-pop);
   padding: 20px;
   display: flex;

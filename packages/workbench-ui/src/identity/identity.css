@@ -9,10 +9,10 @@
   font-size: var(--text-sm);
 }
 .identity-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 10px; }
-.identity-heading h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.identity-heading h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
 .identity-heading span { font-size: var(--text-xs); color: var(--muted); }
 .identity-panel p { line-height: 1.65; color: var(--text-soft); }
-.identity-panel h3 { font-size: var(--text-base); font-weight: 600; margin: 14px 0 6px; color: var(--text); }
+.identity-panel h3 { font-size: var(--text-sm); font-weight: 600; margin: 14px 0 6px; color: var(--text); }
 .identity-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .identity-actions label { display: flex; align-items: center; gap: 8px; color: var(--text-soft); }
 .identity-actions select {

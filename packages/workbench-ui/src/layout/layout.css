@@ -246,19 +246,38 @@
 }
 .collaboration-modal {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 560px);
+  max-width: min(92vw, 560px);
+  max-height: min(86vh, 680px);
+  padding: 0;
   background: var(--surface);
   border: none;
   border-radius: var(--radius-xl);
-  padding: 20px;
-  max-width: min(92vw, 600px);
-  max-height: min(88vh, 720px);
-  overflow: auto;
+  overflow: hidden;
   box-shadow: var(--elev-pop);
+}
+.collaboration-modal-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong, var(--line-strong)) transparent;
+}
+.collaboration-modal-scroll:has(> .desktop-settings) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .collaboration-modal-close {
   position: absolute;
   right: 14px;
   top: 14px;
+  z-index: 2;
 }
 
 .collaboration-layout :focus-visible {

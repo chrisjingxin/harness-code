@@ -421,7 +421,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
             >
               <X size={16} />
             </button>
-            {props.settings}
+            <div className="collaboration-modal-scroll">{props.settings}</div>
           </div>
         </div>
       )}

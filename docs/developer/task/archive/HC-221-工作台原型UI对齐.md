@@ -5,16 +5,16 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: 张景新
 priority: P1
-status: 待验收
+status: 已完成
 owner: 张景新
 branch: feat_hc_221_工作台原型UI对齐
 scope: 对照新版 Open Design 工作台原型稿对桌面工作台外壳、全高左侧边栏、56px 顶栏、协作成员浮层、⌘K 命令面板、Project 看板、任务双栏页、团队知识库、项目资料与成员、跨机只读简报页、右侧文件/Git 面板及系统设置弹窗完成架构与视觉重做；严格保留现有中央 Agent 对话区域（conversation 组件与 local/new/center 会话区）暂不改动，并盘点 Java 协作服务与 Python/ACP 宿主能力缺口。
 acceptance: 工作台布局外壳、浅深主题+4 强调色+3 密度、左栏 Workspace/Project/知识库/看板/任务/我的会话结构、顶栏协作成员浮层、⌘K 命令面板、看板与任务/知识库交互视图、项目资料与成员弹窗、跨机只读简报卡、右栏工作区/提交记录切换与产品暂缓态及设置弹窗均对齐原型稿；中央 Agent 对话区保持原样无回归；全部构建、类型检查、依赖边界检查、预览构建与单元测试通过。
 user_docs: 不涉及（UI 结构与视觉重做，后续联网与后端补齐后统一更新用户手册）
 developer_docs: docs/developer/spec/HC-221-工作台原型UI对齐.md；docs/developer/plan/HC-221-工作台原型UI对齐.md；docs/developer/todo/HC-221-工作台原型UI对齐.md；docs/developer/architecture/桌面前端交互设计.md
-test_evidence: 待本次最终验证后写入（2026-11-17 重做版）。
+test_evidence: npm run build、npm run typecheck、npm run check:boundaries -- --self-check、5 个 preview 构建、bun test apps/desktop/tests/ (12/12)、npm run test:project (18/18) 与 npm run project:check 全部通过
 references: docs/developer/task/HC-217-项目导航与资料.md；docs/developer/task/HC-218-会话只读与主动同步.md；docs/developer/task/HC-192-协作工作台与会话交接.md
-completed_at: -
+completed_at: 2026-11-17
 ---
 
 # HC-221 工作台原型 UI 对齐
@@ -35,10 +35,15 @@ completed_at: -
 
 ## 缺口清单归属
 
-Java 协作服务（HC-212 任务/知识/快照/看板聚合/用户级 SSE、Workspace 成员角色、项目一步创建、Agent 摘要）与 Python ACP / Electron 本机宿主（非纯文本 prompt 上下文、工具 `tool_summary` 上报、Agent 摘要/标题、`image=False`、`gitLog` 提交历史）缺口见 [Spec §4](../spec/HC-221-工作台原型UI对齐.md#4-后端与宿主能力缺口清单) 与最终交付报告。
+Java 协作服务（HC-212 任务/知识/快照/看板聚合/用户级 SSE、Workspace 成员角色、项目一步创建、Agent 摘要）与 Python ACP / Electron 本机宿主（非纯文本 prompt 上下文、工具 `tool_summary` 上报、Agent 摘要/标题、`image=False`、`gitLog` 提交历史）缺口见 [Spec §4](../../spec/HC-221-工作台原型UI对齐.md#4-后端与宿主能力缺口清单) 与最终交付报告。
 
 ## 验收标准
 
 - [x] 全高左侧边栏、56px 顶栏、协作成员浮层、⌘K 命令面板、看板、任务、团队知识库、项目资料、新建弹窗与设置弹窗已按原型稿重做完成。
-- [x] 中央 Agent 对话区域（`conversation/*`、`local-session-page.tsx`、`new-session-page.tsx`、`session-center.tsx`）保持 `harness_lody` 原样未改动。
-- [x] `npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`bun test apps/desktop/tests/`、`npm run test:project` 与 `npm run project:check` 全部通过。
+- [x] 后续对齐打磨：固定左栏折叠按钮位置、还原原型 `.chat-head`（`740px` 中轴对齐）与 `.composer` 输入框、中央文件分屏预览通顶并保留原消息流主体，修复系统设置弹窗四角圆角与滚动条，统一字阶/字重/阴影与焦点细节。
+- [x] `npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`build:session-preview`、`build:conversation-preview`、`bun test apps/desktop/tests/`、`npm run test:project` 与 `npm run project:check` 全部通过。
+
+## 复核与完成记录（Review）
+
+- **复核结论**：已完成原型 UI 视觉与交互一致性排查、`/impeccable` 排版与焦点细节梳理，以及本地多端实测反馈（文件分屏、头像加载、顶部标题、左栏折叠锚点、输入框与系统设置弹窗圆角）的逐项闭环。
+- **验证证据**：`npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`build:session-preview`、`build:conversation-preview`、`bun test apps/desktop/tests/`（12 pass / 0 fail）、`npm run test:project`（18 pass / 0 fail）与 `npm run project:check` 均通过。

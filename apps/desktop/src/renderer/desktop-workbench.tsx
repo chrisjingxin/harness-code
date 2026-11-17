@@ -113,13 +113,15 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     persistence.save({ kind: "account" }, { workspaceId })
   }
 
-  const baseSettings = <>
+  const settingsHead = (
     <div className="desktop-settings-head">
       <div>
         <h2>系统设置</h2>
         <p className="desktop-settings-sub">外观、强调色、界面密度、快捷键、账号与团队</p>
       </div>
     </div>
+  )
+  const settingsBody = <>
     <div className="desktop-set-section">外观与布局</div>
     <WindowPreferences {...props.preferences} />
     <div className="desktop-set-section">快捷键</div>
@@ -156,7 +158,8 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       onToggleTheme={props.preferences.toggleTheme}
       user={signedIn.user}
       titleBarClassName={titleBarClassName}
-      baseSettings={baseSettings}
+      settingsHead={settingsHead}
+      settingsBody={settingsBody}
       settingsOpen={settingsOpen}
       setSettingsOpen={setSettingsOpen}
       personalError={props.personalError}
@@ -164,9 +167,12 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
   }
 
   const settings = <div className="desktop-settings">
-    {baseSettings}
-    <div className="desktop-set-section">本机设备</div>
-    <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />
+    {settingsHead}
+    <div className="desktop-settings-body">
+      {settingsBody}
+      <div className="desktop-set-section">本机设备</div>
+      <DeviceRegistrationPanel host={props.devices} workspaceId={null} device={null} />
+    </div>
   </div>
 
   const status = identity.state.status
@@ -238,7 +244,8 @@ function WorkspaceProjectWorkbench(props: {
   onToggleTheme?(): void
   user: UserSummary
   titleBarClassName: string
-  baseSettings: React.ReactNode
+  settingsHead: React.ReactNode
+  settingsBody: React.ReactNode
   settingsOpen: boolean
   setSettingsOpen(open: boolean): void
   personalError: string
@@ -399,16 +406,19 @@ function WorkspaceProjectWorkbench(props: {
   }
 
   const settings = <div className="desktop-settings">
-    {props.baseSettings}
-    <div className="desktop-set-section">本机设备</div>
-    <DeviceRegistrationPanel
-      host={props.devices}
-      workspaceId={props.workspaceId}
-      device={localDevice.device}
-      devices={localDevice.devices}
-      blockedReason={localDevice.blockedReason}
-      onChanged={localDevice.refresh}
-    />
+    {props.settingsHead}
+    <div className="desktop-settings-body">
+      {props.settingsBody}
+      <div className="desktop-set-section">本机设备</div>
+      <DeviceRegistrationPanel
+        host={props.devices}
+        workspaceId={props.workspaceId}
+        device={localDevice.device}
+        devices={localDevice.devices}
+        blockedReason={localDevice.blockedReason}
+        onChanged={localDevice.refresh}
+      />
+    </div>
   </div>
 
   return <>
@@ -445,10 +455,10 @@ function WorkspaceProjectWorkbench(props: {
 }
 
 const ACCENT_OPTIONS = [
-  { id: "violet", label: "紫檀", color: "#7c5cff" },
-  { id: "indigo", label: "靛蓝", color: "#2563eb" },
-  { id: "teal", label: "青碧", color: "#0f766e" },
-  { id: "ink", label: "炭墨", color: "#18181b" },
+  { id: "violet", label: "紫罗兰", color: "#5b63d3" },
+  { id: "indigo", label: "靛蓝", color: "#2b59e8" },
+  { id: "teal", label: "青碧", color: "#09695a" },
+  { id: "ink", label: "墨黑", color: "#171717" },
 ] as const
 type AccentOption = (typeof ACCENT_OPTIONS)[number]["id"]
 type DensityOption = "compact" | "standard" | "wide"
@@ -558,9 +568,11 @@ function WindowPreferences({ state, accent, density, error, setThemeMode, setAcc
             aria-label={opt.label}
             title={opt.label}
             className={`swatch${accent === opt.id ? " is-on" : ""}`}
-            style={{ background: opt.color }}
             onClick={() => setAccent(opt.id)}
-          />
+          >
+            <span className="swatch-chip" style={{ background: opt.color }} aria-hidden="true" />
+            <span>{opt.label}</span>
+          </button>
         ))}
       </div>
     </div>

@@ -1,6 +1,6 @@
 # HC-221 工作台原型 UI 对齐 Spec
 
-状态：草稿，待评审。对应任务见 [HC-221 Task](../task/HC-221-工作台原型UI对齐.md)；实施步骤见 [HC-221 Plan](../plan/HC-221-工作台原型UI对齐.md)；执行清单见 [HC-221 Todo](../todo/HC-221-工作台原型UI对齐.md)。原型参考文件位于 `/Users/zhangjingxin/Library/Application Support/Open Design/namespaces/release-stable/data/projects/c3-harness-code-workbench-v3/index.html`。
+状态：已完成，已归档。对应任务见 [HC-221 Task](../task/archive/HC-221-工作台原型UI对齐.md)；实施步骤见 [HC-221 Plan](../plan/HC-221-工作台原型UI对齐.md)；执行清单见 [HC-221 Todo](../todo/HC-221-工作台原型UI对齐.md)。原型参考文件位于 `/Users/zhangjingxin/Library/Application Support/Open Design/namespaces/release-stable/data/projects/c3-harness-code-workbench-v3/index.html`。
 
 ## 1. 现状与改后收益
 
