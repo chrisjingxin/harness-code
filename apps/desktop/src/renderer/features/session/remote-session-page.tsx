@@ -89,59 +89,19 @@ export function RemoteSessionPage({
   const briefUploadedLabel = formatShortTime(conversation.briefUpdatedAtMs || conversation.updatedAt)
   const localSyncedLabel = syncState.lastSyncedAtMs ? formatShortTime(syncState.lastSyncedAtMs) : "—"
   const busy = syncStatus === "syncing"
-  const syncTone = syncStatus === "has_update" ? "accent" : syncStatus === "sync_failed" ? "danger" : hasDownloadedMessages ? "success" : "warning"
-  const syncText = syncStatus === "has_update"
-    ? "有更新"
-    : syncStatus === "sync_failed"
-      ? "同步失败"
-      : hasDownloadedMessages
-        ? "已同步"
-        : "未同步"
+  const syncActionLabel = busy
+    ? "正在同步…"
+    : syncStatus === "has_update"
+      ? "同步更新"
+      : syncStatus === "sync_failed"
+        ? "重试同步"
+        : "重新同步"
 
   return (
     <section
       className="session-center session-remote-readonly"
       aria-label={`${conversation.title || "未命名会话"}（只读）`}
     >
-      <div className="session-head-wrap">
-        <header className="session-heading">
-          <div className="session-heading-main">
-            <h1>{conversation.title || "未命名会话"}</h1>
-            <div className="session-subtitle">
-              <span>{ownerName}</span>
-              <span>·</span>
-              <span>{kind === "remote_self" ? "本人会话 · 只读" : "队友会话 · 只读"}</span>
-              <span>·</span>
-              <span>更新于 {briefUploadedLabel}</span>
-            </div>
-          </div>
-          <div className="session-heading-actions">
-            <span className="wb-status-badge" data-tone={syncTone}>{syncText}</span>
-            {hasDownloadedMessages ? (
-              <button
-                type="button"
-                className="wb-button wb-button-secondary wb-button-small"
-                disabled={busy}
-                onClick={onSyncConversation}
-              >
-                <RefreshIcon size={13} />
-                <span>{busy ? "正在同步…" : syncStatus === "has_update" ? "同步更新" : "重新同步"}</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="wb-button wb-button-quiet wb-button-small"
-                disabled={busy}
-                onClick={onRefreshBrief}
-              >
-                <RefreshIcon size={13} />
-                <span>刷新简报</span>
-              </button>
-            )}
-          </div>
-        </header>
-      </div>
-
       {hasDownloadedMessages ? (
         <>
           <div className="session-ro-strip-wrap">
@@ -165,16 +125,15 @@ export function RemoteSessionPage({
                   {syncState.cacheTruncated ? " · 缓存已截断，点击重新同步可拉取全量" : ""}
                 </span>
               )}
-              {syncStatus === "sync_failed" || syncStatus === "has_update" ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary wb-button-small session-note-action"
-                  disabled={busy}
-                  onClick={onSyncConversation}
-                >
-                  {busy ? "正在同步…" : "立即同步"}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="wb-button wb-button-secondary wb-button-small session-note-action"
+                disabled={busy}
+                onClick={onSyncConversation}
+              >
+                <RefreshIcon size={12} />
+                <span>{syncActionLabel}</span>
+              </button>
             </div>
           </div>
 
@@ -196,7 +155,7 @@ export function RemoteSessionPage({
           <div className="session-remote-brief">
             <div className="session-brief-top">
               <div className="session-brief-title-group">
-                <h2>{ownerName} 的会话简报</h2>
+                <h2>{kind === "remote_self" ? "本人其他设备的会话简报" : `${ownerName} 的会话简报`}</h2>
                 <span className="session-brief-meta">最近上传于 {briefUploadedLabel}</span>
               </div>
               <span className="wb-status-badge">

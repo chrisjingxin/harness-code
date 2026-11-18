@@ -51,7 +51,7 @@ const DESKTOP_NAMESPACE = "desktop-window"
 const workspaceDefaults: WorkspacePersonal = { projectId: null, panels: { left: { open: true, width: 280 }, right: { open: true, width: 340 } } }
 const navigationDefaults: ProjectNavigationPersonal = { page: { kind: "new" }, expandedMembers: [], selfCollapsed: false }
 const pageNames: Record<ProjectPage["kind"], string> = {
-  new: "新对话", conversation: "会话", board: "项目看板", tasks: "项目任务", task: "任务详情", info: "项目资料", knowledge: "团队知识",
+  new: "新对话", conversation: "会话", board: "Project 看板", tasks: "任务", task: "任务详情", info: "Project 资料与成员", knowledge: "团队知识库",
 }
 const defaultSessions: NavigationSessionSource = {
   entries: [],
@@ -708,6 +708,48 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     <WorkbenchLayout
       titleBarClassName={props.titleBarClassName}
       context={headerContext}
+      renderHeaderTitle={({ leftCollapsed }) => {
+        if (scope && activeProvider?.headerTitle) {
+          const custom = activeProvider.headerTitle({ scope, page, leftCollapsed })
+          if (custom !== null && custom !== undefined) return custom
+        }
+        if (!current) return <span className="tb-name">协作工作台</span>
+        const viewTitle = pageNames[page.kind]
+        const countLabel = page.kind === "info"
+          ? `${members.length} 位成员`
+          : page.kind === "board"
+            ? !providers.board
+              ? `${collab.tasks.length} 个任务 · ${members.length} 人`
+              : props.taskCount !== null && props.taskCount !== undefined
+                ? `${props.taskCount} 项待办 · ${members.length} 人`
+                : `${members.length} 位成员`
+            : page.kind === "tasks" || page.kind === "task"
+              ? !providers.tasks
+                ? `${collab.tasks.length} 个任务`
+                : props.taskCount !== null && props.taskCount !== undefined
+                  ? `${props.taskCount} 项待办`
+                  : ""
+              : page.kind === "knowledge"
+                ? !providers.knowledge
+                  ? `${collab.knowledge.length} 条可引用`
+                  : leftCollapsed
+                    ? ""
+                    : props.workspaceName
+                : ""
+        const crumbLabel = page.kind === "knowledge" ? props.workspaceName : current.name
+        return (
+          <>
+            {leftCollapsed && crumbLabel ? (
+              <span className="tb-crumb">
+                <span className="tb-crumb-name">{crumbLabel}</span>
+                <span className="tb-crumb-sep" aria-hidden="true">/</span>
+              </span>
+            ) : null}
+            <span className="tb-name">{viewTitle}</span>
+            {countLabel ? <span className="tb-count">{countLabel}</span> : null}
+          </>
+        )
+      }}
       backButton={backButton}
       headerExtra={headerExtra}
       colorScheme={props.colorScheme}

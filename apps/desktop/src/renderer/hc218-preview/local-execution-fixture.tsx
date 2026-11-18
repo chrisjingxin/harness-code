@@ -37,16 +37,19 @@ export function LocalExecutionFixture({ scope }: { readonly scope: ConversationS
 
   return (
     <section className="session-center" aria-label={localExecutionFixtureTitle}>
-      <header className="session-heading">
-        <div>
-          <h1>{localExecutionFixtureTitle}</h1>
-          <p className="session-subtitle">模拟显示事件，发送后依次出现思考、工具组与回答，约 25 秒后结束。输入「拒绝测试」可验证拒绝后保留草稿。</p>
-        </div>
-        <label>
+      <div
+        className="view-bar"
+        style={{ padding: "12px var(--pad-stage, 24px) 0", maxWidth: 788, width: "100%", margin: "0 auto" }}
+      >
+        <span className="meta">
+          模拟显示事件，发送后依次出现思考、工具组与回答，约 25 秒后结束；输入「拒绝测试」可验证保留草稿。
+        </span>
+        <span className="vb-spacer" />
+        <label className="od-row" style={{ fontSize: "var(--text-xs)", color: "var(--fg-2)" }}>
           <input type="checkbox" checked={available} onChange={event => setAvailable(event.currentTarget.checked)} />
           模拟宿主可用
         </label>
-      </header>
+      </div>
       <div className="session-conversation-wrap">
         <ConversationView
           {...view}

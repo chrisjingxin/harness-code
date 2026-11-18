@@ -92,8 +92,7 @@ export function TeamKnowledge(props: TeamKnowledgeProps) {
   return <KnowledgePage key={JSON.stringify([namespace, accountId, teamId])} {...props} />
 }
 
-function KnowledgePage({ scope, teamName, items, actions, rendering, controls, initialItemId, onEditItem }: TeamKnowledgeProps) {
-  const heading = useId()
+function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, onEditItem }: TeamKnowledgeProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [content, setContent] = useState<Resource<KnowledgeVersionContent> | null>(null)
   const [history, setHistory] = useState<HistoryState>({ status: "closed" })
@@ -155,12 +154,8 @@ function KnowledgePage({ scope, teamName, items, actions, rendering, controls, i
   const readable = Boolean(reference?.status === "ready")
   const historyAvailable = Boolean(actions.readHistory && actions.readVersion)
   return (
-    <section className="team-knowledge-page" aria-labelledby={heading}>
-      <header className="team-knowledge-heading">
-        <h1 id={heading}>团队知识</h1>
-        <p>{teamName}</p>
-        {controls}
-      </header>
+    <section className="team-knowledge-page" aria-label="团队知识">
+      {controls ? <div className="view-bar">{controls}</div> : null}
       <div className="team-knowledge-layout">
         <nav className="team-knowledge-list" aria-label="知识条目">
           <h2>知识条目</h2>

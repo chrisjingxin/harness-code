@@ -37,6 +37,8 @@ export type ProjectPageProvider = {
   right?(context: { scope: ProjectNavigationScope; page: ProjectPage; slot: WorkbenchRightSlot }): ReactNode | null
   /** 可选：会话等页面覆盖顶栏上下文；返回 null 时使用外壳默认标题。 */
   context?(context: { scope: ProjectNavigationScope; page: ProjectPage }): CollaborationContextView | null
+  /** 可选：渲染单行顶栏左侧上下文标题区；返回 null 或未实现时由工作台默认标题逻辑接管。 */
+  headerTitle?(context: { scope: ProjectNavigationScope; page: ProjectPage; leftCollapsed: boolean }): ReactNode | null
 }
 
 /** 由装配层按实际已交付模块提供的页面提供者集合；未提供的页面显示“尚未接入”。 */

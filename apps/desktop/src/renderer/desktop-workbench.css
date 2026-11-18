@@ -2,7 +2,7 @@
 html, body, #root { height: 100%; overflow: hidden; }
 
 .desktop-titlebar {
-  min-height: max(54px, env(titlebar-area-height, 0px));
+  min-height: max(var(--topbar-h, 48px), env(titlebar-area-height, 0px));
   -webkit-app-region: drag;
   user-select: none;
 }

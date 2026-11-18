@@ -120,24 +120,22 @@ export function ProjectInfoPage({
   return (
     <section className="pnav-page" aria-label="项目资料">
       <div className="pnav-page-content">
-        <div className="page-head">
-          <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h1>Project 资料与成员</h1>
-            <span className="sub">{workspaceName ? `${workspaceName} / ` : ""}{project.name}</span>
+        {(archived || (manage && !editing)) && (
+          <div className="view-bar">
+            <span className="vb-spacer" />
+            {archived ? (
+              <span className="status-badge">项目已归档</span>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditing({ name: project.name, description: project.description })}
+              >
+                编辑资料与成员
+              </button>
+            )}
           </div>
-          <span className="spacer" />
-          {archived ? (
-            <span className="status-badge">项目已归档</span>
-          ) : manage && !editing ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setEditing({ name: project.name, description: project.description })}
-            >
-              编辑资料与成员
-            </button>
-          ) : null}
-        </div>
+        )}
 
         <div className="info-grid">
           <div className="pnav-info-col">

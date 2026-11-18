@@ -292,6 +292,10 @@ function Preview(): ReactElement {
     canCreateConversation: true,
     execution: { getAvailability: () => ({ available: false, reason: "本机 Agent 与 ACP 内核尚未接入，支持选择普通目录与保存草稿。" }) },
     rendering: { copyText: text => window.workbench.copyText(text) },
+    resolveOwner: userId => {
+      const m = members.find(item => item.userId === userId)
+      return m ? { userNo: m.userNo ?? "", userName: m.userName, photo: "" } : undefined
+    },
     resolveOwnerName: userId => members.find(m => m.userId === userId)?.userName ?? userId,
     onChooseNewDirectory: () => { void pickDirectory(path => setNewDraft(prev => ({ ...prev, directoryPath: path }))) },
     onNewDraftChange: text => setNewDraft(prev => ({ ...prev, draftText: text })),
@@ -393,6 +397,19 @@ function Preview(): ReactElement {
   return (
     <WorkbenchLayout
       context={provider.context?.({ scope, page }) ?? { title: "零售核心架构演进", projectName: "零售核心架构演进" }}
+      renderHeaderTitle={({ leftCollapsed }) => page.kind === "conversation" && page.conversationId === LOCAL_EXECUTION_FIXTURE_ID
+        ? (
+          <>
+            {leftCollapsed ? (
+              <span className="tb-crumb">
+                <span className="tb-crumb-name">零售核心架构演进</span>
+                <span className="tb-crumb-sep" aria-hidden="true">/</span>
+              </span>
+            ) : null}
+            <span className="tb-name">{localExecutionFixtureTitle}</span>
+          </>
+        )
+        : provider.headerTitle?.({ scope, page, leftCollapsed })}
       navigation={
         <ProjectNavigation
           view={{

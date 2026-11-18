@@ -8,6 +8,7 @@
  * 并在不破坏作用域隔离的前提下提供只读态右键栏隐藏、顶栏上下文输出与缺失会话降级展示。
  */
 import type { ReactElement, ReactNode } from "react"
+import type { UserSummary } from "@workbench/contracts"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -17,8 +18,10 @@ import type {
   RenderingActions,
   WorkbenchRightSlot,
 } from "@workbench/ui"
+import { UserAvatar } from "../collaboration-views/index.js"
 import type { ProjectPage, ProjectPageProvider, ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort, NewSessionDraft, ProjectConversationSummary, SessionExternalHooks, SessionKind, SessionSyncState } from "./contracts.js"
+import { ChevronDownIcon, FolderIcon } from "./icons.js"
 import { LocalSessionPage } from "./local-session-page.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import { NewSessionPage } from "./new-session-page.js"
@@ -28,6 +31,7 @@ import {
   classifyConversation,
   decodeHistoryToTimelineEntries,
   deriveSyncStatus,
+  directoryBasename,
   emptySyncState,
 } from "./session-model.js"
 
@@ -111,6 +115,8 @@ export type SessionPageController = {
   readonly execution: LocalSessionExecutionPort
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
+  /** 可选：根据成员 ID 返回头像与工号等资料，供跨机只读会话顶栏展示队友头像。 */
+  resolveOwner?(userId: string): Pick<UserSummary, "userNo" | "userName" | "photo"> | undefined
   resolveOwnerName(userId: string): string
   onChooseNewDirectory(): void
   onNewDraftChange(text: string): void
@@ -205,7 +211,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             scope={convScope}
             visible={visible}
             conversation={conversation}
-            ownerName={ownerName}
             directoryPath={controller.directories[conversation.conversationId] ?? null}
             entries={entries}
             contentRevision={syncState.localSyncedSequence}
@@ -214,7 +219,6 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             rendering={controller.rendering}
             hooks={controller.hooks}
             centralFiles={controller.getCentralFiles?.({ scope, conversation })}
-            onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             onPersonalChange={controller.onPersonalChange}
             onCapabilitySelect={controller.onCapabilitySelect}
             onRequestFileCandidates={controller.onRequestFileCandidates}
@@ -251,6 +255,110 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       // 跨机器会话（含本人其他设备）一律禁止挂载实时文件面板。
       if (classify(conversation) !== "local") return null
       return controller.renderLocalRight?.({ scope, conversation, slot }) ?? null
+    },
+
+    headerTitle({ page, leftCollapsed }): ReactElement | null {
+      const crumb = leftCollapsed && controller.projectName ? (
+        <span className="tb-crumb">
+          <span className="tb-crumb-name">{controller.projectName}</span>
+          <span className="tb-crumb-sep" aria-hidden="true">/</span>
+        </span>
+      ) : null
+
+      if (page.kind === "new") {
+        return (
+          <>
+            {crumb}
+            <span className="tb-name">新建会话</span>
+            <span className="tb-count">本机执行</span>
+          </>
+        )
+      }
+
+      if (page.kind !== "conversation") return null
+
+      const conversation = findConversation(page.conversationId)
+      if (!conversation) {
+        return (
+          <>
+            {crumb}
+            <span className="tb-name">{controller.projectName || "会话不可用"}</span>
+          </>
+        )
+      }
+
+      const kind = classify(conversation)
+      const title = conversation.title || "未命名会话"
+      const isLocal = kind === "local"
+
+      if (isLocal) {
+        const directoryPath = controller.directories[conversation.conversationId] ?? null
+        const folderName = directoryBasename(directoryPath)
+        const activeExecution = controller.execution.getView?.(conversation.conversationId)
+        const isRunning = Boolean(activeExecution?.activeTurnId)
+        return (
+          <>
+            {crumb}
+            <span className="tb-name" title={title}>{title}</span>
+            <button
+              type="button"
+              className="tb-dir session-directory-button"
+              title={directoryPath ? `本机工作目录：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
+              onClick={() => controller.onChooseSessionDirectory(conversation.conversationId)}
+            >
+              <FolderIcon size={12} />
+              <span className="d">{folderName || "选择工作目录"}</span>
+              <span className="chev" aria-hidden="true"><ChevronDownIcon size={11} /></span>
+            </button>
+            {isRunning ? (
+              <span className="tb-state running">
+                <span className="d" aria-hidden="true" />
+                运行中
+              </span>
+            ) : null}
+          </>
+        )
+      }
+
+      const owner = controller.resolveOwner?.(conversation.ownerUserId)
+      const ownerName = controller.resolveOwnerName(conversation.ownerUserId)
+      const syncState = controller.syncStates[conversation.conversationId] ?? emptySyncState()
+      const syncStatus = deriveSyncStatus({
+        kind,
+        remoteSyncedSequence: conversation.syncedSequence,
+        localSyncedSequence: syncState.localSyncedSequence,
+        syncing: syncState.syncing,
+        syncError: syncState.syncError,
+      })
+      const hasDownloadedMessages = syncState.messages.length > 0 || (syncState.localSyncedSequence > 0 && syncStatus !== "unsynced")
+      const stateBadge = syncStatus === "syncing"
+        ? <span className="tb-state sync"><span className="d" aria-hidden="true" />同步中… · 只读</span>
+        : syncStatus === "has_update"
+          ? <span className="tb-state sync"><span className="d" aria-hidden="true" />有更新 · 只读</span>
+          : syncStatus === "sync_failed"
+            ? <span className="tb-state failed"><span className="d" aria-hidden="true" />同步失败 · 只读</span>
+            : hasDownloadedMessages
+              ? <span className="tb-state ro">已同步 · 只读</span>
+              : <span className="tb-state sync"><span className="d" aria-hidden="true" />未同步 · 只读</span>
+
+      return (
+        <>
+          {kind === "remote_other" ? (
+            <span className="tb-peer">
+              <UserAvatar user={owner ? { ...owner, userName: owner.userName || ownerName } : { userName: ownerName }} name={ownerName} size={20} />
+              <span className="tb-peer-name">{ownerName}</span>
+            </span>
+          ) : (
+            <>
+              {crumb}
+              <span className="tb-peer-name">本人其他设备</span>
+            </>
+          )}
+          <span className="tb-dot-sep" aria-hidden="true">·</span>
+          <span className="tb-name" title={title}>{title}</span>
+          {stateBadge}
+        </>
+      )
     },
 
     context({ page }): CollaborationContextView | null {

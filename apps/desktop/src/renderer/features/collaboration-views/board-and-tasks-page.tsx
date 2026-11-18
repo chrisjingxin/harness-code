@@ -17,13 +17,12 @@ const BOARD_COLUMNS: readonly { status: CollabTaskStatus; label: string }[] = [
 ]
 
 export function ProjectBoardPage({
-  projectName,
   members,
   tasks,
   onGoTasks,
   onOpenTask,
 }: {
-  readonly projectName: string
+  readonly projectName?: string
   readonly members: readonly NavigationMember[]
   readonly tasks: readonly CollabTask[]
   readonly onGoTasks: () => void
@@ -33,12 +32,9 @@ export function ProjectBoardPage({
 
   return (
     <div className="collab-page-stage">
-      <div className="page-head">
-        <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-          <h1>Project 看板</h1>
-          <span className="sub">{projectName} · {tasks.length} 个任务 · {members.length} 位成员</span>
-        </div>
-        <span className="spacer" />
+      <div className="view-bar">
+        <span className="meta">{tasks.length} 个任务 · {members.length} 位成员</span>
+        <span className="vb-spacer" />
         <button type="button" className="btn btn-secondary btn-sm" onClick={onGoTasks}>去任务列表</button>
       </div>
 
@@ -117,12 +113,7 @@ export function ProjectTasksPage({
 
   return (
     <div className="collab-page-stage">
-      <div className="page-head">
-        <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-          <h1>任务</h1>
-          <span className="sub">{projectName} · {tasks.length} 个任务</span>
-        </div>
-        <span className="spacer" />
+      <div className="view-bar">
         <div className="seg" role="tablist" aria-label="任务筛选">
           {([
             ["assigned", "指派给我"],
@@ -141,6 +132,7 @@ export function ProjectTasksPage({
             </button>
           ))}
         </div>
+        <span className="vb-spacer" />
         <button type="button" className="btn btn-primary btn-sm" onClick={onOpenDispatchDialog}>
           <PlusIcon size={14} />
           <span>派发任务</span>

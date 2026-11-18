@@ -14,6 +14,7 @@ import type {
   LocalDirectoryHost,
   MemberSummary,
   ProjectConversationHost,
+  UserSummary,
 } from "@workbench/contracts"
 import type { ConversationPersonalState, ConversationScope, RenderingActions } from "@workbench/ui"
 import type { ConversationPersonal, ProjectDraftPersonal } from "../../../personal-host.js"
@@ -785,9 +786,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [currentScopeKey, activeConversations, recordsByKey])
 
-  const memberNameById = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const member of members) map.set(member.user.id, member.user.userName)
+  const memberById = useMemo(() => {
+    const map = new Map<string, UserSummary>()
+    for (const member of members) map.set(member.user.id, member.user)
     return map
   }, [members])
 
@@ -830,7 +831,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [])
   const localExecutionPort = useLocalExecution(
     localExecution, scope, selectedIsLocal ? selectedConversationId : null,
-    selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我",
+    selectedDirectoryPath, directorySelectionRevision, memberById.get(userId)?.userName ?? "我",
     commitAcceptedDraft,
     refreshExecutionWorkspace,
   )
@@ -911,7 +912,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     newSessionError,
     execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
-    resolveOwnerName: ownerId => memberNameById.get(ownerId) ?? `成员 (${ownerId.slice(0, 6)})`,
+    resolveOwner: ownerId => memberById.get(ownerId),
+    resolveOwnerName: ownerId => memberById.get(ownerId)?.userName ?? `成员 (${ownerId.slice(0, 6)})`,
     onChooseNewDirectory,
     onNewDraftChange,
     onStartNewSession: () => { void onStartNewSession() },
@@ -1008,7 +1010,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     execution,
     localExecutionPort,
     rendering,
-    memberNameById,
+    memberById,
     onChooseNewDirectory,
     onNewDraftChange,
     onStartNewSession,

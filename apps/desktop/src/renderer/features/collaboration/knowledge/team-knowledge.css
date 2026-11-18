@@ -1,21 +1,11 @@
 /* 知识阅读和版本预览使用公共主题变量、按钮及 Markdown 样式。 */
-.team-knowledge-page { width: min(100%, 1080px); margin-inline: auto; padding: var(--pad-stage, 24px); }
-.team-knowledge-heading { margin-bottom: 18px; }
-.team-knowledge-heading h1 {
-  margin: 0;
-  font-size: var(--text-xl);
-  font-weight: 600;
-  letter-spacing: -.01em;
-  line-height: var(--leading-tight);
-  color: var(--fg);
-}
-.team-knowledge-heading p { margin: 4px 0 0; color: var(--muted); font-size: var(--text-sm); }
+.team-knowledge-page { width: min(100%, 1080px); margin-inline: auto; padding: 16px var(--pad-stage, 24px) var(--pad-stage, 24px); }
 .team-knowledge-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 14px;
+  flex: 1 1 auto;
 }
 .team-knowledge-search-input {
   flex: 1 1 220px;

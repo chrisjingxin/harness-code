@@ -1,7 +1,7 @@
 /* 项目资料页、双栏面板与表单样式（对齐原型稿 viewProject / .info-grid / .panel / .member-row / .stat-row）。 */
 .pnav-page-slot { height: 100%; min-height: 0; }
 .pnav-page-slot[hidden] { display: none; }
-.pnav-page { box-sizing: border-box; height: 100%; overflow: auto; padding: var(--pad-stage, 24px); background: var(--bg); }
+.pnav-page { box-sizing: border-box; height: 100%; overflow: auto; padding: 16px var(--pad-stage, 24px) var(--pad-stage, 24px); background: var(--bg); }
 .pnav-page > h1 { margin: 0 0 6px; font-size: var(--text-xl); font-weight: 600; color: var(--text); }
 .pnav-page-status { margin: 6px 0 12px; color: var(--muted); font-size: var(--text-base); line-height: 1.7; }
 .pnav-page-note { margin: 10px 0 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.65; }

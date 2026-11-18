@@ -18,10 +18,8 @@ import type {
   RenderingActions,
 } from "@workbench/ui"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
-import { ChevronDownIcon, FolderIcon } from "./icons.js"
 import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
-import { directoryBasename, formatShortTime } from "./session-model.js"
 import { describePermissionRequest, projectLocalExecution } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
@@ -30,7 +28,6 @@ export type LocalSessionPageProps = {
   readonly scope: ConversationScope
   readonly visible: boolean
   readonly conversation: ProjectConversationSummary
-  readonly ownerName: string
   readonly directoryPath: string | null
   readonly entries: readonly ConversationTimelineEntry[]
   readonly contentRevision: number
@@ -39,7 +36,6 @@ export type LocalSessionPageProps = {
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
   readonly centralFiles?: SessionCentralFilesState
-  readonly onChooseDirectory: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
   readonly onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
@@ -50,7 +46,6 @@ export function LocalSessionPage({
   scope,
   visible,
   conversation,
-  ownerName,
   directoryPath,
   entries,
   contentRevision,
@@ -59,7 +54,6 @@ export function LocalSessionPage({
   rendering,
   hooks,
   centralFiles,
-  onChooseDirectory,
   onPersonalChange,
   onCapabilitySelect,
   onRequestFileCandidates,
@@ -72,7 +66,6 @@ export function LocalSessionPage({
   }, [viewingFile])
   const availability = execution.getAvailability(conversation.conversationId)
   const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
-  const folderName = directoryBasename(directoryPath)
   const referenceKey = JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId, conversation.projectId, directoryPath])
   const activeReference = useRef({ key: referenceKey, visible })
   const referenceRequest = useRef(0)
@@ -147,44 +140,11 @@ export function LocalSessionPage({
   const view = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
-  const isRunning = Boolean(activeExecution?.activeTurnId)
-  const updatedLabel = formatShortTime(conversation.updatedAt)
 
   return (
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
-          <div className="session-head-wrap">
-            <header className="session-heading">
-              <div className="session-heading-main">
-                <h1>{conversation.title || "未命名会话"}</h1>
-                <div
-                  className="session-subtitle"
-                  title={`会话所有者：${ownerName} · Project 内共享（仅同步已上传的简报与定稿消息）`}
-                >
-                  <span>本机执行 · 最近更新 {updatedLabel}</span>
-                  <button
-                    type="button"
-                    className="session-directory-button"
-                    onClick={onChooseDirectory}
-                    title={directoryPath ? `当前工作目录（仅本机可用）：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
-                  >
-                    <FolderIcon size={12} />
-                    <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
-                    <ChevronDownIcon size={11} />
-                  </button>
-                </div>
-              </div>
-              <div className="session-heading-actions">
-                <span
-                  className={`status-badge session-status-badge${isRunning ? " running is-running" : ""}`}
-                  title="项目成员仅可主动同步已上传的简报与定稿消息；你本机选择的目录不会暴露给他人。"
-                >
-                  {isRunning ? "本机运行中" : "本机空闲"}
-                </span>
-              </div>
-            </header>
-          </div>
           <div className="session-conversation-wrap">
             <ConversationView
               {...view}

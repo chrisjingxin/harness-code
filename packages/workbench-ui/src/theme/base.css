@@ -37,7 +37,7 @@
   --gap-list: 4px;
   --sidebar-w: 256px;
   --rail-w: 300px;
-  --topbar-h: 56px;
+  --topbar-h: 48px;
 
   --motion-fast: 140ms;
   --motion-base: 200ms;
@@ -200,6 +200,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .page-head h1 { font-size: var(--text-xl); line-height: 1.4; color: var(--fg); }
 .page-head .sub { font-size: var(--text-sm); color: var(--muted); }
 .page-head .spacer { flex: 1 1 0; }
+
+/* 视图工具条：只放当前视图真正需要的筛选与动作，不再重复顶栏已承载的页面标题。 */
+.view-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; min-height: 28px; }
+.view-bar .vb-spacer { flex: 1 1 0; }
 
 .empty-block {
   display: flex; flex-direction: column; align-items: center; gap: 10px;

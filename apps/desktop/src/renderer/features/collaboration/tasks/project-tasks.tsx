@@ -36,9 +36,9 @@ const filters = [
 ] as const
 
 /** 任务行以返回的任务标识请求定位，列表数据由宿主更新。 */
-export function ProjectTaskList({ accountId, projectName, tasks, onCreateTask, onOpenTask }: {
+export function ProjectTaskList({ accountId, tasks, onCreateTask, onOpenTask }: {
   readonly accountId: string
-  readonly projectName: string
+  readonly projectName?: string
   readonly tasks: readonly ProjectTaskSummary[]
   onCreateTask?(): void
   onOpenTask(taskId: string): void
@@ -47,24 +47,20 @@ export function ProjectTaskList({ accountId, projectName, tasks, onCreateTask, o
   const visibleTasks = tasks.filter(task => (
     filter === "all" || (filter === "assigned" ? task.assignee.id : task.publisher.id) === accountId
   ))
-  const heading = useId()
 
   return (
-    <section className="project-task-page" aria-labelledby={heading}>
-      <header className="project-task-heading">
-        <div>
-          <h1 id={heading}>项目任务</h1>
-          <p>{projectName}</p>
+    <section className="project-task-page" aria-label="项目任务">
+      <div className="view-bar">
+        <div className="project-task-filters" role="group" aria-label="任务筛选">
+          {filters.map(item => (
+            <button key={item.id} type="button" className="wb-button wb-button-quiet wb-button-small"
+              aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>
+              {item.label}
+            </button>
+          ))}
         </div>
+        <span className="vb-spacer" />
         {onCreateTask && <button type="button" className="wb-button wb-button-primary" onClick={onCreateTask}>创建任务</button>}
-      </header>
-      <div className="project-task-filters" role="group" aria-label="任务筛选">
-        {filters.map(item => (
-          <button key={item.id} type="button" className="wb-button wb-button-quiet wb-button-small"
-            aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>
-            {item.label}
-          </button>
-        ))}
       </div>
       {visibleTasks.length ? (
         <ul className="project-task-list">

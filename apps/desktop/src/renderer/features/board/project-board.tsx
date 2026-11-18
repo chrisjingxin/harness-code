@@ -39,13 +39,24 @@ const conversationLabels = {
 }
 
 export function ProjectBoard(props: ProjectBoardProps) {
-  const { data, projectName, description, busy, error, updatedAt, notification } = props
+  const { data, description, busy, error, updatedAt, notification } = props
   const model = useMemo(() => data ? buildBoardModel(data) : null, [data])
   const [locateError, setLocateError] = useState("")
   return <div className="project-board-scroll">
     <main className="project-board" aria-label="项目看板">
-      <header className="project-board-heading">
-        <div><h1>{projectName}</h1>{description && <p>{description}</p>}</div>
+      <div className="view-bar project-board-top">
+        <div className="project-board-summary" aria-label="项目概况">
+          {data && model && <>
+            <span><strong>{model.activeMembers}</strong> 位成员</span>
+            <span><strong>{data.conversations.length}</strong> 条近期会话</span>
+            <span><strong>{data.tasks.length}</strong> 项未结束任务</span>
+          </>}
+          <span className="project-board-updated">
+            {busy ? "正在刷新" : updatedAt !== null ? `更新于 ${formatShortTime(updatedAt)}` : null}
+            <span className="project-board-notification" aria-live="polite">{statusLabels[notification]}</span>
+          </span>
+        </div>
+        <span className="vb-spacer" />
         <div className="project-board-actions">
           <button className="wb-button wb-button-secondary wb-button-small" onClick={props.onOpenProject}>项目资料</button>
           <button className="wb-button wb-button-secondary wb-button-small" disabled={busy} onClick={() => {
@@ -54,18 +65,8 @@ export function ProjectBoard(props: ProjectBoardProps) {
           }}>刷新</button>
           {props.onCreateTask && <button className="wb-button wb-button-primary wb-button-small" onClick={props.onCreateTask}>创建任务</button>}
         </div>
-      </header>
-      <div className="project-board-summary" aria-label="项目概况">
-        {data && model && <>
-          <span><strong>{model.activeMembers}</strong> 位成员</span>
-          <span><strong>{data.conversations.length}</strong> 条近期会话</span>
-          <span><strong>{data.tasks.length}</strong> 项未结束任务</span>
-        </>}
-        <span className="project-board-updated">
-          {busy ? "正在刷新" : updatedAt !== null ? `更新于 ${formatShortTime(updatedAt)}` : null}
-          <span className="project-board-notification" aria-live="polite">{statusLabels[notification]}</span>
-        </span>
       </div>
+      {description && <p className="project-board-desc">{description}</p>}
       {(error || locateError) && <p className="project-board-error" role="status">{error || locateError}</p>}
       {data && model && <>
         <section aria-labelledby="board-members">

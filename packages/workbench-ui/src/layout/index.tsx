@@ -30,6 +30,8 @@ export type WorkbenchLayoutProps = {
   /** 正式窗口按平台给原生按钮和拖动区留空间。 */
   titleBarClassName?: string;
   context: CollaborationContextView | null;
+  /** 自定义单行顶栏标题区渲染器；传入左栏当前是否收起（含窄屏自动收起），返回 null/undefined 或未提供时回退到 context 单行展示。 */
+  renderHeaderTitle?: (state: { leftCollapsed: boolean }) => ReactNode;
   /** 顶栏返回按钮（如查看队友跨机只读会话时“← 返回我的会话”）。 */
   backButton?: ReactNode;
   /** 顶栏右侧协作成员区（如头像叠放触发器 + 数量）。 */
@@ -270,6 +272,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
 
   const isMac = props.titleBarClassName?.includes("macos") ?? false;
   const isWin = props.titleBarClassName?.includes("windows") ?? false;
+  const leftCollapsed = leftMode === "hidden";
+  const customHeaderTitle = props.renderHeaderTitle?.({ leftCollapsed });
 
   return (
     <div
@@ -326,9 +330,23 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
           }
         >
           {props.backButton}
-          <div className="collaboration-header-context">
-            <strong>{props.context?.title ?? "请选择会话"}</strong>
-            {subtitle ? <span>{subtitle}</span> : null}
+          <div className="collaboration-header-context tb-title">
+            {customHeaderTitle !== null && customHeaderTitle !== undefined ? (
+              customHeaderTitle
+            ) : (
+              <>
+                {leftCollapsed && props.context?.projectName ? (
+                  <span className="tb-crumb">
+                    <span className="tb-crumb-name">{props.context.projectName}</span>
+                    <span className="tb-crumb-sep" aria-hidden="true">/</span>
+                  </span>
+                ) : null}
+                <strong className="tb-name" title={props.context?.title ?? "请选择会话"}>
+                  {props.context?.title ?? "请选择会话"}
+                </strong>
+                {subtitle ? <span className="tb-count">{subtitle}</span> : null}
+              </>
+            )}
           </div>
           {props.headerExtra ? (
             <div className="collaboration-header-collab">{props.headerExtra}</div>

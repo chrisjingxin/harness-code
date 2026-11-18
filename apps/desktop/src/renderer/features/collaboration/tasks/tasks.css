@@ -2,17 +2,9 @@
 .project-task-page {
   width: min(100%, 880px);
   margin-inline: auto;
-  padding: var(--pad-stage, 24px);
+  padding: 16px var(--pad-stage, 24px) var(--pad-stage, 24px);
   overflow-wrap: anywhere;
 }
-.project-task-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.project-task-heading > button { flex: none; }
 .project-task-page h1 {
   margin: 0;
   font-size: var(--text-xl);
@@ -21,12 +13,12 @@
   line-height: var(--leading-tight);
   color: var(--fg);
 }
-.project-task-heading p, .project-task-detail-heading p {
+.project-task-detail-heading p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.project-task-filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.project-task-filters { display: flex; flex-wrap: wrap; gap: 4px; }
 .project-task-filters [aria-pressed="true"] {
   background: var(--selected);
   color: var(--fg);

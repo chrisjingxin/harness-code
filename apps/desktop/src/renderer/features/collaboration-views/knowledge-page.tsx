@@ -10,8 +10,6 @@ import { UserAvatar } from "./collab-overlays.js"
 import type { CollabKnowledge } from "./collab-store.js"
 
 export function TeamKnowledgePage({
-  workspaceName,
-  projectName,
   members,
   knowledge,
   selectedId,
@@ -20,8 +18,8 @@ export function TeamKnowledgePage({
   onSaveEdit,
   onCiteToSession,
 }: {
-  readonly workspaceName: string
-  readonly projectName: string
+  readonly workspaceName?: string
+  readonly projectName?: string
   readonly members: readonly NavigationMember[]
   readonly knowledge: readonly CollabKnowledge[]
   readonly selectedId: string | null
@@ -52,12 +50,7 @@ export function TeamKnowledgePage({
 
   return (
     <div className="collab-page-stage">
-      <div className="page-head">
-        <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-          <h1>团队知识库</h1>
-          <span className="sub">{workspaceName} 的公共规约，加上 {projectName} 的项目沉淀</span>
-        </div>
-        <span className="spacer" />
+      <div className="view-bar">
         <div className="seg" role="tablist" aria-label="知识作用域">
           {([
             ["all", "全部可用"],
@@ -76,6 +69,7 @@ export function TeamKnowledgePage({
             </button>
           ))}
         </div>
+        <span className="vb-spacer" />
         <button type="button" className="btn btn-primary btn-sm" onClick={onCreateClick}>
           <PlusIcon size={14} />
           <span>新建知识</span>

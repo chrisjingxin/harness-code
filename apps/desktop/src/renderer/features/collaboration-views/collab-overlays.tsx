@@ -66,7 +66,7 @@ function syncToneOf(entry: NavigationSessionEntry): { cls: "updated" | "unsynced
   return { cls: "synced", text: txt, dot: false }
 }
 
-/** 顶栏「协作成员」触发器：叠放队友头像（带更新小圆点）+ 成员总人数 + 下拉箭头。 */
+/** 顶栏「协作成员」触发器：叠放最多 3 个 22px 队友头像（带更新小圆点）+ 成员总人数 + 更新圆点 + 下拉箭头。 */
 export function TopbarCollabButton({
   members,
   selfUserId,
@@ -82,6 +82,7 @@ export function TopbarCollabButton({
 }): ReactElement {
   const mates = members.filter(m => m.userId !== selfUserId)
   const hasUpd = (uid: string) => peerEntries.some(e => e.ownerUserId === uid && e.badge?.tone === "warning")
+  const anyUpd = mates.some(m => hasUpd(m.userId))
 
   return (
     <button
@@ -90,20 +91,21 @@ export function TopbarCollabButton({
       aria-haspopup="dialog"
       aria-expanded={expanded}
       title="协作成员与队友会话"
-      aria-label={`协作成员 ${members.length}`}
+      aria-label={`协作成员 ${members.length} 人${anyUpd ? " · 有更新" : ""}`}
       onClick={onClick}
     >
       <span className="av-stack">
-        {mates.slice(0, 5).map(m => (
+        {mates.slice(0, 3).map(m => (
           <span key={m.userId} className="av-dot-wrap">
-            <UserAvatar user={m} size={24} />
+            <UserAvatar user={m} size={22} />
             {hasUpd(m.userId) && <span className="av-dot" aria-hidden="true" />}
           </span>
         ))}
       </span>
-      <span className="collab-count">协作成员 {members.length}</span>
-      <span className="collab-chev">
-        <svg className="od-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <span className="collab-count">{members.length}</span>
+      {anyUpd && <span className="collab-dot" aria-hidden="true" />}
+      <span className="collab-chev" aria-hidden="true">
+        <svg className="od-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="m6 9 6 6 6-6" />
         </svg>
       </span>
