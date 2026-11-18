@@ -34,7 +34,7 @@ test = [
 # DeepAgents 0.7.3 imports Anthropic integrations at module load time, but
 # Harness always supplies an explicit model and never uses that provider.
 # Keep the packages out of resolution and let the installation step apply the
-# source patch recorded under scripts/dependencies/.
+# source patch recorded under packages/agent/scripts/.
 exclude-dependencies = [
     "anthropic",
     "langchain-anthropic",

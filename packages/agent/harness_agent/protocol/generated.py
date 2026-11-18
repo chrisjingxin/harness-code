@@ -1,4 +1,4 @@
-"""由 packages/protocol/schema/v3.json 生成的协议入口，请勿手工修改。"""
+"""由同目录 protocol_v3.json 维护的 Harness Agent 内部协议入口，请勿手工修改。"""
 
 from __future__ import annotations
 

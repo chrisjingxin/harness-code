@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts/dependencies/check_dependencies.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/check_dependencies.py"
 SPEC = importlib.util.spec_from_file_location("check_dependencies", SCRIPT)
 assert SPEC and SPEC.loader
 CHECK = importlib.util.module_from_spec(SPEC)
@@ -95,7 +95,7 @@ def test_installed_check_scans_each_workspace_link(tmp_path: Path) -> None:
         json.dumps({"name": "anthropic-sdk", "version": "0.1.0"}),
         encoding="utf-8",
     )
-    linked_package = root / "packages/cli/node_modules/anthropic-sdk"
+    linked_package = root / "apps/desktop/node_modules/anthropic-sdk"
     linked_package.parent.mkdir(parents=True)
     try:
         linked_package.symlink_to(cache_package, target_is_directory=True)

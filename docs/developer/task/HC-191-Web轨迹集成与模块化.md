@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: -
 decomposed_by: 历史未记录
 priority: P1
-status: 进行中
+status: 已过时
 owner: Codex
 branch: trace_merge
 scope: 在主仓库集成内网既有 Trace 功能并统一主题，隔离展示、数据与宿主接线，验收后一次性迁回内网。
@@ -13,7 +13,7 @@ acceptance: Trace 功能与内网基线一致；当前 Web 行为保留；双主
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-191-Web轨迹集成与模块化.md、docs/developer/plan/HC-191-Web轨迹集成与模块化.md、docs/developer/todo/HC-191-Web轨迹集成与模块化.md
 test_evidence: "dev 本地迁移复核：typecheck、build、额外夹具类型检查通过；相关回归 428 pass，浏览器布局 13 pass，接管恢复 2 pass。CLI 全量 1344 pass / 1 skip / 1 既有高亮断言失败；工程检查受 dev 原有本地链接影响，Python 依赖门禁未通过。"
-references: docs/developer/task/HC-190-Web主题布局与Git提交.md
+references: docs/developer/task/HC-190-Web主题布局与Git提交.md；docs/developer/task/HC-201-Harness轨迹与设置扩展.md；docs/developer/task/HC-203-旧入口与依赖退役.md
 completed_at: -
 ---
 
