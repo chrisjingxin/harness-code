@@ -16,9 +16,9 @@ import workbench.collaboration.infrastructure.contract.Contracts;
 import workbench.collaboration.interfaces.ApiProblem;
 import workbench.collaboration.interfaces.dto.ConversationDtos;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 模块：会话同步应用服务 (ConversationSyncAppService)
@@ -99,13 +99,12 @@ public class ConversationSyncAppService {
                     new ConversationDtos.ConversationSyncResponse(conversation.syncedSequence()));
         }
 
+        List<Message> batchMessages = new ArrayList<>(items.size());
         for (SyncBatch.Item item : items) {
-            Message message = new Message(
-                    UUID.randomUUID().toString(), conversation.workspaceId(), conversationId,
-                    item.type(), item.sequence(), item.payload(), item.occurredAtMs());
-            messages.save(message);
-            // 投递检索索引通道（wb.search.index）：Kafka 削峰后按文档 ID 幂等 upsert 入 ES
-            searchIndex.publishSearchIndex(conversation.workspaceId(), JSON.writeValueAsString(message));
+            batchMessages.add(new Message(
+                    Message.deterministicId(conversationId, item.sequence()),
+                    conversation.workspaceId(), conversationId,
+                    item.type(), item.sequence(), item.payload(), item.occurredAtMs()));
         }
 
         long now = System.currentTimeMillis();
@@ -124,6 +123,13 @@ public class ConversationSyncAppService {
                 briefUpdatedAt,
                 watermark, conversation.nativeSessionId(), conversation.createdAtMs(), now);
         conversations.update(updated);
+        // 先更新会话行再持久化消息：若 ES/Redis 写入失败抛 503，事务整体回滚，水位绝不虚推
+        messages.saveAll(batchMessages);
+
+        for (Message message : batchMessages) {
+            // 投递检索索引通道（wb.search.index）：事务提交后经 Kafka 异步幂等 upsert
+            searchIndex.publishSearchIndex(conversation.workspaceId(), JSON.writeValueAsString(message));
+        }
 
         // 会话头也入检索索引（wb_conversation_v1），供简报看板全文检索
         searchIndex.publishSearchIndex(conversation.workspaceId(), JSON.writeValueAsString(Map.of(

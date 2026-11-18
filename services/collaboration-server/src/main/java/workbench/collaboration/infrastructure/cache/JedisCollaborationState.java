@@ -1,16 +1,24 @@
 package workbench.collaboration.infrastructure.cache;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.params.SetParams;
 import tools.jackson.databind.json.JsonMapper;
 import workbench.collaboration.application.port.IdempotencyPort;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.domain.conversation.MessageStorePort;
 import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAdapter;
+import workbench.collaboration.interfaces.ApiProblem;
 
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 模块：分布式 Redis 协作状态与滑窗实现 (JedisCollaborationState)
@@ -30,6 +38,8 @@ import java.util.Optional;
  * - 下游依赖方：JedisPool、ElasticsearchMessageStoreAdapter、Jackson JsonMapper。
  */
 public final class JedisCollaborationState {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JedisCollaborationState.class);
 
     private final JedisPool pool;
     private final ElasticsearchMessageStoreAdapter search;
@@ -130,12 +140,42 @@ public final class JedisCollaborationState {
     private final class Messages implements MessageStorePort {
         @Override
         public void save(Message message) {
-            String key = CacheKeys.messages(message.conversationId());
+            saveAll(List.of(message));
+        }
+
+        @Override
+        public void saveAll(List<Message> batch) {
+            if (batch == null || batch.isEmpty()) {
+                return;
+            }
+            // 先通过 ES _bulk 确认持久化落盘，再刷新 Redis 热滑窗；任一失败抛出 503
+            if (search != null) {
+                Map<String, List<Message>> byWorkspace = new LinkedHashMap<>();
+                for (Message message : batch) {
+                    byWorkspace.computeIfAbsent(message.workspaceId(), ignored -> new java.util.ArrayList<>()).add(message);
+                }
+                for (Map.Entry<String, List<Message>> entry : byWorkspace.entrySet()) {
+                    search.saveMessages(entry.getKey(), entry.getValue());
+                }
+            }
+            Set<String> touchedConversations = new LinkedHashSet<>();
             try (Jedis jedis = pool.getResource()) {
-                jedis.zadd(key, message.sequence(), json.writeValueAsString(message));
-                // 原子移除滑窗容量之外的老旧消息，保持窗口尺寸最大为 100
-                jedis.zremrangeByRank(key, 0, CacheKeys.trimUntilRank(CacheKeys.MESSAGE_LIMIT));
-                jedis.expire(key, CacheKeys.MESSAGE_TTL_SECONDS);
+                for (Message message : batch) {
+                    String key = CacheKeys.messages(message.conversationId());
+                    // 同序号覆盖：先清理该序号旧成员，防止跨时间戳重试留下重复条
+                    jedis.zremrangeByScore(key, (double) message.sequence(), (double) message.sequence());
+                    jedis.zadd(key, message.sequence(), json.writeValueAsString(message));
+                    touchedConversations.add(message.conversationId());
+                }
+                for (String conversationId : touchedConversations) {
+                    String key = CacheKeys.messages(conversationId);
+                    // 原子移除滑窗容量之外的老旧消息，保持窗口尺寸最大为 100
+                    jedis.zremrangeByRank(key, 0, CacheKeys.trimUntilRank(CacheKeys.MESSAGE_LIMIT));
+                    jedis.expire(key, CacheKeys.MESSAGE_TTL_SECONDS);
+                }
+            } catch (JedisException failure) {
+                LOGGER.error("Redis 热滑窗写入失败 (conversations={}): {}", touchedConversations, failure.getMessage());
+                throw new ApiProblem(503, "SERVICE_UNAVAILABLE");
             }
         }
 
@@ -155,6 +195,9 @@ public final class JedisCollaborationState {
                     return List.of();
                 }
                 return raw.stream().map(item -> json.readValue(item, Message.class)).toList();
+            } catch (JedisException failure) {
+                LOGGER.error("Redis 读取最近消息失败 (conversation={}): {}", conversationId, failure.getMessage());
+                throw new ApiProblem(503, "SERVICE_UNAVAILABLE");
             }
         }
 
@@ -164,7 +207,7 @@ public final class JedisCollaborationState {
                 return List.of();
             }
             // 热窗优先：窗口覆盖区间（最老序号 <= afterSequence+1）即整段可信；
-            // 否则说明窗口下沿有淘汰缺段，直接回源 ES 保证完整性
+            // 否则说明窗口下沿已淘汰或过期，回源 ES Translog 补齐
             try (Jedis jedis = pool.getResource()) {
                 String key = CacheKeys.messages(conversationId);
                 Long oldest = null;
@@ -176,8 +219,11 @@ public final class JedisCollaborationState {
                     List<String> raw = jedis.zrangeByScore(key, String.valueOf(afterSequence + 1), "+inf", 0, limit);
                     return raw.stream().map(item -> json.readValue(item, Message.class)).toList();
                 }
+            } catch (JedisException failure) {
+                LOGGER.error("Redis 读取增量滑窗失败 (conversation={}): {}", conversationId, failure.getMessage());
+                throw new ApiProblem(503, "SERVICE_UNAVAILABLE");
             }
-            return search == null ? List.of() : search.listAfter(workspaceId, conversationId, afterSequence, limit);
+            return search == null ? List.of() : search.readAfterStrict(workspaceId, conversationId, afterSequence, limit);
         }
     }
 

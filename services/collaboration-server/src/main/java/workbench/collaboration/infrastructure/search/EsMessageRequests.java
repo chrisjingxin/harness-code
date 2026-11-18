@@ -4,6 +4,7 @@ import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import tools.jackson.databind.json.JsonMapper;
+import workbench.collaboration.domain.conversation.Message;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -31,12 +32,69 @@ import java.util.Map;
 public final class EsMessageRequests {
 
     private static final MediaType JSON = MediaType.get("application/json");
+    private static final MediaType NDJSON = MediaType.get("application/x-ndjson");
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+    public static final String MESSAGE_INDEX = "wb_message_v1";
+    public static final String CONVERSATION_INDEX = "wb_conversation_v1";
+    public static final String KNOWLEDGE_INDEX = "wb_knowledge_v1";
 
     private final String baseUrl;
 
     public EsMessageRequests(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+    }
+
+    /** 探测 Elasticsearch 根端点连通性与版本信息。 */
+    public Request ping() {
+        return new Request.Builder()
+                .url(baseUrl + "/")
+                .get()
+                .build();
+    }
+
+    /** 检查指定索引是否已存在。 */
+    public Request headIndex(String index) {
+        return new Request.Builder()
+                .url(baseUrl + "/" + encode(index))
+                .head()
+                .build();
+    }
+
+    /** 创建索引并显式声明分片与字段 Mapping。 */
+    public Request createIndex(String index, String mappingJson) {
+        return new Request.Builder()
+                .url(baseUrl + "/" + encode(index))
+                .put(RequestBody.create(mappingJson, JSON))
+                .build();
+    }
+
+    /**
+     * 构造批量写入定稿消息的 ES _bulk 请求（NDJSON）。
+     */
+    public Request bulkIndexMessages(String workspaceId, List<Message> messages) {
+        StringBuilder ndjson = new StringBuilder();
+        for (Message message : messages) {
+            ndjson.append(MAPPER.writeValueAsString(Map.of(
+                    "index", Map.of("_id", message.messageId(), "routing", workspaceId))))
+                    .append('\n')
+                    .append(MAPPER.writeValueAsString(message))
+                    .append('\n');
+        }
+        return new Request.Builder()
+                .url(baseUrl + "/wb_message_v1/_bulk?routing=" + encode(workspaceId))
+                .post(RequestBody.create(ndjson.toString(), NDJSON))
+                .build();
+    }
+
+    /**
+     * 构造按确定性消息 ID 批量实时点查的 ES _mget 请求（直读 Translog，0 延迟可见）。
+     */
+    public Request mgetMessages(String workspaceId, List<String> messageIds) {
+        return new Request.Builder()
+                .url(baseUrl + "/wb_message_v1/_mget?routing=" + encode(workspaceId))
+                .post(RequestBody.create(MAPPER.writeValueAsString(Map.of("ids", messageIds)), JSON))
+                .build();
     }
 
     /**
@@ -98,7 +156,7 @@ public final class EsMessageRequests {
         Map<String, Object> bool = new LinkedHashMap<>();
         bool.put("filter", filters);
         if (keyword != null && !keyword.isBlank()) {
-            bool.put("must", List.of(Map.of("match", Map.of("text", keyword))));
+            bool.put("must", List.of(Map.of("match", Map.of("payload", keyword))));
         }
 
         Map<String, Object> dsl = new LinkedHashMap<>();
@@ -168,5 +226,62 @@ public final class EsMessageRequests {
 
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 声明 cluster 模式必需的三张 ES 7.6.0 索引 Mapping。
+     * 所有 UUID/状态字段显式绑定 keyword，避免动态映射分词导致 term 回源查空。
+     */
+    public static Map<String, String> indexMappings() {
+        Map<String, String> schemas = new LinkedHashMap<>();
+        schemas.put(MESSAGE_INDEX, schemaJson(Map.ofEntries(
+                Map.entry("messageId", Map.of("type", "keyword")),
+                Map.entry("workspaceId", Map.of("type", "keyword")),
+                Map.entry("conversationId", Map.of("type", "keyword")),
+                Map.entry("type", Map.of("type", "keyword")),
+                Map.entry("sequence", Map.of("type", "long")),
+                Map.entry("occurredAtMs", Map.of("type", "long")),
+                Map.entry("payload", Map.of("type", "text"))
+        )));
+        schemas.put(CONVERSATION_INDEX, schemaJson(Map.ofEntries(
+                Map.entry("conversationId", Map.of("type", "keyword")),
+                Map.entry("projectId", Map.of("type", "keyword")),
+                Map.entry("ownerUserId", Map.of("type", "keyword")),
+                Map.entry("status", Map.of("type", "keyword")),
+                Map.entry("briefSource", Map.of("type", "keyword")),
+                Map.entry("title", textWithKeyword()),
+                Map.entry("briefText", Map.of("type", "text")),
+                Map.entry("briefUpdatedAtMs", Map.of("type", "long")),
+                Map.entry("syncedSequence", Map.of("type", "long")),
+                Map.entry("updatedAtMs", Map.of("type", "long"))
+        )));
+        schemas.put(KNOWLEDGE_INDEX, schemaJson(Map.ofEntries(
+                Map.entry("workspaceId", textWithKeyword()),
+                Map.entry("knowledgeId", textWithKeyword()),
+                Map.entry("termKey", textWithKeyword()),
+                Map.entry("category", textWithKeyword()),
+                Map.entry("version", Map.of("type", "long")),
+                Map.entry("archived", Map.of("type", "boolean")),
+                Map.entry("title", Map.of("type", "text")),
+                Map.entry("text", Map.of("type", "text"))
+        )));
+        return schemas;
+    }
+
+    private static Map<String, Object> textWithKeyword() {
+        return Map.of(
+                "type", "text",
+                "fields", Map.of("keyword", Map.of("type", "keyword", "ignore_above", 256))
+        );
+    }
+
+    private static String schemaJson(Map<String, Object> properties) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("settings", Map.of("number_of_shards", 1, "number_of_replicas", 0));
+        body.put("mappings", Map.of(
+                "_routing", Map.of("required", true),
+                "properties", properties
+        ));
+        return MAPPER.writeValueAsString(body);
     }
 }

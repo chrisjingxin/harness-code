@@ -51,9 +51,9 @@ workbench:
     max-lifetime-ms: 200000
     idle-timeout-ms: 180000
     keepalive-time-ms: 120000
-  # 冒烟和本机启动默认不连接 Redis、Kafka、ES。生产改成 cluster。
+  # 默认按 cluster 模式连接 Redis、Kafka 与 ES；无外部中间件的隔离单机冒烟需显式指定 standalone。
   middleware:
-    mode: standalone
+    mode: cluster
     node-id: local
     redis:
       host: 127.0.0.1

@@ -26,6 +26,18 @@ public interface MessageStorePort {
     void save(Message message);
 
     /**
+     * 批量保存同一批同步的定稿消息。
+     * 集群实现通过一次 ES _bulk 确认持久化落盘并更新 Redis 热滑窗，任一失败立即抛 503。
+     *
+     * @param messages 同批次定稿消息列表
+     */
+    default void saveAll(List<Message> messages) {
+        for (Message message : messages) {
+            save(message);
+        }
+    }
+
+    /**
      * 根据工作区与消息标识点查单条定稿消息。
      *
      * @param workspaceId 所属工作区标识（用于 ES 路由隔离）

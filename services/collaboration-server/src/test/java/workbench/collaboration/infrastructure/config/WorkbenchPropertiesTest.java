@@ -19,7 +19,26 @@ class WorkbenchPropertiesTest {
         WorkbenchProperties properties = context.getBean(WorkbenchProperties.class);
         assertThat(properties.getCommand()).isEqualTo("migrate");
         assertThat(properties.getOrigin()).isEqualTo("http://127.0.0.1:18084");
+        assertThat(properties.getMiddleware().getMode()).isEqualTo("cluster");
+        assertThat(properties.cluster()).isFalse();
       });
+  }
+
+  @Test
+  void defaultsToClusterOnlyWhenStartCommandRuns() {
+    runner.run(context -> {
+      WorkbenchProperties properties = context.getBean(WorkbenchProperties.class);
+      assertThat(properties.getMiddleware().getMode()).isEqualTo("cluster");
+      assertThat(properties.cluster()).isTrue();
+    });
+    runner.withPropertyValues("workbench.command=init-demo").run(context -> {
+      WorkbenchProperties properties = context.getBean(WorkbenchProperties.class);
+      assertThat(properties.cluster()).isFalse();
+    });
+    runner.withPropertyValues("workbench.command=start", "workbench.middleware.mode=standalone").run(context -> {
+      WorkbenchProperties properties = context.getBean(WorkbenchProperties.class);
+      assertThat(properties.cluster()).isFalse();
+    });
   }
 
   @Configuration

@@ -1,9 +1,13 @@
 package workbench.collaboration.infrastructure.config;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
@@ -36,6 +40,20 @@ import workbench.collaboration.infrastructure.search.ElasticsearchMessageStoreAd
 @EnableScheduling
 public class MiddlewareConfig {
 
+    /**
+     * 仅在常驻服务启动（start）且配置为 cluster 模式时生效的装配条件。
+     * 未显式指定 mode 时默认按 cluster 处理；init-demo 等一次性命令绝不触发集群后台组件。
+     */
+    public static final class ClusterStartCondition implements Condition {
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            Environment env = context.getEnvironment();
+            String command = env.getProperty("workbench.command", "start");
+            String mode = env.getProperty("workbench.middleware.mode", "cluster");
+            return "start".equalsIgnoreCase(command) && "cluster".equalsIgnoreCase(mode);
+        }
+    }
+
     @Bean
     LocalEventBus localEventBus() {
         return new LocalEventBus();
@@ -46,7 +64,7 @@ public class MiddlewareConfig {
      */
     @Bean
     @Primary
-    @ConditionalOnProperty(name = "workbench.middleware.mode", havingValue = "cluster")
+    @Conditional(ClusterStartCondition.class)
     KafkaEventBus kafkaEventBus(LocalEventBus local, NotificationSignal signal, WorkbenchProperties properties) {
         return new KafkaEventBus(
                 local, signal,
@@ -65,9 +83,15 @@ public class MiddlewareConfig {
             config.setMaxTotal(8);
             WorkbenchProperties.Redis redis = properties.getMiddleware().getRedis();
             JedisPool pool = new JedisPool(config, redis.getHost(), redis.getPort(), 300);
-            // 启动时立即探测 Redis 连通性（Fail-Closed 原则）
-            try (Jedis jedis = pool.getResource()) {
-                jedis.ping();
+            try {
+                // 启动时立即探测 Redis 连通性并初始化 Elasticsearch 索引（Fail-Closed 原则）
+                try (Jedis jedis = pool.getResource()) {
+                    jedis.ping();
+                }
+                search.ensureReady();
+            } catch (RuntimeException failure) {
+                pool.close();
+                throw failure;
             }
             JedisCollaborationState state = new JedisCollaborationState(pool, search);
             return new Ports(state.idempotency(), state.messages());

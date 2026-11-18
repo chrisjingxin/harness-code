@@ -1,5 +1,8 @@
 package workbench.collaboration.domain.conversation;
 
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
 /**
  * 模块：定稿消息实体模型 (Message)
  *
@@ -30,4 +33,12 @@ public record Message(
         long sequence,
         String payload,
         long occurredAtMs
-) {}
+) {
+    /**
+     * 基于会话标识与连续序号生成确定性消息标识。
+     * 重试或重放写入时得到同一 messageId，确保 Redis 与 Elasticsearch 严格幂等。
+     */
+    public static String deterministicId(String conversationId, long sequence) {
+        return UUID.nameUUIDFromBytes((conversationId + ":" + sequence).getBytes(StandardCharsets.UTF_8)).toString();
+    }
+}

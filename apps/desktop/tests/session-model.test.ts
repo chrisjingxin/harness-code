@@ -115,3 +115,25 @@ test("toNavigationSessionEntries 正确映射多成员会话条目", () => {
   assert.equal(projected[0]?.badge?.text, "本机")
   assert.equal(projected[1]?.badge?.text, "已同步")
 })
+
+test("mergeIncrementalHistory 超过单页 200 条上限时分两页无损合并 250 条消息", () => {
+  const allMessages: ProjectHistoryMessage[] = Array.from({ length: 250 }, (_, idx) => ({
+    sequence: idx + 1,
+    type: idx % 2 === 0 ? "user" : "assistant",
+    occurredAtMs: 1_700_000_000_000 + idx,
+    payload: JSON.stringify({ text: `msg-${idx + 1}` }),
+  }))
+
+  const page1 = allMessages.slice(0, 200)
+  const mergedPage1 = mergeIncrementalHistory([], 0, page1, 250)
+  assert.equal(mergedPage1.messages.length, 200)
+  const cursorAfterPage1 = page1.at(-1)?.sequence ?? 0
+  assert.equal(cursorAfterPage1, 200)
+
+  const page2 = allMessages.slice(200, 250)
+  const mergedPage2 = mergeIncrementalHistory(mergedPage1.messages, cursorAfterPage1, page2, 250)
+  assert.equal(mergedPage2.messages.length, 250)
+  assert.equal(mergedPage2.messages[0]?.sequence, 1)
+  assert.equal(mergedPage2.messages.at(-1)?.sequence, 250)
+  assert.equal(mergedPage2.syncedSequence, 250)
+})

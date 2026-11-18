@@ -62,12 +62,13 @@ public class WorkbenchProperties {
     }
 
     /**
-     * 判断当前是否处于分布式集群模式。
+     * 判断当前是否处于常驻服务的分布式集群模式。
+     * 一次性运维命令（contracts / init-demo）绝不连接 Redis、Kafka 或 Elasticsearch。
      *
-     * @return 若 mode 属性为 "cluster"（忽略大小写）则返回 true，否则为 false（单机内存模式）
+     * @return 仅当 command 为 "start" 且 mode 为 "cluster"（均忽略大小写）时返回 true，否则为 false
      */
     public boolean cluster() {
-        return "cluster".equalsIgnoreCase(middleware.getMode());
+        return "start".equalsIgnoreCase(command) && "cluster".equalsIgnoreCase(middleware.getMode());
     }
 
     /**
@@ -157,7 +158,7 @@ public class WorkbenchProperties {
      * cluster：使用外置真实的 Redis、Kafka、Elasticsearch 生产集群。
      */
     public static class Middleware {
-        private String mode = "standalone";
+        private String mode = "cluster";
         private String nodeId = "local";
         private Redis redis = new Redis();
         private Kafka kafka = new Kafka();

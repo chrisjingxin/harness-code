@@ -53,7 +53,7 @@ try:
     if (data.get('spring') or {}).get('profiles') or (data.get('spring') or {}).get('config'):
         raise CheckError('服务使用额外的 Spring 配置，无法安全判断当前消息存储模式')
     workbench = data.get('workbench') or {}
-    mode = (workbench.get('middleware') or {}).get('mode', 'standalone')
+    mode = (workbench.get('middleware') or {}).get('mode', 'cluster')
     origin = workbench.get('origin')
     port = (data.get('server') or {}).get('port', 18084)
     parsed = urlsplit(origin or '')

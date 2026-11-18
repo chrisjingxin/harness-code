@@ -84,7 +84,7 @@ async function stopDatabase() {
 async function startServer() {
   assert(!await listening(javaPort), "不能接管已占用的Java端口")
   const configuration = { spring: { datasource: { url: `jdbc:mysql://127.0.0.1:${mysqlPort}/hc194_demo`, username: "hc194_runtime", password: secrets.hc194_runtime,
-    hikari: { "data-source-properties": { sslMode: "VERIFY_CA", trustCertificateKeyStoreUrl: pathToFileURL(join(runtime, "mysql-ca.p12")).href, trustCertificateKeyStoreType: "PKCS12", trustCertificateKeyStorePassword: secrets.trust, fallbackToSystemTrustStore: "false", connectTimeout: "3000", socketTimeout: "3000" } } } }, server: { address: "127.0.0.1", port: javaPort }, workbench: { origin } }
+    hikari: { "data-source-properties": { sslMode: "VERIFY_CA", trustCertificateKeyStoreUrl: pathToFileURL(join(runtime, "mysql-ca.p12")).href, trustCertificateKeyStoreType: "PKCS12", trustCertificateKeyStorePassword: secrets.trust, fallbackToSystemTrustStore: "false", connectTimeout: "3000", socketTimeout: "3000" } } } }, server: { address: "127.0.0.1", port: javaPort }, workbench: { origin, middleware: { mode: "standalone" } } }
   server = await privateProcess(java, ["-jar", jar, "--workbench.command=start"], "identity-server.log", { ...process.env, SPRING_APPLICATION_JSON: JSON.stringify(configuration) })
   await ready(server, javaPort)
 }

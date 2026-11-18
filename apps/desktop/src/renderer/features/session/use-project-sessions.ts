@@ -486,18 +486,23 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         }
 
         accumulated = merged.messages
-        currentSequence = merged.syncedSequence
+        const fetchedThrough = res.value.messages.at(-1)?.sequence ?? currentSequence
         reportedWatermark = Math.max(reportedWatermark, res.value.syncedSequence)
         pageCount += 1
 
         if (
           res.value.messages.length === HISTORY_PAGE_LIMIT
-          && currentSequence < res.value.syncedSequence
+          && fetchedThrough > currentSequence
+          && fetchedThrough < res.value.syncedSequence
           && pageCount < MAX_HISTORY_PAGES
         ) {
-          cursor = currentSequence
+          currentSequence = fetchedThrough
+          cursor = fetchedThrough
           continue
         }
+        currentSequence = res.value.messages.length === HISTORY_PAGE_LIMIT && fetchedThrough < res.value.syncedSequence
+          ? fetchedThrough
+          : merged.syncedSequence
         break
       }
 

@@ -1,8 +1,9 @@
 package workbench.collaboration.infrastructure.search;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import workbench.collaboration.infrastructure.config.MiddlewareConfig;
 import workbench.collaboration.infrastructure.persistence.KnowledgeStore;
 
 import java.util.Map;
@@ -12,7 +13,7 @@ import java.util.Map;
  * 先读一批待投影条目 → 在事务外写 ES → 标记成功版本。任何未标记版本都可在下轮重试。
  */
 @Component
-@ConditionalOnProperty(name = {"workbench.middleware.mode"}, havingValue = "cluster")
+@Conditional(MiddlewareConfig.ClusterStartCondition.class)
 public class KnowledgeIndexProjection {
     private static final int BATCH_SIZE = 16;
     private final KnowledgeStore store;
