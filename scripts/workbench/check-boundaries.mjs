@@ -3,8 +3,9 @@
  * 旧 CLI/TUI/Web/旧协议/Vendor/旧 Runner 路径已由 HC-203 退役，不能通过相对路径、构建 alias 或重新引入回流。
  */
 import assert from "node:assert/strict"
-import { access, readFile, readdir } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { builtinModules } from "node:module"
+import { tmpdir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import ts from "typescript"
@@ -41,6 +42,37 @@ const retiredPaths = [
   "scripts/e2e-pty.py",
   "scripts/workbench/run-runner-host-smoke.mjs",
 ]
+
+/** Git 删除源码后本地工作区可能残留被 `.gitignore` 忽略的历史构建或缓存目录，不视为源码回流。 */
+const ignoredRetiredEntries = new Set([
+  "node_modules",
+  "dist",
+  "out",
+  "__pycache__",
+  ".venv",
+  ".pytest_cache",
+  ".publish",
+  ".test-tree-sitter",
+  ".claude",
+  ".DS_Store",
+])
+
+async function hasNonIgnoredRetiredContent(targetPath) {
+  let stats
+  try {
+    stats = await lstat(targetPath)
+  } catch (error) {
+    if (error?.code === "ENOENT") return false
+    throw error
+  }
+  if (!stats.isDirectory()) return true
+  for (const entry of await readdir(targetPath, { withFileTypes: true })) {
+    if (ignoredRetiredEntries.has(entry.name)) continue
+    if (!entry.isDirectory()) return true
+    if (await hasNonIgnoredRetiredContent(join(targetPath, entry.name))) return true
+  }
+  return false
+}
 
 function validateRetiredPaths(existingPaths) {
   for (const retiredPath of retiredPaths) {
@@ -112,12 +144,7 @@ async function files(directory) {
 async function check() {
   const existingRetired = new Set()
   for (const retiredPath of retiredPaths) {
-    try {
-      await access(join(root, retiredPath))
-      existingRetired.add(retiredPath)
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error
-    }
+    if (await hasNonIgnoredRetiredContent(join(root, retiredPath))) existingRetired.add(retiredPath)
   }
   validateRetiredPaths(existingRetired)
   const manifest = await loadJson(join(root, "package.json"))
@@ -170,7 +197,7 @@ async function check() {
   }
   console.log(`依赖边界通过：${packages.size} 个 workspace；锁文件、公开入口与宿主边界已检查。`)
 }
-function selfCheck() {
+async function selfCheck() {
   const owner = { path: "packages/project-service", directory: "/project/service", manifest: { name: "@workbench/project-service", dependencies: { "@workbench/contracts": "0.2.0", "@workbench/ui": "0.2.0" } } }
   const packages = new Map([
     ["@workbench/contracts", { manifest: { exports: { ".": "./index.js", "./runtime": "./runtime.js" } } }],
@@ -210,7 +237,19 @@ function selfCheck() {
   assert.equal(publicEntry({ "./runtime": "./dist/runtime.js", "./ui": "./dist/ui.js" }, "./ui"), true)
   validateRetiredPaths(new Set())
   assert.throws(() => validateRetiredPaths(new Set(["packages/cli"])), /禁止回流已退役路径/)
+  const tempDir = await mkdtemp(join(tmpdir(), "workbench-retired-check-"))
+  try {
+    const ignoredOnlyDir = join(tempDir, "ignored-only")
+    await mkdir(join(ignoredOnlyDir, "node_modules"), { recursive: true })
+    await mkdir(join(ignoredOnlyDir, "dist"), { recursive: true })
+    await writeFile(join(ignoredOnlyDir, "dist", "index.js"), "", "utf8")
+    assert.equal(await hasNonIgnoredRetiredContent(ignoredOnlyDir), false)
+    await writeFile(join(ignoredOnlyDir, "package.json"), "{}", "utf8")
+    assert.equal(await hasNonIgnoredRetiredContent(ignoredOnlyDir), true)
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
   console.log("边界夹具通过：声明子入口合法；旧依赖、反向依赖、内部路径、未声明依赖、UI 宿主访问与退役路径回流被拒绝。")
 }
 await check()
-if (process.argv.includes("--self-check")) selfCheck()
+if (process.argv.includes("--self-check")) await selfCheck()
