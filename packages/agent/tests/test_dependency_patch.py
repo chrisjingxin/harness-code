@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts/dependencies/apply_deepagents_patch.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/apply_deepagents_patch.py"
 SPEC = importlib.util.spec_from_file_location("apply_deepagents_patch", SCRIPT)
 assert SPEC and SPEC.loader
 PATCH = importlib.util.module_from_spec(SPEC)

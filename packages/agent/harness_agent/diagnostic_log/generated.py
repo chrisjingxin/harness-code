@@ -1,4 +1,4 @@
-"""由 Diagnostic Log v1 Schema 生成，请勿手工修改。"""
+"""由同目录 diagnostic_log_v1.json 维护的 Harness Agent 内部诊断日志契约，请勿手工修改。"""
 
 DIAGNOSTIC_LOG_SCHEMA_VERSION = 1
 DIAGNOSTIC_LOG_SCHEMA_SHA256 = "09697583f76a1307d93922393637f3e83303596d4c33cfdd455c875af73e9c8e"

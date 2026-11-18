@@ -5,7 +5,7 @@ feature_area: Web UI 工作台体验升级
 parent_task: HC-124
 decomposed_by: Codex
 priority: P1
-status: 进行中
+status: 已过时
 owner: Codex
 branch: trace_merge
 scope: 落地已确认的冷紫品牌主题与三栏布局，保留中间对话和工具交互，文件树迁到右侧，支持勾选文件提交与提交后推送。
@@ -13,7 +13,7 @@ acceptance: 双主题可替换且选中清晰；原有功能可达；文件树�
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-190-Web主题布局与Git提交.md、docs/developer/plan/HC-190-Web主题布局与Git提交.md、docs/developer/todo/HC-190-Web主题布局与Git提交.md、docs/developer/architecture/架构总览.md
 test_evidence: "dev 本地迁移复核：typecheck、build、额外夹具类型检查通过；相关回归 428 pass，浏览器布局 13 pass，接管恢复 2 pass。CLI 全量 1344 pass / 1 skip / 1 既有高亮断言失败；工程检查受 dev 原有本地链接影响，Python 依赖门禁未通过。"
-references: docs/developer/task/HC-125-统一Web工作台视觉token.md
+references: docs/developer/task/HC-125-统一Web工作台视觉token.md；docs/developer/task/HC-205-主题与通用视图抽离.md；docs/developer/task/HC-207-文件与变更视图复用.md；docs/developer/task/HC-208-协作导航与桌面布局.md；docs/developer/task/HC-203-旧入口与依赖退役.md
 completed_at: -
 ---
 

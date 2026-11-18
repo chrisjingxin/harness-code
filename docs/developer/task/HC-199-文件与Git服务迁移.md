@@ -82,7 +82,7 @@ macOS 15.4 x86_64、Node 22.23.2、Apple Git 2.39.5。运行 `npm run build --wo
 
 ### 原设备只读路由实施证据（2026-11-11，复核通过）
 
-新增会话项目只读 HTTP 入口及五种具名动作，Java 按当前登录、会话绑定、设备与共享版本授权，经声明 `project.read` 的当前 ready WSS 连接派发。Runner 复核原项目登记和目录后调用本机项目服务；Java 匹配原连接与请求，并在返回前复核会话和授权。受信服务端演示来源以 `WORKBENCH_PROJECT_READ_DEMO_LOCAL_BINDING` 显式指定唯一工作区、设备、项目及共享版本。未配置或不匹配返回来源未知。内网仓库权限入口定义了允许、来源未知、身份未绑定、无读权和检查不可用的结果，当前实现只提供上述纯本地演示绑定。`项目服务` · [Runner 端口](../../../apps/runner/src/project-read.ts)
+新增会话项目只读 HTTP 入口及五种具名动作，Java 按当前登录、会话绑定、设备与共享版本授权，经声明 `project.read` 的当前 ready WSS 连接派发。Runner 复核原项目登记和目录后调用本机项目服务；Java 匹配原连接与请求，并在返回前复核会话和授权。受信服务端演示来源以 `WORKBENCH_PROJECT_READ_DEMO_LOCAL_BINDING` 显式指定唯一工作区、设备、项目及共享版本。未配置或不匹配返回来源未知。内网仓库权限入口定义了允许、来源未知、身份未绑定、无读权和检查不可用的结果，当前实现只提供上述纯本地演示绑定。`项目服务` · Runner 端口（原 `apps/runner/src/project-read.ts`，已由 HC-228 下线）
 
 macOS 15.4 x86_64，Node 22.23.2、JBR 21.0.6、MySQL 8.4.11、Git 2.39.5。执行 `npm run contracts:smoke`、`npm run server:build`、`npm run server:contracts`，Node 和 Java 共用的 79 项契约夹具通过。contracts、runner-core、project-service、runner 构建及类型检查通过，desktop 类型检查和 `npm run check:boundaries -- --self-check` 通过。根 `dev` 的 workspace 构建顺序核对为 contracts → runner-core → project-service → runner → UI。Java 使用既有 JBR 和 Maven 3.9.11。
 

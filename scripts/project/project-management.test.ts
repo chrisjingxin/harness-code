@@ -60,11 +60,13 @@ async function createFixture(): Promise<string> {
   const taskName = taskFileName(taskMetadata.id, taskMetadata.title)
   await Promise.all([
     writeFile(join(projectRoot, "README.md"), "# 入口\n\n[快速开始](docs/user/快速开始.md)\n", "utf8"),
+    writeFile(join(projectRoot, "docs/user/独立桌面工作台.md"), "# 独立桌面工作台\n", "utf8"),
     writeFile(join(projectRoot, "docs/user/快速开始.md"), "# 快速开始\n", "utf8"),
+    writeFile(join(projectRoot, "docs/user/安全与沙箱.md"), "# 安全与沙箱\n", "utf8"),
     writeFile(join(projectRoot, "docs/user/模型配置.md"), "# 模型配置\n", "utf8"),
-    writeFile(join(projectRoot, "docs/user/交互使用.md"), "# 交互使用\n", "utf8"),
     writeFile(join(projectRoot, "docs/user/故障排查.md"), "# 故障排查\n", "utf8"),
     writeFile(join(projectRoot, "docs/developer/architecture/架构总览.md"), "# 架构总览\n", "utf8"),
+    writeFile(join(projectRoot, "docs/developer/architecture/多人协作工作台顶层设计.md"), "# 多人协作工作台顶层设计\n", "utf8"),
     writeFile(join(projectRoot, "docs/developer/project/开发工作流.md"), "# 开发工作流\n", "utf8"),
     writeFile(join(projectRoot, "docs/developer/project/变更检查清单.md"), "# 变更检查清单\n", "utf8"),
     writeFile(join(projectRoot, TASK_DIR, "README.md"), "# 任务\n", "utf8"),
@@ -387,4 +389,67 @@ test("renderTaskBoard 文案指向新目录", () => {
   assert.ok(board.includes("docs/developer/task/archive/"))
   assert.ok(!board.includes("docs/developer/tasks/"))
   assert.ok(!board.includes("下次复核"))
+})
+
+test("版本检查和升版支持显式两级 provider workspace 并拒绝通配符", async () => {
+  const projectRoot = await createFixture()
+  try {
+    await mkdir(join(projectRoot, "packages/providers/harness"), { recursive: true })
+    const workspaces = ["apps/desktop", "packages/workbench-contracts", "packages/providers/harness"]
+    const desktop = { name: "@workbench/desktop", version: "0.0.0", dependencies: { "@workbench/harness-provider": "0.0.0" } }
+    const contracts = { name: "@workbench/contracts", version: "0.0.0" }
+    const harness = { name: "@workbench/harness-provider", version: "0.0.0", dependencies: { "@workbench/contracts": "0.0.0" } }
+    await Promise.all([
+      writeFile(join(projectRoot, "VERSION"), "0.0.0\n", "utf8"),
+      writeFile(join(projectRoot, "package.json"), JSON.stringify({ workspaces }), "utf8"),
+      writeFile(join(projectRoot, "apps/desktop/package.json"), JSON.stringify(desktop), "utf8"),
+      writeFile(join(projectRoot, "packages/workbench-contracts/package.json"), JSON.stringify(contracts), "utf8"),
+      writeFile(join(projectRoot, "packages/providers/harness/package.json"), JSON.stringify(harness), "utf8"),
+      writeFile(join(projectRoot, "package-lock.json"), JSON.stringify({
+        packages: {
+          "apps/desktop": desktop,
+          "packages/workbench-contracts": contracts,
+          "packages/providers/harness": harness,
+        },
+      }), "utf8"),
+    ])
+    await setVersion(projectRoot, "0.1.0", ["feat: 支持两级 provider workspace"])
+    await assert.doesNotReject(() => checkRelease(projectRoot))
+    const updatedHarness = JSON.parse(await readFile(join(projectRoot, "packages/providers/harness/package.json"), "utf8"))
+    assert.equal(updatedHarness.version, "0.1.0")
+    assert.equal(updatedHarness.dependencies["@workbench/contracts"], "0.1.0")
+
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ workspaces: ["packages/providers/*"] }), "utf8")
+    await assert.rejects(checkRelease(projectRoot), /显式 workspace 清单/)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("文档校验严格拒绝活动文档断链，并仅对历史快照放行已退役路径白名单", async () => {
+  const projectRoot = await createFixture()
+  try {
+    await mkdir(join(projectRoot, "docs/developer/research"), { recursive: true })
+    await writeFile(
+      join(projectRoot, "docs/developer/research/history.md"),
+      "历史引用 [旧入口](../../../packages/cli/src/index.ts) 与 [旧文档](../../user/Web界面.md)。\n",
+      "utf8",
+    )
+    await writeFile(
+      join(projectRoot, TASK_DIR, taskFileName("HC-002", "已过时任务")),
+      renderTask({ ...taskMetadata, id: "HC-002", title: "已过时任务", status: "已过时", references: "HC-001" })
+        + "\n参考 [旧 Runner](../../../apps/runner/src/runtime.ts)。\n",
+      "utf8",
+    )
+    await assert.doesNotReject(() => checkDocs(projectRoot))
+
+    await writeFile(join(projectRoot, "docs/developer/research/history.md"), "[未知](../../../packages/other/missing.ts)\n", "utf8")
+    await assert.rejects(checkDocs(projectRoot), /无效本地链接/)
+
+    await writeFile(join(projectRoot, "docs/developer/research/history.md"), "仅保留合法文本。\n", "utf8")
+    await writeFile(join(projectRoot, "README.md"), "[误引旧包](packages/cli/src/index.ts)\n", "utf8")
+    await assert.rejects(checkDocs(projectRoot), /无效本地链接/)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
 })

@@ -1,9 +1,9 @@
 /**
- * 新平台依赖检查：根清单/锁 → 包图 → 源码导入 → 公开入口与宿主边界。
- * 旧目录只作迁移来源，不参与扫描；不能通过相对路径或构建 alias 绕过公开导出。
+ * 新平台依赖与防回流检查：已退役路径禁止回流 → 根清单/锁 → 包图 → 源码导入 → 公开入口与宿主边界。
+ * 旧 CLI/TUI/Web/旧协议/Vendor/旧 Runner 路径已由 HC-203 退役，不能通过相对路径、构建 alias 或重新引入回流。
  */
 import assert from "node:assert/strict"
-import { readFile, readdir } from "node:fs/promises"
+import { access, readFile, readdir } from "node:fs/promises"
 import { builtinModules } from "node:module"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -29,6 +29,24 @@ const allowed = {
   ],
 }
 const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|deepagents)/
+const retiredPaths = [
+  "packages/cli",
+  "packages/protocol",
+  "packages/runner-core",
+  "apps/runner",
+  "third_party",
+  "patches",
+  "scripts/install",
+  "scripts/dependencies",
+  "scripts/e2e-pty.py",
+  "scripts/workbench/run-runner-host-smoke.mjs",
+]
+
+function validateRetiredPaths(existingPaths) {
+  for (const retiredPath of retiredPaths) {
+    if (existingPaths.has(retiredPath)) throw new Error(`禁止回流已退役路径: ${retiredPath}`)
+  }
+}
 const desktopMainOnly = new Set([
   "@workbench/acp-runtime",
   "@workbench/project-service",
@@ -92,6 +110,16 @@ async function files(directory) {
 }
 /** 检查失败会携带文件和行号，供开发者直接定位。 */
 async function check() {
+  const existingRetired = new Set()
+  for (const retiredPath of retiredPaths) {
+    try {
+      await access(join(root, retiredPath))
+      existingRetired.add(retiredPath)
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error
+    }
+  }
+  validateRetiredPaths(existingRetired)
   const manifest = await loadJson(join(root, "package.json"))
   assert.deepEqual(manifest.workspaces, Object.keys(allowed), "根 workspace 必须是八个显式目录")
   const packages = new Map()
@@ -180,7 +208,9 @@ function selfCheck() {
     }
   }
   assert.equal(publicEntry({ "./runtime": "./dist/runtime.js", "./ui": "./dist/ui.js" }, "./ui"), true)
-  console.log("边界夹具通过：声明子入口合法；旧依赖、反向依赖、内部路径、未声明依赖和 UI 宿主访问被拒绝。")
+  validateRetiredPaths(new Set())
+  assert.throws(() => validateRetiredPaths(new Set(["packages/cli"])), /禁止回流已退役路径/)
+  console.log("边界夹具通过：声明子入口合法；旧依赖、反向依赖、内部路径、未声明依赖、UI 宿主访问与退役路径回流被拒绝。")
 }
 await check()
 if (process.argv.includes("--self-check")) selfCheck()

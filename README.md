@@ -58,8 +58,8 @@ npm run check:boundaries -- --self-check
 npm run project:check
 ```
 
-七个 workspace 按契约、核心骨架、UI、应用排序，只有一个根 package-lock；普通安装使用 npm ci。必要工程管理小套为 `npm run test:project`，完整回归在总体开发后统一执行。
+八个 workspace（`workbench-contracts`、`acp-runtime`、`project-service`、`workbench-ui`、`providers/{harness,pi,qwen}`、`apps/desktop`）共用唯一根 `package-lock.json`；普通安装使用 `npm ci`。必要工程管理小套为 `npm run test:project`，完整回归在总体开发后统一执行。
 
-新入口位于 apps/desktop，UI 与契约位于 packages/workbench-ui 和 workbench-contracts，执行器/ACP/项目服务独立成包。旧 CLI、Web、Python 内核和 vendor 源码暂留供后续迁移，均退出新默认安装和运行路径；旧用户指南中的命令不代表本分支当前能力。Harness 将作为可替换 ACP Agent 接入，可选集成不成为平台启动条件。
+新入口位于 `apps/desktop`，UI 与契约位于 `packages/workbench-ui` 和 `packages/workbench-contracts`，ACP 运行时、多代理 Provider 与项目服务独立成包。旧 CLI、TUI、独立 Web、旧 `@za38/protocol`、旧 `apps/runner` / `packages/runner-core` 及 OpenTUI/Bun vendor 源码已由 HC-203 退役；`packages/agent` 作为可选 Harness Python ACP Agent 独立保留，不进入默认安装和运行路径，平台可在无 Harness/Python 时使用其他 ACP Agent。
 
 设计与进度见 [HC-193](docs/developer/task/HC-193-独立桌面工程与分包.md)、[总体设计](docs/developer/architecture/多人协作工作台顶层设计.md)和[开发工作流](docs/developer/project/开发工作流.md)。

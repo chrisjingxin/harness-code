@@ -5,7 +5,7 @@ feature_area: 会话生命周期与历史管理
 parent_task: -
 decomposed_by: Codex
 priority: P1
-status: 待认领
+status: 已过时
 owner: 未认领
 branch: -
 scope: 在 /web 的 Agent 回答下提供 Fork 操作，从指定已完成轮次创建独立会话，继承截至该回答的对话上下文，不恢复文件或重放历史工具。
@@ -13,7 +13,7 @@ acceptance: 从三轮会话的第二轮回答分叉后，新会话只包含前�
 user_docs: docs/user/Web界面.md
 developer_docs: docs/developer/spec/HC-215-Web历史轮次分叉.md、docs/developer/plan/HC-215-Web历史轮次分叉.md、docs/developer/todo/HC-215-Web历史轮次分叉.md、docs/developer/architecture/架构总览.md
 test_evidence: Task 阶段 npm run tasks:sync 与 npm run project:check 通过；未改生产代码，未运行行为测试
-references: docs/developer/task/archive/HC-165-会话撤销重做与快照还原.md
+references: docs/developer/task/archive/HC-165-会话撤销重做与快照还原.md；docs/developer/task/HC-192-协作工作台与会话交接.md；docs/developer/task/HC-218-会话只读与主动同步.md；docs/developer/task/HC-203-旧入口与依赖退役.md
 completed_at: -
 ---
 

@@ -11,7 +11,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 /** 与根显式 workspace 清单共用版本对象，避免新平台再依赖旧 CLI/Python。 */
 async function versionFiles(projectRoot: string): Promise<string[]> {
   const manifest = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as { workspaces: string[] }
-  if (!Array.isArray(manifest.workspaces) || manifest.workspaces.some(path => !/^(apps|packages)\/[a-z0-9-]+$/.test(path))) throw new Error("版本检查需要显式 workspace 清单")
+  if (!Array.isArray(manifest.workspaces) || manifest.workspaces.some(path => !/^(?:apps\/[a-z0-9-]+|packages\/[a-z0-9-]+(?:\/[a-z0-9-]+)?)$/.test(path))) throw new Error("版本检查需要显式 workspace 清单")
   return manifest.workspaces.map(path => `${path}/package.json`)
 }
 
