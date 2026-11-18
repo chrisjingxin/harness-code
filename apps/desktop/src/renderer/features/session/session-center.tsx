@@ -19,13 +19,13 @@ import type {
   RenderingActions,
 } from "@workbench/ui"
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CloseIcon,
-  FolderIcon,
-  MaximizeIcon,
-  MinimizeIcon,
-} from "./icons.js"
+  IconArrowsMaximize,
+  IconArrowsMinimize,
+  IconChevronLeft,
+  IconChevronRight,
+  IconFolder,
+  IconX,
+} from "@tabler/icons-react"
 
 export type CentralFileTabItem = {
   readonly path: string
@@ -277,7 +277,7 @@ export function SessionCentralFilePanels({
                   title="关闭"
                   onClick={() => state.onCloseFile(tab.path)}
                 >
-                  <CloseIcon size={11} />
+                  <IconX size={11} aria-hidden="true" />
                 </button>
               </div>
             )
@@ -314,7 +314,7 @@ export function SessionCentralFilePanels({
               title={maximized ? "还原分屏" : "放大预览"}
               onClick={onToggleMaximized}
             >
-              {maximized ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
+              {maximized ? <IconArrowsMinimize size={15} aria-hidden="true" /> : <IconArrowsMaximize size={15} aria-hidden="true" />}
             </button>
           )}
           <button
@@ -324,7 +324,7 @@ export function SessionCentralFilePanels({
             title="关闭预览"
             onClick={state.onSelectConversation}
           >
-            <CloseIcon size={15} />
+            <IconX size={15} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -371,7 +371,7 @@ export function SessionCentralFilePanels({
                 if (target) state.onOpenDiffFile?.(target.path)
               }}
             >
-              <ChevronLeftIcon size={13} />
+              <IconChevronLeft size={13} aria-hidden="true" />
             </button>
             <span className="fp-step-count">{cIdx + 1}/{changedFiles.length}</span>
             <button
@@ -385,7 +385,7 @@ export function SessionCentralFilePanels({
                 if (target) state.onOpenDiffFile?.(target.path)
               }}
             >
-              <ChevronRightIcon size={13} />
+              <IconChevronRight size={13} aria-hidden="true" />
             </button>
           </div>
         )}
@@ -423,7 +423,7 @@ export function SessionRightDock({
     return (
       <section className="session-right-guide" aria-label="选择本机工作目录">
         <span className="session-right-guide-icon">
-          <FolderIcon size={20} />
+          <IconFolder size={20} aria-hidden="true" />
         </span>
         <h2>尚未绑定工作目录</h2>
         <p>选择一个本机文件夹后，可在此浏览只读文件树、打开正文并在输入 `@` 时联想文件路径（支持普通非 Git 文件夹）。</p>
@@ -432,7 +432,7 @@ export function SessionRightDock({
           className="wb-button wb-button-primary wb-button-small"
           onClick={onChooseDirectory}
         >
-          <FolderIcon size={13} />
+          <IconFolder size={13} aria-hidden="true" />
           <span>选择工作目录</span>
         </button>
       </section>

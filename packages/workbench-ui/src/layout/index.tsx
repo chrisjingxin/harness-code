@@ -1,5 +1,5 @@
 /** 工作台外壳：通顶左侧栏 + 右侧(顶栏 + 舞台/右栏)，仅管理空间、响应折叠与浮层。 */
-import { Moon, PanelLeft, PanelLeftClose, PanelRight, Sun, X } from "lucide-react";
+import { IconLayoutSidebar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarRight, IconMoon, IconSun, IconX } from "@tabler/icons-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ReactElement,
@@ -360,7 +360,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
                 aria-label="切换浅色/深色"
                 title="切换浅色/深色"
               >
-                {props.colorScheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                {props.colorScheme === "dark" ? <IconSun size={16} aria-hidden="true" /> : <IconMoon size={16} aria-hidden="true" />}
               </button>
             )}
             <button
@@ -382,7 +382,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
               aria-label="切换项目面板"
               aria-expanded={visibleRightMode !== "hidden"}
             >
-              <PanelRight size={16} />
+              <IconLayoutSidebarRight size={16} aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -415,7 +415,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         aria-expanded={leftMode !== "hidden"}
         title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
       >
-        {leftMode !== "hidden" ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+        {leftMode !== "hidden" ? <IconLayoutSidebarLeftCollapse size={16} aria-hidden="true" /> : <IconLayoutSidebar size={16} aria-hidden="true" />}
       </button>
 
       {props.overlays}
@@ -441,7 +441,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
               onClick={props.closeSettings}
               aria-label="关闭设置"
             >
-              <X size={16} />
+              <IconX size={16} aria-hidden="true" />
             </button>
             <div className="collaboration-modal-scroll">{props.settings}</div>
           </div>

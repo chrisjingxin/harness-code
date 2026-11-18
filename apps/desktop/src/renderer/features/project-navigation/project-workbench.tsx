@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { IconArrowLeft } from "@tabler/icons-react"
 import type { CollaborationHost, UserSummary } from "@workbench/contracts"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "@workbench/ui"
 import type {
@@ -18,7 +19,6 @@ import type { ProjectNavigationPersonal, ProjectPage, WorkspacePersonal } from "
 import type { PersonalPersistence } from "../../personal-persistence.js"
 import type { ProjectConversationSummary, SessionIntegrationApi } from "../session/index.js"
 import {
-  ArrowLeftIcon,
   CollabMembersPopover,
   CommandPaletteModal,
   DispatchTaskDialog,
@@ -583,7 +583,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         else shell.openPage({ kind: "new" })
       }}
     >
-      <ArrowLeftIcon size={14} />
+      <IconArrowLeft size={14} aria-hidden="true" />
       <span>返回我的会话</span>
     </button>
   ) : undefined

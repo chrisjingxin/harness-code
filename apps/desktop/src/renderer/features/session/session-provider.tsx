@@ -21,7 +21,7 @@ import type {
 import { UserAvatar } from "../collaboration-views/index.js"
 import type { ProjectPage, ProjectPageProvider, ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort, NewSessionDraft, ProjectConversationSummary, SessionExternalHooks, SessionKind, SessionSyncState } from "./contracts.js"
-import { ChevronDownIcon, FolderIcon } from "./icons.js"
+import { IconChevronDown, IconFolder } from "@tabler/icons-react"
 import { LocalSessionPage } from "./local-session-page.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import { NewSessionPage } from "./new-session-page.js"
@@ -306,9 +306,9 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
               title={directoryPath ? `本机工作目录：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
               onClick={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             >
-              <FolderIcon size={12} />
+              <IconFolder size={12} aria-hidden="true" />
               <span className="d">{folderName || "选择工作目录"}</span>
-              <span className="chev" aria-hidden="true"><ChevronDownIcon size={11} /></span>
+              <span className="chev" aria-hidden="true"><IconChevronDown size={11} aria-hidden="true" /></span>
             </button>
             {isRunning ? (
               <span className="tb-state running">

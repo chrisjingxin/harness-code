@@ -1,5 +1,5 @@
 /** 右侧文件树（对齐原型稿 .dock-bar / .dock-tree / .f-badge）：支持文件变更标记与直接中央分屏打开。 */
-import { ChevronDown, ChevronRight, FileSymlink, Folder, RefreshCw } from "lucide-react"
+import { IconChevronDown, IconChevronRight, IconFileSymlink, IconFolder, IconRefresh } from "@tabler/icons-react"
 import { useId, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent, ReactElement, RefObject } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
@@ -37,7 +37,7 @@ export function ProjectFileExplorer({
         <span>{projectName}</span>
       </span>
       <button type="button" className="wb-icon-button" aria-label="刷新文件树" title={refresh.enabled ? "刷新" : refresh.reason}
-        disabled={!refresh.enabled} onClick={() => actions.refreshTree(scope)}><RefreshCw size={14} aria-hidden="true" /></button>
+        disabled={!refresh.enabled} onClick={() => actions.refreshTree(scope)}><IconRefresh size={14} aria-hidden="true" /></button>
     </div>
     {tree.freshness === "cached" ? <p className="project-tree-notice">文件列表为缓存 / 非实时</p> : null}
     {tree.status === "ready" && tree.message ? <p className="project-tree-notice" role="status">{tree.message}</p> : null}
@@ -143,10 +143,10 @@ function ProjectFileTree({
         style={{ paddingInlineStart: 6 + row.depth * 12 }}
         onClick={() => { treeRef.current?.focus(); setFocusedPath(row.path); activate(row) }}>
         <span className="project-file-row-arrow" aria-hidden="true">
-          {row.kind === "directory" ? row.expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
+          {row.kind === "directory" ? row.expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} /> : null}
         </span>
-        {row.kind === "directory" ? <Folder size={14} aria-hidden="true" className="project-file-row-icon" />
-          : row.kind === "symlink" ? <FileSymlink size={14} aria-hidden="true" className="project-file-row-icon" />
+        {row.kind === "directory" ? <IconFolder size={14} aria-hidden="true" className="project-file-row-icon" />
+          : row.kind === "symlink" ? <IconFileSymlink size={14} aria-hidden="true" className="project-file-row-icon" />
             : <FileTypeIcon name={row.name} />}
         <span className="project-file-row-name" title={row.path}>{row.name}</span>
         {badgeTxt ? <span className={`f-badge ${badgeCls}`}>{badgeTxt}</span> : null}

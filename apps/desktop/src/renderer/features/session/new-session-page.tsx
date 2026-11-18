@@ -6,7 +6,7 @@
  * 并诚实展示当前设备登记与 Agent 可用性；选择目录和输入草稿仅保存在本人本机范围，不自动建会。
  */
 import type { ReactElement } from "react"
-import { ArrowRightIcon, ChevronDownIcon, FolderIcon } from "./icons.js"
+import { IconArrowRight, IconChevronDown, IconFolder } from "@tabler/icons-react"
 import { directoryBasename } from "./session-model.js"
 import type { NewSessionDraft } from "./contracts.js"
 
@@ -59,9 +59,9 @@ export function NewSessionPage({
           onClick={onChooseDirectory}
           title={draft.directoryPath ?? "选择一个本机文件夹（支持普通非 Git 目录）"}
         >
-          <FolderIcon size={14} />
+          <IconFolder size={14} aria-hidden="true" />
           <span>{folderName || "选择文件夹"}</span>
-          <ChevronDownIcon size={12} />
+          <IconChevronDown size={12} aria-hidden="true" />
         </button>
         <span
           className="session-tag"
@@ -92,7 +92,7 @@ export function NewSessionPage({
           title={disabledReason}
           onClick={onStartSession}
         >
-          <ArrowRightIcon size={14} />
+          <IconArrowRight size={14} aria-hidden="true" />
           <span>{busy ? "正在创建…" : "开始会话"}</span>
         </button>
       </div>

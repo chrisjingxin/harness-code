@@ -27,8 +27,8 @@
     }
   },
   "dependencies": {
+    "@tabler/icons-react": "3.46.0",
     "@workbench/contracts": "0.2.0",
-    "lucide-react": "1.16.0",
     "marked": "17.0.1",
     "shiki": "3.23.0"
   },

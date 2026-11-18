@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement } from "react"
 import type { NavigationMember, NavigationSessionEntry } from "@workbench/ui"
 import { resolveFallbackDemoAvatar, resolveUserPhoto } from "../../demo-avatars.js"
-import { BookOpenIcon, CloseIcon, LockIcon, SearchIcon, TaskIcon } from "./collab-icons.js"
+import { IconBook, IconChevronDown, IconListCheck, IconLock, IconSearch, IconX } from "@tabler/icons-react"
 import { memberRoleLabel, TASK_STATUS_LABEL } from "./collab-store.js"
 import type { CollabKnowledge, CollabKnowledgeScope, CollabTask } from "./collab-store.js"
 
@@ -105,9 +105,7 @@ export function TopbarCollabButton({
       <span className="collab-count">{members.length}</span>
       {anyUpd && <span className="collab-dot" aria-hidden="true" />}
       <span className="collab-chev" aria-hidden="true">
-        <svg className="od-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <IconChevronDown className="od-icon" size={12} aria-hidden="true" />
       </span>
     </button>
   )
@@ -187,11 +185,11 @@ export function CollabMembersPopover({
             <span className="eyebrow">{projectName} · 协作成员</span>
             <span className="meta od-nowrap" style={{ marginLeft: "auto" }}>{filteredSessions.length} 条</span>
             <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
-              <CloseIcon size={15} />
+              <IconX size={15} aria-hidden="true" />
             </button>
           </div>
           <div className="pop-search">
-            <SearchIcon size={14} />
+            <IconSearch size={14} aria-hidden="true" />
             <input
               ref={inputRef}
               type="text"
@@ -300,7 +298,7 @@ export function CollabMembersPopover({
         </div>
 
         <div className="pop-foot">
-          <LockIcon size={12} />
+          <IconLock size={12} aria-hidden="true" />
           <span>会话同步是 Project 维度的，拿到的都是只读快照</span>
         </div>
       </div>
@@ -468,7 +466,7 @@ export function CommandPaletteModal({
     <div className="palette-wrap" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="palette" role="dialog" aria-modal="true" aria-label="全局搜索">
         <div className="palette-input">
-          <SearchIcon size={16} />
+          <IconSearch size={16} aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
@@ -508,9 +506,9 @@ export function CommandPaletteModal({
                         {item.user ? (
                           <UserAvatar user={item.user} size={22} self={item.kind === "session" && item.self} />
                         ) : item.kind === "knowledge" ? (
-                          <BookOpenIcon size={15} />
+                          <IconBook size={15} aria-hidden="true" />
                         ) : (
-                          <TaskIcon size={15} />
+                          <IconListCheck size={15} aria-hidden="true" />
                         )}
                         <span className="p-main">
                           <span className="p-t">{item.title}</span>
@@ -569,7 +567,7 @@ export function StartTaskDialog({
             <p className="dlg-sub">{task.title}</p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
+            <IconX size={15} aria-hidden="true" />
           </button>
         </div>
 
@@ -688,7 +686,7 @@ export function KnowledgeCreateDialog({
             <p className="dlg-sub">{projectName}</p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
+            <IconX size={15} aria-hidden="true" />
           </button>
         </div>
 
@@ -801,7 +799,7 @@ export function DispatchTaskDialog({
             <p className="dlg-sub">{subtitle}</p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
+            <IconX size={15} aria-hidden="true" />
           </button>
         </div>
 

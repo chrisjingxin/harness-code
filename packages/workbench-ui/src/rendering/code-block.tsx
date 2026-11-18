@@ -1,7 +1,7 @@
 /** 代码块：当前原文 → 可选高亮或 Diff → 用户主动复制；不直接访问宿主。 */
 import { useEffect, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
-import { Check, Copy } from "lucide-react"
+import { IconCheck, IconCopy } from "@tabler/icons-react"
 import { renderSpans } from "./render-spans.js"
 import { resolveLanguage } from "./syntax/language-catalog.js"
 import { useSyntaxHighlight } from "./syntax/use-syntax-highlight.js"
@@ -51,7 +51,7 @@ export function CodeBlock({ code, language = "", actions }: CodeBlockProps): Rea
       <div className="code-block-actions">
         {!actions?.copyText && <span className="code-block-unavailable">复制不可用，可手动选择</span>}
         <button type="button" className="code-block-copy" aria-label={actions?.copyText ? "复制代码" : "复制不可用"} title={actions?.copyText ? "复制代码" : "复制不可用，请手动选择代码"} disabled={!actions?.copyText} onClick={() => { void copy() }}>
-          {copyStatus === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {copyStatus === "copied" ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}
         </button>
       </div>
     </div>

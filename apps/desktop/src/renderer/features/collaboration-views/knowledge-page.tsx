@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react"
 import type { ReactElement } from "react"
 import type { NavigationMember } from "@workbench/ui"
-import { AtSignIcon, PlusIcon } from "./collab-icons.js"
+import { IconAt, IconPlus } from "@tabler/icons-react"
 import { UserAvatar } from "./collab-overlays.js"
 import type { CollabKnowledge } from "./collab-store.js"
 
@@ -71,7 +71,7 @@ export function TeamKnowledgePage({
         </div>
         <span className="vb-spacer" />
         <button type="button" className="btn btn-primary btn-sm" onClick={onCreateClick}>
-          <PlusIcon size={14} />
+          <IconPlus size={14} aria-hidden="true" />
           <span>新建知识</span>
         </button>
       </div>
@@ -135,7 +135,7 @@ export function TeamKnowledgePage({
                     title="把这条知识插入到本机会话输入框"
                     onClick={() => onCiteToSession(cur)}
                   >
-                    <AtSignIcon size={14} />
+                    <IconAt size={14} aria-hidden="true" />
                     <span>引用到会话</span>
                   </button>
                 </>

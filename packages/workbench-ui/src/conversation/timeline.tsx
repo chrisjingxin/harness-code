@@ -6,7 +6,7 @@
  *
  * 显示条目 → 按相邻 Agent 内容分组 → 渲染消息/工具 → 按个人锚点恢复或跟随滚动。
  */
-import { ArrowDown, Brain, Check, ChevronRight, Copy, Loader2, Wrench } from "lucide-react"
+import { IconArrowDown, IconBrain, IconCheck, IconChevronRight, IconCopy, IconLoader2, IconTool } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 
@@ -97,7 +97,7 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               aria-label={scroll.hasNewOutput ? "跳到最新输出" : "回到底部"}
               onClick={scroll.scrollToBottom}
             >
-              <ArrowDown aria-hidden="true" />
+              <IconArrowDown aria-hidden="true" />
               {scroll.hasNewOutput ? <span aria-hidden="true" className="wb-conversation-to-bottom-dot" /> : null}
             </button>
           ) : null}
@@ -291,7 +291,7 @@ function ProcessGroupRows({
   const forced = summary.running
   const expanded = forced || expandedTools.includes(summary.id)
   const detailsId = `${summary.id}:body`.replaceAll(":", "-")
-  const Icon = forced ? Loader2 : summary.hasThought ? Brain : Wrench
+  const Icon = forced ? IconLoader2 : summary.hasThought ? IconBrain : IconTool
   const iconClass = forced ? "wb-conversation-tool-icon wb-conversation-spin" : "wb-conversation-tool-icon"
   const labelNode = (
     <span className="wb-conversation-process-label">
@@ -313,7 +313,7 @@ function ProcessGroupRows({
         >
           <Icon aria-hidden="true" className={iconClass} />
           {labelNode}
-          <ChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
+          <IconChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
         </button>
       ) : (
         <div className="wb-conversation-process-header">
@@ -401,17 +401,17 @@ function ToolGroupRows({
           aria-disabled={forced || undefined}
           onClick={() => { if (!forced) onToggleTool(groupId) }}
         >
-          {running ? <Loader2 aria-hidden="true" className="wb-conversation-tool-icon wb-conversation-spin" /> : <Wrench aria-hidden="true" className="wb-conversation-tool-icon" />}
+          {running ? <IconLoader2 aria-hidden="true" className="wb-conversation-tool-icon wb-conversation-spin" /> : <IconTool aria-hidden="true" className="wb-conversation-tool-icon" />}
           <span className="wb-conversation-tool-group-label">
             {label}
             {running ? <span className="wb-conversation-tool-group-progress"> · 正在执行 · 第 {runningIndex + 1} 个</span> : null}
             {failedCount > 0 ? <span className="wb-conversation-tool-group-failures"> · 含 {failedCount} 个失败</span> : null}
           </span>
-          <ChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
+          <IconChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
         </button>
       ) : (
         <div className="wb-conversation-tool-group-header">
-          {running ? <Loader2 aria-hidden="true" className="wb-conversation-tool-icon wb-conversation-spin" /> : <Wrench aria-hidden="true" className="wb-conversation-tool-icon" />}
+          {running ? <IconLoader2 aria-hidden="true" className="wb-conversation-tool-icon wb-conversation-spin" /> : <IconTool aria-hidden="true" className="wb-conversation-tool-icon" />}
           <span className="wb-conversation-tool-group-label">{label}{failedCount > 0 ? <span className="wb-conversation-tool-group-failures"> · 含 {failedCount} 个失败</span> : null}</span>
         </div>
       )}
@@ -464,11 +464,11 @@ function ReasoningRow({
         aria-controls={open ? bodyId : undefined}
         onClick={() => { entry.active ? setLocalCollapsed(value => !value) : onToggle?.() }}
       >
-        <Brain aria-hidden="true" className="wb-conversation-tool-icon" />
+        <IconBrain aria-hidden="true" className="wb-conversation-tool-icon" />
         <span className={entry.active ? "wb-conversation-reasoning-label wb-conversation-shimmer" : "wb-conversation-reasoning-label"}>
           {entry.active ? "思考中" : "思考过程"}
         </span>
-        <ChevronRight aria-hidden="true" focusable="false" className={open ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
+        <IconChevronRight aria-hidden="true" focusable="false" className={open ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
       </button>
       <Disclosure open={open}>
         <div id={bodyId} className="wb-conversation-reasoning-body" role={entry.active ? "status" : undefined} aria-live={entry.active ? "polite" : undefined}>
@@ -556,7 +556,7 @@ function TimelineRow({
   }
   return (
     <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className="wb-conversation-interaction-history">
-      <Check aria-hidden="true" className="wb-conversation-tool-icon" />
+      <IconCheck aria-hidden="true" className="wb-conversation-tool-icon" />
       <span className="wb-conversation-interaction-history-title">{entry.title}</span>
       <span className="wb-conversation-interaction-history-status">{entry.statusLabel}</span>
       {entry.description ? <span className="wb-conversation-interaction-history-desc">{entry.description}</span> : null}
@@ -607,7 +607,7 @@ function ReplyFooter({ text, rendering }: { text: string; rendering: RenderingAc
         title="复制回答"
         onClick={() => { void copy() }}
       >
-        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        {copied ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}
       </button>
       <span className="sr" role="status">{announce}</span>
     </div>
@@ -623,7 +623,7 @@ function ActivityStatus({ activity }: { activity?: ConversationTimelineActivity 
     <div ref={rowRef} className="wb-conversation-live" aria-live="polite" data-paused={paused || undefined}>
       {activity ? (
         <div className="wb-conversation-progress" role="status">
-          {activity.active ? <Loader2 aria-hidden="true" className="wb-conversation-progress-icon wb-conversation-spin" /> : null}
+          {activity.active ? <IconLoader2 aria-hidden="true" className="wb-conversation-progress-icon wb-conversation-spin" /> : null}
           <span className={activity.active ? "wb-conversation-shimmer" : undefined}>
             {[activity.label, activity.phaseLabel, activity.elapsedMs === undefined ? undefined : `已运行 ${formatElapsed(elapsed)}`].filter(Boolean).join(" · ")}
           </span>

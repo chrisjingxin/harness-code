@@ -2,7 +2,7 @@
  * 项目只读文件部件：右侧与中央共用同一份受控内容。
  * 页面装配方决定文件身份、缓存和权限；这里不读取磁盘或发起网络请求。
  */
-import { ExternalLink, RefreshCw, X } from "lucide-react"
+import { IconExternalLink, IconRefresh, IconX } from "@tabler/icons-react"
 import { useState } from "react"
 import type { ReactElement } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
@@ -31,7 +31,7 @@ export function ProjectFileTab({ scope, path, name, selected, tabId, panelId, on
       <FileTypeIcon name={name} /><span className="project-workbench-tab-name">{name}</span>
     </button>
     <button type="button" className="project-file-tab-close" aria-label={`关闭文件 ${path}`} title="关闭文件"
-      onClick={() => onClose(scope, path)}><X size={12} aria-hidden="true" /></button>
+      onClick={() => onClose(scope, path)}><IconX size={12} aria-hidden="true" /></button>
   </div>
 }
 
@@ -121,10 +121,10 @@ function ProjectFileHeader({ scope, path, view: rawView, refresh, onRefresh, ope
       <div className="project-file-preview-tools" role="group" aria-label="文件预览操作">
         <button type="button" className="wb-icon-button" aria-label="刷新预览"
           title={refresh.enabled ? "刷新" : refresh.reason} disabled={!refresh.enabled}
-          onClick={() => onRefresh(scope, path)}><RefreshCw size={14} aria-hidden="true" /></button>
+          onClick={() => onRefresh(scope, path)}><IconRefresh size={14} aria-hidden="true" /></button>
         {openCentral && onOpenCentral ? <button type="button" className="wb-icon-button" aria-label="在主区域打开"
           title={openCentral.enabled ? "在主区域打开" : openCentral.reason} disabled={!openCentral.enabled}
-          onClick={() => onOpenCentral(scope, path)}><ExternalLink size={16} aria-hidden="true" /></button> : null}
+          onClick={() => onOpenCentral(scope, path)}><IconExternalLink size={16} aria-hidden="true" /></button> : null}
       </div>
     </div>
   </div>

@@ -1,6 +1,22 @@
-/** 文件类型图标：按文件名选择原有图形和语义色，供文件树与对话路径共同使用。 */
-import { Braces, CodeXml, Database, File, FileCode, FileImage, FileJson, FileText, Terminal } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+/** 文件类型图标：按文件名选择矢量图形与语义色，供文件树、变更列表与对话路径共同使用。 */
+import {
+  IconBraces,
+  IconBrandGolang,
+  IconBrandJavascript,
+  IconBrandPython,
+  IconBrandRust,
+  IconBrandTypescript,
+  IconCode,
+  IconDatabase,
+  IconFile,
+  IconFileCode,
+  IconFileSettings,
+  IconFileText,
+  IconJson,
+  IconPhoto,
+  IconTerminal2,
+} from "@tabler/icons-react"
+import type { Icon } from "@tabler/icons-react"
 import type { ReactElement } from "react"
 
 /** 文件类型只用于显示，不表示文件可读取或可执行。 */
@@ -8,7 +24,7 @@ export type FileIconType = "ts" | "js" | "python" | "go" | "rust" | "shell" | "c
 
 export type FileIconSpec = {
   readonly type: FileIconType
-  readonly icon: LucideIcon
+  readonly icon: Icon
   readonly label?: string
 }
 
@@ -33,10 +49,22 @@ const SPECIAL_NAME_TYPES: Record<string, FileIconType> = {
   ".editorconfig": "config", license: "doc", readme: "doc",
 }
 
-const TYPE_ICONS: Record<FileIconType, LucideIcon> = {
-  ts: FileCode, js: FileCode, python: FileCode, go: FileCode, rust: FileCode,
-  shell: Terminal, code: FileCode, style: Braces, html: CodeXml, json: Braces,
-  doc: FileText, config: FileJson, data: Database, image: FileImage, default: File,
+const TYPE_ICONS: Record<FileIconType, Icon> = {
+  ts: IconBrandTypescript,
+  js: IconBrandJavascript,
+  python: IconBrandPython,
+  go: IconBrandGolang,
+  rust: IconBrandRust,
+  shell: IconTerminal2,
+  code: IconFileCode,
+  style: IconBraces,
+  html: IconCode,
+  json: IconJson,
+  doc: IconFileText,
+  config: IconFileSettings,
+  data: IconDatabase,
+  image: IconPhoto,
+  default: IconFile,
 }
 
 const TYPE_LABELS: Partial<Record<FileIconType, string>> = { ts: "TS", js: "JS", python: "Py", go: "Go", rust: "Rs" }
@@ -56,6 +84,5 @@ export function fileIconFor(name: string): FileIconSpec {
 export function FileTypeIcon({ name, size = 14 }: { name: string; size?: number }): ReactElement {
   const spec = fileIconFor(name)
   const Icon = spec.icon
-  if (spec.label) return <span aria-hidden="true" className={`wb-file-type-icon wb-file-type-badge wb-file-type-icon-${spec.type}`} style={{ width: size, height: size }}>{spec.label}</span>
   return <Icon aria-hidden="true" size={size} className={`wb-file-type-icon wb-file-type-icon-${spec.type}`} />
 }

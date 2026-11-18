@@ -4,7 +4,7 @@
  * 草稿及身份由调用方保存。文件沿用原目录查询；项目会话只上报选择，由装配方取材和确认。
  * 输入或光标变化 → 匹配 @ token → 绑定 scope/目标/修订发请求 → 仅接收当前请求结果。
  */
-import { AlertTriangle, ArrowUp, Check, ChevronDown, X } from "lucide-react"
+import { IconAlertTriangle, IconArrowUp, IconCheck, IconChevronDown, IconPlayerStopFilled, IconX } from "@tabler/icons-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
@@ -422,7 +422,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           {draft.attachmentIds.length ? <div className="wb-composer-attachments" aria-label="附件">{draft.attachmentIds.map(id => {
             const item = model.attachments.find(attachment => attachment.id === id)
             if (!item) return <span key={id}>附件资料暂不可用</span>
-            return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><X aria-hidden="true" /></button></span>
+            return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><IconX aria-hidden="true" /></button></span>
           })}</div> : null}
           <textarea ref={textareaRef} className="wb-composer-textarea" rows={1} value={draft.text} disabled={!canEdit} placeholder={canEdit ? "描述你要做的事，输入 @ 可以引用文件，输入 / 唤起命令…" : "当前无法编辑草稿"} aria-label="消息，Enter 发送，Shift+Enter 换行" onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }} onKeyDown={handleKeyDown} />
           <div className="wb-composer-rail">
@@ -436,12 +436,12 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             </div>
             <div className="wb-composer-rail-right">
               <span className="wb-composer-hint">只在本机执行 · Enter 发送</span>
-              {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" /></svg></button> : null}
-              {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><ArrowUp aria-hidden="true" /></button> : null}
+              {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
+              {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><IconArrowUp aria-hidden="true" /></button> : null}
             </div>
           </div>
         </div>
-        {displayStatus ? <p className="wb-composer-status" role="status"><AlertTriangle aria-hidden="true" />{displayStatus}</p> : null}
+        {displayStatus ? <p className="wb-composer-status" role="status"><IconAlertTriangle aria-hidden="true" />{displayStatus}</p> : null}
       </form>
     </div>
   )
@@ -483,9 +483,9 @@ function CapabilityMenu({ scope, control, onSelect }: { scope: ConversationScope
     // 焦点在触发按钮与菜单选项之间移动时保持打开；离开整个控件后及时收起。
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
   }}>
-    <button ref={trigger} type="button" className="wb-composer-chip" disabled={!control.availability.enabled || !onSelect} title={control.availability.reason || (!onSelect ? "当前不可切换" : undefined)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><span>{selected && selected.label !== control.label ? `${control.label}：${selected.label}` : control.label}</span><ChevronDown aria-hidden="true" /></button>
+    <button ref={trigger} type="button" className="wb-composer-chip" disabled={!control.availability.enabled || !onSelect} title={control.availability.reason || (!onSelect ? "当前不可切换" : undefined)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><span>{selected && selected.label !== control.label ? `${control.label}：${selected.label}` : control.label}</span><IconChevronDown aria-hidden="true" /></button>
     {open ? <div ref={menu} className="wb-capability-menu" role="menu" aria-label={control.label} onKeyDown={onMenuKey}>
-      {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <Check size={13} aria-hidden="true" /> : null}</button>)}
+      {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <IconCheck size={13} aria-hidden="true" /> : null}</button>)}
     </div> : null}
   </div>
 }

@@ -4,7 +4,7 @@
 import { useState } from "react"
 import type { ReactElement } from "react"
 import type { NavigationMember, NavigationSessionEntry } from "@workbench/ui"
-import { CheckIcon, ClockIcon, DotIcon, FileIcon, LockIcon, PlusIcon, SendArrowIcon } from "./collab-icons.js"
+import { IconArrowRight, IconCheck, IconClock, IconFile, IconLock, IconPlus, IconPoint } from "@tabler/icons-react"
 import { UserAvatar } from "./collab-overlays.js"
 import { memberRoleLabel, TASK_PRIO_LABEL, TASK_STATUS_LABEL } from "./collab-store.js"
 import type { CollabTask, CollabTaskStatus } from "./collab-store.js"
@@ -134,7 +134,7 @@ export function ProjectTasksPage({
         </div>
         <span className="vb-spacer" />
         <button type="button" className="btn btn-primary btn-sm" onClick={onOpenDispatchDialog}>
-          <PlusIcon size={14} />
+          <IconPlus size={14} aria-hidden="true" />
           <span>派发任务</span>
         </button>
       </div>
@@ -194,7 +194,7 @@ export function ProjectTasksPage({
                   <dt>关联会话</dt>
                   <dd>
                     <button type="button" className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }} onClick={() => onGotoSession(linkedSession.conversationId)}>
-                      <FileIcon size={14} />
+                      <IconFile size={14} aria-hidden="true" />
                       <span>{linkedSession.title}</span>
                     </button>
                   </dd>
@@ -203,33 +203,33 @@ export function ProjectTasksPage({
             </dl>
 
             {activeTask.toUserId !== selfUserId ? (
-              <div className="detail-note"><LockIcon size={15} /><span>这个任务指派给了 {activeTo?.userName ?? "队友"}。只有被指派人可以认领和在本机开始。</span></div>
+              <div className="detail-note"><IconLock size={15} aria-hidden="true" /><span>这个任务指派给了 {activeTo?.userName ?? "队友"}。只有被指派人可以认领和在本机开始。</span></div>
             ) : activeTask.status === "open" ? (
-              <div className="detail-note"><DotIcon size={15} /><span>先认领任务，再决定什么时候在本机开跑。认领只是表态，不会启动任何进程。</span></div>
+              <div className="detail-note"><IconPoint size={15} aria-hidden="true" /><span>先认领任务，再决定什么时候在本机开跑。认领只是表态，不会启动任何进程。</span></div>
             ) : activeTask.status === "claimed" ? (
-              <div className="detail-note"><LockIcon size={15} /><span>已认领。下一步「在本机开始」需要你自己选会话和工作目录，系统不会自动远程启动。</span></div>
+              <div className="detail-note"><IconLock size={15} aria-hidden="true" /><span>已认领。下一步「在本机开始」需要你自己选会话和工作目录，系统不会自动远程启动。</span></div>
             ) : activeTask.status === "running" ? (
-              <div className="detail-note"><ClockIcon size={15} /><span>正在本机执行。任务状态会跟着会话走，会话结束之后再标记完成。</span></div>
+              <div className="detail-note"><IconClock size={15} aria-hidden="true" /><span>正在本机执行。任务状态会跟着会话走，会话结束之后再标记完成。</span></div>
             ) : (
-              <div className="detail-note"><CheckIcon size={15} /><span>这个任务已经完成。</span></div>
+              <div className="detail-note"><IconCheck size={15} aria-hidden="true" /><span>这个任务已经完成。</span></div>
             )}
 
             <div className="detail-actions">
               {activeTask.toUserId === selfUserId && activeTask.status === "open" && (
                 <button type="button" className="btn btn-primary" onClick={() => onClaimTask(activeTask.id)}>
-                  <CheckIcon size={15} />
+                  <IconCheck size={15} aria-hidden="true" />
                   <span>认领任务</span>
                 </button>
               )}
               {activeTask.toUserId === selfUserId && activeTask.status === "claimed" && (
                 <button type="button" className="btn btn-primary" onClick={() => onOpenStartDialog(activeTask)}>
-                  <SendArrowIcon size={15} />
+                  <IconArrowRight size={15} aria-hidden="true" />
                   <span>在本机开始</span>
                 </button>
               )}
               {activeTask.toUserId === selfUserId && activeTask.status === "running" && (
                 <button type="button" className="btn btn-secondary" onClick={() => onFinishTask(activeTask.id)}>
-                  <CheckIcon size={15} />
+                  <IconCheck size={15} aria-hidden="true" />
                   <span>标记完成</span>
                 </button>
               )}

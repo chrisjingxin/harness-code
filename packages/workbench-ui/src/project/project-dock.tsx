@@ -2,7 +2,7 @@
  * 右侧文件/变更 Dock（1:1 还原原型稿 .rail）：
  * 支持“文件”与“变更”双 Tab、可拖拽调宽、点击文件直接在中央分屏或右侧预览打开。
  */
-import { Clock, Folder, GitBranch, Lock, X } from "lucide-react"
+import { IconClock, IconFolder, IconGitBranch, IconLock, IconX } from "@tabler/icons-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, RefObject } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
@@ -78,15 +78,15 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
       <div className="project-dock-tabs" role="tablist" aria-label="项目面板" onKeyDown={onPanelKeys}>
         <button type="button" role="tab" id={`${uid}-files-tab`} aria-controls={`${uid}-files-panel`} aria-selected={panel === "files"}
           tabIndex={panel === "files" ? 0 : -1} data-panel="files" className={panel === "files" ? "project-dock-tab is-selected" : "project-dock-tab"}
-          onClick={() => actions.selectPanel(scope, "files")}><Folder size={14} aria-hidden="true" />文件</button>
+          onClick={() => actions.selectPanel(scope, "files")}><IconFolder size={14} aria-hidden="true" />文件</button>
         <button type="button" role="tab" id={`${uid}-changes-tab`} aria-controls={`${uid}-changes-panel`} aria-selected={panel === "changes"}
           tabIndex={panel === "changes" ? 0 : -1} data-panel="changes" className={panel === "changes" ? "project-dock-tab is-selected" : "project-dock-tab"}
-          onClick={() => actions.selectPanel(scope, "changes")}><GitBranch size={14} aria-hidden="true" />变更
+          onClick={() => actions.selectPanel(scope, "changes")}><IconGitBranch size={14} aria-hidden="true" />变更
           {showChanges && changes.repository ? <span className="project-git-count">{changes.repository.files.length}</span> : null}
         </button>
       </div>
       <button type="button" className="wb-icon-button project-dock-close" aria-label="关闭右侧面板" title="关闭右栏"
-        onClick={() => actions.setDockOpen(scope, false)}><X size={15} aria-hidden="true" /></button>
+        onClick={() => actions.setDockOpen(scope, false)}><IconX size={15} aria-hidden="true" /></button>
     </header>
     {availability.state !== "available" ? <p className="project-availability" role="status">{availability.message}</p> : null}
 
@@ -109,8 +109,8 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
           {sessionMeta && (
             <div className="project-rail-block">
               <span className="project-rail-title">会话</span>
-              <div className="project-dir-line"><Clock size={12} aria-hidden="true" /><span>最近更新 {sessionMeta.updatedLabel}</span></div>
-              <div className="project-dir-line"><Lock size={12} aria-hidden="true" /><span>{sessionMeta.modeLabel}</span></div>
+              <div className="project-dir-line"><IconClock size={12} aria-hidden="true" /><span>最近更新 {sessionMeta.updatedLabel}</span></div>
+              <div className="project-dir-line"><IconLock size={12} aria-hidden="true" /><span>{sessionMeta.modeLabel}</span></div>
             </div>
           )}
         </div>
@@ -175,7 +175,7 @@ function ProjectDockFiles({ scope, files, gates, personal, actions, treeRef, uid
             tabIndex={selected ? 0 : -1} className="project-file-tab-select" data-path={tab.path} title={tab.path}
             onClick={() => actions.selectFileTab(scope, tab.path)}><FileTypeIcon name={tab.name} /><span className="project-file-tab-name">{tab.name}</span></button>
           <button type="button" className="project-file-tab-close" aria-label={`关闭右侧文件 ${tab.path}`} title="关闭"
-            onClick={() => close(tab.path)}><X size={12} aria-hidden="true" /></button>
+            onClick={() => close(tab.path)}><IconX size={12} aria-hidden="true" /></button>
         </div>
       })}
     </div>

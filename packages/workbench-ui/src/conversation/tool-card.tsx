@@ -4,7 +4,7 @@
  * 上游先给出显示文案和原文；这里不按工具名解析 Harness 载荷，也不执行工具。
  * 没有任何可展开内容的调用渲染为不可点的静态行，不再出现空详情。
  */
-import { Check, ChevronRight, Copy, FilePenLine, FileText, Loader2, Wrench } from "lucide-react"
+import { IconCheck, IconChevronRight, IconCopy, IconFilePencil, IconFileText, IconLoader2, IconTool } from "@tabler/icons-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
 
@@ -57,7 +57,7 @@ export function ConversationToolCard({
   const hasExtension = detail?.extension != null
   const expandable = hasOutput || hasArguments || hasExtension
   const statusLabel = tool.status === "running" ? "运行中" : tool.status === "failed" ? "失败" : "已完成"
-  const Icon = tool.tone === "read" ? FileText : tool.tone === "write" ? FilePenLine : Wrench
+  const Icon = tool.tone === "read" ? IconFileText : tool.tone === "write" ? IconFilePencil : IconTool
   const failed = tool.status === "failed"
 
   const head = (
@@ -66,11 +66,11 @@ export function ConversationToolCard({
       <span className="wb-conversation-tool-label" title={tool.originalName ?? tool.label}>{tool.label}</span>
       {tool.summary ? <PathSummary text={tool.summary} /> : null}
       <span className="wb-conversation-tool-status" role="img" aria-label={statusLabel} title={statusLabel}>
-        {tool.status === "running" ? <Loader2 aria-hidden="true" className="wb-conversation-spin" />
+        {tool.status === "running" ? <IconLoader2 aria-hidden="true" className="wb-conversation-spin" />
           : failed ? <span className="wb-conversation-tool-failed-badge">失败</span>
             : null}
       </span>
-      {expandable && onToggle ? <ChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} /> : null}
+      {expandable && onToggle ? <IconChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} /> : null}
     </>
   )
 
@@ -107,7 +107,7 @@ export function ConversationToolCard({
               <details className="wb-conversation-detail-card wb-conversation-arguments">
                 <summary className="wb-conversation-detail-header wb-conversation-arguments-summary">
                   <span className="wb-conversation-detail-title">参数</span>
-                  <ChevronRight aria-hidden="true" className="wb-conversation-detail-chevron" />
+                  <IconChevronRight aria-hidden="true" className="wb-conversation-detail-chevron" />
                 </summary>
                 <div className="wb-conversation-detail-body" data-clamped="false">
                   <pre className="wb-conversation-detail-pre">{prettifyObject(argumentsText) ?? argumentsText}</pre>
@@ -192,7 +192,7 @@ function ConversationToolOutput({
           disabled={!canCopy || status === "copying"}
           onClick={() => { void copy() }}
         >
-          {status === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {status === "copied" ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}
         </button>
       </header>
       <div className="wb-conversation-detail-body" data-clamped={collapsible && !expanded}>

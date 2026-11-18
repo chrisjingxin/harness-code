@@ -2,7 +2,19 @@
  * 右侧 Git 变更与提交历史视图（1:1 还原原型稿 .git-pane）：
  * 支持工作区 / 提交记录子视图切换、路径搜索、M/A/U 状态胶囊筛选、压缩目录树、提交记录展开与 Diff 查看。
  */
-import { ChevronRight, FileDiff, Folder, GitBranch, GitCommitHorizontal, List, ListTree, RefreshCw, Search, Upload, X } from "lucide-react"
+import {
+  IconChevronRight,
+  IconFileDiff,
+  IconFolder,
+  IconGitBranch,
+  IconGitCommit,
+  IconList,
+  IconListTree,
+  IconRefresh,
+  IconSearch,
+  IconUpload,
+  IconX,
+} from "@tabler/icons-react"
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
@@ -178,14 +190,14 @@ export function ProjectGitPanel({
     <div className="project-git-top">
       <div className="project-git-info">
         <span className="project-git-branch" title={`当前分支：${branchName}`}>
-          <GitBranch size={13} aria-hidden="true" />
+          <IconGitBranch size={13} aria-hidden="true" />
           <span>{branchName}</span>
         </span>
         {repository?.upstream ? (
           <span className="project-git-ahead" title={`领先远端 ${aheadCount} 个提交`}>↑{aheadCount}</span>
         ) : null}
         <button type="button" className="wb-icon-button" disabled={Boolean(refreshReason)} title={refreshReason ?? "刷新变更与日志"}
-          aria-label="刷新 Git 变更" onClick={() => actions.refreshChanges(scope)}><RefreshCw size={14} aria-hidden="true" /></button>
+          aria-label="刷新 Git 变更" onClick={() => actions.refreshChanges(scope)}><IconRefresh size={14} aria-hidden="true" /></button>
       </div>
 
       {/* 子视图分段切换：工作区 vs 提交记录 */}
@@ -216,7 +228,7 @@ export function ProjectGitPanel({
         <div className="project-git-toolbar">
           <div className="project-git-search-row">
             <div className="project-git-search-box">
-              <Search size={13} aria-hidden="true" />
+              <IconSearch size={13} aria-hidden="true" />
               <input
                 type="text"
                 value={query}
@@ -226,18 +238,18 @@ export function ProjectGitPanel({
               />
               {query ? (
                 <button type="button" className="project-git-search-clear" aria-label="清空筛选" onClick={() => setQuery("")}>
-                  <X size={12} aria-hidden="true" />
+                  <IconX size={12} aria-hidden="true" />
                 </button>
               ) : null}
             </div>
             <div className="project-git-view-seg" role="group" aria-label="变更展示方式">
               <button type="button" className={`project-git-view-btn${resolvedView === "tree" ? " is-active" : ""}`}
                 onClick={() => setViewMode("tree")} aria-label="目录树视图" title="目录树（按目录分组）">
-                <ListTree size={13} aria-hidden="true" />
+                <IconListTree size={13} aria-hidden="true" />
               </button>
               <button type="button" className={`project-git-view-btn${resolvedView === "list" ? " is-active" : ""}`}
                 onClick={() => setViewMode("list")} aria-label="平铺列表视图" title="平铺列表">
-                <List size={13} aria-hidden="true" />
+                <IconList size={13} aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -260,7 +272,7 @@ export function ProjectGitPanel({
       {subView === "history" && (
         <div className="project-git-toolbar">
           <div className="project-git-search-box">
-            <Search size={13} aria-hidden="true" />
+            <IconSearch size={13} aria-hidden="true" />
             <input
               type="text"
               value={logQuery}
@@ -270,7 +282,7 @@ export function ProjectGitPanel({
             />
             {logQuery ? (
               <button type="button" className="project-git-search-clear" aria-label="清空搜索" onClick={() => setLogQuery("")}>
-                <X size={12} aria-hidden="true" />
+                <IconX size={12} aria-hidden="true" />
               </button>
             ) : null}
           </div>
@@ -324,13 +336,13 @@ export function ProjectGitPanel({
                           <button type="button" className={`project-git-caret${row.open ? " is-open" : ""}`}
                             aria-label={`${row.open ? "折叠" : "展开"} ${row.name}`}
                             onClick={() => setClosedDirs(prev => ({ ...prev, [row.path]: row.open }))}>
-                            <ChevronRight size={12} aria-hidden="true" />
+                            <IconChevronRight size={12} aria-hidden="true" />
                           </button>
                           <DirCheckbox checked={dirAllChecked} indeterminate={dirSomeChecked && !dirAllChecked}
                             label={`选择目录 ${row.name}`} onChange={() => toggleDirSelection(row.allFiles)} />
                           <button type="button" className="project-git-tree-btn" title={`${row.path}（${row.allFiles.length} 个文件）`}
                             onClick={() => setClosedDirs(prev => ({ ...prev, [row.path]: row.open }))}>
-                            <Folder size={13} aria-hidden="true" />
+                            <IconFolder size={13} aria-hidden="true" />
                             <span className="project-git-tree-name project-git-dir-name">{row.name}</span>
                             <span className="project-git-dir-count">{row.allFiles.length}</span>
                           </button>
@@ -382,7 +394,7 @@ export function ProjectGitPanel({
             </div>
 
             {!onOpenDiffInCentral && diff ? <div className="project-git-diff" aria-label={`${diff.path} Diff`}>
-              <div className="project-git-diff-title"><FileDiff size={14} aria-hidden="true" />
+              <div className="project-git-diff-title"><IconFileDiff size={14} aria-hidden="true" />
                 <span>{diff.path.split("/").at(-1)}</span><span className="project-git-diff-comparison">工作区 ↔ HEAD</span></div>
               <div className="project-git-diff-path">{diff.path}</div><ProjectGitDiff text={diff.text} />
               {diff.truncated ? <p className="project-git-hint">Diff 已截断，当前只展示部分内容。</p> : null}
@@ -406,7 +418,7 @@ export function ProjectGitPanel({
         ) : repository ? <div className="project-git-commit">
           <label htmlFor={`${id}-message`}>提交说明</label><textarea id={`${id}-message`} value={personal.commitMessage}
             maxLength={8192} placeholder="描述这次修改…" onChange={event => actions.setCommitMessage(scope, event.currentTarget.value)} />
-          {repository.upstream ? <p className="project-git-target"><Upload size={12} aria-hidden="true" />
+          {repository.upstream ? <p className="project-git-target"><IconUpload size={12} aria-hidden="true" />
             推送到 {repository.upstream.remote}/{repository.upstream.branch} · 当前 {repository.upstream.ahead} 个未推送提交
             {repository.upstream.behind ? ` · 落后 ${repository.upstream.behind} 个提交` : ""}</p>
             : <p className="project-git-hint">没有可用的推送目标。</p>}
@@ -414,7 +426,7 @@ export function ProjectGitPanel({
           {pushReason ? <p className="project-git-hint">推送：{pushReason}</p> : null}
           <div className="project-git-commit-actions">
             <button type="button" className="wb-button wb-button-primary" disabled={Boolean(commitReason)} title={commitReason ?? "提交"}
-              onClick={() => submit(false)}><GitCommitHorizontal size={15} aria-hidden="true" />提交 {selected.length} 个文件</button>
+              onClick={() => submit(false)}><IconGitCommit size={15} aria-hidden="true" />提交 {selected.length} 个文件</button>
             <button type="button" className="wb-button wb-button-secondary" disabled={Boolean(commitReason || pushReason)}
               title={commitReason ?? pushReason ?? "提交并推送"} onClick={() => submit(true)}>提交并推送</button>
           </div>
@@ -526,7 +538,7 @@ export function ProjectGitPanel({
           )}
         </div>
         <div className="git-hist-foot">
-          <GitBranch size={12} aria-hidden="true" />
+          <IconGitBranch size={12} aria-hidden="true" />
           <span className="gh-branch">origin/{branchName}</span>
           <span>{aheadCount ? `领先 ${aheadCount} 个提交` : "已同步"}</span>
         </div>

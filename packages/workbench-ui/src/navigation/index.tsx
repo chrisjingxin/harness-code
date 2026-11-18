@@ -4,17 +4,17 @@
  * 组件不发请求、不持有身份或个人状态；所有意图通过 actions 回传给宿主。
  */
 import {
-  BookOpen,
-  Check,
-  ChevronDown,
-  LayoutGrid,
-  ListChecks,
-  Lock,
-  Plus,
-  Search,
-  Settings,
-  SlidersHorizontal,
-} from "lucide-react";
+  IconAdjustmentsHorizontal,
+  IconBook,
+  IconCheck,
+  IconChevronDown,
+  IconLayoutGrid,
+  IconListCheck,
+  IconLock,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+} from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { NavigationMemberGroup } from "./members.js";
@@ -238,7 +238,7 @@ function WorkspaceSwitch({ view, actions }: ProjectNavigationProps) {
             </span>
           </span>
         </span>
-        <ChevronDown size={14} className="chev" />
+        <IconChevronDown size={14} className="chev" aria-hidden="true" />
       </button>
 
       {open && workspaces.length > 0 && (
@@ -270,7 +270,7 @@ function WorkspaceSwitch({ view, actions }: ProjectNavigationProps) {
                     </span>
                   )}
                 </span>
-                <span className="pnav-menu-check">{on && <Check size={14} />}</span>
+                <span className="pnav-menu-check">{on && <IconCheck size={14} aria-hidden="true" />}</span>
               </button>
             );
           })}
@@ -342,7 +342,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
             </span>
           )}
         </span>
-        <ChevronDown size={14} className="chev" />
+        <IconChevronDown size={14} className="chev" aria-hidden="true" />
       </button>
       <button
         type="button"
@@ -353,7 +353,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
         data-active={view.activePage === "info"}
         onClick={actions.openProjectSettings}
       >
-        <SlidersHorizontal size={15} />
+        <IconAdjustmentsHorizontal size={15} aria-hidden="true" />
       </button>
       {open && (
         <div className="pnav-menu" role="menu" aria-label="切换 Project">
@@ -383,12 +383,12 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
                   </span>
                 )}
               </span>
-              <span className="pnav-menu-check">{item.projectId === view.currentProjectId && <Check size={14} />}</span>
+              <span className="pnav-menu-check">{item.projectId === view.currentProjectId && <IconCheck size={14} aria-hidden="true" />}</span>
             </button>
           ))}
           <div className="pnav-menu-sep" />
           <button type="button" role="menuitem" className="pnav-menu-create" onClick={() => choose(actions.createProject)}>
-            <Plus size={15} />
+            <IconPlus size={15} aria-hidden="true" />
             <span className="mi-main"><span className="mi-name">新建 Project</span></span>
           </button>
         </div>
@@ -434,7 +434,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           title="Workspace 团队知识库"
           onClick={() => actions.openPage("knowledge")}
         >
-          <BookOpen size={15} />
+          <IconBook size={15} aria-hidden="true" />
           <span className="pnav-nav-label">团队知识库</span>
           {view.knowledgeCount !== null && view.knowledgeCount !== undefined && (
             <span className="pnav-nav-count">{view.knowledgeCount}</span>
@@ -460,7 +460,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             aria-current={view.activePage === "board" ? "page" : undefined}
             onClick={() => actions.openPage("board")}
           >
-            <LayoutGrid size={15} />
+            <IconLayoutGrid size={15} aria-hidden="true" />
             <span className="pnav-nav-label">Project 看板</span>
           </button>
           <button
@@ -471,7 +471,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             aria-current={view.activePage === "tasks" ? "page" : undefined}
             onClick={() => actions.openPage("tasks")}
           >
-            <ListChecks size={15} />
+            <IconListCheck size={15} aria-hidden="true" />
             <span className="pnav-nav-label">任务</span>
             {view.taskCount !== null && view.taskCount > 0 && (
               <span className="pnav-nav-count">{view.taskCount}</span>
@@ -490,7 +490,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           disabled={!hasProject}
           onClick={() => (actions.createSession ? actions.createSession() : actions.openPage("new"))}
         >
-          <Plus size={15} />
+          <IconPlus size={15} aria-hidden="true" />
           <span>新建会话</span>
         </button>
 
@@ -502,13 +502,13 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             disabled={!hasProject}
             onClick={actions.openCommandPalette}
           >
-            <Search size={14} />
+            <IconSearch size={14} aria-hidden="true" />
             <span className="pnav-ellipsis">搜索会话、任务、知识</span>
             <span className="kbd">⌘K</span>
           </button>
         ) : (
           <label className="pnav-search">
-            <Search size={14} />
+            <IconSearch size={14} aria-hidden="true" />
             <input
               ref={searchInputRef}
               aria-label="搜索会话"
@@ -538,7 +538,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 <p>{view.projects.length ? "选择一个项目开始协作。" : "还没有项目。"}</p>
                 {!view.projects.length && (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={actions.createProject}>
-                    <Plus size={13} />
+                    <IconPlus size={13} aria-hidden="true" />
                     <span>创建项目</span>
                   </button>
                 )}
@@ -585,7 +585,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                   >
                     <span className="sess-title pnav-ellipsis">{entry.title}</span>
                     <span className="sess-meta">
-                      {isOtherDevice && <Lock size={10} />}
+                      {isOtherDevice && <IconLock size={10} aria-hidden="true" />}
                       <span className="line">{metaText}</span>
                     </span>
                     {hasUnread && <span className="unsync-dot" aria-label="有更新" />}
@@ -611,7 +611,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           title="系统设置"
           onClick={actions.openSettings}
         >
-          <Settings size={16} />
+          <IconSettings size={16} aria-hidden="true" />
         </button>
       </div>
     </nav>

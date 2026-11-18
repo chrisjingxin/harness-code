@@ -3,6 +3,7 @@
  * 填写名称与说明 + 可选勾选 Workspace 初始成员，提交后创建项目并自动邀请选中成员。
  */
 import { useEffect, useRef, useState } from "react"
+import { IconX } from "@tabler/icons-react"
 import type { MemberSummary } from "@workbench/contracts"
 import type { OrganizationHost } from "../../../organization-host.js"
 import { memberRoleLabel, UserAvatar } from "../collaboration-views/index.js"
@@ -113,9 +114,7 @@ export function CreateProjectDialog({
             aria-label="关闭"
             style={{ marginLeft: "auto" }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-              <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-            </svg>
+            <IconX size={15} aria-hidden="true" />
           </button>
         </div>
 

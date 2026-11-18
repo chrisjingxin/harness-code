@@ -24,17 +24,17 @@ import type {
   SessionSyncStatus,
 } from "./contracts.js"
 import {
-  AlertIcon,
-  CheckDoubleIcon,
-  ClockIcon,
-  GitBranchIcon,
-  LinkIcon,
-  LockIcon,
-  MessageIcon,
-  PlusIcon,
-  RefreshIcon,
-  ShieldCheckIcon,
-} from "./icons.js"
+  IconAlertTriangle,
+  IconChecks,
+  IconClock,
+  IconGitBranch,
+  IconLink,
+  IconLock,
+  IconMessage,
+  IconPlus,
+  IconRefresh,
+  IconShieldCheck,
+} from "@tabler/icons-react"
 import { formatShortTime } from "./session-model.js"
 
 const readonlyComposer: ConversationComposerView = {
@@ -110,7 +110,7 @@ export function RemoteSessionPage({
               data-tone={syncStatus === "sync_failed" ? "danger" : syncStatus === "has_update" ? "warning" : undefined}
               role="status"
             >
-              <CheckDoubleIcon size={13} />
+              <IconChecks size={13} aria-hidden="true" />
               {syncStatus === "sync_failed" ? (
                 <span>
                   同步失败：{syncState.syncError || "无法拉取最新消息"} · 当前保留已同步至第 {syncState.localSyncedSequence} 条的内容
@@ -131,7 +131,7 @@ export function RemoteSessionPage({
                 disabled={busy}
                 onClick={onSyncConversation}
               >
-                <RefreshIcon size={12} />
+                <IconRefresh size={12} aria-hidden="true" />
                 <span>{syncActionLabel}</span>
               </button>
             </div>
@@ -169,18 +169,18 @@ export function RemoteSessionPage({
 
             <div className="session-brief-facts">
               <span>
-                <ClockIcon size={13} />
+                <IconClock size={13} aria-hidden="true" />
                 <span>最近上传于 {briefUploadedLabel}</span>
               </span>
               <span>
-                <MessageIcon size={13} />
+                <IconMessage size={13} aria-hidden="true" />
                 <span>
                   {hasRemoteMessages ? `已上传 ${conversation.syncedSequence} 条消息` : "尚未上传正文消息"}
                 </span>
               </span>
               {conversation.repositories.map(repo => (
                 <span key={repo.repositoryId}>
-                  <GitBranchIcon size={13} />
+                  <IconGitBranch size={13} aria-hidden="true" />
                   <span>{repo.name}</span>
                 </span>
               ))}
@@ -194,7 +194,7 @@ export function RemoteSessionPage({
                   disabled={busy}
                   onClick={onSyncConversation}
                 >
-                  <RefreshIcon size={13} />
+                  <IconRefresh size={13} aria-hidden="true" />
                   <span>{busy ? "正在同步…" : "同步会话"}</span>
                 </button>
               ) : (
@@ -204,7 +204,7 @@ export function RemoteSessionPage({
                   disabled={busy}
                   onClick={onRefreshBrief}
                 >
-                  <RefreshIcon size={13} />
+                  <IconRefresh size={13} aria-hidden="true" />
                   <span>刷新简报</span>
                 </button>
               )}
@@ -217,14 +217,14 @@ export function RemoteSessionPage({
 
             {syncStatus === "sync_failed" && syncState.syncError ? (
               <div className="session-remote-error" role="alert">
-                <AlertIcon size={14} />
+                <IconAlertTriangle size={14} aria-hidden="true" />
                 <span>同步失败：{syncState.syncError}</span>
               </div>
             ) : null}
           </div>
 
           <div className="session-remote-note-card">
-            <ShieldCheckIcon size={14} />
+            <IconShieldCheck size={14} aria-hidden="true" />
             <span>同步之后是只读视图：没有输入框，也不能在这里继续对话。查看会话不会操作对方的 Agent 或文件。</span>
           </div>
         </div>
@@ -235,7 +235,7 @@ export function RemoteSessionPage({
       <footer className="session-remote-action-bar">
         <div className="session-peer-foot-inner">
           <span className="session-ro-hint">
-            <LockIcon size={13} />
+            <IconLock size={13} aria-hidden="true" />
             <span>跨机器会话仅供阅读 · 无输入框</span>
           </span>
           <div className="session-remote-actions">
@@ -251,7 +251,7 @@ export function RemoteSessionPage({
                 }
               }}
             >
-              <LinkIcon size={13} />
+              <IconLink size={13} aria-hidden="true" />
               <span>引用到我的会话</span>
             </button>
             <button
@@ -266,7 +266,7 @@ export function RemoteSessionPage({
                 }
               }}
             >
-              <PlusIcon size={13} />
+              <IconPlus size={13} aria-hidden="true" />
               <span>创建任务</span>
             </button>
           </div>
