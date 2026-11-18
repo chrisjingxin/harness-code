@@ -4,6 +4,7 @@ import type { NotificationEvent, ProjectUpdatesHost, ProjectUpdatesStatus } from
 
 export interface ProjectUpdateTargets {
   readonly projectId: string | null
+  readonly isBoardActive?: boolean
   readonly refreshProjectList: () => void
   readonly refreshProjectDetail: () => void
   readonly refreshConversations: () => void
@@ -81,6 +82,6 @@ export function dispatchProjectUpdates(events: readonly NotificationEvent[], tar
   if (projectDetail) targets.refreshProjectDetail()
   if (projectDetail || conversations) targets.refreshConversations()
   if (projectDetail || tasks.size) targets.refreshTasks([...tasks])
-  if (projectDetail || conversations || tasks.size) targets.refreshBoard()
+  if (targets.isBoardActive !== false && (projectDetail || conversations || tasks.size)) targets.refreshBoard()
   if (knowledge.size) targets.refreshKnowledge([...knowledge])
 }
