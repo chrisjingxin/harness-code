@@ -77,9 +77,8 @@ export function ProjectInfoPage({
   const nameOf = (userId: string) => names.get(userId)?.userName ?? `成员 ${userId.slice(0, 8)}`
   const roleOf = (userId: string) => {
     const user = names.get(userId)
-    if (!user) return "研发成员"
-    const role = memberRoleLabel(user)
-    return user.userNo ? `${role} · ${user.userNo}` : role
+    if (!user) return ""
+    return [memberRoleLabel(user), user.userNo].filter(Boolean).join(" · ")
   }
   const active = detail.members.filter(member => member.status === "active")
   const candidates = team.filter(item => !active.some(member => member.userId === item.user.id))

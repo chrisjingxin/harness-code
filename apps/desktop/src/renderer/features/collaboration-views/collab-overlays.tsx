@@ -1,13 +1,25 @@
 /**
- * 顶栏协作成员浮层、⌘K 全局搜索命令面板、以及任务/知识弹窗（1:1 还原原型稿）。
+ * 顶栏协作成员浮层与 ⌘K 全局搜索命令面板。
  */
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement } from "react"
+import type { KnowledgeSummary, TaskStatus, TaskSummary } from "@workbench/contracts"
 import type { NavigationMember, NavigationSessionEntry } from "@workbench/ui"
 import { resolveFallbackDemoAvatar, resolveUserPhoto } from "../../demo-avatars.js"
 import { BookOpenIcon, CloseIcon, LockIcon, SearchIcon, TaskIcon } from "./collab-icons.js"
-import { memberRoleLabel, TASK_STATUS_LABEL } from "./collab-store.js"
-import type { CollabKnowledge, CollabKnowledgeScope, CollabTask } from "./collab-store.js"
+
+const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "待接收",
+  doing: "进行中",
+  review: "待验收",
+  done: "已完成",
+  cancelled: "已取消",
+}
+
+/** 仅透传服务端返回的所属团队/组织名称，不在前端预设岗位角色。 */
+export function memberRoleLabel(member?: { readonly orgName?: string | null } | null): string {
+  return member?.orgName || ""
+}
 
 export function UserAvatar({
   user,
@@ -230,7 +242,7 @@ export function CollabMembersPopover({
                       {m.userName}
                       {hasUpd && <span className="pm-dot" aria-hidden="true" />}
                     </span>
-                    <span className="pm-role">{memberRoleLabel(m)}</span>
+                    {memberRoleLabel(m) && <span className="pm-role">{memberRoleLabel(m)}</span>}
                   </span>
                 </button>
               )
@@ -316,7 +328,6 @@ export function CommandPaletteModal({
   open,
   projectName,
   members,
-  selfUserId,
   mySessions,
   peerSessions,
   tasks,
@@ -329,11 +340,10 @@ export function CommandPaletteModal({
   readonly open: boolean
   readonly projectName: string
   readonly members: readonly NavigationMember[]
-  readonly selfUserId: string
   readonly mySessions: readonly NavigationSessionEntry[]
   readonly peerSessions: readonly NavigationSessionEntry[]
-  readonly tasks: readonly CollabTask[]
-  readonly knowledge: readonly CollabKnowledge[]
+  readonly tasks: readonly TaskSummary[]
+  readonly knowledge: readonly KnowledgeSummary[]
   readonly onClose: () => void
   readonly onSelectSession: (conversationId: string) => void
   readonly onSelectTask: (taskId: string) => void
@@ -352,6 +362,7 @@ export function CommandPaletteModal({
   }, [open])
 
   const memberById = useMemo(() => new Map(members.map(m => [m.userId, m])), [members])
+  const activeKnowledge = useMemo(() => knowledge.filter(item => !item.archived), [knowledge])
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -394,36 +405,38 @@ export function CommandPaletteModal({
       })
     }
 
-    const tks = tasks.filter(t => hit(t.title) || hit(t.desc)).slice(0, cap)
+    const tks = tasks.filter(t => {
+      const assigneeName = memberById.get(t.assigneeId)?.userName ?? ""
+      return hit(t.title) || hit(assigneeName)
+    }).slice(0, cap)
     if (tks.length) {
       out.push({
         label: "任务",
         items: tks.map(t => ({
           kind: "task",
-          id: t.id,
+          id: t.taskId,
           title: t.title,
           sub: `${projectName} · ${TASK_STATUS_LABEL[t.status]}`,
-          user: memberById.get(t.toUserId),
+          user: memberById.get(t.assigneeId),
         })),
       })
     }
 
-    const kbs = knowledge.filter(k => hit(k.title) || hit(k.sum)).slice(0, cap)
+    const kbs = activeKnowledge.filter(k => hit(k.title) || hit(k.category) || hit(k.termKey)).slice(0, cap)
     if (kbs.length) {
       out.push({
         label: "知识",
         items: kbs.map(k => ({
           kind: "knowledge",
-          id: k.id,
+          id: k.knowledgeId,
           title: k.title,
-          sub: `${k.scope === "workspace" ? "Workspace 团队" : projectName} · ${k.version}`,
-          user: memberById.get(k.authorUserId),
+          sub: `${k.category ? `${k.category} · ` : ""}v${k.version}`,
         })),
       })
     }
 
     return out
-  }, [query, mySessions, peerSessions, tasks, knowledge, projectName, memberById])
+  }, [query, mySessions, peerSessions, tasks, activeKnowledge, projectName, memberById])
 
   const flatItems = useMemo(() => groups.flatMap(g => g.items), [groups])
 
@@ -459,7 +472,7 @@ export function CommandPaletteModal({
 
   if (!open) return null
 
-  const totalAll = mySessions.length + peerSessions.length + tasks.length + knowledge.length
+  const totalAll = mySessions.length + peerSessions.length + tasks.length + activeKnowledge.length
   let flatIdx = 0
 
   return (
@@ -523,319 +536,6 @@ export function CommandPaletteModal({
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-/** 「在本机开始」任务启动弹窗（#dlgStart）。 */
-export function StartTaskDialog({
-  task,
-  localSessions,
-  onClose,
-  onConfirm,
-}: {
-  readonly task: CollabTask | null
-  readonly localSessions: readonly NavigationSessionEntry[]
-  readonly onClose: () => void
-  readonly onConfirm: (result: { mode: "existing" | "new"; existingSessionId?: string }) => void
-}): ReactElement | null {
-  const [mode, setMode] = useState<"existing" | "new">(localSessions.length ? "existing" : "new")
-  const [pickedId, setPickedId] = useState<string>(localSessions[0]?.conversationId ?? "")
-
-  useEffect(() => {
-    setMode(localSessions.length ? "existing" : "new")
-    setPickedId(localSessions[0]?.conversationId ?? "")
-  }, [task?.id, localSessions.length])
-
-  if (!task) return null
-
-  return (
-    <div className="dlg-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <form
-        className="dlg"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="dlgStartTitle"
-        onSubmit={e => {
-          e.preventDefault()
-          onConfirm(mode === "existing" ? { mode: "existing", existingSessionId: pickedId } : { mode: "new" })
-        }}
-      >
-        <div className="dlg-head">
-          <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h2 id="dlgStartTitle">在本机开始</h2>
-            <p className="dlg-sub">{task.title}</p>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
-          </button>
-        </div>
-
-        <div className="dlg-body">
-          <div className="fld">
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>选择执行会话</span>
-            <div className="choice-list" role="radiogroup">
-              <label className={`choice${mode === "existing" ? " is-on" : ""}`}>
-                <input
-                  type="radio"
-                  name="startMode"
-                  checked={mode === "existing"}
-                  disabled={!localSessions.length}
-                  onChange={() => setMode("existing")}
-                />
-                <span className="c-main">
-                  <span className="c-t">在已有本机会话中继续</span>
-                  <span className="c-d">
-                    {localSessions.length ? `保留原对话与工作目录，共 ${localSessions.length} 个可用` : "当前项目暂无本机会话"}
-                  </span>
-                </span>
-              </label>
-              <label className={`choice${mode === "new" ? " is-on" : ""}`}>
-                <input
-                  type="radio"
-                  name="startMode"
-                  checked={mode === "new"}
-                  onChange={() => setMode("new")}
-                />
-                <span className="c-main">
-                  <span className="c-t">前往新对话准备页创建</span>
-                  <span className="c-d">自选工作目录与指令后，在本机启动全新会话</span>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          {mode === "existing" && localSessions.length > 0 && (
-            <div className="fld">
-              <label htmlFor="startPickSelect">已有会话</label>
-              <select
-                id="startPickSelect"
-                value={pickedId}
-                onChange={e => setPickedId(e.currentTarget.value)}
-              >
-                {localSessions.map(s => (
-                  <option key={s.conversationId} value={s.conversationId}>{s.title}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        <div className="dlg-foot">
-          <span className="spacer" />
-          <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn btn-primary">开始执行</button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-/** 「新建知识」弹窗（#dlgKnowledge）。 */
-export function KnowledgeCreateDialog({
-  open,
-  projectName,
-  onClose,
-  onSubmit,
-}: {
-  readonly open: boolean
-  readonly projectName: string
-  readonly onClose: () => void
-  readonly onSubmit: (input: { title: string; sum: string; body: string; scope: CollabKnowledgeScope }) => void
-}): ReactElement | null {
-  const [title, setTitle] = useState("")
-  const [sum, setSum] = useState("")
-  const [body, setBody] = useState("")
-  const [scope, setScope] = useState<CollabKnowledgeScope>("project")
-  const [err, setErr] = useState("")
-  const titleRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setTitle("")
-    setSum("")
-    setBody("")
-    setScope("project")
-    setErr("")
-    const t = window.setTimeout(() => titleRef.current?.focus(), 0)
-    return () => window.clearTimeout(t)
-  }, [open])
-
-  if (!open) return null
-
-  return (
-    <div className="dlg-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <form
-        className="dlg"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="dlgKnowTitle"
-        onSubmit={e => {
-          e.preventDefault()
-          if (!title.trim()) {
-            setErr("请填写知识标题。")
-            titleRef.current?.focus()
-            return
-          }
-          onSubmit({ title: title.trim(), sum: sum.trim(), body: body.trim(), scope })
-        }}
-      >
-        <div className="dlg-head">
-          <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h2 id="dlgKnowTitle">新建知识</h2>
-            <p className="dlg-sub">{projectName}</p>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
-          </button>
-        </div>
-
-        <div className="dlg-body">
-          <div className="fld">
-            <label htmlFor="knowTitle">标题<span className="req" aria-hidden="true">*</span></label>
-            <input
-              ref={titleRef}
-              id="knowTitle"
-              type="text"
-              placeholder="例如：支付回调幂等键约定"
-              value={title}
-              onChange={e => { setTitle(e.currentTarget.value); setErr("") }}
-            />
-            {err && <p className="err">{err}</p>}
-          </div>
-          <div className="fld">
-            <label htmlFor="knowSum">一句话结论</label>
-            <input id="knowSum" type="text" placeholder="概括这条知识约束了什么" value={sum} onChange={e => setSum(e.currentTarget.value)} />
-          </div>
-          <div className="fld">
-            <label htmlFor="knowBody">详细规范 / 正文</label>
-            <textarea id="knowBody" placeholder="写明触发条件、代码规范或字段约定，供团队与 Agent 直接执行" value={body} onChange={e => setBody(e.currentTarget.value)} />
-          </div>
-          <div className="fld">
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>归属</span>
-            <div className="choice-list" role="radiogroup">
-              <label className={`choice${scope === "project" ? " is-on" : ""}`}>
-                <input type="radio" name="kscope" checked={scope === "project"} onChange={() => setScope("project")} />
-                <span className="c-main">
-                  <span className="c-t">仅当前 Project</span>
-                  <span className="c-d">只随这个项目沉淀，别的项目看不到</span>
-                </span>
-              </label>
-              <label className={`choice${scope === "workspace" ? " is-on" : ""}`}>
-                <input type="radio" name="kscope" checked={scope === "workspace"} onChange={() => setScope("workspace")} />
-                <span className="c-main">
-                  <span className="c-t">Workspace 团队共享</span>
-                  <span className="c-d">当前 Workspace 下所有项目通用</span>
-                </span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div className="dlg-foot">
-          <span className="spacer" />
-          <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn btn-primary">保存知识</button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-/** 「@成员 派发任务」弹窗（#dlgDispatch）。 */
-export function DispatchTaskDialog({
-  open,
-  subtitle,
-  members,
-  defaultAssigneeId,
-  onClose,
-  onSubmit,
-}: {
-  readonly open: boolean
-  readonly subtitle: string
-  readonly members: readonly NavigationMember[]
-  readonly defaultAssigneeId?: string
-  readonly onClose: () => void
-  readonly onSubmit: (input: { title: string; toUserId: string; desc: string }) => void
-}): ReactElement | null {
-  const [title, setTitle] = useState("")
-  const [toUserId, setToUserId] = useState(defaultAssigneeId ?? members[0]?.userId ?? "")
-  const [desc, setDesc] = useState("")
-  const [err, setErr] = useState("")
-  const titleRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setTitle("")
-    setDesc("")
-    setErr("")
-    setToUserId(defaultAssigneeId ?? members[0]?.userId ?? "")
-    const t = window.setTimeout(() => titleRef.current?.focus(), 0)
-    return () => window.clearTimeout(t)
-  }, [open, defaultAssigneeId, members])
-
-  if (!open) return null
-
-  return (
-    <div className="dlg-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <form
-        className="dlg"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="dlgDispatchTitle"
-        onSubmit={e => {
-          e.preventDefault()
-          if (!title.trim()) {
-            setErr("请填写任务标题。")
-            titleRef.current?.focus()
-            return
-          }
-          onSubmit({ title: title.trim(), toUserId: toUserId || members[0]?.userId || "", desc: desc.trim() })
-        }}
-      >
-        <div className="dlg-head">
-          <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h2 id="dlgDispatchTitle">@成员 派发任务</h2>
-            <p className="dlg-sub">{subtitle}</p>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭" style={{ marginLeft: "auto" }}>
-            <CloseIcon size={15} />
-          </button>
-        </div>
-
-        <div className="dlg-body">
-          <div className="fld">
-            <label htmlFor="disTitle">任务标题<span className="req" aria-hidden="true">*</span></label>
-            <input
-              ref={titleRef}
-              id="disTitle"
-              type="text"
-              placeholder="例如：支付方式列表接口补 3 个字段"
-              value={title}
-              onChange={e => { setTitle(e.currentTarget.value); setErr("") }}
-            />
-            {err && <p className="err">{err}</p>}
-          </div>
-          <div className="fld">
-            <label htmlFor="disTo">指派给</label>
-            <select id="disTo" value={toUserId} onChange={e => setToUserId(e.currentTarget.value)}>
-              {members.map(m => (
-                <option key={m.userId} value={m.userId}>{m.userName} · {memberRoleLabel(m)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="fld">
-            <label htmlFor="disDesc">背景说明</label>
-            <textarea id="disDesc" placeholder="为什么需要这个改动、验收标准是什么" value={desc} onChange={e => setDesc(e.currentTarget.value)} />
-          </div>
-        </div>
-
-        <div className="dlg-foot">
-          <span className="spacer" />
-          <button type="button" className="btn btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn btn-primary">派发任务</button>
-        </div>
-      </form>
     </div>
   )
 }
