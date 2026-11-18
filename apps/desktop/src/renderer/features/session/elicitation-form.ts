@@ -310,6 +310,9 @@ export function toConversationInteraction(
     readonly retryRevision?: number
     readonly readOnly?: boolean
     readonly availability?: ConversationAvailability
+    readonly renderPlanPreview?: (
+      form: Extract<RecognizedElicitationForm, { kind: "plan" }>,
+    ) => ConversationInteractionView["preview"]
   } = {},
 ): { readonly form: RecognizedElicitationForm; readonly interaction: ConversationInteractionView } | null {
   const form = recognizeElicitationForm(request.requestedSchema, request.message)
@@ -378,19 +381,29 @@ export function toConversationInteraction(
   }
 
   if (form.kind === "plan") {
+    const planPreview = form.markdown && options.renderPlanPreview ? options.renderPlanPreview(form) : undefined
     return {
       form,
       interaction: {
         ...base,
         kind: "approval",
         title: form.displayPath ? `确认执行计划（${form.displayPath}）` : "确认执行计划",
-        ...(form.markdown ? { description: form.markdown } : {}),
+        ...(planPreview !== undefined ? { preview: planPreview } : form.markdown ? { description: form.markdown } : {}),
         options: form.decisions.map(decision => ({
           id: decision,
           label: form.optionLabels[decision] || PLAN_LABELS[decision],
           tone: decision === "approved" ? "positive" : decision === "abandoned" ? "negative" : "neutral",
-          behavior: decision === "abandoned" ? "immediate" : "confirm",
-          feedback: decision === "abandoned" ? "none" : "optional",
+          behavior: decision === "approved" ? "immediate" : "confirm",
+          feedback: decision === "approved" ? "none" : "optional",
+          ...(decision === "revise" ? {
+            feedbackLabel: "修改意见",
+            feedbackPlaceholder: "请填写需要调整或补充的计划内容…",
+            submitLabel: "提交修改意见",
+          } : decision === "abandoned" ? {
+            feedbackLabel: "放弃说明",
+            feedbackPlaceholder: "可选填写放弃原因…",
+            submitLabel: "确认放弃",
+          } : {}),
           availability: { enabled: true },
         })),
       },
@@ -416,8 +429,17 @@ export function toConversationInteraction(
         label: form.optionLabels[decision] || GOAL_LABELS[decision],
         ...(decision === "edited" ? { description: "请在下方反馈框每行填写一条新的判定条件" } : {}),
         tone: decision === "accepted" ? "positive" : decision === "rejected" ? "negative" : "neutral",
-        behavior: "confirm",
-        feedback: decision === "edited" ? "required" : "optional",
+        behavior: decision === "accepted" ? "immediate" : "confirm",
+        feedback: decision === "accepted" ? "none" : decision === "edited" ? "required" : "optional",
+        ...(decision === "edited" ? {
+          feedbackLabel: "判定条件（每行一条）",
+          feedbackPlaceholder: "每行输入一条新的判定条件…",
+          submitLabel: "提交修改",
+        } : decision === "rejected" ? {
+          feedbackLabel: "拒绝说明",
+          feedbackPlaceholder: "可选填写拒绝原因…",
+          submitLabel: "确认拒绝",
+        } : {}),
         availability: { enabled: true },
       })),
     },

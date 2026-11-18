@@ -7,7 +7,7 @@
  */
 import { useRef } from "react"
 import type { FormEvent, KeyboardEvent, ReactElement } from "react"
-import { IconArrowUp, IconChevronDown, IconFolder } from "@tabler/icons-react"
+import { IconArrowUp, IconChevronDown, IconFolder, IconLoader2 } from "@tabler/icons-react"
 import type { LocalExecutionProviderInfo } from "../../../local-execution-host.js"
 import { directoryBasename } from "./session-model.js"
 import type { NewSessionDraft } from "./contracts.js"
@@ -82,7 +82,7 @@ export function NewSessionPage({
           onCompositionStart={() => { composing.current = true }}
           onCompositionEnd={() => { composing.current = false }}
           onKeyDown={handleKeyDown}
-          placeholder="描述你想讨论或完成的事情，按 Enter 开始会话…"
+          placeholder="描述你想讨论或推进的事项…"
           aria-label="新会话初始内容"
         />
         <div className="session-new-card-footer">
@@ -121,15 +121,16 @@ export function NewSessionPage({
             </span>
           </div>
           <div className="session-new-card-right">
-            <span className="session-new-kbd-hint">⏎ 开始</span>
             <button
               type="submit"
-              className="wb-button wb-button-primary wb-button-small"
+              className="session-new-send-btn"
+              aria-label={busy ? "创建中…" : "开始会话"}
               disabled={!canSubmit}
-              title={disabledReason ?? "创建并发送初始消息"}
+              title={disabledReason ?? (busy ? "创建中…" : "开始会话")}
             >
-              <IconArrowUp size={14} aria-hidden="true" />
-              <span>{busy ? "创建中…" : "开始会话"}</span>
+              {busy
+                ? <IconLoader2 size={14} aria-hidden="true" className="session-plan-spin" />
+                : <IconArrowUp size={14} aria-hidden="true" />}
             </button>
           </div>
         </div>
@@ -145,7 +146,7 @@ export function NewSessionPage({
           </span>
         </div>
       ) : null}
-      <p className="session-new-note">目录由你选择，可以是普通文件夹；按 Enter 直接开始，Shift+Enter 换行。</p>
+      <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹。</p>
     </section>
   )
 }

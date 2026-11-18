@@ -452,10 +452,27 @@
   color: var(--fg, var(--text));
 }
 
-.session-new-kbd-hint {
-  color: var(--meta, var(--subtle));
-  font-size: var(--text-xs, 12px);
-  white-space: nowrap;
+.session-new-send-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent, var(--action));
+  color: var(--accent-fg, var(--action-text));
+  cursor: pointer;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.session-new-send-btn:hover:not(:disabled) {
+  background: var(--accent-hover, var(--action-hover));
+}
+
+.session-new-send-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }
 
 .session-new-send {
@@ -1041,4 +1058,320 @@
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
+}
+
+/* 计划交互 Markdown 预览、顶部工具条与放大阅读弹窗 */
+.session-plan-elicitation-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.session-plan-elicitation-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
+}
+
+.session-plan-elicitation-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.session-plan-elicitation-markdown {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.session-plan-markdown-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.session-plan-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+  color: var(--fg-2, var(--text-soft));
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.session-plan-zoom-btn:hover {
+  background: var(--hover);
+  color: var(--fg, var(--text));
+}
+
+.session-plan-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--overlay-scrim, rgba(15, 23, 42, 0.45));
+  backdrop-filter: blur(2px);
+}
+
+.session-plan-zoom-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 92vw);
+  max-height: 86vh;
+  min-height: 0;
+  border-radius: var(--radius-xl, 12px);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line)), var(--elev-pop);
+  overflow: hidden;
+}
+
+.session-plan-zoom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border, var(--line));
+}
+
+.session-plan-zoom-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-plan-zoom-title-group h3 {
+  margin: 0;
+  font-size: var(--text-md, 14px);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-plan-zoom-title-group span {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.session-plan-zoom-close {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.session-plan-zoom-close:hover {
+  background: var(--hover);
+  color: var(--fg, var(--text));
+}
+
+.session-plan-zoom-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+  font-size: var(--text-base, 13.5px);
+  line-height: 1.7;
+  color: var(--fg, var(--text));
+}
+
+/* 交互式 /undo 回退选择题卡片 */
+.session-undo-card {
+  display: grid;
+  gap: 10px;
+  max-width: 660px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, var(--line));
+  border-radius: var(--radius-surface, 12px);
+  background: var(--surface);
+  box-shadow: 0 2px 8px -4px rgba(15, 23, 42, 0.08);
+}
+
+.session-undo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-undo-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+}
+
+.session-undo-title svg {
+  color: var(--accent);
+}
+
+.session-undo-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs, 11px);
+  color: var(--muted);
+}
+
+.session-undo-list {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.session-undo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-control, 8px);
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.session-undo-item:hover {
+  background: var(--hover);
+}
+
+.session-undo-item[data-checked="true"] {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border, var(--line)));
+}
+
+.session-undo-item input[type="radio"] {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.session-undo-turn-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2, var(--text-soft));
+}
+
+.session-undo-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm, 13px);
+  color: var(--fg, var(--text));
+}
+
+.session-undo-files {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.session-undo-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  box-shadow: inset 0 1px 0 var(--border-soft, var(--line-soft));
+}
+
+.session-undo-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.session-undo-mode-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-xs, 12px);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.session-undo-mode-btn.is-active {
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.session-undo-mode-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.session-undo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.session-undo-hint {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.session-undo-error {
+  margin: 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--danger-fg, var(--danger));
 }

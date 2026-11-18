@@ -146,7 +146,21 @@ export type ConversationInteractionView = {
   /** 装配方仅在确认此 scope 与请求可以重试时递增，默认 0。 */
   readonly retryRevision?: number
 } & (
-  | { readonly kind: "approval"; readonly options: readonly { readonly id: string; readonly label: string; readonly description?: string; readonly tone: "positive" | "negative" | "neutral"; readonly behavior: "confirm" | "immediate"; readonly feedback: "none" | "optional" | "required"; readonly availability: ConversationAvailability }[] }
+  | {
+      readonly kind: "approval"
+      readonly options: readonly {
+        readonly id: string
+        readonly label: string
+        readonly description?: string
+        readonly tone: "positive" | "negative" | "neutral"
+        readonly behavior: "confirm" | "immediate"
+        readonly feedback: "none" | "optional" | "required"
+        readonly feedbackLabel?: string
+        readonly feedbackPlaceholder?: string
+        readonly submitLabel?: string
+        readonly availability: ConversationAvailability
+      }[]
+    }
   | { readonly kind: "question"; readonly questions: readonly { readonly id: string; readonly text: string; readonly multiple: boolean; readonly required: boolean; readonly allowOther: boolean; readonly options: readonly ConversationMenuItemView[] }[] }
   | { readonly kind: "extension"; readonly content: ReactNode }
 )
