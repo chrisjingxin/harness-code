@@ -1,7 +1,11 @@
-/** 文件树、候选和只读预览共用项目范围，内容与页签缓存由调用方管理。 */
+/**
+ * 【功能定义】文件树浏览、@ 候选文件检索与只读正文预览实现。
+ * 【协作边界】所有操作都在 `ProjectRoot` 校验与 `.git`/敏感目录保护边界内执行；内容缓存由上层调用方管理。
+ */
 import { lstat, opendir, realpath, stat } from "node:fs/promises"
-import { dirname, posix, resolve } from "node:path"
-import { digest, gitCommand, gitLine, gitText, utf8 } from "./git-command.js"
+import { posix, resolve } from "node:path"
+import { digest, gitCommand, gitText, utf8 } from "./git-command.js"
+import { detectGitRoot } from "./git-state.js"
 import { ProjectRoot, filesystemError, sameFileVersion, validRelativePath } from "./root.js"
 import { ProjectServiceError } from "./types.js"
 import type { ProjectCandidates, ProjectDirectory, ProjectEntry, ProjectPreview } from "./types.js"
@@ -41,22 +45,8 @@ function parent(path: string): string {
   return posix.dirname(path) === "." ? "" : posix.dirname(path)
 }
 
-/** 管理目录可能由工作树的 .git 文件指向另一个位置。仅在设备内使用这些绝对路径。 */
-async function gitDirectories(root: ProjectRoot): Promise<readonly string[]> {
-  const commands = [
-    ["rev-parse", "--absolute-git-dir"],
-    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-  ]
-  const paths = await Promise.all(commands.map(args => gitCommand(root.path, args, { timeout: 5_000 })))
-  const directories = new Set<string>()
-  for (const result of paths) {
-    if (result.state === "exited" && result.code === 0) {
-      const path = resolve(root.path, gitLine(result.stdout))
-      directories.add(path)
-      directories.add(await realpath(path).catch(() => path))
-    }
-  }
-  return [...directories]
+function hasIgnoredSegment(path: string): boolean {
+  return path.split("/").some(segment => ignored.has(segment))
 }
 
 function decodePreview(bytes: Buffer, truncated: boolean): string {
@@ -65,7 +55,7 @@ function decodePreview(bytes: Buffer, truncated: boolean): string {
     try {
       return utf8.decode(bytes.subarray(0, bytes.length - trim)).replace(/^\uFEFF/, "")
     } catch {
-      // 字节上限可落在 UTF-8 字符中间，最多丢弃不完整字符的尾部字节。
+      // 字节上限可能落在 UTF-8 多字节字符中间，最多剥离尾部 3 个残字节重试。
     }
   }
   throw new ProjectServiceError("unsupported-encoding", "非 UTF-8 文本暂不支持预览。")
@@ -76,12 +66,8 @@ export class ProjectFiles {
 
   async listDirectory(directory = "", cursor?: string): Promise<ProjectDirectory> {
     await this.root.verify()
-    const protectedPaths = await gitDirectories(this.root)
-    await this.resolveDirectory(directory, protectedPaths)
-    const indexed = await this.gitIndex(protectedPaths)
-    const listed = indexed
-      ? { entries: await this.classify(indexed.entries.filter(item => parent(item.path) === directory), protectedPaths), truncated: indexed.truncated }
-      : await this.scanDirectory(directory, protectedPaths)
+    const { protectedPaths } = await detectGitRoot(this.root.path)
+    const listed = await this.scanDirectory(directory, protectedPaths)
     listed.entries.sort(compare)
     const limited = listed.truncated || listed.entries.length > MAX_DIRECTORY_ROWS
     const rows = listed.entries.slice(0, MAX_DIRECTORY_ROWS)
@@ -101,15 +87,12 @@ export class ProjectFiles {
       throw new ProjectServiceError("limit-exceeded", "文件候选查询超出限制。")
     }
     await this.root.verify()
-    const protectedPaths = await gitDirectories(this.root)
+    const { isGitRepository, protectedPaths } = await detectGitRoot(this.root.path)
     await this.resolveDirectory(directory, protectedPaths)
     const term = query.trim()
-    const indexed = await this.gitIndex(protectedPaths)
     const source = term
-      ? indexed ?? await this.scanTree(protectedPaths)
-      : indexed
-        ? { entries: indexed.entries.filter(item => parent(item.path) === directory), truncated: indexed.truncated }
-        : await this.scanDirectory(directory, protectedPaths)
+      ? (isGitRepository ? await this.gitIndex(protectedPaths, directory) : null) ?? await this.scanTree(protectedPaths, directory)
+      : await this.scanDirectory(directory, protectedPaths)
     const matches = term
       ? source.entries.filter(item => item.kind !== "directory").map(item => ({
         item, score: candidateScore(item, term.toLowerCase()),
@@ -117,7 +100,7 @@ export class ProjectFiles {
         .map(match => match.item)
       : source.entries.sort(compare)
     const take = Math.min(limit, MAX_CANDIDATES)
-    const classified = await this.classify(matches.slice(0, take), protectedPaths)
+    const classified = term && isGitRepository ? await this.classify(matches.slice(0, take), protectedPaths) : matches.slice(0, take)
     const pattern = term ? new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu") : null
     const items = classified.map(item => {
       const match = pattern?.exec(item.path)
@@ -130,7 +113,7 @@ export class ProjectFiles {
 
   async readPreview(path: string): Promise<ProjectPreview> {
     await this.root.verify()
-    const protectedPaths = await gitDirectories(this.root)
+    const { protectedPaths } = await detectGitRoot(this.root.path)
     try {
       return await this.readOnce(path, protectedPaths)
     } catch (error) {
@@ -167,7 +150,7 @@ export class ProjectFiles {
   private async resolveDirectory(directory: string, protectedPaths: readonly string[]): Promise<string> {
     const path = await this.root.resolveReadable(directory, protectedPaths, true)
     try {
-      if (!(await stat(path)).isDirectory()) throw new ProjectServiceError("unsupported", "目标不是目录。")
+      if (!(await stat(path)).isDirectory()) throw new ProjectServiceError("invalid-path", "目标路径不是目录。")
       return path
     } catch (error) {
       throw filesystemError(error)
@@ -181,8 +164,8 @@ export class ProjectFiles {
       const entries: ProjectEntry[] = []
       let truncated = false
       for await (const row of await opendir(path)) {
-        const relative = directory ? `${directory}/${row.name}` : row.name
-        if (!validRelativePath(relative) || row.isDirectory() && ignored.has(row.name)) continue
+        const relativePath = directory ? `${directory}/${row.name}` : row.name
+        if (!validRelativePath(relativePath) || (row.isDirectory() && ignored.has(row.name))) continue
         try {
           this.root.assertReadable(resolve(path, row.name), protectedPaths)
         } catch {
@@ -193,7 +176,7 @@ export class ProjectFiles {
           break
         }
         if (row.isDirectory() || row.isFile() || row.isSymbolicLink()) {
-          entries.push(entry(relative, row.isDirectory() ? "directory" : row.isFile() ? "file" : "symlink"))
+          entries.push(entry(relativePath, row.isDirectory() ? "directory" : row.isFile() ? "file" : "symlink"))
         }
       }
       if (await realpath(path) !== path || !sameFileVersion(before, await stat(path))) {
@@ -205,14 +188,14 @@ export class ProjectFiles {
     }
   }
 
-  private async scanTree(protectedPaths: readonly string[]): Promise<Index> {
-    const queue = [""]
+  private async scanTree(protectedPaths: readonly string[], startDir = ""): Promise<Index> {
+    const queue = [startDir]
     const entries: ProjectEntry[] = []
     let truncated = false
     for (let index = 0; index < queue.length; index++) {
       let page: Index
       try {
-        page = await this.scanDirectory(queue[index], protectedPaths)
+        page = await this.scanDirectory(queue[index]!, protectedPaths)
       } catch (error) {
         if (index === 0) throw error
         truncated = true
@@ -228,32 +211,26 @@ export class ProjectFiles {
     return { entries, truncated }
   }
 
-  private async gitIndex(protectedPaths: readonly string[]): Promise<Index | null> {
-    // 在登记根执行 ls-files，子目录仓库的结果也保持相对于登记根。
+  private async gitIndex(protectedPaths: readonly string[], scopeDir = ""): Promise<Index | null> {
     const result = await gitCommand(this.root.path, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
       timeout: 5_000, maxBuffer: 16 * 1024 * 1024,
     })
-    if (result.state === "unavailable" || result.state === "exited" && result.code === 128 && !protectedPaths.length) return null
-    if (result.state !== "exited" || result.code !== 0) {
-      throw new ProjectServiceError("limit-exceeded", "Git 文件列表不可用或超出扫描限制。")
-    }
-    const byPath = new Map<string, ProjectEntry>()
+    if (result.state !== "exited" || result.code !== 0) return null
+    const entries: ProjectEntry[] = []
     for (const file of gitText(result.stdout).split("\0").filter(Boolean)) {
-      if (!validRelativePath(file)) continue
+      if (!validRelativePath(file) || hasIgnoredSegment(file)) continue
+      if (scopeDir && file !== scopeDir && !file.startsWith(`${scopeDir}/`)) continue
       try {
         this.root.assertReadable(this.root.relativePath(file), protectedPaths)
       } catch {
         continue
       }
-      for (let path = file; path && !byPath.has(path); path = parent(path)) {
-        if (byPath.size === MAX_INDEX_ROWS) {
-          // 部分扫描可能停在一个文件的祖先上，补不齐时仍明确标记截断。
-          return { entries: [...byPath.values()], truncated: true }
-        }
-        byPath.set(path, entry(path, path === file ? "file" : "directory"))
+      if (entries.length === MAX_INDEX_ROWS) {
+        return { entries, truncated: true }
       }
+      entries.push(entry(file, "file"))
     }
-    return { entries: [...byPath.values()], truncated: false }
+    return { entries, truncated: false }
   }
 
   private async classify(rows: ProjectEntry[], protectedPaths: readonly string[]): Promise<ProjectEntry[]> {

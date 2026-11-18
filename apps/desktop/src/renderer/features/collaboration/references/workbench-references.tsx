@@ -3,9 +3,8 @@
  * 仅在应用草稿后保留已确认的固定材料，个人记录只接收材料标识。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { TaskSummary } from "@workbench/contracts"
+import type { CollaborationAppsHost, TaskSummary } from "@workbench/contracts"
 import type { ConversationCollaborationCandidate, ConversationProjectTarget, ConversationReferenceView, ConversationScope, ConversationTimelineEntry } from "@workbench/ui"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import { decodeHistoryToTimelineEntries } from "../../session/index.js"
@@ -28,7 +27,6 @@ const EMPTY_MATERIALS: ReadonlyMap<string, Material> = new Map()
 interface WorkbenchReferenceOptions {
   readonly scope: ProjectNavigationScope | null
   readonly selectedConversationId: string | null
-  readonly pageKey?: string
   readonly pageController: SessionPageController
   readonly integration: SessionIntegrationApi
   readonly readSnapshot?: ReferenceActions["readSnapshot"]
@@ -43,16 +41,17 @@ interface WorkbenchReferenceOptions {
 
 /** 快照能力缺失时，工作台沿用原有文件提及和只读页提示。 */
 export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
-  const { scope, selectedConversationId, pageKey, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
+  const { scope, selectedConversationId, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
     members, tasks, onChooseMember, onOpenTask } = options
   const { currentUserId: localDeviceId, conversations, directories, resolveOwnerName } = pageController
   const sourceIsListed = selectedConversationId === null || conversations.some(item =>
     item.conversationId === selectedConversationId && item.projectId === scope?.projectId)
+  // 切换看板/任务/知识/会话页时不重建引用范围，避免切页清掉已恢复的固定材料缓存并重复拉取。
   const referenceScope = useMemo((): ReferenceScope | null =>
     scope && sourceIsListed && (host || (localDeviceId && readSnapshot))
-      ? { ...scope, deviceId: localDeviceId ?? "", conversationId: selectedConversationId, pageKey }
+      ? { ...scope, deviceId: localDeviceId ?? "", conversationId: selectedConversationId }
       : null,
-  [scope, localDeviceId, selectedConversationId, pageKey, sourceIsListed, readSnapshot, host])
+  [scope, localDeviceId, selectedConversationId, sourceIsListed, readSnapshot, host])
 
   const currentOrigin = useRef<ReferenceScope | null>(null)
   useLayoutEffect(() => {
@@ -62,12 +61,14 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
   const materialKey = scope && localDeviceId && (host || readSnapshot)
     ? JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.projectId, localDeviceId])
     : ""
+  const restoredKey = referenceScope
+    ? JSON.stringify([referenceScope.namespace, referenceScope.accountId, referenceScope.workspaceId, referenceScope.projectId, referenceScope.deviceId])
+    : ""
   const [confirmed, setConfirmed] = useState<{ key: string; origin: ReferenceScope; materials: ReadonlyMap<string, Material> }>()
-  const [restored, setRestored] = useState<{ origin: ReferenceScope; materials: ReadonlyMap<string, Restored> }>()
+  const [restored, setRestored] = useState<{ key: string; materials: ReadonlyMap<string, Restored> }>()
   const [retryRevision, retryReads] = useState(0)
-  const confirmedMaterials = confirmed?.key === materialKey && (!host || confirmed.origin === referenceScope)
-    ? confirmed.materials : EMPTY_MATERIALS
-  const restoredMaterials = restored?.origin === referenceScope ? restored.materials : undefined
+  const confirmedMaterials = confirmed?.key === materialKey ? confirmed.materials : EMPTY_MATERIALS
+  const restoredMaterials = restoredKey && restored?.key === restoredKey ? restored.materials : undefined
 
   const selected = selectedConversationId && conversations.find(item => item.conversationId === selectedConversationId)
   const draftIds = selectedConversationId ? pageController.personalStates[selectedConversationId]?.draft.referenceIds ?? [] : []
@@ -84,18 +85,19 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
 
   useLayoutEffect(() => {
     const failure = executionView?.referenceFailure
-    if (!referenceScope || !failure) return
+    if (!referenceScope || !restoredKey || !failure) return
     setRestored(previous => {
-      const next = new Map(previous?.origin === referenceScope ? previous.materials : [])
+      const next = new Map(previous?.key === restoredKey ? previous.materials : [])
       next.set(failure.id, { message: failure.message })
-      return { origin: referenceScope, materials: next }
+      return { key: restoredKey, materials: next }
     })
-  }, [referenceScope, executionView?.referenceFailure])
+  }, [referenceScope, restoredKey, executionView?.referenceFailure])
 
   useEffect(() => {
-    if (!host || !referenceScope || !ids.length) return
+    if (!host || !referenceScope || !restoredKey || !ids.length) return
     let active = true
     const origin = referenceScope
+    const key = restoredKey
     for (const id of ids) {
       if (restoredMaterials?.get(id) && "snapshot" in restoredMaterials.get(id)!) continue
       void readFixedMaterial(host, origin, id, resolveOwnerName)
@@ -104,14 +106,14 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
         .then(value => {
           if (!active || currentOrigin.current !== origin) return
           setRestored(previous => {
-            const next = new Map(previous?.origin === origin ? previous.materials : [])
+            const next = new Map(previous?.key === key ? previous.materials : [])
             next.set(id, value)
-            return { origin, materials: next }
+            return { key, materials: next }
           })
         })
     }
     return () => { active = false }
-  }, [host, referenceScope, restoreKey, retryRevision])
+  }, [host, referenceScope, restoredKey, restoreKey, retryRevision])
 
   function fixedMaterial(id: string): ConversationSnapshot | undefined {
     const record = restoredMaterials?.get(id)

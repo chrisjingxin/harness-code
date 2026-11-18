@@ -3,11 +3,13 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
   applyLocalExecutionUpdate,
+  buildComposerCapabilities,
   describePermissionRequest,
   emptyLocalExecutionView,
+  extractFileAttachments,
   projectLocalExecution,
 } from "../src/renderer/features/session/local-execution-view.ts"
-import type { LocalExecutionPermission, LocalExecutionTool } from "../src/local-execution-host.ts"
+import type { LocalExecutionPermission, LocalExecutionSessionState, LocalExecutionTool } from "../src/local-execution-host.ts"
 
 const author = { id: "u-1", displayName: "我" }
 
@@ -341,4 +343,224 @@ test("applyLocalExecutionUpdate records permission-decision at permission settle
     assert.equal(history.statusLabel, "允许一次")
     assert.equal(history.title, "edit_file package-settings.json")
   }
+})
+
+test("正文之间仅夹杂思考且未切换 messageId 时合并为一条正文并移到思考之后", () => {
+  let state = applyLocalExecutionUpdate(accepted(), { kind: "assistant-text", turnId: "t-1", text: "`wc -l pi", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "确认文件名" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "-probe.txt`", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "再补一句" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: " 已确认", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "finished", turnId: "t-1" })
+
+  assert.deepEqual(
+    state.entries.map(e => e.id),
+    [
+      "local-execution:t-1:user",
+      "local-execution:t-1:reasoning:0",
+      "local-execution:t-1:reasoning:1",
+      "local-execution:t-1:assistant",
+    ],
+  )
+  const assistant = state.entries[3]
+  assert.equal(assistant?.kind, "message")
+  if (assistant?.kind === "message") {
+    assert.equal(assistant.text, "`wc -l pi-probe.txt` 已确认")
+    assert.equal(assistant.streaming, false)
+  }
+})
+
+test("工具、审批或 messageId 切换后穿插思考仍开启新的正文段", () => {
+  let state = applyLocalExecutionUpdate(accepted(), { kind: "assistant-text", turnId: "t-1", text: "第一段", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "tool", turnId: "t-1", tool: tool("c-1", { title: "read_file a.ts", status: "completed" }) })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "工具后思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第二段", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "换段前思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第三段", messageId: "m-2" })
+  state = applyLocalExecutionUpdate(state, {
+    kind: "permission",
+    turnId: "t-1",
+    request: { id: "p-1", title: "审批", options: [{ id: "ok", label: "允许", allows: true }] },
+  })
+  state = applyLocalExecutionUpdate(state, { kind: "permission", turnId: "t-1", request: null })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "审批后思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第四段", messageId: "m-2" })
+  state = applyLocalExecutionUpdate(state, { kind: "finished", turnId: "t-1" })
+
+  const assistants = state.entries.filter(e => e.kind === "message" && e.role === "assistant")
+  assert.deepEqual(
+    assistants.map(a => a.kind === "message" ? [a.id, a.text] : []),
+    [
+      ["local-execution:t-1:assistant", "第一段"],
+      ["local-execution:t-1:assistant:1", "第二段"],
+      ["local-execution:t-1:assistant:2", "第三段"],
+      ["local-execution:t-1:assistant:3", "第四段"],
+    ],
+  )
+})
+
+test("execute 工具保留完整命令字符串，不按首个空格拆分成 label 和 summary", () => {
+  let state = applyLocalExecutionUpdate(accepted(), {
+    kind: "tool",
+    turnId: "t-1",
+    tool: tool("cmd-1", { title: "wc -l pi-probe.txt", kind: "execute", status: "completed" }),
+  })
+  state = applyLocalExecutionUpdate(state, {
+    kind: "tool",
+    turnId: "t-1",
+    tool: tool("cmd-2", { title: "ls", kind: "execute", status: "completed" }),
+  })
+  const cmd1 = state.entries.find(e => e.id === "local-execution:t-1:tool:cmd-1")
+  const cmd2 = state.entries.find(e => e.id === "local-execution:t-1:tool:cmd-2")
+  assert.equal(cmd1?.kind, "tool")
+  if (cmd1?.kind === "tool") {
+    assert.equal(cmd1.label, "终端命令")
+    assert.equal(cmd1.summary, "wc -l pi-probe.txt")
+    assert.equal(cmd1.originalName, "wc -l pi-probe.txt")
+  }
+  assert.equal(cmd2?.kind, "tool")
+  if (cmd2?.kind === "tool") {
+    assert.equal(cmd2.label, "终端命令")
+    assert.equal(cmd2.summary, "ls")
+    assert.equal(cmd2.originalName, "ls")
+  }
+})
+
+test("session-state 与 elicitation 状态流转及交互历史记录", () => {
+  const sessionState: LocalExecutionSessionState = {
+    providerId: "harness",
+    connected: true,
+    modes: {
+      currentModeId: "default",
+      availableModes: [{ id: "default", name: "逐项确认" }, { id: "plan", name: "先出计划" }],
+    },
+    currentModeId: "default",
+    configOptions: [
+      {
+        id: "model",
+        name: "模型",
+        type: "select",
+        currentValue: "claude-sonnet",
+        options: [{ value: "claude-sonnet", name: "Claude Sonnet" }],
+      },
+      {
+        id: "workflow",
+        name: "工作流",
+        type: "select",
+        category: "harness.workflow",
+        currentValue: "build",
+        options: [{ value: "build", name: "直接执行" }, { value: "compose", name: "分阶段协作" }],
+      },
+    ],
+    availableCommands: [{ name: "compact", description: "压缩上下文" }, { name: "title", description: "修改标题", inputHint: "标题" }],
+    plans: [{ kind: "entries", entries: [{ content: "写测试", priority: "high", status: "completed" }] }],
+    usage: { used: 1200, size: 128000, cost: { amount: 0.05, currency: "USD" } },
+    restoreStatus: { kind: "reset", reason: "session-restore-failed", previousSessionId: "old-1", sessionId: "new-2" },
+  }
+
+  let state = applyLocalExecutionUpdate(emptyLocalExecutionView, { kind: "session-state", state: sessionState })
+  assert.equal(state.sessionState?.providerId, "harness")
+  assert.equal(state.sessionState?.plans.length, 1)
+
+  state = applyLocalExecutionUpdate(state, { kind: "accepted", turnId: "t-el", text: "开始", author })
+  state = applyLocalExecutionUpdate(state, {
+    kind: "elicitation",
+    request: { id: "el-1", message: "确认计划", requestedSchema: { type: "object", properties: {} } },
+  })
+  assert.equal(state.elicitation?.id, "el-1")
+
+  state = applyLocalExecutionUpdate(state, {
+    kind: "elicitation-decision",
+    turnId: "t-el",
+    requestId: "el-1",
+    title: "确认计划",
+    statusLabel: "已批准",
+  })
+  assert.equal(state.elicitation, null)
+  assert.ok(state.entries.some(e => e.kind === "interaction-history" && e.id === "local-execution:t-el:elicitation:el-1"))
+})
+
+test("buildComposerCapabilities 生成多代理/模式/配置控件、workflow tabCycle、斜杠命令、用量与回退提示", () => {
+  const sessionState: LocalExecutionSessionState = {
+    providerId: "harness",
+    connected: true,
+    modes: {
+      currentModeId: "default",
+      availableModes: [{ id: "default", name: "逐项确认" }, { id: "plan", name: "先出计划" }],
+    },
+    currentModeId: "default",
+    configOptions: [
+      {
+        id: "model",
+        name: "模型",
+        type: "select",
+        currentValue: "m-1",
+        options: [{ value: "m-1", name: "Model 1" }, { value: "m-2", name: "Model 2" }],
+      },
+      {
+        id: "workflow",
+        name: "工作流",
+        type: "select",
+        currentValue: "build",
+        options: [{ value: "build", name: "直接执行" }, { value: "compose", name: "分阶段协作" }],
+      },
+      {
+        id: "thought_level",
+        name: "思考",
+        type: "select",
+        currentValue: "high",
+        options: [{ value: "low", name: "低" }, { value: "high", name: "高" }],
+      },
+    ],
+    availableCommands: [{ name: "compact", description: "压缩上下文" }, { name: "btw", description: "旁注", inputHint: "问题" }],
+    plans: [],
+    usage: { used: 1500, size: 100_000 },
+    restoreStatus: { kind: "reset", reason: "session-restore-unsupported", previousSessionId: "s-old", sessionId: "s-new" },
+  }
+
+  const caps = buildComposerCapabilities({
+    providers: {
+      providers: [
+        { id: "harness", label: "Harness Code", available: true },
+        { id: "pi", label: "Pi", available: false, reason: "未检测到 pi-acp" },
+        { id: "qwen", label: "Qwen Code", available: true },
+      ],
+      defaultProviderId: "harness",
+    },
+    selectedProviderId: "harness",
+    sessionState,
+    availability: { available: true },
+    directoryPath: "/tmp/ws",
+    running: false,
+  })
+
+  assert.deepEqual(caps.commands.map(c => c.id), ["compact", "btw"])
+  assert.equal(caps.commands[0]?.label, "/compact")
+  assert.deepEqual(caps.controls.map(c => c.id), ["agent", "mode", "config:model", "config:workflow", "config:thought_level"])
+  assert.equal(caps.controls[0]?.selectedId, "harness")
+  assert.equal(caps.controls[0]?.items[1]?.availability.enabled, false)
+  assert.deepEqual(caps.tabCycle, { controlId: "config:workflow", itemIds: ["build", "compose"] })
+  assert.equal(caps.usageBadge, "1.5k/100k")
+  assert.ok(caps.restoreNotice?.includes("不支持恢复"))
+
+  // 无 workflow 配置时 tabCycle 回落到 mode
+  const withoutWorkflow = buildComposerCapabilities({
+    sessionState: {
+      ...sessionState,
+      providerId: "pi",
+      configOptions: sessionState.configOptions.filter(c => c.id !== "workflow"),
+    },
+    availability: { available: true },
+    directoryPath: "/tmp/ws",
+    running: false,
+  })
+  assert.deepEqual(withoutWorkflow.tabCycle, { controlId: "mode", itemIds: ["default", "plan"] })
+})
+
+test("extractFileAttachments 从发送文本提取工作区 @file 令牌并拦截越界路径与邮箱", () => {
+  const extracted = extractFileAttachments(
+    '请看 @src/main.ts 与 @"docs/design doc.md" 还有 @README.md，别管 a@example.com、@Component、@/etc/passwd 和 @../secret.txt',
+    ["extra/item.ts"],
+  )
+  assert.deepEqual(extracted, ["extra/item.ts", "src/main.ts", "docs/design doc.md", "README.md"])
 })

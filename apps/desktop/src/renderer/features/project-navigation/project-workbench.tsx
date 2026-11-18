@@ -3,10 +3,19 @@
  * 1. useProjectShell：恢复团队个人记录 → 读取项目列表确定当前项目与导航范围（scope）→ 读取项目详情与本项目导航记录。
  * 2. ProjectWorkbench：左栏 ProjectNavigation + 按 page.kind 选择提供者；会话提供者在项目范围内常驻挂载（切页只改 visible），右栏与顶栏上下文由当前提供者决定。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { IconArrowLeft } from "@tabler/icons-react"
-import type { CollaborationHost, UserSummary } from "@workbench/contracts"
+import type {
+  CollaborationHost,
+  KnowledgeSummary,
+  OrganizationHost,
+  ProjectNavigationPersonal,
+  ProjectPage,
+  TaskSummary,
+  UserSummary,
+  WorkspacePersonal,
+} from "@workbench/contracts"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "@workbench/ui"
 import type {
   CollaborationContextView,
@@ -14,24 +23,13 @@ import type {
   NavigationWorkspaceItem,
   ProjectNavigationActions,
 } from "@workbench/ui"
-import type { OrganizationHost } from "../../../organization-host.js"
-import type { ProjectNavigationPersonal, ProjectPage, WorkspacePersonal } from "../../../personal-host.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
-import type { ProjectConversationSummary, SessionIntegrationApi } from "../session/index.js"
 import {
   CollabMembersPopover,
   CommandPaletteModal,
-  DispatchTaskDialog,
-  KnowledgeCreateDialog,
-  ProjectBoardPage,
-  ProjectTasksPage,
-  StartTaskDialog,
-  TeamKnowledgePage,
   TopbarCollabButton,
   memberRoleLabel,
-  useCollabStore,
 } from "../collaboration-views/index.js"
-import type { CollabTask } from "../collaboration-views/index.js"
 import "../collaboration-views/collab-views.css"
 import type {
   NavigationSessionEntry,
@@ -269,12 +267,10 @@ export type ProjectWorkbenchProps = {
   /** 个人记录保存失败时的提示，由上层持久化统一产生。 */
   personalError: string
   sessions?: NavigationSessionSource
-  sessionIntegration?: SessionIntegrationApi
-  onBindSessionHooks?(handlers: {
-    onQuoteConversation?: (conversation: ProjectConversationSummary) => void
-    onCreateTaskFromConversation?: (conversation: ProjectConversationSummary) => void
-  }): void
+  tasks?: readonly TaskSummary[]
+  knowledge?: readonly KnowledgeSummary[]
   taskCount?: number | null
+  knowledgeCount?: number | null
   providers?: ProjectPageProviders
 }
 
@@ -301,28 +297,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     () => projectMembers(shell.detail.detail, shell.team.members),
     [shell.detail.detail, shell.team.members],
   )
-  const collab = useCollabStore(workspaceId, shell.projectId, user.id, members)
   const [collabPopoverOpen, setCollabPopoverOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [startTaskTarget, setStartTaskTarget] = useState<CollabTask | null>(null)
-  const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false)
-  const [dispatchDialogContext, setDispatchDialogContext] = useState<{ subtitle: string; defaultAssigneeId?: string } | null>(null)
-  const [selectedKnowledgeId, setSelectedKnowledgeId] = useState<string | null>(null)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const toastTimerRef = useRef<number | null>(null)
-
-  const showToast = useCallback((message: string) => {
-    setToastMessage(message)
-    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current)
-    toastTimerRef.current = window.setTimeout(() => {
-      toastTimerRef.current = null
-      setToastMessage(null)
-    }, 2400)
-  }, [])
-
-  useEffect(() => () => {
-    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current)
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -342,25 +318,6 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [shell.workspace.status, shell.workspace.value, shell.saveWorkspace])
-
-  useEffect(() => {
-    props.onBindSessionHooks?.({
-      onQuoteConversation: conversation => {
-        if (!shell.scope) return
-        const ownerName = members.find(m => m.userId === conversation.ownerUserId)?.userName ?? "队友"
-        const snippet = conversation.briefText.trim() ? `\n${conversation.briefText.trim()}` : ""
-        const initialText = `> 引用 ${ownerName} 的会话「${conversation.title}」：${snippet}\n\n`
-        shell.openPage({ kind: "new" })
-        showToast("已引用会话背景到本机新对话草稿")
-      },
-      onCreateTaskFromConversation: conversation => {
-        setDispatchDialogContext({
-          subtitle: `来源：会话「${conversation.title}」`,
-          defaultAssigneeId: conversation.ownerUserId !== user.id ? conversation.ownerUserId : undefined,
-        })
-      },
-    })
-  }, [props.onBindSessionHooks, props.sessionIntegration, shell.scope, shell.openPage, members, user.id, showToast])
 
   if (shell.workspace.status !== "ready") {
     const failed = shell.workspace.status === "failed"
@@ -478,8 +435,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       selfUserId={user.id}
       justCreated={shell.created === projectId}
       sessionCount={sessions.entries.length}
-      taskCount={collab.tasks.length}
-      knowledgeCount={collab.knowledge.length}
+      taskCount={props.tasks?.length}
+      knowledgeCount={props.knowledge?.length ?? props.knowledgeCount ?? undefined}
       onChanged={shell.reloadProject}
       onRetry={() => { void shell.detail.reload() }}
     />
@@ -489,57 +446,6 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     pageView = <div className="pnav-page-slot">
       {activeProvider.render({ scope, page, navigator, visible: true })}
     </div>
-  } else if (page.kind === "board") {
-    pageView = <ProjectBoardPage
-      projectName={current?.name ?? "当前项目"}
-      members={members}
-      tasks={collab.tasks}
-      onGoTasks={() => shell.openPage({ kind: "tasks" })}
-      onOpenTask={taskId => shell.openPage({ kind: "task", taskId })}
-    />
-  } else if (page.kind === "tasks" || page.kind === "task") {
-    pageView = <ProjectTasksPage
-      projectName={current?.name ?? "当前项目"}
-      selfUserId={user.id}
-      members={members}
-      tasks={collab.tasks}
-      sessions={sessions.entries}
-      selectedTaskId={page.kind === "task" ? page.taskId : null}
-      onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
-      onClaimTask={taskId => {
-        collab.claimTask(taskId)
-        showToast("已认领任务")
-      }}
-      onOpenStartDialog={task => setStartTaskTarget(task)}
-      onFinishTask={taskId => {
-        collab.finishTask(taskId)
-        showToast("任务已标记完成")
-      }}
-      onOpenDispatchDialog={() => setDispatchDialogContext({ subtitle: `当前 Project：${current?.name ?? "当前项目"}` })}
-      onGotoSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
-    />
-  } else if (page.kind === "knowledge") {
-    pageView = <TeamKnowledgePage
-      workspaceName={props.workspaceName}
-      projectName={current?.name ?? "当前项目"}
-      members={members}
-      knowledge={collab.knowledge}
-      selectedId={selectedKnowledgeId}
-      onSelect={id => setSelectedKnowledgeId(id)}
-      onCreateClick={() => setKnowledgeDialogOpen(true)}
-      onSaveEdit={(id, sum, body) => {
-        const updated = collab.updateKnowledge(id, sum, body)
-        showToast(updated ? `已保存并更新到 ${updated.version}` : "知识已更新")
-      }}
-      onCiteToSession={item => {
-        if (myLocalEntries[0]) {
-          shell.openPage({ kind: "conversation", conversationId: myLocalEntries[0].conversationId })
-        } else {
-          shell.openPage({ kind: "new" })
-        }
-        showToast(`已将《${item.title}》带入会话草稿`)
-      }}
-    />
   } else {
     pageView = <section className="pnav-page" aria-label={pageNames[page.kind]}>
       <h1>{pageNames[page.kind]}</h1>
@@ -619,72 +525,15 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           open={paletteOpen}
           projectName={current.name}
           members={members}
-          selfUserId={user.id}
           mySessions={myEntries}
           peerSessions={peerEntries}
-          tasks={collab.tasks}
-          knowledge={collab.knowledge}
+          tasks={props.tasks ?? []}
+          knowledge={props.knowledge ?? []}
           onClose={() => setPaletteOpen(false)}
           onSelectSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
           onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
-          onSelectKnowledge={knowledgeId => {
-            setSelectedKnowledgeId(knowledgeId)
-            shell.openPage({ kind: "knowledge" })
-          }}
+          onSelectKnowledge={() => shell.openPage({ kind: "knowledge" })}
         />
-      )}
-      <StartTaskDialog
-        task={startTaskTarget}
-        localSessions={myLocalEntries}
-        onClose={() => setStartTaskTarget(null)}
-        onConfirm={({ mode, existingSessionId }) => {
-          const target = startTaskTarget
-          setStartTaskTarget(null)
-          if (!target) return
-          if (mode === "existing" && existingSessionId) {
-            collab.startTask(target.id, existingSessionId)
-            shell.openPage({ kind: "conversation", conversationId: existingSessionId })
-            showToast("任务已转入进行中")
-          } else {
-            collab.startTask(target.id, "")
-            shell.openPage({ kind: "new" })
-            showToast("已切换到新会话准备页")
-          }
-        }}
-      />
-      <KnowledgeCreateDialog
-        open={knowledgeDialogOpen}
-        projectName={current?.name ?? "当前项目"}
-        onClose={() => setKnowledgeDialogOpen(false)}
-        onSubmit={input => {
-          setKnowledgeDialogOpen(false)
-          const createdItem = collab.createKnowledge(input)
-          if (createdItem) {
-            setSelectedKnowledgeId(createdItem.id)
-            shell.openPage({ kind: "knowledge" })
-            showToast(`已保存知识《${createdItem.title}》`)
-          }
-        }}
-      />
-      <DispatchTaskDialog
-        open={dispatchDialogContext !== null}
-        subtitle={dispatchDialogContext?.subtitle ?? ""}
-        members={members}
-        defaultAssigneeId={dispatchDialogContext?.defaultAssigneeId}
-        onClose={() => setDispatchDialogContext(null)}
-        onSubmit={input => {
-          setDispatchDialogContext(null)
-          const task = collab.dispatchTask(input)
-          if (task) {
-            const toName = members.find(m => m.userId === task.toUserId)?.userName ?? "成员"
-            showToast(`已向 @${toName} 派发任务「${task.title}」`)
-          }
-        }}
-      />
-      {toastMessage && (
-        <div className="toast" role="status" aria-live="polite">
-          {toastMessage}
-        </div>
       )}
     </>
   )
@@ -715,26 +564,23 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         }
         if (!current) return <span className="tb-name">协作工作台</span>
         const viewTitle = pageNames[page.kind]
+        const effectiveTaskCount = props.taskCount !== null && props.taskCount !== undefined
+          ? props.taskCount
+          : props.tasks?.length ?? null
         const countLabel = page.kind === "info"
           ? `${members.length} 位成员`
           : page.kind === "board"
-            ? !providers.board
-              ? `${collab.tasks.length} 个任务 · ${members.length} 人`
-              : props.taskCount !== null && props.taskCount !== undefined
-                ? `${props.taskCount} 项待办 · ${members.length} 人`
-                : `${members.length} 位成员`
+            ? effectiveTaskCount !== null
+              ? `${effectiveTaskCount} 项待办 · ${members.length} 人`
+              : `${members.length} 位成员`
             : page.kind === "tasks" || page.kind === "task"
-              ? !providers.tasks
-                ? `${collab.tasks.length} 个任务`
-                : props.taskCount !== null && props.taskCount !== undefined
-                  ? `${props.taskCount} 项待办`
-                  : ""
+              ? effectiveTaskCount !== null
+                ? `${effectiveTaskCount} 项待办`
+                : ""
               : page.kind === "knowledge"
-                ? !providers.knowledge
-                  ? `${collab.knowledge.length} 条可引用`
-                  : leftCollapsed
-                    ? ""
-                    : props.workspaceName
+                ? leftCollapsed
+                  ? ""
+                  : props.workspaceName
                 : ""
         const crumbLabel = page.kind === "knowledge" ? props.workspaceName : current.name
         return (
@@ -783,8 +629,20 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           search: shell.search,
           activePage,
           selectedConversationId: page.kind === "conversation" ? page.conversationId : null,
-          taskCount: props.taskCount ?? (projectId ? collab.todoCount : null),
-          knowledgeCount: projectId ? collab.wsKnowledgeCount : null,
+          taskCount: !projectId
+            ? null
+            : props.taskCount !== undefined
+              ? props.taskCount
+              : props.tasks
+                ? props.tasks.filter(t => t.assigneeId === user.id && t.status !== "done" && t.status !== "cancelled").length
+                : null,
+          knowledgeCount: !projectId
+            ? null
+            : props.knowledgeCount !== undefined
+              ? props.knowledgeCount
+              : props.knowledge
+                ? props.knowledge.filter(k => !k.archived).length
+                : null,
         }} actions={actions} />
         {shell.notice && <p className="desktop-navigation-note" role="status">{shell.notice}</p>}
         {props.personalError && <p className="desktop-navigation-note" role="alert">{props.personalError}{" "}

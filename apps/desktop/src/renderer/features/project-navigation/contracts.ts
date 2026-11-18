@@ -3,8 +3,8 @@
  * 由 HC-217 导出，供 HC-218（会话）、HC-219（任务/知识）、HC-220（看板）分别实现并由主装配接入。
  */
 import type { ReactNode } from "react"
+import type { ProjectPage } from "@workbench/contracts"
 import type { CollaborationContextView, NavigationSessionEntry, WorkbenchRightSlot } from "@workbench/ui"
-import type { ProjectPage } from "../../../personal-host.js"
 
 export type { NavigationSessionEntry, ProjectPage }
 

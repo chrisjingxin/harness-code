@@ -1,17 +1,20 @@
 /**
- * 每个窗口独有的身份状态：具名动作 → 同一生产网络客户端 → 核对代次 → 发布安全视图。
- * 窗口关闭/退出立即取消旧身份；这里只存一份身份状态，不存设备身份或磁盘缓存。
+ * 【功能定义】每个窗口独有的身份状态与工作区请求门面：
+ * 具名动作 → 统一生产网络客户端 → 核对身份代次 → 发布安全视图。
+ *
+ * 【协作边界】
+ * - 窗口关闭或退出立即递增代次并丢弃旧身份回包；这里只存内存态身份，不落盘凭据。
+ * - `withWorkspace` 为主进程各 IPC/存储模块提供统一的工作区归属校验与代次隔离；
+ *   保留 `applicationWorkspace` 与 `getProjectConversation` 供独立执行桥接 `local-execution-ipc.ts` 调用。
  */
 import { randomUUID } from "node:crypto"
 import type {
-  CollaborationError, CollaborationResult, CurrentUserResponse, DemoUsersResponse, IdentityState, MembersResponse,
-  ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
-  ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
-  ProjectPatchRequest, ProjectResponse, RepositoryListResponse,
+  CollaborationError, CollaborationResult, ConversationDetailResponse, CurrentUserResponse,
+  DemoUsersResponse, IdentityState, MembersResponse,
 } from "@workbench/contracts"
 import { CollaborationClient } from "./collaboration-client.js"
 
-/** IPC和生命周期边界统一生成可序列化错误，不返回原生异常。 */
+/** IPC 和生命周期边界统一生成可序列化错误，不返回原生异常。 */
 export function identityError(code: CollaborationError["code"], message: string): { ok: false; error: CollaborationError } {
   return { ok: false, error: { code, message, requestId: randomUUID(), retryable: code === "NETWORK_UNAVAILABLE" || code === "SERVICE_UNAVAILABLE" } }
 }
@@ -24,7 +27,7 @@ export class CollaborationState {
   #exiting = false
   #listeners = new Set<(state: IdentityState) => void>()
 
-  /** origin只来自宿主启动配置；缺失或无效时基础窗口仍可使用。 */
+  /** origin 只来自宿主启动配置；缺失或无效时基础窗口仍可使用。 */
   constructor(origin?: string, transport?: typeof fetch) {
     try {
       if (!origin) throw new Error("未配置")
@@ -47,12 +50,14 @@ export class CollaborationState {
       this.#publish({ status: "connectionError", lastKnownUser: user, error })
     }
   }
-  /** 订阅只属于本窗口；取消函数和dispose均能解除监听。 */
+
+  /** 订阅只属于本窗口；取消函数和 dispose 均能解除监听。 */
   onStateChanged(listener: (state: IdentityState) => void): () => void {
     if (this.#disposed) return () => {}
     this.#listeners.add(listener)
     return () => { this.#listeners.delete(listener) }
   }
+
   /** 读取安全状态；连接恢复时重新向服务确认上次身份，不直接恢复旧工作区。 */
   async getState(): Promise<CollaborationResult<IdentityState>> {
     if (this.#disposed) return this.#cancelled()
@@ -66,6 +71,7 @@ export class CollaborationState {
     }
     return { ok: true, value: structuredClone(this.#state) }
   }
+
   /** 匿名演示列表也来自服务；读取失败不生成本地账号。 */
   async listDemoUsers(): Promise<CollaborationResult<DemoUsersResponse>> {
     if (this.#disposed) return this.#cancelled()
@@ -77,6 +83,7 @@ export class CollaborationState {
     else if (this.#state.status === "connectionError" && !this.#state.lastKnownUser) this.#publish({ status: "signedOut" })
     return result
   }
+
   /** 完整登录确认属于同一代操作；已有身份或正在退出时禁止覆盖登录。 */
   async signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>> {
     if (this.#disposed) return this.#cancelled()
@@ -90,6 +97,7 @@ export class CollaborationState {
     else { this.#publish({ status: "signedOut" }); this.#failure(result.error) }
     return result
   }
+
   /** 开始即停止旧业务；远端失败仍回到本机已退出，并返回未确认的事实。 */
   async signOut(): Promise<CollaborationResult<null>> {
     if (this.#disposed) return this.#cancelled()
@@ -98,14 +106,15 @@ export class CollaborationState {
     this.#exiting = true
     this.#publish({ status: "loading" })
     try {
-      // 客户端在首次await之前隔离旧Jar、取消旧请求；远端退出另用旧Jar的独立上下文。
+      // 客户端在首次 await 之前隔离旧 Jar、取消旧请求；远端退出另用旧 Jar 的独立上下文。
       const result = this.#client ? await this.#client.signOut() : this.#unavailable()
       if (!this.#current(generation)) return this.#cancelled()
       this.#publish({ status: "signedOut" })
       return result
     } finally { this.#exiting = false }
   }
-  /** 只在身份确认后读取成员；不缓存跨身份结果，旧代回包不交付给UI。 */
+
+  /** 只在身份确认后读取成员；不缓存跨身份结果，旧代回包不交付给 UI。 */
   async listMembers(workspaceId: string): Promise<CollaborationResult<MembersResponse>> {
     if (this.#disposed || this.#state.status !== "signedIn" || !this.#client) return this.#cancelled()
     const generation = this.#generation
@@ -114,66 +123,35 @@ export class CollaborationState {
     if (!result.ok) this.#failure(result.error)
     return result
   }
-  /** 所有会话与项目读取共享窗口身份代次，退出或切换账号后的回包不再送给页面。 */
-  async #readWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>,
-    publishConnectionError = true): Promise<CollaborationResult<T>> {
+
+  /**
+   * 在当前已登录且属于指定工作区的身份代次下执行客户端请求；
+   * 退出或切换账号后旧代次迟到的回包直接拦截，认证失效立即收回窗口身份。
+   */
+  async withWorkspace<T>(
+    workspaceId: string,
+    fn: (client: CollaborationClient) => Promise<CollaborationResult<T>>,
+    options?: { publishConnectionError?: boolean },
+  ): Promise<CollaborationResult<T>> {
     if (this.#disposed || this.#state.status !== "signedIn") return this.#cancelled()
     if (!this.#state.workspaces.some(workspace => workspace.id === workspaceId)) return identityError("RESOURCE_NOT_FOUND", "工作区不可用。")
     if (!this.#client) return this.#unavailable()
     const generation = this.#generation
-    const result = await request(this.#client)
+    const result = await fn(this.#client)
     if (!this.#current(generation)) return this.#cancelled()
+    const publishConnectionError = options?.publishConnectionError ?? true
     if (!result.ok && (publishConnectionError || result.error.code === "AUTHENTICATION_REQUIRED")) this.#failure(result.error)
     return result
   }
 
   /** 仅主进程使用。业务错误留在当前表单处理，认证失效仍立即收回窗口身份。 */
   applicationWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>): Promise<CollaborationResult<T>> {
-    return this.#readWorkspace(workspaceId, request, false)
+    return this.withWorkspace(workspaceId, request, { publishConnectionError: false })
   }
 
-  /** 项目级会话只读与登记；与项目/个人视图共享窗口代次隔离。 */
-  listProjectConversations(workspaceId: string, projectId: string, query?: { ownerId?: string; status?: ConversationStatus }): Promise<CollaborationResult<ConversationListResponse>> {
-    // 简报列表可由后台通知刷新，瞬时错误仍留在会话模块。认证失效继续收回身份。
-    return this.#readWorkspace(workspaceId, client => client.listProjectConversations(workspaceId, projectId, query), false)
-  }
-  registerProjectConversation(workspaceId: string, projectId: string, request: ConversationRegisterRequest): Promise<CollaborationResult<ConversationDetailResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.registerProjectConversation(workspaceId, projectId, request))
-  }
+  /** 供 `local-execution-ipc.ts` 校验本机发送前的会话归属；通过统一工作区守卫执行。 */
   getProjectConversation(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.getProjectConversation(workspaceId, projectId, conversationId))
-  }
-  readProjectConversationHistory(workspaceId: string, projectId: string, conversationId: string, afterSequence: number, limit = 200): Promise<CollaborationResult<ConversationHistoryResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit))
-  }
-
-  /** 组织层读写与会话读取共用身份代次和工作区校验；权限由服务端判定，这里不推断角色。 */
-  listProjects(workspaceId: string): Promise<CollaborationResult<ProjectListResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.listProjects(workspaceId), false)
-  }
-  createProject(workspaceId: string, request: ProjectCreateRequest): Promise<CollaborationResult<ProjectResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.createProject(workspaceId, request))
-  }
-  getProject(workspaceId: string, projectId: string): Promise<CollaborationResult<ProjectDetailResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.getProject(workspaceId, projectId), false)
-  }
-  updateProject(workspaceId: string, projectId: string, request: ProjectPatchRequest): Promise<CollaborationResult<ProjectResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.updateProject(workspaceId, projectId, request))
-  }
-  addProjectMember(workspaceId: string, projectId: string, request: ProjectMemberAddRequest): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.addProjectMember(workspaceId, projectId, request))
-  }
-  removeProjectMember(workspaceId: string, projectId: string, userId: string): Promise<CollaborationResult<ProjectMemberChangeResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.removeProjectMember(workspaceId, projectId, userId))
-  }
-  listRepositories(workspaceId: string): Promise<CollaborationResult<RepositoryListResponse>> {
-    return this.#readWorkspace(workspaceId, client => client.listRepositories(workspaceId))
-  }
-  linkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
-    return this.#readWorkspace(workspaceId, client => client.linkRepository(workspaceId, projectId, repositoryId))
-  }
-  unlinkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
-    return this.#readWorkspace(workspaceId, client => client.unlinkRepository(workspaceId, projectId, repositoryId))
+    return this.withWorkspace(workspaceId, client => client.getProjectConversation(workspaceId, projectId, conversationId))
   }
 
   /** 仅主进程内部组合使用；调用方仍要按当前代次核对自己的异步结果。 */

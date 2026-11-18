@@ -217,6 +217,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const briefInFlightRef = useRef(new Set<string>())
   const [newSessionBusy, setNewSessionBusy] = useState(false)
   const [newSessionError, setNewSessionError] = useState<string | null>(null)
+  const [newProviderId, setNewProviderId] = useState<string | null>(null)
+  const [providerByConversation, setProviderByConversation] = useState<Readonly<Record<string, string>>>({})
   const pendingRequestRef = useRef<{ signature: string; requestId: string } | null>(null)
   const pendingAutoSendRef = useRef<{
     readonly scope: ProjectNavigationScope
@@ -681,6 +683,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
 
       const created = res.conversation
       pendingRequestRef.current = null
+      if (newProviderId) {
+        setProviderByConversation(prev => ({ ...prev, [created.conversationId]: newProviderId }))
+      }
       includeRegisteredConversation(targetKey, created)
 
       await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
@@ -728,6 +733,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     updateRecord,
     saveDraftValue,
     onOpenConversation,
+    newProviderId,
   ])
 
   const [directorySelectionRevision, confirmDirectorySelection] = useState(0)
@@ -834,6 +840,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedDirectoryPath, directorySelectionRevision, memberById.get(userId)?.userName ?? "我",
     commitAcceptedDraft,
     refreshExecutionWorkspace,
+    providerByConversation,
   )
 
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
@@ -910,11 +917,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     canCreateConversation,
     createBlockedReason,
     newSessionError,
+    newProviderId,
     execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
     resolveOwner: ownerId => memberById.get(ownerId),
     resolveOwnerName: ownerId => memberById.get(ownerId)?.userName ?? `成员 (${ownerId.slice(0, 6)})`,
     onChooseNewDirectory,
+    onSelectNewProvider: providerId => setNewProviderId(providerId),
     onNewDraftChange,
     onStartNewSession: () => { void onStartNewSession() },
     onChooseSessionDirectory,
@@ -1009,6 +1018,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     canCreateConversation,
     createBlockedReason,
     newSessionError,
+    newProviderId,
     execution,
     localExecutionPort,
     rendering,

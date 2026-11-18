@@ -1,9 +1,28 @@
 /**
- * 本机执行结果到中央对话的投影。装配方按会话持有状态，将已排序、去重的文本更新
- * 交给本模块。这里只归并显示条目，不消费 ACP 帧或云端同步历史。
+ * 本机执行结果到中央对话与输入能力控件的纯投影模型。
+ *
+ * 【功能定义】
+ * 1. 归并本机轮次流事件（用户消息、思考、工具、审批/表单交互历史与终态）；
+ * 2. 持有并更新会话级 ACP 快照（Provider、模式、模型、配置项、斜杠命令、计划、用量、回退提示与挂起表单）；
+ * 3. 提供纯函数构造输入区控件（`controls`/`commands`/`tabCycle`）与 `@relative/path` 文件附件提取。
+ * 【协作边界】不消费 Electron/Node API 或直接触发 IPC，便于在 Node 单测与渲染层复用。
  */
-import type { LocalExecutionPermission, LocalExecutionTool } from "../../../local-execution-host.js"
-import type { ConversationTimelineEntry, ConversationToolBlock, ConversationToolDetailView, ConversationViewProps } from "@workbench/ui"
+import type {
+  LocalExecutionAvailability,
+  LocalExecutionElicitationRequest,
+  LocalExecutionPermission,
+  LocalExecutionProviderList,
+  LocalExecutionSessionState,
+  LocalExecutionTool,
+} from "../../../local-execution-host.js"
+import type {
+  ConversationComposerView,
+  ConversationMenuItemView,
+  ConversationTimelineEntry,
+  ConversationToolBlock,
+  ConversationToolDetailView,
+  ConversationViewProps,
+} from "@workbench/ui"
 
 type Message = Extract<ConversationTimelineEntry, { kind: "message" }>
 type Tool = Extract<ConversationTimelineEntry, { kind: "tool" }>
@@ -27,10 +46,15 @@ export type SyncedTurnRange = {
 export type LocalExecutionView = {
   readonly activeTurnId: string | null
   readonly activeTurnAssistantMessageId?: string
+  /** 记录上一条正文之后是否出现过工具或审批；仅夹杂思考时不切分新正文段。 */
+  readonly activeTurnAssistantBreak?: boolean
   readonly entries: readonly LocalEntry[]
   readonly revision: number
   readonly permissionRetryRevision?: number
   readonly permission?: LocalExecutionPermission | null
+  readonly elicitation?: LocalExecutionElicitationRequest | null
+  readonly elicitationRetryRevision?: number
+  readonly sessionState?: LocalExecutionSessionState
   readonly failure: string | null
   readonly referenceFailure?: { readonly id: string; readonly message: string }
   readonly uploadFailures?: ReadonlyMap<string, string>
@@ -57,6 +81,9 @@ export type LocalExecutionViewUpdate =
   | { readonly kind: "thought"; readonly turnId: string; readonly text: string }
   | { readonly kind: "permission"; readonly turnId: string; readonly request: LocalExecutionPermission | null }
   | { readonly kind: "permission-decision"; readonly turnId: string; readonly requestId: string; readonly title: string; readonly optionLabel: string; readonly description?: string }
+  | { readonly kind: "elicitation"; readonly request: LocalExecutionElicitationRequest | null }
+  | { readonly kind: "elicitation-decision"; readonly turnId?: string | null; readonly requestId: string; readonly title: string; readonly statusLabel: string; readonly description?: string }
+  | { readonly kind: "session-state"; readonly state: LocalExecutionSessionState }
   | { readonly kind: "finished"; readonly turnId: string; readonly failure?: string }
   | { readonly kind: "upload"; readonly turnId: string; readonly failure?: string; readonly firstSequence?: number; readonly syncedSequence?: number }
 
@@ -95,9 +122,17 @@ function splitToolTitle(
   rawTitle: string | undefined,
   locations: LocalExecutionTool["locations"],
   diffs: LocalExecutionTool["diffs"],
+  kind?: LocalExecutionTool["kind"],
 ): { readonly label: string; readonly summary?: string; readonly originalName?: string } {
   const trimmed = rawTitle?.trim()
   if (trimmed) {
+    if (kind === "execute") {
+      return {
+        label: "终端命令",
+        summary: trimmed,
+        originalName: trimmed,
+      }
+    }
     const match = /^([a-z][a-z0-9_:-]*)\s+(.+)$/i.exec(trimmed)
     if (match) {
       return {
@@ -120,6 +155,38 @@ function splitToolTitle(
 }
 
 export function applyLocalExecutionUpdate(state: LocalExecutionView, update: LocalExecutionViewUpdate): LocalExecutionView {
+  if (update.kind === "session-state") {
+    return { ...state, sessionState: update.state }
+  }
+  if (update.kind === "elicitation") {
+    return {
+      ...state,
+      elicitation: update.request,
+      ...(update.request ? { elicitationRetryRevision: 0 } : {}),
+    }
+  }
+  if (update.kind === "elicitation-decision") {
+    const historyId = update.turnId
+      ? `local-execution:${update.turnId}:elicitation:${update.requestId}`
+      : `local-execution:elicitation:${update.requestId}`
+    const nextEntry: InteractionHistory = {
+      kind: "interaction-history",
+      id: historyId,
+      title: update.title,
+      statusLabel: update.statusLabel,
+      ...(update.description ? { description: update.description } : {}),
+    }
+    const existing = state.entries.find(entry => entry.id === historyId)
+    const entries = existing
+      ? state.entries.map(entry => entry.id === historyId ? nextEntry : entry)
+      : [...state.entries, nextEntry]
+    return {
+      ...state,
+      entries,
+      elicitation: state.elicitation?.id === update.requestId ? null : state.elicitation,
+      revision: state.revision + 1,
+    }
+  }
   if (update.kind === "upload") {
     const prevFailure = state.uploadFailures?.get(update.turnId)
     const prevRange = state.syncedTurnRanges?.[update.turnId]
@@ -146,6 +213,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       ...state,
       activeTurnId: update.turnId,
       activeTurnAssistantMessageId: undefined,
+      activeTurnAssistantBreak: undefined,
       settledPermissionAnchors: undefined,
       entries: [...state.entries, {
         kind: "message", id, role: "user", text: update.text, author: update.author, referenceIds: update.referenceIds, createdAtMs: Date.now(),
@@ -214,6 +282,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       : state.settledPermissionAnchors
     return {
       ...state,
+      activeTurnAssistantBreak: true,
       entries: baseEntries,
       permission: update.request,
       ...(settledPermissionAnchors ? { settledPermissionAnchors } : {}),
@@ -237,7 +306,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     }
     const status = update.tool.status
     const detail = mergeToolDetail(existing?.detail, mergedTool)
-    const header = splitToolTitle(mergedTool.title, mergedTool.locations, mergedTool.diffs)
+    const header = splitToolTitle(mergedTool.title, mergedTool.locations, mergedTool.diffs, mergedTool.kind)
     const item: Tool = {
       kind: "tool", id,
       label: header.label,
@@ -252,6 +321,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     const entries = existing ? settled.map(entry => entry.id === id ? item : entry) : [...settled, item]
     return {
       ...state,
+      activeTurnAssistantBreak: true,
       entries,
       toolSnapshots: { ...state.toolSnapshots, [id]: mergedTool },
       revision: state.revision + 1,
@@ -290,14 +360,34 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     if (canAppendToTail && last?.kind === "message") {
       entries = settled.map(entry => entry === last ? { ...last, text: last.text + update.text, streaming: true } : entry)
     } else {
-      const paused = finishStreamingAssistant(settled, entryPrefix)
-      const count = paused.filter(entry => entry.kind === "message" && entry.id.startsWith(assistantPrefix)).length
-      const segmentId = count === 0 ? assistantPrefix : `${assistantPrefix}:${count}`
-      entries = [...paused, { kind: "message", id: segmentId, role: "assistant", text: update.text, streaming: true } satisfies Message]
+      // 两段正文之间只出现过思考且 messageId 未变时，把新片段并回原正文并移至思考条目之后。
+      const reasoningPrefix = `${entryPrefix}:reasoning:`
+      let mergeIndex = -1
+      if (!messageIdChanged && !state.activeTurnAssistantBreak) {
+        let idx = settled.length - 1
+        while (idx >= 0 && settled[idx]!.kind === "reasoning" && settled[idx]!.id.startsWith(reasoningPrefix)) {
+          idx -= 1
+        }
+        const candidate = idx >= 0 ? settled[idx] : undefined
+        if (idx < settled.length - 1 && candidate?.kind === "message" && candidate.role === "assistant" && candidate.id.startsWith(assistantPrefix)) {
+          mergeIndex = idx
+        }
+      }
+      if (mergeIndex >= 0) {
+        const target = settled[mergeIndex] as Message
+        const merged: Message = { ...target, text: target.text + update.text, streaming: true }
+        entries = [...settled.slice(0, mergeIndex), ...settled.slice(mergeIndex + 1), merged]
+      } else {
+        const paused = finishStreamingAssistant(settled, entryPrefix)
+        const count = paused.filter(entry => entry.kind === "message" && entry.id.startsWith(assistantPrefix)).length
+        const segmentId = count === 0 ? assistantPrefix : `${assistantPrefix}:${count}`
+        entries = [...paused, { kind: "message", id: segmentId, role: "assistant", text: update.text, streaming: true } satisfies Message]
+      }
     }
     return {
       ...state,
       activeTurnAssistantMessageId: update.messageId ?? state.activeTurnAssistantMessageId,
+      activeTurnAssistantBreak: false,
       entries,
       revision: state.revision + 1,
     }
@@ -329,11 +419,24 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       }]
     }
   }
+  if (state.elicitation) {
+    const historyId = `${entryPrefix}:elicitation:${state.elicitation.id}`
+    if (!entries.some(entry => entry.id === historyId)) {
+      entries = [...entries, {
+        kind: "interaction-history",
+        id: historyId,
+        title: state.elicitation.message || "交互表单",
+        statusLabel: update.failure === "本轮已停止。" ? "已取消" : "已结束",
+      }]
+    }
+  }
   return {
     ...state,
     activeTurnId: null,
     activeTurnAssistantMessageId: undefined,
+    activeTurnAssistantBreak: undefined,
     permission: null,
+    elicitation: null,
     entries,
     revision: state.revision + Number(entries.length !== state.entries.length || entries.some((entry, idx) => entry !== state.entries[idx])),
     failure: update.failure ?? null,
@@ -533,6 +636,191 @@ export function describePermissionRequest(permission: LocalExecutionPermission):
   return {
     ...(descParts.length ? { description: descParts.join(" · ") } : {}),
     blocks,
+  }
+}
+
+function compactTokenCount(value: number): string {
+  if (value < 1000) return String(value)
+  return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k`
+}
+
+function isSafeAttachmentCandidate(candidate: string, quoted: boolean): boolean {
+  if (!candidate || candidate.length > 1024 || /[\u0000-\u001f\u007f]/.test(candidate)) return false
+  if (candidate.startsWith("/") || candidate.startsWith("\\") || /^[a-zA-Z]:/.test(candidate)) return false
+  if (candidate.endsWith("/")) return false
+  const cleaned = candidate.replace(/^(?:\.\/)+/, "")
+  if (!cleaned) return false
+  const segments = cleaned.split(/[\\/]+/)
+  if (segments.some(seg => !seg || seg === "." || seg === ".." || seg.toLowerCase() === ".git")) return false
+  // 仅当带引号、包含路径分隔符或具备文件后缀时才识别为工作区文件，避免把普通 @人名 误当文件附件。
+  return quoted || cleaned.includes("/") || /\.[a-z0-9_-]{1,12}$/i.test(cleaned)
+}
+
+/** 从用户输入草稿中提取安全的相对路径 `@file` / `@"file name"` 引用，与显式附件标识合并去重。 */
+export function extractFileAttachments(text: string, explicitAttachmentIds: readonly string[] = []): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  const pushIfSafe = (raw: string, quoted: boolean) => {
+    const trimmed = raw.trim().replace(/^(?:\.\/)+/, "")
+    if (!isSafeAttachmentCandidate(trimmed, quoted) || seen.has(trimmed)) return
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+
+  for (const id of explicitAttachmentIds) pushIfSafe(id, true)
+  const pattern = /(?:^|[\s(（[【])@(?:"([^"\n]+)"|([^\s"'，。；：！？、）)】》”’]+))/g
+  for (const match of text.matchAll(pattern)) {
+    const quoted = match[1] !== undefined
+    const raw = quoted ? match[1]! : (match[2] ?? "").replace(/[),.;:!?]+$/, "")
+    pushIfSafe(raw, quoted)
+  }
+  return result
+}
+
+function isWorkflowOption(option: LocalExecutionSessionState["configOptions"][number]): boolean {
+  return option.id === "workflow" || option.category === "harness.workflow"
+}
+
+/** 根据实时 ACP 会话能力与已注册代理列表构造输入区命令、能力下拉、Tab 轮转、用量徽标与回退提示。 */
+export function buildComposerCapabilities(input: {
+  readonly providers?: LocalExecutionProviderList
+  readonly selectedProviderId?: string
+  readonly sessionState?: LocalExecutionSessionState
+  readonly availability: LocalExecutionAvailability
+  readonly directoryPath: string | null
+  readonly running: boolean
+  readonly textOnly?: boolean
+}): {
+  readonly commands: readonly ConversationMenuItemView[]
+  readonly controls: ConversationComposerView["controls"]
+  readonly tabCycle?: ConversationComposerView["tabCycle"]
+  readonly usageBadge?: string
+  readonly restoreNotice?: string
+} {
+  const { providers, selectedProviderId, sessionState, availability, directoryPath, running, textOnly } = input
+  const controlBlockedReason = running
+    ? "等待当前回复完成"
+    : !availability.available
+      ? availability.reason
+      : undefined
+
+  const commands: ConversationMenuItemView[] = (sessionState?.availableCommands ?? []).map(cmd => ({
+    id: cmd.name,
+    label: `/${cmd.name}`,
+    description: cmd.inputHint ? `${cmd.description}（参数：${cmd.inputHint}）` : cmd.description,
+    availability: availability.available ? { enabled: true } : { enabled: false, reason: availability.reason },
+  }))
+
+  const controls: ConversationComposerView["controls"][number][] = []
+  const currentProviderId = sessionState?.providerId ?? selectedProviderId ?? providers?.defaultProviderId ?? undefined
+  if (providers && providers.providers.length > 0) {
+    controls.push({
+      id: "agent",
+      label: "Agent",
+      ...(currentProviderId ? { selectedId: currentProviderId } : {}),
+      availability: running
+        ? { enabled: false, reason: "等待当前回复完成" }
+        : directoryPath
+          ? { enabled: true }
+          : { enabled: false, reason: "请先选择本机工作目录" },
+      items: providers.providers.map(p => ({
+        id: p.id,
+        label: p.label,
+        ...(p.available ? (p.description ? { description: p.description } : {}) : { description: p.reason }),
+        availability: p.available ? { enabled: true } : { enabled: false, reason: p.reason ?? "当前不可用" },
+      })),
+    })
+  } else {
+    controls.push({
+      id: "agent",
+      label: "Agent",
+      selectedId: "default",
+      availability: availability.available
+        ? { enabled: true }
+        : { enabled: false, reason: availability.reason },
+      items: [{
+        id: "default",
+        label: !availability.available ? "未接入" : textOnly ? "本机 Agent" : "Harness",
+        availability: { enabled: availability.available },
+      }],
+    })
+  }
+
+  if (sessionState?.modes && sessionState.modes.availableModes.length > 0) {
+    controls.push({
+      id: "mode",
+      label: "模式",
+      selectedId: sessionState.currentModeId ?? sessionState.modes.currentModeId,
+      availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
+      items: sessionState.modes.availableModes.map(mode => ({
+        id: mode.id,
+        label: mode.name,
+        ...(mode.description ? { description: mode.description } : {}),
+        availability: { enabled: true },
+      })),
+    })
+  }
+
+  for (const opt of sessionState?.configOptions ?? []) {
+    if (opt.type === "select" && opt.options.length > 0) {
+      controls.push({
+        id: `config:${opt.id}`,
+        label: opt.name,
+        selectedId: opt.currentValue,
+        availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
+        items: opt.options.map(choice => {
+          const desc = [choice.groupName, choice.description].filter(Boolean).join(" · ")
+          return {
+            id: choice.value,
+            label: choice.name,
+            ...(desc ? { description: desc } : {}),
+            availability: { enabled: true },
+          }
+        }),
+      })
+    } else if (opt.type === "boolean") {
+      controls.push({
+        id: `config:${opt.id}`,
+        label: opt.name,
+        selectedId: String(opt.currentValue),
+        availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
+        items: [
+          { id: "true", label: "开启", availability: { enabled: true } },
+          { id: "false", label: "关闭", availability: { enabled: true } },
+        ],
+      })
+    }
+  }
+
+  let tabCycle: ConversationComposerView["tabCycle"] | undefined
+  const workflowOpt = sessionState?.configOptions.find(opt => opt.type === "select" && opt.options.length >= 2 && isWorkflowOption(opt))
+  if (workflowOpt && workflowOpt.type === "select") {
+    tabCycle = { controlId: `config:${workflowOpt.id}`, itemIds: workflowOpt.options.map(o => o.value) }
+  } else if (sessionState?.modes && sessionState.modes.availableModes.length >= 2) {
+    tabCycle = { controlId: "mode", itemIds: sessionState.modes.availableModes.map(m => m.id) }
+  }
+
+  let usageBadge: string | undefined
+  if (sessionState?.usage && sessionState.usage.size > 0) {
+    const baseUsage = `${compactTokenCount(sessionState.usage.used)}/${compactTokenCount(sessionState.usage.size)}`
+    usageBadge = sessionState.usage.cost
+      ? `${baseUsage} · ${sessionState.usage.cost.currency} ${sessionState.usage.cost.amount.toFixed(2)}`
+      : baseUsage
+  }
+
+  let restoreNotice: string | undefined
+  if (sessionState?.restoreStatus.kind === "reset") {
+    restoreNotice = sessionState.restoreStatus.reason === "session-restore-unsupported"
+      ? "当前 Agent 不支持恢复原原生会话，已自动为你新建会话继续执行。"
+      : "原原生会话无法恢复或已过期，已自动为你新建会话继续执行。"
+  }
+
+  return {
+    commands,
+    controls,
+    ...(tabCycle ? { tabCycle } : {}),
+    ...(usageBadge ? { usageBadge } : {}),
+    ...(restoreNotice ? { restoreNotice } : {}),
   }
 }
 

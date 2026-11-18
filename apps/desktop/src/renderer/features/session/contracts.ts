@@ -1,51 +1,34 @@
 /**
- * HC-218 会话模块公开与内部协作契约。
+ * HC-218 / HC-229 会话模块公开与内部协作契约。
  *
  * 【功能定义】
- * 定义本人本机 / 本人其他设备 / 他人会话的三态归类、本地主动同步五态机、
- * HC-219 / HC-220 协作用集成接点，以及向本机 Agent 执行器的可注入边界。
+ * 统一复用 `@workbench/contracts` 的会话与历史消息 DTO，定义本人本机 / 只读会话分类、
+ * 本地主动同步五态机、HC-219 / HC-220 协作用集成接点，以及完整 ACP 执行端口。
  */
 import type { ReactNode } from "react"
-import type { LocalExecutionView } from "./local-execution-view.js"
+import type {
+  ConversationBriefSource,
+  ConversationMessageType,
+  ConversationRepositoryItem,
+  ConversationStatus,
+  ConversationSummary,
+  HistoryMessage,
+} from "@workbench/contracts"
 import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationTimelineEntry } from "@workbench/ui"
+import type {
+  LocalExecutionElicitationAnswer,
+  LocalExecutionProviderList,
+} from "../../../local-execution-host.js"
+import type { LocalExecutionView } from "./local-execution-view.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 
-/** 服务端项目会话状态枚举，对齐 organization.schema.json。 */
-export type ProjectConversationStatus = "idle" | "running" | "waiting_approval" | "error"
-
-/** 简报生成来源枚举。 */
-export type ProjectConversationBriefSource = "rule" | "agent"
-
-/** 历史定稿消息类型枚举。 */
-export type ProjectConversationMessageType = "user" | "assistant" | "tool_summary" | "status"
-
-export type ProjectConversationRepositoryItem = {
-  readonly repositoryId: string
-  readonly name: string
-}
-
-/** 项目内单条会话摘要（与组织层 ConversationSummary 字段一致）。 */
-export type ProjectConversationSummary = {
-  readonly conversationId: string
-  readonly projectId: string
-  readonly ownerUserId: string
-  readonly title: string
-  readonly status: ProjectConversationStatus
-  readonly briefText: string
-  readonly briefSource: ProjectConversationBriefSource
-  readonly briefUpdatedAtMs: number
-  readonly syncedSequence: number
-  readonly updatedAt: string
-  readonly repositories: readonly ProjectConversationRepositoryItem[]
-}
-
-/** 服务端增量历史消息项。 */
-export type ProjectHistoryMessage = {
-  readonly sequence: number
-  readonly type: ProjectConversationMessageType
-  readonly occurredAtMs: number
-  readonly payload: string
-}
+/** 直接复用公共契约 DTO，消除与 organization.ts 重复的手写定义。 */
+export type ProjectConversationStatus = ConversationStatus
+export type ProjectConversationBriefSource = ConversationBriefSource
+export type ProjectConversationMessageType = ConversationMessageType
+export type ProjectConversationRepositoryItem = ConversationRepositoryItem
+export type ProjectConversationSummary = ConversationSummary
+export type ProjectHistoryMessage = HistoryMessage
 
 /** 本机对单条会话的身份归属判定结果。 */
 export type SessionKind = "local" | "remote_self" | "remote_other"
@@ -90,6 +73,12 @@ export interface LocalSessionExecutionPort {
   readonly textOnly?: boolean
   readonly commitsAcceptedDraft?: boolean
   getView?(conversationId: string): LocalExecutionView | undefined
+  getProviders?(): LocalExecutionProviderList | undefined
+  getSelectedProviderId?(conversationId: string): string | undefined
+  selectProvider?(conversationId: string, providerId: string): Promise<void>
+  setMode?(conversationId: string, modeId: string): Promise<void>
+  setConfigOption?(conversationId: string, configId: string, value: string | boolean): Promise<void>
+  answerElicitation?(conversationId: string, requestId: string, answer: LocalExecutionElicitationAnswer): Promise<void>
   send?(input: {
     readonly scope: ProjectNavigationScope
     readonly conversationId: string

@@ -3,9 +3,8 @@
  * 每次请求带递增序号，范围变化或重新读取后，旧请求的结果直接丢弃，避免迟到数据串到另一个项目。
  */
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { CollaborationHost, MemberSummary, ProjectDetailResponse, ProjectSummary, RepositorySummary } from "@workbench/contracts"
+import type { CollaborationHost, MemberSummary, OrganizationHost, ProjectDetailResponse, ProjectSummary, RepositorySummary } from "@workbench/contracts"
 import type { NavigationAvailability, NavigationMember } from "@workbench/ui"
-import type { OrganizationHost } from "../../../organization-host.js"
 import { resolveUserPhoto } from "../../demo-avatars.js"
 
 type Loaded<T> = { value: T; availability: NavigationAvailability }

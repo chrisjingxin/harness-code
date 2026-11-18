@@ -7,16 +7,17 @@
   },
   "workspaces": [
     "packages/workbench-contracts",
-    "packages/runner-core",
     "packages/acp-runtime",
     "packages/project-service",
     "packages/workbench-ui",
-    "apps/runner",
+    "packages/providers/harness",
+    "packages/providers/pi",
+    "packages/providers/qwen",
     "apps/desktop"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/acp-runtime --workspace @workbench/runner-core --workspace @workbench/project-service --workspace @workbench/runner --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
+    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/acp-runtime --workspace @workbench/project-service --workspace @workbench/harness-provider --workspace @workbench/pi-provider --workspace @workbench/qwen-provider --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
     "dev:remote": "node scripts/workbench/remote-desktop.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "check:boundaries": "node scripts/workbench/check-boundaries.mjs",

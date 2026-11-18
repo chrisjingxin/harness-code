@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { LocalAcpHost } from "../src/index.ts"
+import { LocalAcpHost } from "../dist/index.js"
 
 const sdkUrl = import.meta.resolve("@agentclientprotocol/sdk")
 const stubAgentScript = `

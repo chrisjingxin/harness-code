@@ -1,15 +1,43 @@
 /** Workspace 知识的正式装配。列表和历史只读元数据，正文按用户选择的版本读取。 */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
-import type { CollaborationResult, KnowledgeDetail, KnowledgeVersion } from "@workbench/contracts"
+import type { CollaborationAppsHost, CollaborationResult, KnowledgeDetail, KnowledgeSummary, KnowledgeVersion } from "@workbench/contracts"
 import type { RenderingActions } from "@workbench/ui"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
 import { knowledgeReferenceId } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import { readPages } from "../metadata.js"
+import type { KnowledgeMetadataScope } from "../metadata.js"
 import { knowledgeMaterial } from "../references/fixed-materials.js"
 import { snapshotReferenceView } from "../references/conversation-references.js"
 import { TeamKnowledge } from "./team-knowledge.js"
 import type { KnowledgeList, KnowledgeResult, KnowledgeVersionContent } from "./team-knowledge.js"
+
+export type KnowledgeRows =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; items: readonly KnowledgeSummary[] }
+
+/** 工作区左栏数量、命令面板搜索与列表共用本轮摘要；仅在团队/账号/刷新修订变化时拉取未归档条目。 */
+export function useWorkspaceKnowledgeMetadata(
+  host: CollaborationAppsHost | undefined,
+  scope: KnowledgeMetadataScope | null,
+  revision: number,
+): KnowledgeRows {
+  const teamKey = scope ? JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId]) : ""
+  const workspaceId = scope?.workspaceId
+  const [state, setState] = useState<{ teamKey: string; rows: KnowledgeRows }>()
+  useEffect(() => {
+    if (!host || !teamKey || !workspaceId) return
+    let active = true
+    void readPages(afterId => host.listKnowledge(workspaceId, "", afterId), page => page.items, () => active)
+      .then(items => {
+        if (active) setState({ teamKey, rows: { status: "ready", items: items.filter(item => !item.archived) } })
+      }).catch(error => {
+        if (active) setState({ teamKey, rows: { status: "error", message: error instanceof Error ? error.message : "无法读取知识列表。" } })
+      })
+    return () => { active = false }
+  }, [host, teamKey, workspaceId, revision])
+  return teamKey && state?.teamKey === teamKey ? state.rows : { status: "loading" }
+}
 
 interface LiveTeamKnowledgeProps {
   readonly host: CollaborationAppsHost

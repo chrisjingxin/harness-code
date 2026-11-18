@@ -12,14 +12,30 @@ import ts from "typescript"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const allowed = {
   "packages/workbench-contracts": [],
-  "packages/runner-core": ["@workbench/contracts"],
   "packages/acp-runtime": [],
   "packages/project-service": ["@workbench/contracts"],
   "packages/workbench-ui": ["@workbench/contracts"],
-  "apps/runner": ["@workbench/runner-core", "@workbench/project-service"],
-  "apps/desktop": ["@workbench/contracts", "@workbench/ui", "@workbench/acp-runtime"],
+  "packages/providers/harness": ["@workbench/contracts", "@workbench/acp-runtime"],
+  "packages/providers/pi": ["@workbench/contracts", "@workbench/acp-runtime"],
+  "packages/providers/qwen": ["@workbench/contracts", "@workbench/acp-runtime"],
+  "apps/desktop": [
+    "@workbench/contracts",
+    "@workbench/acp-runtime",
+    "@workbench/project-service",
+    "@workbench/ui",
+    "@workbench/harness-provider",
+    "@workbench/pi-provider",
+    "@workbench/qwen-provider",
+  ],
 }
-const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|harness-provider|deepagents)/
+const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|deepagents)/
+const desktopMainOnly = new Set([
+  "@workbench/acp-runtime",
+  "@workbench/project-service",
+  "@workbench/harness-provider",
+  "@workbench/pi-provider",
+  "@workbench/qwen-provider",
+])
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
 /** node: 前缀在 Node 新版本中可能尚未进入 builtinModules（如 node:sqlite）；仍按内建处理。 */
 const isBuiltin = specifier => builtins.has(specifier) || specifier.startsWith("node:")
@@ -56,8 +72,8 @@ function validateImport(specifier, file, owner, packages) {
   if (!(name in declarations)) throw new Error(`未声明依赖 ${name}`)
   const target = packages.get(name)
   if (target) {
-    if (name === "@workbench/acp-runtime" && !inside(file, join(owner.directory, "src", "main"))) {
-      throw new Error("本机 ACP 运行时只能在桌面主进程装配")
+    if (owner.path === "apps/desktop" && desktopMainOnly.has(name) && !inside(file, join(owner.directory, "src", "main"))) {
+      throw new Error(`${name} 只能在桌面主进程装配`)
     }
     if (!allowed[owner.path].includes(name)) throw new Error(`禁止反向依赖 ${name}`)
     const suffix = specifier.slice(name.length)
@@ -77,7 +93,7 @@ async function files(directory) {
 /** 检查失败会携带文件和行号，供开发者直接定位。 */
 async function check() {
   const manifest = await loadJson(join(root, "package.json"))
-  assert.deepEqual(manifest.workspaces, Object.keys(allowed), "根 workspace 必须是七个显式目录")
+  assert.deepEqual(manifest.workspaces, Object.keys(allowed), "根 workspace 必须是八个显式目录")
   const packages = new Map()
   for (const path of manifest.workspaces) {
     const entry = { path, directory: join(root, path), manifest: await loadJson(join(root, path, "package.json")) }
@@ -127,19 +143,41 @@ async function check() {
   console.log(`依赖边界通过：${packages.size} 个 workspace；锁文件、公开入口与宿主边界已检查。`)
 }
 function selfCheck() {
-  const owner = { path: "packages/runner-core", directory: "/project/core", manifest: { name: "@workbench/runner-core", dependencies: { "@workbench/contracts": "0.2.0", "@workbench/ui": "0.2.0" } } }
+  const owner = { path: "packages/project-service", directory: "/project/service", manifest: { name: "@workbench/project-service", dependencies: { "@workbench/contracts": "0.2.0", "@workbench/ui": "0.2.0" } } }
   const packages = new Map([
     ["@workbench/contracts", { manifest: { exports: { ".": "./index.js", "./runtime": "./runtime.js" } } }],
     ["@workbench/ui", { manifest: { exports: { ".": "./index.js" } } }],
     ["@workbench/acp-runtime", { manifest: { exports: { ".": "./index.js" } } }],
+    ["@workbench/project-service", { manifest: { exports: { ".": "./index.js" } } }],
+    ["@workbench/harness-provider", { manifest: { exports: { ".": "./index.js" } } }],
+    ["@workbench/pi-provider", { manifest: { exports: { ".": "./index.js" } } }],
+    ["@workbench/qwen-provider", { manifest: { exports: { ".": "./index.js" } } }],
   ])
-  validateImport("@workbench/contracts/runtime", "/project/core/src/index.ts", owner, packages)
-  for (const path of ["@workbench/contracts/private", "@workbench/ui", "@za38/protocol", "../../other/index.js", "missing-package"]) assert.throws(() => validateImport(path, "/project/core/src/index.ts", owner, packages), undefined, path)
+  validateImport("@workbench/contracts/runtime", "/project/service/src/index.ts", owner, packages)
+  for (const path of ["@workbench/contracts/private", "@workbench/ui", "@za38/protocol", "../../other/index.js", "missing-package"]) assert.throws(() => validateImport(path, "/project/service/src/index.ts", owner, packages), undefined, path)
   assert.throws(() => validateImport("node:fs", "/project/ui/src/index.ts", { ...owner, manifest: { name: "@workbench/ui" } }, packages))
-  const desktop = { path: "apps/desktop", directory: "/project/desktop", manifest: { name: "@workbench/desktop", dependencies: { "@workbench/acp-runtime": "0.2.0" } } }
-  validateImport("@workbench/acp-runtime", "/project/desktop/src/main/local-acp-host.ts", desktop, packages)
-  for (const layer of ["preload", "renderer"]) {
-    assert.throws(() => validateImport("@workbench/acp-runtime", `/project/desktop/src/${layer}/index.ts`, desktop, packages))
+  const pi = { path: "packages/providers/pi", directory: "/project/providers/pi", manifest: { name: "@workbench/pi-provider", dependencies: { "@workbench/contracts": "0.2.0", "@workbench/acp-runtime": "0.2.0", "@workbench/harness-provider": "0.2.0" } } }
+  validateImport("@workbench/acp-runtime", "/project/providers/pi/src/index.ts", pi, packages)
+  assert.throws(() => validateImport("@workbench/harness-provider", "/project/providers/pi/src/index.ts", pi, packages))
+  const desktop = {
+    path: "apps/desktop",
+    directory: "/project/desktop",
+    manifest: {
+      name: "@workbench/desktop",
+      dependencies: {
+        "@workbench/acp-runtime": "0.2.0",
+        "@workbench/project-service": "0.2.0",
+        "@workbench/harness-provider": "0.2.0",
+        "@workbench/pi-provider": "0.2.0",
+        "@workbench/qwen-provider": "0.2.0",
+      },
+    },
+  }
+  for (const pkg of desktopMainOnly) {
+    validateImport(pkg, "/project/desktop/src/main/local-acp-host.ts", desktop, packages)
+    for (const file of ["/project/desktop/src/preload/index.ts", "/project/desktop/src/renderer/index.ts", "/project/desktop/src/shared.ts"]) {
+      assert.throws(() => validateImport(pkg, file, desktop, packages), undefined, `${pkg} -> ${file}`)
+    }
   }
   assert.equal(publicEntry({ "./runtime": "./dist/runtime.js", "./ui": "./dist/ui.js" }, "./ui"), true)
   console.log("边界夹具通过：声明子入口合法；旧依赖、反向依赖、内部路径、未声明依赖和 UI 宿主访问被拒绝。")

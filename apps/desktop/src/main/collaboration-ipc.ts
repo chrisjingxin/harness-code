@@ -1,39 +1,63 @@
-/** 身份/项目会话 IPC 只接受固定方法；来源/数量/参数 → 窗口独有状态 → 不含凭据的结果。 */
-import { app, dialog, ipcMain } from "electron"
+/**
+ * 【功能定义】桌面身份、项目会话、协作应用与个人视图 IPC 装配入口：
+ * 统一经 `ipc-guard.ts` 校验来源与参数数量 → 强类型参数/请求体守卫 → 窗口工作区守卫 → 不含凭据的安全结果。
+ *
+ * 【协作边界】
+ * - 保留 `bindLocalExecutionIpc` 装配接点供独立本机 ACP 执行桥接使用。
+ * - 所有 `CollaborationAppsHost` 通道均由编译期映射表逐项绑定，不再使用绕过类型检查的动态下标强转。
+ */
+import { app, dialog } from "electron"
 import type { BrowserWindow } from "electron"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { CollaborationState, identityError } from "./collaboration-state.js"
+import type {
+  CollaborationAppsHost,
+  CollaborationResult,
+  ConversationRegisterRequest,
+  ConversationStatus,
+  KnowledgeCreateRequest,
+  KnowledgeUpdateRequest,
+  ProjectReadAction,
+  SnapshotCreateRequest,
+  TaskConversationRequest,
+  TaskCreateRequest,
+  TaskPatchRequest,
+  TaskStatus,
+  TaskTransitionRequest,
+} from "@workbench/contracts"
+import type { CollaborationClient } from "./collaboration-client.js"
+import { CollaborationState } from "./collaboration-state.js"
 import { ConversationUploads } from "./conversation-uploads.js"
-import { bindOrganizationIpc } from "./organization-ipc.js"
-import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
-import type { RunnerSupervisor } from "./runner-supervisor.js"
-import { verifyDesktopSource } from "./trusted-source.js"
-import type { CollaborationResult, ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
-import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import { parseFixedReference } from "../collaboration-reference.js"
+import {
+  createCollaborationIpcRegistrar,
+  formatIpcError,
+  isNonEmptyString,
+  isNonNegativeSafeInteger,
+  isNullableUuid,
+  isPlainObject,
+  isPositiveSafeInteger,
+  isUserId,
+  isUuid,
+} from "./ipc-guard.js"
 import { LocalDirectoryService } from "./local-directory-host.js"
+import { bindLocalExecutionIpc, createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
+import { bindOrganizationIpc } from "./organization-ipc.js"
 import { PersonalStore } from "./personal-store.js"
-import { createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
-import type { LocalExecutionScope } from "../local-execution-host.js"
+import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-const USER_ID = /^[0-9a-f]{32}$/
 const CONVERSATION_STATUSES = new Set(["idle", "running", "waiting_approval", "error"])
-const isId = (value: unknown): value is string => typeof value === "string" && UUID.test(value)
-const isUserId = (value: unknown): value is string => typeof value === "string" && USER_ID.test(value)
-const isNonEmptyString = (value: unknown, maxLength = 4096): value is string =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= maxLength
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+const TASK_STATUSES = new Set(["todo", "doing", "review", "done", "cancelled"])
+
+const invalidAppRequest = () => Promise.resolve(formatIpcError("INVALID_REQUEST", "请求参数无效。"))
 
 function isProjectReadAction(value: unknown): value is ProjectReadAction {
-  if (!isObject(value) || typeof value.kind !== "string") return false
+  if (!isPlainObject(value) || typeof value.kind !== "string") return false
   switch (value.kind) {
     case "listDirectory":
       return typeof value.directory === "string" && (value.cursor === undefined || typeof value.cursor === "string")
     case "searchCandidates":
       return typeof value.directory === "string" && typeof value.query === "string"
-        && (value.limit === undefined || (typeof value.limit === "number" && Number.isSafeInteger(value.limit) && value.limit > 0))
+        && (value.limit === undefined || isPositiveSafeInteger(value.limit))
     case "readPreview":
       return typeof value.path === "string"
     case "gitStatus":
@@ -47,7 +71,7 @@ function isProjectReadAction(value: unknown): value is ProjectReadAction {
 
 function isConversationQuery(value: unknown): value is { ownerId?: string; status?: ConversationStatus } | undefined {
   if (value === undefined) return true
-  if (!isObject(value) || Object.keys(value).some(key => key !== "ownerId" && key !== "status")) return false
+  if (!isPlainObject(value) || Object.keys(value).some(key => key !== "ownerId" && key !== "status")) return false
   if (value.ownerId !== undefined && !isUserId(value.ownerId)) return false
   return value.status === undefined || (typeof value.status === "string" && CONVERSATION_STATUSES.has(value.status))
 }
@@ -56,19 +80,95 @@ function isHistoryLimit(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 500)
 }
 
-function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
-  return isObject(value) && isUserId(value.accountId) && isId(value.workspaceId) && isId(value.projectId)
-    && isId(value.conversationId)
+function isConversationRegisterRequest(value: unknown): value is ConversationRegisterRequest {
+  return isPlainObject(value)
+    && typeof value.requestId === "string"
+    && (value.title === undefined || typeof value.title === "string")
+    && (value.repositoryIds === undefined || (Array.isArray(value.repositoryIds) && value.repositoryIds.every(item => typeof item === "string")))
 }
 
+function isSnapshotRange(value: unknown): value is SnapshotCreateRequest["range"] {
+  if (value === undefined) return true
+  if (!isPlainObject(value) || typeof value.type !== "string") return false
+  switch (value.type) {
+    case "latest":
+      return value.count === undefined || typeof value.count === "number"
+    case "through":
+      return typeof value.toSequence === "number"
+    case "range":
+      return typeof value.fromSequence === "number" && typeof value.toSequence === "number"
+    case "brief":
+      return true
+    default:
+      return false
+  }
+}
+
+function isSnapshotCreateRequest(value: unknown): value is SnapshotCreateRequest {
+  return isPlainObject(value) && typeof value.sourceConversationId === "string" && isSnapshotRange(value.range)
+}
+
+function isTaskCreateRequest(value: unknown): value is TaskCreateRequest {
+  return isPlainObject(value)
+    && typeof value.title === "string"
+    && typeof value.description === "string"
+    && typeof value.assigneeId === "string"
+    && typeof value.requestId === "string"
+    && (value.snapshotIds === undefined || (Array.isArray(value.snapshotIds) && value.snapshotIds.every(item => typeof item === "string")))
+    && (value.knowledgeRefs === undefined || (Array.isArray(value.knowledgeRefs)
+      && value.knowledgeRefs.every(ref => isPlainObject(ref) && typeof ref.knowledgeId === "string" && typeof ref.versionId === "string")))
+}
+
+function isTaskPatchRequest(value: unknown): value is TaskPatchRequest {
+  return isPlainObject(value)
+    && typeof value.description === "string"
+    && typeof value.expectedVersion === "number"
+    && typeof value.requestId === "string"
+}
+
+function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === "string" && TASK_STATUSES.has(value)
+}
+
+function isTaskTransitionRequest(value: unknown): value is TaskTransitionRequest {
+  return isPlainObject(value)
+    && isTaskStatus(value.targetStatus)
+    && typeof value.expectedVersion === "number"
+    && typeof value.requestId === "string"
+    && (value.note === undefined || typeof value.note === "string")
+    && (value.commitSha === undefined || typeof value.commitSha === "string")
+}
+
+function isTaskConversationRequest(value: unknown): value is TaskConversationRequest {
+  return isPlainObject(value)
+    && typeof value.conversationId === "string"
+    && typeof value.expectedVersion === "number"
+    && typeof value.requestId === "string"
+}
+
+function isKnowledgeCreateRequest(value: unknown): value is KnowledgeCreateRequest {
+  return isPlainObject(value)
+    && typeof value.termKey === "string"
+    && typeof value.category === "string"
+    && typeof value.title === "string"
+    && typeof value.text === "string"
+}
+
+function isKnowledgeUpdateRequest(value: unknown): value is KnowledgeUpdateRequest {
+  return isPlainObject(value)
+    && typeof value.category === "string"
+    && typeof value.title === "string"
+    && typeof value.text === "string"
+    && typeof value.expectedVersion === "number"
+}
+
+/** 绑定工作台主窗口的协作与本机目录 IPC；窗口关闭时统一释放所有监听和子模块句柄。 */
 export function bindCollaborationIpc(
   window: BrowserWindow,
   trustedUrl: string,
-  supervisor: RunnerSupervisor,
   onCloseAborted: () => void,
   runtime: LocalExecutionRuntime,
 ) {
-  void supervisor
   const origin = process.env.WORKBENCH_SERVICE_ORIGIN
   const identity = new CollaborationState(origin)
   const client = identity.network()
@@ -82,7 +182,7 @@ export function bindCollaborationIpc(
             const detail = await client.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId, signal)
             if (!detail.ok) return detail
             if (detail.value.conversation.ownerUserId !== scope.accountId) {
-              return identityError("CONVERSATION_FORBIDDEN", "仅会话创建者可执行该操作。")
+              return formatIpcError("CONVERSATION_FORBIDDEN", "仅会话创建者可执行该操作。")
             }
             return { ok: true, value: detail.value.conversation.syncedSequence }
           },
@@ -96,114 +196,110 @@ export function bindCollaborationIpc(
         },
       )
     : null
-  const execution = createLocalExecutionIpc(window, identity, uploads, runtime)
+  const execution = createLocalExecutionIpc(window, identity, uploads, runtime, join(app.getPath("userData"), "local-execution-grants"))
+  const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
-  const channels: string[] = []
   const unsubscribe = identity.onStateChanged(state => {
     uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
   })
-  function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {
-    channels.push(channel)
-    ipcMain.handle(channel, async (event, ...args: unknown[]) => {
-      try { verifyDesktopSource(window, trustedUrl, event) }
-      catch { return identityError("REQUEST_SOURCE_REJECTED", "不允许的身份请求来源。") }
-      if (args.length !== count) return identityError("INVALID_REQUEST", "请求参数无效。")
-      try { return await action(...args) }
-      catch { return identityError("INTERNAL_ERROR", "操作暂时无法完成。") }
+
+  const ipc = createCollaborationIpcRegistrar({
+    window,
+    trustedUrl,
+    messages: {
+      sourceRejected: "不允许的身份请求来源。",
+      invalidRequest: "请求参数无效。",
+      internalError: "操作暂时无法完成。",
+    },
+  })
+
+  ipc.handle("collaboration:get-state", 0, () => identity.getState())
+  ipc.handle("collaboration:demo-users", 0, () => identity.listDemoUsers())
+  ipc.handle("collaboration:sign-in", 1, userNo => typeof userNo === "string" && /^[0-9a-z][0-9a-z_-]{0,31}$/.test(userNo)
+    ? identity.signIn(userNo) : formatIpcError("INVALID_REQUEST", "员工工号无效。"))
+  ipc.handle("collaboration:sign-out", 0, () => identity.signOut())
+  ipc.handle("collaboration:members", 1, id => isUuid(id) ? identity.listMembers(id) : formatIpcError("INVALID_REQUEST", "工作区标识无效。"))
+
+  // 显式按 CollaborationAppsHost 逐一注册编译期受检处理器，保证方法名、参数个数与返回契约一致。
+  function handleApp<K extends keyof CollaborationAppsHost>(
+    name: K,
+    count: Parameters<CollaborationAppsHost[K]>["length"],
+    invoke: (networkClient: CollaborationClient, workspaceId: string, args: readonly unknown[]) => ReturnType<CollaborationAppsHost[K]>,
+  ) {
+    ipc.handle(`workbench:collaboration-apps:${name}`, count, (workspaceId, ...args) => {
+      if (!isUuid(workspaceId)) return formatIpcError("INVALID_REQUEST", "工作区标识无效。")
+      return identity.withWorkspace(
+        workspaceId,
+        (networkClient): Promise<CollaborationResult<unknown>> => invoke(networkClient, workspaceId, args),
+        { publishConnectionError: false },
+      )
     })
   }
-  handle("collaboration:get-state", 0, () => identity.getState())
-  handle("collaboration:demo-users", 0, () => identity.listDemoUsers())
-  handle("collaboration:sign-in", 1, userNo => typeof userNo === "string" && /^[0-9a-z][0-9a-z_-]{0,31}$/.test(userNo) ? identity.signIn(userNo) : identityError("INVALID_REQUEST", "员工工号无效。"))
-  handle("collaboration:sign-out", 0, () => identity.signOut())
-  handle("collaboration:members", 1, id => isId(id) ? identity.listMembers(id) : identityError("INVALID_REQUEST", "工作区标识无效。"))
 
-  // 名称由此处逐个登记。路径和请求体随后由同一业务客户端按 HC-212 契约校验。
-  function handleApp(name: keyof CollaborationAppsHost, count: number) {
-    handle(`workbench:collaboration-apps:${name}`, count, (workspaceId, ...args) => {
-      if (!isId(workspaceId)) return identityError("INVALID_REQUEST", "工作区标识无效。")
-      return identity.applicationWorkspace(workspaceId, client => {
-        const method = client[name] as (workspace: string, ...args: unknown[]) => Promise<CollaborationResult<unknown>>
-        return method.call(client, workspaceId, ...args)
-      })
-    })
-  }
-  handleApp("createSnapshot", 3)
-  handleApp("readSnapshot", 3)
-  handleApp("listTasks", 3)
-  handleApp("readTask", 3)
-  handleApp("createTask", 3)
-  handleApp("editTask", 4)
-  handleApp("transitionTask", 4)
-  handleApp("linkTaskConversation", 4)
-  handleApp("listKnowledge", 3)
-  handleApp("readKnowledge", 2)
-  handleApp("createKnowledge", 2)
-  handleApp("editKnowledge", 3)
-  handleApp("archiveKnowledge", 3)
-  handleApp("listKnowledgeVersions", 3)
-  handleApp("readKnowledgeVersion", 3)
+  handleApp("createSnapshot", 3, (c, ws, [projectId, request]) =>
+    isUuid(projectId) && isSnapshotCreateRequest(request) ? c.createSnapshot(ws, projectId, request) : invalidAppRequest())
+  handleApp("readSnapshot", 3, (c, ws, [projectId, snapshotId]) =>
+    isUuid(projectId) && isUuid(snapshotId) ? c.readSnapshot(ws, projectId, snapshotId) : invalidAppRequest())
+  handleApp("listTasks", 3, (c, ws, [projectId, afterId]) =>
+    isUuid(projectId) && isNullableUuid(afterId) ? c.listTasks(ws, projectId, afterId) : invalidAppRequest())
+  handleApp("readTask", 3, (c, ws, [projectId, taskId]) =>
+    isUuid(projectId) && isUuid(taskId) ? c.readTask(ws, projectId, taskId) : invalidAppRequest())
+  handleApp("createTask", 3, (c, ws, [projectId, request]) =>
+    isUuid(projectId) && isTaskCreateRequest(request) ? c.createTask(ws, projectId, request) : invalidAppRequest())
+  handleApp("editTask", 4, (c, ws, [projectId, taskId, request]) =>
+    isUuid(projectId) && isUuid(taskId) && isTaskPatchRequest(request) ? c.editTask(ws, projectId, taskId, request) : invalidAppRequest())
+  handleApp("transitionTask", 4, (c, ws, [projectId, taskId, request]) =>
+    isUuid(projectId) && isUuid(taskId) && isTaskTransitionRequest(request) ? c.transitionTask(ws, projectId, taskId, request) : invalidAppRequest())
+  handleApp("linkTaskConversation", 4, (c, ws, [projectId, taskId, request]) =>
+    isUuid(projectId) && isUuid(taskId) && isTaskConversationRequest(request) ? c.linkTaskConversation(ws, projectId, taskId, request) : invalidAppRequest())
+  handleApp("listKnowledge", 3, (c, ws, [query, afterId]) =>
+    typeof query === "string" && isNullableUuid(afterId) ? c.listKnowledge(ws, query, afterId) : invalidAppRequest())
+  handleApp("readKnowledge", 2, (c, ws, [knowledgeId]) =>
+    isUuid(knowledgeId) ? c.readKnowledge(ws, knowledgeId) : invalidAppRequest())
+  handleApp("createKnowledge", 2, (c, ws, [request]) =>
+    isKnowledgeCreateRequest(request) ? c.createKnowledge(ws, request) : invalidAppRequest())
+  handleApp("editKnowledge", 3, (c, ws, [knowledgeId, request]) =>
+    isUuid(knowledgeId) && isKnowledgeUpdateRequest(request) ? c.editKnowledge(ws, knowledgeId, request) : invalidAppRequest())
+  handleApp("archiveKnowledge", 3, (c, ws, [knowledgeId, expectedVersion]) =>
+    isUuid(knowledgeId) && isPositiveSafeInteger(expectedVersion) ? c.archiveKnowledge(ws, knowledgeId, expectedVersion) : invalidAppRequest())
+  handleApp("listKnowledgeVersions", 3, (c, ws, [knowledgeId, afterId]) =>
+    isUuid(knowledgeId) && isNullableUuid(afterId) ? c.listKnowledgeVersions(ws, knowledgeId, afterId) : invalidAppRequest())
+  handleApp("readKnowledgeVersion", 3, (c, ws, [knowledgeId, versionId]) =>
+    isUuid(knowledgeId) && isUuid(versionId) ? c.readKnowledgeVersion(ws, knowledgeId, versionId) : invalidAppRequest())
 
-  handle("workbench:project-conversations:list", 3, (workspaceId, projectId, query) =>
-    isId(workspaceId) && isId(projectId) && isConversationQuery(query)
-      ? identity.listProjectConversations(workspaceId, projectId, query)
-      : identityError("INVALID_REQUEST", "项目会话列表参数无效。"))
-  handle("workbench:project-conversations:register", 3, (workspaceId, projectId, request) =>
-    isId(workspaceId) && isId(projectId) && isObject(request)
-      ? identity.registerProjectConversation(workspaceId, projectId, request as unknown as ConversationRegisterRequest)
-      : identityError("INVALID_REQUEST", "项目会话登记参数无效。"))
-  handle("workbench:project-conversations:get", 3, (workspaceId, projectId, conversationId) =>
-    isId(workspaceId) && isId(projectId) && isId(conversationId)
+  ipc.handle("workbench:project-conversations:list", 3, (workspaceId, projectId, query) =>
+    isUuid(workspaceId) && isUuid(projectId) && isConversationQuery(query)
+      ? identity.withWorkspace(workspaceId, c => c.listProjectConversations(workspaceId, projectId, query), { publishConnectionError: false })
+      : formatIpcError("INVALID_REQUEST", "项目会话列表参数无效。"))
+  ipc.handle("workbench:project-conversations:register", 3, (workspaceId, projectId, request) =>
+    isUuid(workspaceId) && isUuid(projectId) && isConversationRegisterRequest(request)
+      ? identity.withWorkspace(workspaceId, c => c.registerProjectConversation(workspaceId, projectId, request))
+      : formatIpcError("INVALID_REQUEST", "项目会话登记参数无效。"))
+  ipc.handle("workbench:project-conversations:get", 3, (workspaceId, projectId, conversationId) =>
+    isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
       ? identity.getProjectConversation(workspaceId, projectId, conversationId)
-      : identityError("INVALID_REQUEST", "项目会话标识无效。"))
-  handle("workbench:project-conversations:history", 5, (workspaceId, projectId, conversationId, afterSequence, limit) =>
-    isId(workspaceId) && isId(projectId) && isId(conversationId)
-    && typeof afterSequence === "number" && Number.isSafeInteger(afterSequence) && afterSequence >= 0
+      : formatIpcError("INVALID_REQUEST", "项目会话标识无效。"))
+  ipc.handle("workbench:project-conversations:history", 5, (workspaceId, projectId, conversationId, afterSequence, limit) =>
+    isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
+    && isNonNegativeSafeInteger(afterSequence)
     && isHistoryLimit(limit)
-      ? identity.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit)
-      : identityError("INVALID_REQUEST", "项目会话历史参数无效。"))
+      ? identity.withWorkspace(workspaceId, c => c.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit))
+      : formatIpcError("INVALID_REQUEST", "项目会话历史参数无效。"))
 
-  handle("workbench:local-directory:bind", 4, (workspaceId, projectId, conversationKey, directoryPath) =>
-    isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isNonEmptyString(directoryPath, 4096)
+  ipc.handle("workbench:local-directory:bind", 4, (workspaceId, projectId, conversationKey, directoryPath) =>
+    isUuid(workspaceId) && isUuid(projectId) && isNonEmptyString(conversationKey, 128) && isNonEmptyString(directoryPath, 4096)
       ? localDirectory.bindDirectory(workspaceId, projectId, conversationKey, directoryPath)
-      : identityError("INVALID_REQUEST", "本机工作目录绑定参数无效。"))
-  handle("workbench:local-directory:read", 4, (workspaceId, projectId, conversationKey, action) =>
-    isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
+      : formatIpcError("INVALID_REQUEST", "本机工作目录绑定参数无效。"))
+  ipc.handle("workbench:local-directory:read", 4, (workspaceId, projectId, conversationKey, action) =>
+    isUuid(workspaceId) && isUuid(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
       ? localDirectory.readDirectory(workspaceId, projectId, conversationKey, action)
-      : identityError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
-  handle("workbench:local-execution:prepare", 2, (scope, directory) =>
-    isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
-      ? execution.prepare(scope, directory)
-      : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
-  handle("workbench:local-execution:send", 5, (scope, bindingId, requestId, text, referenceIds) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
-      && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768
-      && Array.isArray(referenceIds) && referenceIds.length <= 2000
-      && referenceIds.every(id => parseFixedReference(id) !== null)
-      && (text.trim() || referenceIds.length)
-      ? execution.send(scope, bindingId, requestId, text, referenceIds as string[])
-      : identityError("INVALID_REQUEST", "请输入有效的文本消息或选择可用的固定引用。文字最长 16,384 字符且不超过 32 KiB。"))
+      : formatIpcError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
 
-  handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId)
-      ? execution.cancel(scope, bindingId, turnId)
-      : identityError("INVALID_REQUEST", "停止参数无效。"))
-  handle("workbench:local-execution:answer-permission", 5, (scope, bindingId, turnId, requestId, optionId) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId) && isId(requestId) && isNonEmptyString(optionId, 1024)
-      ? execution.answerPermission(scope, bindingId, turnId, requestId, optionId)
-      : identityError("INVALID_REQUEST", "审批参数无效。"))
+  ipc.handleRaw("personal:load", 1, key => personal.load(key), () => ({ ok: false, message: "无法读取个人视图。" }))
+  ipc.handleRaw("personal:save", 3, (key, revision, value) => personal.save(key, revision, value), () => ({ ok: false, message: "无法保存个人视图。" }))
 
-  const personalChannels = ["personal:load", "personal:save", "personal:close-ready"]
-  ipcMain.handle("personal:load", async (event, key: unknown) => {
-    try { verifyDesktopSource(window, trustedUrl, event); return await personal.load(key) }
-    catch { return { ok: false, message: "无法读取个人视图。" } }
-  })
-  ipcMain.handle("personal:save", async (event, key: unknown, revision: unknown, value: unknown) => {
-    try { verifyDesktopSource(window, trustedUrl, event); return await personal.save(key, revision, value) }
-    catch { return { ok: false, message: "无法保存个人视图。" } }
-  })
   let allowedToClose = false
   let closeRequest: string | null = null
   let closeTimer: ReturnType<typeof setTimeout> | null = null
@@ -225,8 +321,7 @@ export function bindCollaborationIpc(
     closeTimer = setTimeout(closeFailed, 10000)
     window.webContents.send("personal:prepare-close", closeRequest)
   })
-  ipcMain.handle("personal:close-ready", async (event, request: unknown, ready: unknown) => {
-    try { verifyDesktopSource(window, trustedUrl, event) } catch { return }
+  ipc.handleRaw("personal:close-ready", 2, async (request, ready) => {
     if (typeof request !== "string" || request !== closeRequest || typeof ready !== "boolean") return
     if (!ready) { closeFailed(); return }
     const flushed = await personal.flush()
@@ -239,15 +334,17 @@ export function bindCollaborationIpc(
     if (closeTimer) clearTimeout(closeTimer)
     closeTimer = null; closeRequest = null; allowedToClose = true
     if (!window.isDestroyed()) window.close()
-  })
+  }, () => undefined)
+
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
     void execution.dispose().catch(() => {})
     unsubscribe()
+    unbindExecution()
     unbindOrganization()
     unbindProjectUpdates()
     identity.dispose()
-    for (const channel of [...channels, ...personalChannels]) ipcMain.removeHandler(channel)
+    ipc.dispose()
   })
   return execution.captureDirectorySelection
 }

@@ -7,6 +7,7 @@
  */
 import type { ReactElement } from "react"
 import { IconArrowRight, IconChevronDown, IconFolder } from "@tabler/icons-react"
+import type { LocalExecutionProviderInfo } from "../../../local-execution-host.js"
 import { directoryBasename } from "./session-model.js"
 import type { NewSessionDraft } from "./contracts.js"
 
@@ -18,8 +19,11 @@ export type NewSessionPageProps = {
   readonly createBlockedReason?: string
   readonly agentLabel: string
   readonly agentAvailable: boolean
+  readonly providers?: readonly LocalExecutionProviderInfo[]
+  readonly selectedProviderId?: string
   readonly errorMessage?: string | null
   readonly onChooseDirectory: () => void
+  readonly onSelectProvider?: (providerId: string) => void
   readonly onDraftChange: (text: string) => void
   readonly onStartSession: () => void
 }
@@ -32,8 +36,11 @@ export function NewSessionPage({
   createBlockedReason,
   agentLabel,
   agentAvailable,
+  providers,
+  selectedProviderId,
   errorMessage,
   onChooseDirectory,
+  onSelectProvider,
   onDraftChange,
   onStartSession,
 }: NewSessionPageProps): ReactElement {
@@ -63,6 +70,21 @@ export function NewSessionPage({
           <span>{folderName || "选择文件夹"}</span>
           <IconChevronDown size={12} aria-hidden="true" />
         </button>
+        {providers && providers.length > 0 && onSelectProvider ? (
+          <select
+            className="session-new-provider-select"
+            aria-label="选择本机 Agent"
+            value={selectedProviderId ?? providers[0]?.id ?? ""}
+            disabled={busy}
+            onChange={event => onSelectProvider(event.currentTarget.value)}
+          >
+            {providers.map(provider => (
+              <option key={provider.id} value={provider.id}>
+                {provider.available ? provider.label : `${provider.label}（暂不可用）`}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <span
           className="session-tag"
           data-tone={agentAvailable ? "success" : "warning"}

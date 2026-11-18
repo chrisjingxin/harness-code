@@ -623,3 +623,313 @@ async def test_catalog_change_replaces_the_table_for_every_session(tmp_path: Pat
     assert "navel" in names
     assert listed["params"]["sessionId"] == session_id
     assert ("acp.command.dropped", {"name": "compact", "source": "plugin", "reason": "name_conflict"}) in warnings
+
+
+async def test_undo_list_and_multiturn_index_selection(tmp_path: Path) -> None:
+    """GAP-40：`/undo list` 列出可回退回合，`/undo <N> [mode]` / `/undo [mode] <N>` 按 1-based 回退。"""
+    from tests.support.thread_fixtures import accept_thread
+
+    host = make_persistent_host(tmp_path)
+    store = await host._ensure_thread_persistence()
+    await accept_thread(store, "thread-1", "第一轮：初始化\n多行细节", run_id="run-1")
+    await accept_thread(store, "thread-1", "第二轮：加接口", run_id="run-2")
+    await accept_thread(store, "thread-1", "第三轮：补测试", run_id="run-3")
+
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, commands=True)
+        await _load(acp.client, host.workspace, "thread-1")
+
+        before = len(acp.client.frames)
+        listed = await _prompt(acp.client, "thread-1", "/undo list", request_id=3)
+        assert prompt_response(listed).stop_reason == "end_turn"
+        list_frames = _new_frames(acp.client, before)
+        list_text = _chunk_text(next(frame for frame in list_frames if _is_update(frame, "agent_message_chunk")))
+        assert "#1" in list_text and "第一轮：初始化 多行细节" in list_text
+        assert "#2" in list_text and "第二轮：加接口" in list_text
+        assert "#3" in list_text and "第三轮：补测试" in list_text
+        assert listed["result"]["_meta"]["harnessCode"]["command"] == {
+            "name": "undo",
+            "action": "list",
+        }
+
+        # 非 Git 仓库上 `/undo 2 code` 或 `/undo code 2` 必须解析到第 2 轮并走到 WORKSPACE_NOT_GIT_REPOSITORY
+        code_first = await _prompt(acp.client, "thread-1", "/undo 2 code", request_id=4)
+        assert _error_code(code_first) == "WORKSPACE_NOT_GIT_REPOSITORY"
+        mode_first = await _prompt(acp.client, "thread-1", "/undo code 2", request_id=5)
+        assert _error_code(mode_first) == "WORKSPACE_NOT_GIT_REPOSITORY"
+
+        # 越界回合与非法参数
+        out_of_range = await _prompt(acp.client, "thread-1", "/undo 9", request_id=6)
+        assert out_of_range["error"]["code"] == -32602
+        assert _error_code(out_of_range) == "TURN_NOT_FOUND"
+        for idx, bad in enumerate(
+            ["/undo 0", "/undo -1", "/undo list 1", "/undo 1 2", "/undo both code", "/undo nope"],
+            start=7,
+        ):
+            resp = await _prompt(acp.client, "thread-1", bad, request_id=idx)
+            assert resp["error"]["code"] == -32602, bad
+            assert _error_code(resp) == "INVALID_COMMAND_ARGUMENTS", bad
+
+        # 按 `[mode] <N>` 退第 2 轮
+        before_undo = len(acp.client.frames)
+        undone = await _prompt(acp.client, "thread-1", "/undo conversation 2", request_id=20)
+        assert prompt_response(undone).stop_reason == "end_turn"
+        undo_text = _chunk_text(
+            next(frame for frame in _new_frames(acp.client, before_undo) if _is_update(frame, "agent_message_chunk"))
+        )
+        assert undo_text == "已回退第 2 轮，恢复 0 个文件。重新打开会话可看到回退后的历史"
+        assert undone["result"]["_meta"]["harnessCode"]["command"] == {
+            "name": "undo",
+            "historyChanged": True,
+        }
+
+        # 退完第 2 轮后，list 只剩 #1；再次 /undo 2 报 TURN_NOT_FOUND
+        before_after = len(acp.client.frames)
+        listed_after = await _prompt(acp.client, "thread-1", "/undo list", request_id=21)
+        assert prompt_response(listed_after).stop_reason == "end_turn"
+        after_text = _chunk_text(
+            next(frame for frame in _new_frames(acp.client, before_after) if _is_update(frame, "agent_message_chunk"))
+        )
+        assert "#1" in after_text
+        assert "#2" not in after_text and "#3" not in after_text
+        already = await _prompt(acp.client, "thread-1", "/undo 2", request_id=22)
+        assert _error_code(already) == "TURN_NOT_FOUND"
+
+        # 退完第 1 轮后，list 给出友好的空提示，/undo 1 报 NOTHING_TO_UNDO
+        undone_first = await _prompt(acp.client, "thread-1", "/undo 1 both", request_id=23)
+        assert prompt_response(undone_first).stop_reason == "end_turn"
+        before_empty = len(acp.client.frames)
+        listed_empty = await _prompt(acp.client, "thread-1", "/undo list", request_id=24)
+        assert prompt_response(listed_empty).stop_reason == "end_turn"
+        empty_text = _chunk_text(
+            next(frame for frame in _new_frames(acp.client, before_empty) if _is_update(frame, "agent_message_chunk"))
+        )
+        assert "没有可回退" in empty_text
+        nothing = await _prompt(acp.client, "thread-1", "/undo 1", request_id=25)
+        assert _error_code(nothing) == "NOTHING_TO_UNDO"
+
+
+async def test_plan_command_without_forms_explains_requirement(tmp_path: Path) -> None:
+    """客户端未声明 elicitation.form 时，`/plan` 不启动 Run，而是明确提示需要表单能力。"""
+    agent = ScriptedAgent([text("不该调用模型")])
+    host = make_host(tmp_path, agent=agent)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, forms=False, commands=True)
+        session_id = await _new_session(acp.client, host.workspace)
+        before = len(acp.client.frames)
+        resp_bare = await _prompt(acp.client, session_id, "/plan", request_id=3)
+        assert prompt_response(resp_bare).stop_reason == "end_turn"
+        msg_bare = _chunk_text(
+            next(f for f in _new_frames(acp.client, before) if _is_update(f, "agent_message_chunk"))
+        )
+        assert "elicitation.form" in msg_bare
+
+        before2 = len(acp.client.frames)
+        resp_arg = await _prompt(acp.client, session_id, "/plan 整理重构步骤", request_id=4)
+        assert prompt_response(resp_arg).stop_reason == "end_turn"
+        msg_arg = _chunk_text(
+            next(f for f in _new_frames(acp.client, before2) if _is_update(f, "agent_message_chunk"))
+        )
+        assert "elicitation.form" in msg_arg
+        assert acp.server._sessions[session_id].approval_mode == "auto"
+    assert agent.inputs == []
+
+
+async def test_plan_command_with_forms_switches_mode_and_starts_optional_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """声明 elicitation.form 时：无参 `/plan` 仅切模式并推通知；带文本 `/plan <prompt>` 切模式并在 plan 模式跑一轮。"""
+    seen_requests: list[Any] = []
+    host = make_host(tmp_path, agent=ScriptedAgent([text("已收到规划")]))
+    original_start = host.start_run
+
+    async def spy_start(connection: Any, request: Any, *, on_accepted: Any = None) -> Any:
+        seen_requests.append(request)
+        return await original_start(connection, request, on_accepted=on_accepted)
+
+    monkeypatch.setattr(host, "start_run", spy_start)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, forms=True, commands=True)
+        session_id = await _new_session(acp.client, host.workspace)
+        listed = await acp.client.read_until(lambda frame: _is_update(frame, "available_commands_update"))
+        names = [item["name"] for item in listed["params"]["update"]["availableCommands"]]
+        assert "plan" in names and "plan-view" in names
+
+        # 1) 无参 `/plan`：切到 plan、发 current_mode_update、不启动 Run
+        before = len(acp.client.frames)
+        switched = await _prompt(acp.client, session_id, "/plan", request_id=3)
+        assert prompt_response(switched).stop_reason == "end_turn"
+        frames = _new_frames(acp.client, before)
+        mode_updates = [f for f in frames if _is_update(f, "current_mode_update")]
+        assert len(mode_updates) == 1
+        assert mode_updates[0]["params"]["update"]["currentModeId"] == "plan"
+        assert acp.server._sessions[session_id].approval_mode == "plan"
+        assert acp.server._sessions[session_id].mode_before_plan == "auto"
+        assert seen_requests == []
+
+        # 切回 default，再试带文本的 `/plan 设计认证方案`
+        await acp.client.request(4, "session/set_mode", {"sessionId": session_id, "modeId": "default"})
+        before2 = len(acp.client.frames)
+        started = await _prompt(acp.client, session_id, "/plan 设计认证方案", request_id=5)
+        assert prompt_response(started).stop_reason == "end_turn"
+        frames2 = _new_frames(acp.client, before2)
+        mode_updates2 = [f for f in frames2 if _is_update(f, "current_mode_update")]
+        assert len(mode_updates2) == 1
+        assert mode_updates2[0]["params"]["update"]["currentModeId"] == "plan"
+        assert any(_chunk_text(f) == "已收到规划" for f in frames2 if _is_update(f, "agent_message_chunk"))
+    assert len(seen_requests) == 1
+    assert seen_requests[0].requested_approval_mode == "plan"
+    assert seen_requests[0].pre_plan_mode == "default"
+    assert seen_requests[0].input.message == "设计认证方案"
+
+
+async def test_plan_when_already_in_plan_keeps_pre_plan_mode_and_inlines_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """已在 plan 模式时再次 `/plan` 不重复发通知也不覆盖原模式，带附件时仍能内联。"""
+    sample = tmp_path / "ws" / "spec.txt"
+    seen: list[Any] = []
+    host = make_host(tmp_path, agent=ScriptedAgent([text("好")]))
+    sample.write_text("hello plan\n", encoding="utf-8")
+    original_start = host.start_run
+
+    async def spy_start(connection: Any, request: Any, *, on_accepted: Any = None) -> Any:
+        seen.append(request)
+        return await original_start(connection, request, on_accepted=on_accepted)
+
+    monkeypatch.setattr(host, "start_run", spy_start)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, forms=True, commands=True)
+        session_id = await _new_session(acp.client, host.workspace)
+        await acp.client.request(3, "session/set_mode", {"sessionId": session_id, "modeId": "plan"})
+        before = len(acp.client.frames)
+        again = await _prompt(acp.client, session_id, "/plan", request_id=4)
+        assert prompt_response(again).stop_reason == "end_turn"
+        assert not [f for f in _new_frames(acp.client, before) if _is_update(f, "current_mode_update")]
+        assert acp.server._sessions[session_id].mode_before_plan == "auto"
+
+        attached = await acp.client.request(
+            5,
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {"type": "text", "text": "/plan 看看附件"},
+                    {"type": "resource_link", "uri": sample.as_uri(), "name": "spec.txt"},
+                ],
+            },
+        )
+        assert prompt_response(attached).stop_reason == "end_turn"
+    assert seen[0].requested_approval_mode == "plan"
+    assert seen[0].pre_plan_mode == "auto"
+    assert str(sample) in seen[0].input.message
+    assert not seen[0].input.message.startswith("/plan")
+    assert seen[0].input.model_message is not None
+    assert "hello plan" in seen[0].input.model_message
+
+
+async def test_plan_view_formats_plan_compose_and_goal_without_running_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/plan-view` 调 `host.open_thread(session_id, assume_idle=False)` 展示计划、Compose 与 Goal，不调用模型。"""
+    agent = ScriptedAgent([text("不该调用模型")])
+    host = make_host(tmp_path, agent=agent)
+    open_calls: list[tuple[str, bool]] = []
+    payload_box: dict[str, Any] = {
+        "plan": {"has_plan": True, "plan_markdown": "1. 第一步\n2. 第二步"},
+        "compose_progress": {
+            "status": "active",
+            "current_stage": "plan",
+            "stages": [
+                {"id": "requirement", "state": "confirmed"},
+                {"id": "plan", "state": "current"},
+            ],
+        },
+        "goal": {
+            "goal_id": "g1",
+            "revision": 2,
+            "status": "active",
+            "objective": "跑通测试",
+            "criteria": [{"criterion_id": "c1", "text": "全绿"}],
+        },
+        "goal_pending": None,
+    }
+
+    async def fake_open_thread(thread_id: str, *, assume_idle: bool = False) -> dict[str, object]:
+        open_calls.append((thread_id, assume_idle))
+        return dict(payload_box)
+
+    monkeypatch.setattr(host, "open_thread", fake_open_thread)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, forms=False, commands=True)
+        session_id = await _new_session(acp.client, host.workspace)
+
+        bad = await _prompt(acp.client, session_id, "/plan-view extra", request_id=3)
+        assert bad["error"]["code"] == -32602
+        assert _error_code(bad) == "INVALID_COMMAND_ARGUMENTS"
+
+        before = len(acp.client.frames)
+        viewed = await _prompt(acp.client, session_id, "/plan-view", request_id=4)
+        assert prompt_response(viewed).stop_reason == "end_turn"
+        reply = _chunk_text(
+            next(f for f in _new_frames(acp.client, before) if _is_update(f, "agent_message_chunk"))
+        )
+        assert "1. 第一步" in reply and "2. 第二步" in reply
+        assert "需求" in reply and "计划" in reply
+        assert "跑通测试" in reply and "全绿" in reply
+        assert viewed["result"]["_meta"]["harnessCode"]["command"] == {"name": "plan-view"}
+
+        payload_box.update(
+            {"plan": {"has_plan": False, "plan_markdown": ""}, "compose_progress": None, "goal": None}
+        )
+        before_empty = len(acp.client.frames)
+        empty = await _prompt(acp.client, session_id, "/plan-view", request_id=5)
+        assert prompt_response(empty).stop_reason == "end_turn"
+        empty_reply = _chunk_text(
+            next(f for f in _new_frames(acp.client, before_empty) if _is_update(f, "agent_message_chunk"))
+        )
+        assert "没有" in empty_reply
+    assert open_calls == [(session_id, False), (session_id, False)]
+    assert agent.inputs == []
+
+
+async def test_goal_cancel_maps_to_cancel_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/goal cancel` 与 `/goal cancel_pending` 映射到 `goal_mutate(..., action='cancel_pending')`。"""
+    host = make_host(tmp_path, agent=ScriptedAgent([text("不该调用模型")]))
+    calls: list[tuple[str, str | None, int | None]] = []
+
+    async def inspect(_connection: object, _thread_id: str) -> dict[str, object]:
+        return {
+            "goal": {"goal_id": "g1", "revision": 4, "status": "active", "objective": "保持"},
+            "pending": {"request_id": "req-1", "input_text": "修改目标"},
+            "latest_evaluation": None,
+        }
+
+    async def mutate(
+        _connection: object,
+        _thread_id: str,
+        _operation_id: str,
+        action: str,
+        expected_goal_id: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, object]:
+        calls.append((action, expected_goal_id, expected_revision))
+        return {"disposition": "applied", "goal": {"goal_id": "g1", "revision": 4, "status": "active"}}
+
+    monkeypatch.setattr(host, "goal_inspect", inspect)
+    monkeypatch.setattr(host, "goal_mutate", mutate)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client, forms=True, commands=True)
+        session_id = await _new_session(acp.client, host.workspace)
+        resp1 = await _prompt(acp.client, session_id, "/goal cancel", request_id=3)
+        assert prompt_response(resp1).stop_reason == "end_turn"
+        resp2 = await _prompt(acp.client, session_id, "/goal cancel_pending", request_id=4)
+        assert prompt_response(resp2).stop_reason == "end_turn"
+        bad = await _prompt(acp.client, session_id, "/goal cancel extra", request_id=5)
+        assert _error_code(bad) == "INVALID_COMMAND_ARGUMENTS"
+    assert calls == [
+        ("cancel_pending", "g1", 4),
+        ("cancel_pending", "g1", 4),
+    ]

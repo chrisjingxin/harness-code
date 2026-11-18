@@ -1,6 +1,5 @@
 /** 投影 HC-212 的实际固定材料。正文保留接口原值，日期、范围和来源只用于展示。 */
-import type { CollaborationResult, KnowledgeVersion, SnapshotResponse } from "@workbench/contracts"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
+import type { CollaborationAppsHost, CollaborationResult, KnowledgeVersion, SnapshotResponse } from "@workbench/contracts"
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import type { ConversationSnapshot } from "./conversation-references.js"

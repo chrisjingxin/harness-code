@@ -253,7 +253,7 @@ async def test_bind_failure_degrades_to_plain_text(
         body = f"/{name} 这些文件"
         response = await _prompt(acp.client, session_id, body)
         assert prompt_response(response).stop_reason == "end_turn", response
-    # 绑定失败也要给客户端一个「已落定」信号。插件表丢了，六个内置命令还在。
+    # 绑定失败也要给客户端一个「已落定」信号。插件表丢了，内置命令还在。
     updates = [
         frame for frame in acp.client.frames if _is_update(frame, "available_commands_update")
     ]
@@ -266,6 +266,7 @@ async def test_bind_failure_degrades_to_plain_text(
             "redo",
             "title",
             "abandon",
+            "plan-view",
         ]
     rendered = _rendered(agent)
     assert body in rendered
@@ -327,8 +328,8 @@ def test_command_index_table() -> None:
     )
     available = index.available_commands()
     names = [item.name for item in available]
-    assert names[:6] == ["compact", "btw", "undo", "redo", "title", "abandon"]
-    assert names[6:] == ["plugin:a:audit", "plain"]
+    assert names[:7] == ["compact", "btw", "undo", "redo", "title", "abandon", "plan-view"]
+    assert names[7:] == ["plugin:a:audit", "plain"]
     audit = next(item for item in available if item.name == "plugin:a:audit")
     plain = next(item for item in available if item.name == "plain")
     assert audit.input is not None
@@ -357,6 +358,7 @@ def test_command_index_table() -> None:
         "redo",
         "title",
         "abandon",
+        "plan-view",
     ]
     with_goal = CommandIndex.from_snapshot([], forms=True).available_commands()
     assert [item.name for item in with_goal] == [
@@ -367,4 +369,6 @@ def test_command_index_table() -> None:
         "title",
         "goal",
         "abandon",
+        "plan",
+        "plan-view",
     ]

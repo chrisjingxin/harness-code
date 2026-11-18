@@ -6,12 +6,14 @@ import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
-import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "../personal-host.js"
+import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "@workbench/contracts"
 import type { CollaborationState } from "./collaboration-state.js"
 
 type Identity = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type Entry = { revision: number; flushed: number; data: PersonalValue | null; writing: Promise<void> | null }
 type Authorized = { identity: Identity; name: string }
+type CachedPermission = Authorized & { expiresAtMs: number }
+const PERMISSION_TTL_MS = 60_000
 const fail = (message: string): PersonalResult<never> => ({ ok: false, message })
 const ok = <T>(value: T): PersonalResult<T> => ({ ok: true, value })
 const id = { type: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
@@ -182,7 +184,8 @@ function enforceConversationBudget(value: ConversationPersonal): ConversationPer
 /** 每个窗口持有独立授权代次；数据文件名由宿主对服务域和完整范围计算。 */
 export class PersonalStore {
   readonly #entries = new Map<string, Promise<Entry>>()
-  readonly #permissions = new Map<string, Authorized>()
+  readonly #permissions = new Map<string, CachedPermission>()
+  readonly #authorizing = new Map<string, Promise<PersonalResult<Authorized>>>()
   readonly #root: string
 
   constructor(private readonly identity: CollaborationState, private readonly origin: string, userData: string) {
@@ -193,31 +196,102 @@ export class PersonalStore {
     return Boolean(current && current.generation === identity.generation && current.accountId === identity.accountId)
   }
   #permissionKey(key: PersonalKey): string { return JSON.stringify(key) }
+  #cacheKey(identity: Identity, key: PersonalKey): string {
+    return `${identity.generation}:${identity.accountId}:${this.#permissionKey(key)}`
+  }
+  #evictStalePermissions(currentIdentity: Identity | null): void {
+    for (const [cacheKey, cached] of this.#permissions) {
+      if (!currentIdentity
+        || cached.identity.generation !== currentIdentity.generation
+        || cached.identity.accountId !== currentIdentity.accountId) {
+        this.#permissions.delete(cacheKey)
+      }
+    }
+  }
   #name(parts: readonly string[]): string { return createHash("sha256").update(JSON.stringify([this.origin, ...parts])).digest("hex") }
 
   async #authorize(key: PersonalKey): Promise<PersonalResult<Authorized>> {
-    this.#permissions.delete(this.#permissionKey(key))
     const identity = this.identity.personalIdentity()
+    this.#evictStalePermissions(identity)
     if (!identity) return fail("请重新登录后恢复个人视图。")
-    if (key.kind !== "account" && !identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
-    const parts = [identity.accountId, key.kind]
-    if (key.kind === "workspace") parts.push(key.workspaceId)
-    if (key.kind === "projectNavigation" || key.kind === "projectDraft") {
-      // 项目记录与准备页草稿只给仍可访问该项目的账号读写；被移出后旧选择随之失效。
-      const detail = await this.identity.getProject(key.workspaceId, key.projectId)
-      if (!detail.ok || !this.#current(identity) || detail.value.project.projectId !== key.projectId) return fail("无法确认项目访问权限，请重试。")
-      parts.push(key.workspaceId, key.projectId)
+    if (key.kind !== "account" && !identity.workspaces.includes(key.workspaceId)) {
+      return fail("当前账号无法访问该工作区。")
     }
-    if (key.kind === "conversation" || key.kind === "sessionWorkspace") {
-      const detail = await this.identity.getProjectConversation(key.workspaceId, key.projectId, key.conversationId)
-      if (!detail.ok || !this.#current(identity)) return fail("无法确认会话访问权限，请重试。")
-      const conversation = detail.value.conversation
-      if (conversation.projectId !== key.projectId || conversation.conversationId !== key.conversationId) return fail("会话范围已变化，请重试。")
-      parts.push(key.workspaceId, key.projectId, key.conversationId)
+
+    const cacheKey = this.#cacheKey(identity, key)
+    const now = Date.now()
+    const cached = this.#permissions.get(cacheKey)
+    if (cached) {
+      if (this.#current(cached.identity) && cached.expiresAtMs > now) return ok(cached)
+      this.#permissions.delete(cacheKey)
     }
-    const authorization = { identity, name: this.#name(parts) }
-    this.#permissions.set(this.#permissionKey(key), authorization)
-    return ok(authorization)
+
+    // 合并同一授权范围的并发在途校验，避免打开多会话或连续加载时重复打满服务端权限接口。
+    const inFlight = this.#authorizing.get(cacheKey)
+    if (inFlight) {
+      const result = await inFlight
+      if (!result.ok || !this.#current(identity)) {
+        this.#permissions.delete(cacheKey)
+        return result.ok ? fail("账号已变化，请重试。") : result
+      }
+      return result
+    }
+
+    let request!: Promise<PersonalResult<Authorized>>
+    request = (async (): Promise<PersonalResult<Authorized>> => {
+      try {
+        const parts = [identity.accountId, key.kind]
+        if (key.kind === "workspace") parts.push(key.workspaceId)
+        if (key.kind === "projectNavigation" || key.kind === "projectDraft") {
+          // 项目记录与准备页草稿只给仍可访问该项目的账号读写；被移出后旧选择随之失效。
+          const detail = await this.identity.withWorkspace(
+            key.workspaceId,
+            client => client.getProject(key.workspaceId, key.projectId),
+            { publishConnectionError: false },
+          )
+          if (!detail.ok || !this.#current(identity) || detail.value.project.projectId !== key.projectId) {
+            this.#permissions.delete(cacheKey)
+            return fail("无法确认项目访问权限，请重试。")
+          }
+          parts.push(key.workspaceId, key.projectId)
+        }
+        if (key.kind === "conversation" || key.kind === "sessionWorkspace") {
+          const detail = await this.identity.withWorkspace(
+            key.workspaceId,
+            client => client.getProjectConversation(key.workspaceId, key.projectId, key.conversationId),
+          )
+          if (!detail.ok || !this.#current(identity)) {
+            this.#permissions.delete(cacheKey)
+            return fail("无法确认会话访问权限，请重试。")
+          }
+          const conversation = detail.value.conversation
+          if (conversation.projectId !== key.projectId || conversation.conversationId !== key.conversationId) {
+            this.#permissions.delete(cacheKey)
+            return fail("会话范围已变化，请重试。")
+          }
+          parts.push(key.workspaceId, key.projectId, key.conversationId)
+        }
+        if (!this.#current(identity)) {
+          this.#permissions.delete(cacheKey)
+          return fail("账号已变化，请重新登录。")
+        }
+        const authorization: CachedPermission = {
+          identity,
+          name: this.#name(parts),
+          expiresAtMs: Date.now() + PERMISSION_TTL_MS,
+        }
+        this.#permissions.set(cacheKey, authorization)
+        return ok(authorization)
+      } catch {
+        this.#permissions.delete(cacheKey)
+        return fail("无法确认访问权限，请重试。")
+      } finally {
+        if (this.#authorizing.get(cacheKey) === request) this.#authorizing.delete(cacheKey)
+      }
+    })()
+
+    this.#authorizing.set(cacheKey, request)
+    return request
   }
 
   #entry(name: string, kind: PersonalKey["kind"]): Promise<Entry> {
@@ -257,8 +331,21 @@ export class PersonalStore {
 
   async save(key: unknown, revision: unknown, value: unknown): Promise<PersonalResult<null>> {
     if (!validKey(key) || !Number.isSafeInteger(revision) || (revision as number) < 1 || !validators[key.kind](value)) return fail("个人视图数据无效。")
-    const authorized = this.#permissions.get(this.#permissionKey(key))
-    if (!authorized || !this.#current(authorized.identity)) return fail("当前账号尚未确认该个人视图范围。")
+    const identity = this.identity.personalIdentity()
+    this.#evictStalePermissions(identity)
+    if (!identity) return fail("当前账号尚未确认该个人视图范围。")
+    const cacheKey = this.#cacheKey(identity, key)
+    const cached = this.#permissions.get(cacheKey)
+    if (!cached || !this.#current(cached.identity)) {
+      this.#permissions.delete(cacheKey)
+      return fail("当前账号尚未确认该个人视图范围。")
+    }
+    let authorized: Authorized = cached
+    if (cached.expiresAtMs <= Date.now()) {
+      const refreshed = await this.#authorize(key)
+      if (!refreshed.ok) return refreshed
+      authorized = refreshed.value
+    }
     if (key.kind !== "account" && !authorized.identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
     if (key.kind === "account" && (value as { workspaceId: string | null }).workspaceId !== null
       && !authorized.identity.workspaces.includes((value as { workspaceId: string }).workspaceId)) return fail("工作区不可用。")

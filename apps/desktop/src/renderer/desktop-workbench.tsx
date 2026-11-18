@@ -4,20 +4,21 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react"
 import type {
+  AccountPersonal,
+  CollaborationAppsHost,
   CollaborationHost,
   DesktopHost,
   LocalDirectoryHost,
+  OrganizationHost,
+  PersonalHost,
   ProjectConversationHost,
+  ProjectUpdatesHost,
   ThemeMode,
   UserSummary,
   WindowState,
   ZoomAction,
 } from "@workbench/contracts"
-import type { AccountPersonal, PersonalHost } from "../personal-host.js"
-import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
-import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import type { ProjectUpdatesHost } from "../project-updates-host.js"
 import { ACCENT_OPTIONS, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import type { AccentId, NavigationWorkspaceItem } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
@@ -28,7 +29,7 @@ import { createCollaborationPageProviders } from "./features/collaboration/colla
 import { useCollaborationMetadata } from "./features/collaboration/metadata.js"
 import { LiveProjectTasks, ProjectTaskPublication, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
 import type { TasksContext } from "./features/collaboration/tasks/live-project-tasks.js"
-import { LiveTeamKnowledge } from "./features/collaboration/knowledge/live-team-knowledge.js"
+import { LiveTeamKnowledge, useWorkspaceKnowledgeMetadata } from "./features/collaboration/knowledge/live-team-knowledge.js"
 import { createBoardPageProvider } from "./features/board/board-provider.js"
 import { useProjectBoard } from "./features/board/use-project-board.js"
 import { useProjectUpdates } from "./features/project-updates/use-project-updates.js"
@@ -259,6 +260,8 @@ function WorkspaceProjectWorkbench(props: {
   const taskRows = useProjectTaskMetadata(props.collaborationApps, shell.scope, taskRevision)
   const taskCount = taskRows.status === "ready" ? taskRows.tasks.filter(task =>
     task.assigneeId === props.user.id && task.status !== "done" && task.status !== "cancelled").length : null
+  const knowledgeRows = useWorkspaceKnowledgeMetadata(props.collaborationApps, shell.scope, knowledgeRevision)
+  const knowledgeCount = knowledgeRows.status === "ready" ? knowledgeRows.items.length : null
   const [publishing, setPublishing] = useState<{ scope: typeof shell.scope; page: typeof currentPage; assigneeId?: string; sourceId?: string } | null>(null)
 
   function locateConversation(conversation: ProjectConversationSummary): boolean {
@@ -300,6 +303,7 @@ function WorkspaceProjectWorkbench(props: {
   // 订阅跟随团队外壳。切页面、切项目时只替换刷新目标，正文读取仍在原页面动作内。
   const notification = useProjectUpdates(props.projectUpdates, props.user.id, props.workspaceId, {
     projectId: scope?.projectId ?? null,
+    isBoardActive: currentPage.kind === "board",
     refreshProjectList: () => { void shell.projects.reload() },
     refreshProjectDetail: () => { void shell.detail.reload() },
     refreshConversations: () => {
@@ -325,7 +329,6 @@ function WorkspaceProjectWorkbench(props: {
   const references = useWorkbenchReferences({
     scope: shell.scope,
     selectedConversationId,
-    pageKey: JSON.stringify(currentPage),
     pageController,
     integration,
     readSnapshot: props.referenceSnapshots,
@@ -369,10 +372,6 @@ function WorkspaceProjectWorkbench(props: {
         }) : undefined,
       },
     }),
-    ...createCollaborationPageProviders({
-      projectName: currentProject?.name ?? "当前项目",
-      workspaceName: props.workspaceName,
-    }),
     ...(taskContext ? {
       tasks: {
         render({ scope, page, navigator, visible }) {
@@ -395,7 +394,10 @@ function WorkspaceProjectWorkbench(props: {
           </div>
         },
       },
-    } : {}),
+    } : createCollaborationPageProviders({
+      projectName: currentProject?.name ?? "当前项目",
+      workspaceName: props.workspaceName,
+    })),
   }
 
   const settings = <div className="desktop-settings">
@@ -422,9 +424,11 @@ function WorkspaceProjectWorkbench(props: {
       settingsOpen={props.settingsOpen}
       setSettingsOpen={props.setSettingsOpen}
       personalError={props.personalError}
+      tasks={taskRows.status === "ready" ? taskRows.tasks : undefined}
+      knowledge={knowledgeRows.status === "ready" ? knowledgeRows.items : undefined}
       taskCount={taskCount}
+      knowledgeCount={knowledgeCount}
       sessions={projectSessions.navigationSource}
-      sessionIntegration={projectSessions.integration}
       providers={providers}
     />
     {references.dialog}

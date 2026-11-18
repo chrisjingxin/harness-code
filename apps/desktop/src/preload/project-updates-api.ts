@@ -1,7 +1,7 @@
 /** 严格映射看板端口到固定 IPC，渲染进程拿不到 Electron 事件或通信对象。 */
 import type { IpcRenderer } from "electron"
-import { projectUpdatesChannels as channels } from "../project-updates-host.js"
-import type { ProjectUpdatesHost, ProjectUpdatesNotice } from "../project-updates-host.js"
+import { projectUpdatesChannels as channels } from "@workbench/contracts"
+import type { ProjectUpdatesHost, ProjectUpdatesNotice } from "@workbench/contracts"
 
 export function createProjectUpdatesHost(ipc: IpcRenderer): ProjectUpdatesHost {
   return {

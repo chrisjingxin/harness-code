@@ -1,16 +1,19 @@
 /**
- * ACP 工具更新 → 本机工具显示值：把 rawInput、rawOutput、content 提炼成可读文本和差异块。
+ * ACP 工具更新 → 本机工具显示值：把 rawInput、rawOutput、content 提炼成可读文本、差异块和终端引用。
  *
  * 更新是增量语义：缺失字段必须保持缺省（undefined），不能凭空置空，合并由视图层完成；
- * 终端类内容不映射，超长文本截断并追加明确标记，防止一次输出把通知撑爆。
+ * 超长文本截断并追加明确标记，防止一次输出把通知撑爆。
  */
 import type { ToolCall, ToolCallUpdate } from "@agentclientprotocol/sdk"
-import type { LocalAcpTool } from "./index.js"
+import type { LocalAcpTool, LocalAcpToolLocation } from "./index.js"
 
 const INPUT_LIMIT = 16 * 1024
 const OUTPUT_LIMIT = 64 * 1024
 const DIFF_TEXT_LIMIT = 32 * 1024
 const DIFF_LIMIT = 8
+const MAX_LOCATIONS = 8
+const MAX_TERMINAL_ID = 256
+const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/
 const TRUNCATED = "\n…（内容过长，已截断）"
 
 /** 超长文本按字符截断并附截断说明，让界面能看出内容不完整。 */
@@ -39,7 +42,7 @@ function toOutput(update: ToolCall | ToolCallUpdate): string | undefined {
   return text === undefined || text === "" ? undefined : truncate(text, OUTPUT_LIMIT)
 }
 
-/** content 的 diff 项转成可显示的 {path, oldText, newText}；终端项忽略。 */
+/** content 的 diff 项转成可显示的 {path, oldText, newText}。 */
 function toDiffs(update: ToolCall | ToolCallUpdate): LocalAcpTool["diffs"] {
   const items = update.content ?? []
   const diffs = items.flatMap(item =>
@@ -53,11 +56,17 @@ function toDiffs(update: ToolCall | ToolCallUpdate): LocalAcpTool["diffs"] {
   }))
 }
 
-/** 单条 tool_call / tool_call_update 通知的显示投影；未携带的字段一律缺省。 */
-import type { LocalAcpToolLocation } from "./index.js"
-
-const MAX_LOCATIONS = 8
-const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/
+/** 提取首个合法的终端引用标识，过滤控制字符与空白串。 */
+function toTerminalId(update: ToolCall | ToolCallUpdate): string | undefined {
+  const items = update.content ?? []
+  for (const item of items) {
+    if (item.type !== "terminal" || typeof item.terminalId !== "string") continue
+    const trimmed = item.terminalId.trim()
+    if (!trimmed || CONTROL_CHAR_PATTERN.test(trimmed)) continue
+    return trimmed.slice(0, MAX_TERMINAL_ID)
+  }
+  return undefined
+}
 
 /** 提取并清洗工具关联路径，过滤控制字符与无效行号，并限制上限以防 IPC 载荷膨胀。 */
 function toLocations(locations: (ToolCall | ToolCallUpdate)["locations"]): readonly LocalAcpToolLocation[] | undefined {
@@ -74,7 +83,9 @@ function toLocations(locations: (ToolCall | ToolCallUpdate)["locations"]): reado
   return items.length > 0 ? items : undefined
 }
 
+/** 单条 tool_call / tool_call_update 通知的显示投影；未携带的字段一律缺省。 */
 export function toLocalAcpTool(update: ToolCall | ToolCallUpdate): LocalAcpTool {
+  const terminalId = toTerminalId(update)
   return {
     id: update.toolCallId,
     title: update.title ?? undefined,
@@ -84,5 +95,6 @@ export function toLocalAcpTool(update: ToolCall | ToolCallUpdate): LocalAcpTool 
     output: toOutput(update),
     diffs: toDiffs(update),
     locations: toLocations(update.locations),
+    ...(terminalId !== undefined ? { terminalId } : {}),
   }
 }

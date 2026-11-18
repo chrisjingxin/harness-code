@@ -1,10 +1,10 @@
 /** 隔离桥只转发固定桌面/身份方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
-import type { CollaborationHost, DesktopHost, IdentityState, LocalDirectoryHost, ProjectConversationHost, WindowState } from "@workbench/contracts"
-import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import type { PersonalHost } from "../personal-host.js"
-import type { OrganizationHost } from "../organization-host.js"
-import type { DesktopLocalExecutionHost, LocalExecutionNotice } from "../local-execution-host.js"
+import type {
+  CollaborationAppsHost, CollaborationHost, DesktopHost, IdentityState, LocalDirectoryHost,
+  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState,
+} from "@workbench/contracts"
+import { createLocalExecutionHost } from "./local-execution-api.js"
 import { createProjectUpdatesHost } from "./project-updates-api.js"
 
 const host: DesktopHost = {
@@ -71,21 +71,7 @@ const localDirectory: LocalDirectoryHost = {
     ipcRenderer.invoke("workbench:local-directory:read", workspaceId, projectId, conversationKey, action),
 }
 contextBridge.exposeInMainWorld("localDirectory", localDirectory)
-
-const localExecution: DesktopLocalExecutionHost = {
-  prepare: (scope, directory) => ipcRenderer.invoke("workbench:local-execution:prepare", scope, directory),
-  send: (scope, bindingId, requestId, text, referenceIds = []) =>
-    ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds),
-  cancel: (scope, bindingId, turnId) => ipcRenderer.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),
-  answerPermission: (scope, bindingId, turnId, requestId, optionId) =>
-    ipcRenderer.invoke("workbench:local-execution:answer-permission", scope, bindingId, turnId, requestId, optionId),
-  onNotice: listener => {
-    const receive = (_event: unknown, notice: LocalExecutionNotice) => listener(notice)
-    ipcRenderer.on("workbench:local-execution:notice", receive)
-    return () => { ipcRenderer.removeListener("workbench:local-execution:notice", receive) }
-  },
-}
-contextBridge.exposeInMainWorld("localExecution", localExecution)
+contextBridge.exposeInMainWorld("localExecution", createLocalExecutionHost(ipcRenderer))
 
 const organization: OrganizationHost = {
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),

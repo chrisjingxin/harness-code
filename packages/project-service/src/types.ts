@@ -1,11 +1,13 @@
-/** 项目公开端口的数据与拒绝原因。文件路径始终相对受信宿主注入的根。 */
+/**
+ * 【功能定义】本机项目只读服务公开端口的数据结构与失败语义定义。
+ * 【协作边界】文件路径始终相对受信宿主注入的项目根；跨机器 Git 写入（commit/push）已按设计暂缓，不纳入本端口。
+ */
 
 export type ProjectErrorCode =
   | "root-changed" | "invalid-path" | "outside-project" | "not-found" | "permission-denied"
   | "unsupported" | "binary-file" | "unsupported-encoding" | "file-changed" | "cursor-expired" | "io-error" | "limit-exceeded"
   | "git-unavailable" | "git-root-required" | "git-busy" | "git-blocked" | "git-stale"
-  | "invalid-selection" | "git-failed" | "upstream-unavailable" | "upstream-changed"
-  | "result-unknown"
+  | "invalid-selection" | "git-failed"
 
 export class ProjectServiceError extends Error {
   constructor(readonly code: ProjectErrorCode, message: string) {
@@ -66,30 +68,13 @@ export type ProjectGitDiff = {
   truncated: boolean
 }
 
-export type ProjectCommitInput = {
-  snapshot: string
-  paths: readonly string[]
-  message: string
-  alsoPush?: boolean
-}
-
-export type ProjectPushInput = { snapshot: string; commitSha: string }
-
-export type ProjectPushResult =
-  | { status: "not-requested" | "succeeded" }
-  | { status: "not-started" | "failed" | "unknown"; code: ProjectErrorCode; message: string }
-
-export type ProjectCommitResult =
-  | { status: "succeeded"; commitSha: string; warning?: string; push: ProjectPushResult }
-  | { status: "not-started" | "failed" | "unknown"; code: ProjectErrorCode; message: string; push: ProjectPushResult }
-
-/** 本机服务。读取失败抛出稳定错误，写入分别返回未调用、确切失败、成功或待确认。 */
+/** 本机只读项目服务：提供目录浏览、@ 候选检索、正文预览与 Git 只读状态/差异。 */
 export interface ProjectService {
+  readonly rootPath: string
+  readonly isGitRepository: boolean
   listDirectory(directory?: string, cursor?: string): Promise<ProjectDirectory>
   searchCandidates(input: { directory: string; query: string; limit?: number }): Promise<ProjectCandidates>
   readPreview(path: string): Promise<ProjectPreview>
   gitStatus(): Promise<ProjectGitStatus>
   gitDiff(input: { snapshot: string; path: string }): Promise<ProjectGitDiff>
-  commit(input: ProjectCommitInput): Promise<ProjectCommitResult>
-  push(input: ProjectPushInput): Promise<ProjectPushResult>
 }
