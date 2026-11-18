@@ -1,23 +1,27 @@
 /** 授权本人本机会话、绑定已选目录，并按受理 → 正文 → 终态的顺序向可信窗口转发。 */
-import { randomUUID } from "node:crypto"
-import { realpath, stat } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import type { BrowserWindow } from "electron"
-import type { LocalAcpEvent, LocalAcpHost, LocalAcpSession, UnavailableReason } from "@workbench/acp-runtime"
+import type { LocalAcpEvent, LocalAcpHost, LocalAcpSession, LocalAcpTool, UnavailableReason } from "@workbench/acp-runtime"
 import type { CollaborationResult } from "@workbench/contracts"
 import { localExecutionKey } from "../local-execution-host.js"
 import type { LocalExecutionBinding, LocalExecutionNotice, LocalExecutionReceipt, LocalExecutionScope } from "../local-execution-host.js"
 import type { CollaborationState } from "./collaboration-state.js"
 import { identityError } from "./collaboration-state.js"
-import { syncPayloadLimit, type ConversationUploads, type FinalizedTurn } from "./conversation-uploads.js"
+import { syncPayloadLimit, type ConversationUploads, type FinalizedToolSummary, type FinalizedTurn } from "./conversation-uploads.js"
 import { parseFixedReference } from "../collaboration-reference.js"
 
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type DirectoryGrant = { readonly path: string; readonly dev: bigint; readonly ino: bigint }
-type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & {
+type PersistedGrantEntry = { readonly path: string; readonly dev: string; readonly ino: string }
+type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
   sequence: number
   lastMessageId?: string
   needsSegmentBreak?: boolean
+  toolStates: Map<string, LocalAcpTool>
+  finalizedTools: Map<string, FinalizedToolSummary>
 }
 type Binding = {
   readonly id: string
@@ -61,22 +65,178 @@ function availability(session: LocalAcpSession) {
 const ok = <T>(value: T): CollaborationResult<T> => ({ ok: true, value })
 const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号自己的会话可以执行。")
 
+const MAX_FINALIZED_TOOLS = 50
+const MAX_TRACKED_TOOL_STATES = 200
+const MAX_PERSISTED_GRANTS = 200
+
+function joinReplySegment(reply: string, text: string, needsBreak: boolean): string {
+  if (!needsBreak) return text
+  const trailingNewlines = reply.endsWith("\n\n") ? 2 : reply.endsWith("\n") ? 1 : 0
+  const leadingNewlines = text.startsWith("\n\n") ? 2 : text.startsWith("\n") ? 1 : 0
+  const missing = Math.max(0, 2 - trailingNewlines - leadingNewlines)
+  return `${"\n".repeat(missing)}${text}`
+}
+
+function formatToolLocation(location: NonNullable<LocalAcpTool["locations"]>[number] | undefined): string | undefined {
+  if (!location?.path) return undefined
+  return location.line !== undefined ? `${location.path}:${location.line}` : location.path
+}
+
+function toneForToolKind(kind: LocalAcpTool["kind"]): FinalizedToolSummary["tone"] {
+  if (kind === "read" || kind === "search" || kind === "fetch") return "read"
+  if (kind === "edit" || kind === "delete" || kind === "move") return "write"
+  return "neutral"
+}
+
+function summarizeTool(tool: LocalAcpTool, occurredAtMs: number): FinalizedToolSummary | null {
+  if (tool.status !== "completed" && tool.status !== "failed") return null
+  const trimmed = tool.title?.trim()
+  let label = "Agent 工具"
+  let name: string | undefined
+  let summary = formatToolLocation(tool.locations?.[0]) ?? tool.diffs?.[0]?.path
+  if (trimmed) {
+    if (tool.kind === "execute") {
+      label = "终端命令"
+      name = trimmed
+      summary = trimmed
+    } else {
+      const match = /^([a-z][a-z0-9_:-]*)\s+(.+)$/i.exec(trimmed)
+      if (match) {
+        label = match[1]!
+        name = trimmed
+        summary = match[2]!.trim()
+      } else {
+        label = trimmed
+      }
+    }
+  }
+  return {
+    label,
+    ...(name ? { name } : {}),
+    ...(summary ? { summary } : {}),
+    status: tool.status,
+    tone: toneForToolKind(tool.kind),
+    occurredAtMs,
+  }
+}
+
+function recordFinalizedTool(turn: ActiveTurn, incoming: LocalAcpTool): void {
+  const prev = turn.toolStates.get(incoming.id)
+  const merged: LocalAcpTool = {
+    id: incoming.id,
+    title: incoming.title ?? prev?.title,
+    status: incoming.status ?? prev?.status,
+    kind: incoming.kind ?? prev?.kind,
+    diffs: incoming.diffs ?? prev?.diffs,
+    locations: incoming.locations ?? prev?.locations,
+  }
+  if (prev || turn.toolStates.size < MAX_TRACKED_TOOL_STATES) {
+    turn.toolStates.set(incoming.id, merged)
+  }
+  if (merged.status !== "completed" && merged.status !== "failed") return
+  if (!turn.finalizedTools.has(incoming.id) && turn.finalizedTools.size >= MAX_FINALIZED_TOOLS) return
+  const occurredAtMs = turn.finalizedTools.get(incoming.id)?.occurredAtMs ?? Date.now()
+  const summarized = summarizeTool(merged, occurredAtMs)
+  if (summarized) turn.finalizedTools.set(incoming.id, summarized)
+}
+
 /** 窗口绑定独占订阅，应用级 HC-197 宿主可在新窗口打开时继续接受新的绑定。 */
 export function createLocalExecutionIpc(
   window: BrowserWindow,
   identity: CollaborationState,
   uploads: ConversationUploads | null,
   runtime: LocalExecutionRuntime,
+  grantsDir?: string,
 ) {
   const grants = new Map<string, DirectoryGrant>()
   const bindings = new Map<string, Binding>()
   let tail: Promise<void> = Promise.resolve()
+  let grantIo: Promise<void> = Promise.resolve()
   let disposed = false
 
   function enqueue<T>(action: () => Promise<T>): Promise<T> {
     const result = tail.then(action)
     tail = result.then(() => {}, () => {})
     return result
+  }
+
+  function enqueueGrantIo<T>(action: () => Promise<T>): Promise<T> {
+    const result = grantIo.then(action)
+    grantIo = result.then(() => {}, () => {})
+    return result
+  }
+
+  function grantFileForAccount(accountId: string): string | null {
+    if (!grantsDir) return null
+    const hash = createHash("sha256").update(accountId).digest("hex")
+    return join(grantsDir, `${hash}.json`)
+  }
+
+  async function readPersistedGrantMap(filePath: string): Promise<Record<string, PersistedGrantEntry>> {
+    const clean = Object.create(null) as Record<string, PersistedGrantEntry>
+    try {
+      const raw = JSON.parse(await readFile(filePath, "utf8")) as unknown
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return clean
+      for (const [key, value] of Object.entries(raw)) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue
+        const record = value as Record<string, unknown>
+        if (typeof record.path === "string" && typeof record.dev === "string" && typeof record.ino === "string") {
+          clean[key] = { path: record.path, dev: record.dev, ino: record.ino }
+        }
+      }
+    } catch { /* 文件缺失或损坏时视作无历史授权，确保回退到人工目录选择。 */ }
+    return clean
+  }
+
+  async function persistDirectoryGrant(login: Login, selectedPath: string, grant: DirectoryGrant): Promise<void> {
+    const filePath = grantFileForAccount(login.accountId)
+    if (!filePath || !grantsDir) return
+    await enqueueGrantIo(async () => {
+      if (!isCurrent(login)) return
+      const existing = await readPersistedGrantMap(filePath)
+      delete existing[selectedPath]
+      const entries = Object.entries(existing)
+      const trimmed = entries.length >= MAX_PERSISTED_GRANTS
+        ? entries.slice(entries.length - MAX_PERSISTED_GRANTS + 1)
+        : entries
+      const next = Object.create(null) as Record<string, PersistedGrantEntry>
+      for (const [key, value] of trimmed) next[key] = value
+      next[selectedPath] = { path: grant.path, dev: String(grant.dev), ino: String(grant.ino) }
+      await mkdir(grantsDir, { recursive: true, mode: 0o700 })
+      const temp = `${filePath}.${randomUUID()}.tmp`
+      try {
+        await writeFile(temp, JSON.stringify(next), { flag: "wx", mode: 0o600, flush: true })
+        await rename(temp, filePath)
+      } finally {
+        await rm(temp, { force: true }).catch(() => {})
+      }
+    })
+  }
+
+  async function restoreDirectoryGrant(login: Login, selectedPath: string): Promise<DirectoryGrant | undefined> {
+    const filePath = grantFileForAccount(login.accountId)
+    if (!filePath) return undefined
+    return enqueueGrantIo(async () => {
+      if (!isCurrent(login)) return undefined
+      const existing = await readPersistedGrantMap(filePath)
+      if (!Object.hasOwn(existing, selectedPath)) return undefined
+      const entry = existing[selectedPath]!
+      try {
+        const expectedDev = BigInt(entry.dev)
+        const expectedIno = BigInt(entry.ino)
+        const canonical = await realpath(selectedPath)
+        const info = await stat(canonical, { bigint: true })
+        // 仅当实时路径、设备号与 inode 与原生选择时完全一致才恢复授权，防止重启后目录被替换或软链劫持。
+        if (!info.isDirectory() || canonical !== entry.path || info.dev !== expectedDev || info.ino !== expectedIno) {
+          return undefined
+        }
+        const restored: DirectoryGrant = { path: canonical, dev: info.dev, ino: info.ino }
+        grants.set(selectedPath, restored)
+        return restored
+      } catch {
+        return undefined
+      }
+    })
   }
 
   function isCurrent(login: Login): boolean {
@@ -163,7 +323,7 @@ export function createLocalExecutionIpc(
     answerPermission(scope: LocalExecutionScope, bindingId: string, turnId: string, requestId: string, optionId: string) {
       return actOnTurn(scope, bindingId, turnId, session => session.answerPermission(turnId, requestId, optionId))
     },
-    /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号。 */
+    /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号；通过后按账号落盘供重启恢复。 */
     captureDirectorySelection() {
       const login = identity.personalIdentity()
       return async (path: string) => {
@@ -171,7 +331,12 @@ export function createLocalExecutionIpc(
         try {
           const canonical = await realpath(path)
           const info = await stat(canonical, { bigint: true })
-          if (info.isDirectory() && isCurrent(login)) grants.set(path, { path: canonical, dev: info.dev, ino: info.ino })
+          if (!info.isDirectory() || !isCurrent(login)) return
+          const grant: DirectoryGrant = { path: canonical, dev: info.dev, ino: info.ino }
+          grants.set(path, grant)
+          if (grantsDir) {
+            await persistDirectoryGrant(login, path, grant)
+          }
         } catch { /* 目录已失效，准备执行时会要求重新确认。 */ }
       }
     },
@@ -182,7 +347,10 @@ export function createLocalExecutionIpc(
         if (!login || !isCurrent(login)) return forbidden()
         if ("error" in runtime) return identityError("INVALID_REQUEST", runtime.error)
         const key = localExecutionKey(scope)
-        const directory = grants.get(path)
+        let directory = grants.get(path)
+        if (!directory && grantsDir) {
+          directory = await restoreDirectoryGrant(login, path)
+        }
         if (!directory) return identityError("PROJECT_PATH_INVALID", "请通过「工作目录」重新确认本次执行使用的文件夹。")
         const authorized = await authorize(scope, login)
         if (!authorized.ok) return authorized
@@ -209,12 +377,12 @@ export function createLocalExecutionIpc(
             turn.sequence = event.sequence
             if (event.type === "text-delta") {
               if (turn.reply !== undefined && event.text) {
-                // 工具/思考/审批打断或 messageId 切换后插入段落空行，避免上传定稿将两段回复粘连。
-                const needsBreak = turn.reply.length > 0 && (
+                // 工具/审批打断或 messageId 切换后插入段落空行，避免上传定稿粘连，同时防止叠出多余空行。
+                const needsBreak = turn.reply.length > 0 && Boolean(
                   turn.needsSegmentBreak
-                  || (event.messageId !== undefined && turn.lastMessageId !== undefined && event.messageId !== turn.lastMessageId)
+                  || (event.messageId !== undefined && turn.lastMessageId !== undefined && event.messageId !== turn.lastMessageId),
                 )
-                const addition = (needsBreak ? "\n\n" : "") + event.text
+                const addition = joinReplySegment(turn.reply, event.text, needsBreak)
                 turn.reply = turn.reply.length + addition.length <= syncPayloadLimit ? turn.reply + addition : undefined
                 turn.needsSegmentBreak = false
               }
@@ -228,13 +396,13 @@ export function createLocalExecutionIpc(
               return
             }
             if (event.type === "thought-delta") {
-              // 思考片段只走时间线展示，不进入 turn.reply，避免随定稿上传。
-              if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
+              // 思考片段只走时间线展示，不进入 turn.reply，也不得把连续正文拆出空行。
               publish(login, { ...source, kind: "thought", text: event.text })
               return
             }
             if (event.type === "tool") {
               if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
+              recordFinalizedTool(turn, event.tool)
               publish(login, { ...source, kind: "tool", tool: event.tool })
               return
             }
@@ -254,7 +422,16 @@ export function createLocalExecutionIpc(
             })
             // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
             if (event.type === "completed" && event.shareable && isCurrent(login)) {
-              void uploads?.enqueue(scope, { ...turn, completedAtMs: Date.now() })
+              const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
+              void uploads?.enqueue(scope, {
+                turnId: turn.turnId,
+                userText: turn.userText,
+                referenceIds: turn.referenceIds,
+                ...(tools ? { tools } : {}),
+                reply: turn.reply,
+                acceptedAtMs: turn.acceptedAtMs,
+                completedAtMs: Date.now(),
+              })
             }
           }) }
           bindings.set(key, binding)
@@ -296,7 +473,16 @@ export function createLocalExecutionIpc(
         if (!authorized.ok) return authorized
         const result = binding.session.send(prompt)
         if (result.status === "rejected") return ok({ status: "rejected", reason: unavailableMessages[result.reason] })
-        binding.activeTurn = { turnId: result.turnId, userText: text, referenceIds: ids, reply: "", acceptedAtMs: Date.now(), sequence: 0 }
+        binding.activeTurn = {
+          turnId: result.turnId,
+          userText: text,
+          referenceIds: ids,
+          reply: "",
+          acceptedAtMs: Date.now(),
+          sequence: 0,
+          toolStates: new Map(),
+          finalizedTools: new Map(),
+        }
         // 受理与正文共用一个推送通道。即使 invoke 的回包较晚，页面也先收到受理。
         publish(login, { scope, bindingId, kind: "accepted", turnId: result.turnId, requestId, text })
         return ok(result)

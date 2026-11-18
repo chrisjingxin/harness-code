@@ -1,16 +1,26 @@
 /** 在本机保存不透明的 ACP 会话 ID。文件名由宿主计算，工作目录与 Renderer 都无法指定存储路径。 */
 import { createHash, randomUUID } from "node:crypto"
-import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 export type NativeBinding = {
   read(): Promise<string | undefined>
   write(sessionId: string): Promise<void>
+  clear(): Promise<void>
 }
 
 export function nativeBinding(base: string | undefined, identity: readonly string[]): NativeBinding {
   let nativeId: string | undefined
-  if (!base) return { async read() { return nativeId }, async write(id) { nativeId = id } }
+  if (!base) {
+    return {
+      async read() { return nativeId },
+      async write(id) {
+        if (!id || id.length > 4096) throw new Error("原生会话标识无效。")
+        nativeId = id
+      },
+      async clear() { nativeId = undefined },
+    }
+  }
   const key = createHash("sha256").update(JSON.stringify(identity)).digest("hex")
   const path = join(base, key + ".json")
   return {
@@ -30,11 +40,14 @@ export function nativeBinding(base: string | undefined, identity: readonly strin
       const temporary = path + "." + randomUUID()
       try {
         await writeFile(temporary, JSON.stringify(id), { mode: 0o600, flag: "wx" })
-        // 两个窗口进程使用同一个应用数据目录时，先建立的原生会话绑定优先。
-        await link(temporary, path)
+        // 通过临时独占文件 + rename 原子替换绑定，允许在旧原生会话失效后覆盖写入新会话 ID。
+        await rename(temporary, path)
       } finally {
         await rm(temporary, { force: true })
       }
+    },
+    async clear() {
+      await rm(path, { force: true })
     },
   }
 }

@@ -33,19 +33,31 @@ test("content 文本优先于 rawOutput，缺失时回退 rawOutput", () => {
   assert.equal(toLocalAcpTool(baseCall()).output, undefined)
 })
 
-test("终端内容忽略；diff 转成 path/oldText/newText 并去 null", () => {
+test("提取终端 terminalId；diff 转成 path/oldText/newText 并去 null", () => {
   const tool = toLocalAcpTool(baseCall({
     content: [
-      { type: "terminal", terminalId: "t-1" } as never,
+      { type: "terminal", terminalId: "t-1" },
       { type: "diff", path: "a.ts", newText: "after", oldText: null },
       { type: "diff", path: "b.ts", oldText: "before", newText: "after" },
     ],
   }))
+  assert.equal(tool.terminalId, "t-1")
   assert.deepEqual(tool.diffs, [
     { path: "a.ts", oldText: undefined, newText: "after" },
     { path: "b.ts", oldText: "before", newText: "after" },
   ])
   assert.equal(tool.diffs?.length, 2)
+})
+
+test("无效或含控制字符的 terminalId 被过滤并保持缺省", () => {
+  const bad = toLocalAcpTool(baseCall({
+    content: [
+      { type: "terminal", terminalId: "   " },
+      { type: "terminal", terminalId: "bad\nid" },
+    ],
+  }))
+  assert.equal(bad.terminalId, undefined)
+  assert.equal("terminalId" in bad, false)
 })
 
 test("超长字段截断并附截断标记", () => {

@@ -96,7 +96,7 @@ export function bindCollaborationIpc(
         },
       )
     : null
-  const execution = createLocalExecutionIpc(window, identity, uploads, runtime)
+  const execution = createLocalExecutionIpc(window, identity, uploads, runtime, join(app.getPath("userData"), "local-execution-grants"))
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const channels: string[] = []
