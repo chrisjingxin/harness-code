@@ -116,7 +116,7 @@ test("decision + criteria 目标确认映射为 approval 卡片并还原 accepte
   assert.deepEqual(toElicitationAnswer(converted.form, { kind: "cancel" }), { action: "cancel" })
 })
 
-test("decision + feedback 计划确认映射为 approval 卡片并还原 decision 与修改意见", () => {
+test("decision + feedback 计划确认映射为 approval 卡片：批准直发、修改/放弃保留确认并支持 Markdown preview 注入", () => {
   const req = {
     id: "el-plan-1",
     message: "请确认执行计划（计划.md）\n\n# 步骤\n1. 先写测试",
@@ -128,6 +128,7 @@ test("decision + feedback 计划确认映射为 approval 卡片并还原 decisio
           oneOf: [
             { const: "revise", title: "需要修改" },
             { const: "approved", title: "批准并开始执行" },
+            { const: "abandoned", title: "放弃" },
           ],
         },
         feedback: { type: "string", title: "修改意见", maxLength: 4000 },
@@ -143,11 +144,32 @@ test("decision + feedback 计划确认映射为 approval 卡片并还原 decisio
   if (converted.interaction.kind !== "approval") return
   assert.equal(converted.interaction.title, "确认执行计划（计划.md）")
   assert.equal(converted.interaction.description, "# 步骤\n1. 先写测试")
-  assert.deepEqual(converted.interaction.options.map(o => o.id), ["approved", "revise"])
+  assert.deepEqual(converted.interaction.options.map(o => o.id), ["approved", "revise", "abandoned"])
+  assert.equal(converted.interaction.options[0]?.behavior, "immediate")
+  assert.equal(converted.interaction.options[0]?.feedback, "none")
+  assert.equal(converted.interaction.options[1]?.behavior, "confirm")
+  assert.equal(converted.interaction.options[1]?.feedback, "optional")
+  assert.equal(converted.interaction.options[2]?.behavior, "confirm")
+  assert.equal(converted.interaction.options[2]?.feedback, "optional")
 
+  const withPreview = toConversationInteraction(req, {
+    renderPlanPreview: plan => `preview:${plan.displayPath}:${plan.markdown}`,
+  })
+  assert.ok(withPreview && withPreview.interaction.kind === "approval")
+  assert.equal(withPreview.interaction.description, undefined)
+  assert.equal(withPreview.interaction.preview, "preview:计划.md:# 步骤\n1. 先写测试")
+
+  assert.deepEqual(
+    toElicitationAnswer(converted.form, { kind: "approval", optionId: "approved" }),
+    { action: "accept", content: { decision: "approved", feedback: "" } },
+  )
   assert.deepEqual(
     toElicitationAnswer(converted.form, { kind: "approval", optionId: "revise", feedback: "补一条边界检查" }),
     { action: "accept", content: { decision: "revise", feedback: "补一条边界检查" } },
+  )
+  assert.deepEqual(
+    toElicitationAnswer(converted.form, { kind: "approval", optionId: "abandoned", feedback: "需求变更" }),
+    { action: "accept", content: { decision: "abandoned", feedback: "需求变更" } },
   )
 })
 

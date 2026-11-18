@@ -289,3 +289,54 @@ test("PersonalStore 在身份代次变化、权限失效或过期撤销时淘汰
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("PersonalStore 在 60 秒 TTL 到期后并发调用 save 复用单次重验且全部成功", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc232-personal-ttl-concurrent-"))
+  const realDateNow = Date.now
+  try {
+    let nowMs = 1_700_000_000_000
+    Date.now = () => nowMs
+
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+
+    assert.equal((await store.load(convKey)).ok, true)
+    assert.equal(mock.counts().getConversationCalls, 1)
+
+    nowMs += 60_000
+    let releaseRefresh!: (result: CollaborationResult<ConversationDetailResponse>) => void
+    mock.setGetConversation(() => new Promise(resolve => { releaseRefresh = resolve }))
+
+    const concurrentSaves = Promise.all([
+      store.save(convKey, 1, sampleConversation),
+      store.save(convKey, 2, sampleConversation),
+      store.save(convKey, 3, sampleConversation),
+    ])
+    // 三个并发过期的 save 必须共享同一个在途权限校验请求，且后面的不能因提前删缓存而报错。
+    assert.equal(mock.counts().getConversationCalls, 2)
+    releaseRefresh({
+      ok: true,
+      value: {
+        conversation: {
+          conversationId: CONV_ID,
+          projectId: PROJECT_ID,
+          ownerUserId: USER_A,
+          title: "重验通过会话",
+          status: "idle",
+          briefText: "",
+          briefSource: "rule",
+          briefUpdatedAtMs: 1_700_000_000_000,
+          syncedSequence: 0,
+          updatedAt: "2026-11-18T00:00:00.000Z",
+          repositories: [],
+        },
+      },
+    })
+    const results = await concurrentSaves
+    assert.deepEqual(results.map(item => item.ok), [true, true, true])
+  } finally {
+    Date.now = realDateNow
+    await rm(dir, { recursive: true, force: true })
+  }
+})

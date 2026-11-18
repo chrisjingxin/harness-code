@@ -67,17 +67,43 @@ export function ConversationInteraction({ scope, interaction, personal, actions,
           const answer = saved?.kind === "approval" ? saved : null
           const selected = interaction.options.find(option => option.id === answer?.optionId)
           const feedbackValid = selected?.feedback !== "required" || Boolean(answer?.feedback?.trim())
+          const showSubmit = Boolean(
+            interaction.options.every(option => option.behavior === "confirm" || option.feedback !== "none")
+            || (selected && (selected.behavior === "confirm" || selected.feedback !== "none")),
+          )
           return <>
             <div className="wb-interaction-approval-options" role="group" aria-label="审批选项">
               {interaction.options.map(option => <button type="button" key={option.id} className={`wb-interaction-option wb-interaction-option-${option.tone}`} aria-pressed={answer?.optionId === option.id} title={!option.availability.enabled ? option.availability.reason ?? "当前选项不可用" : option.description} disabled={!editable || !option.availability.enabled} onClick={() => {
                 const next: ConversationInteractionAnswer = { kind: "approval", optionId: option.id }
                 save(next)
-                // 明确要求反馈或批准类动作都保留确认步骤，防止误触。
-                if (option.behavior === "immediate" && option.tone !== "positive" && option.feedback !== "required") submit(next)
+                if (option.behavior === "immediate" && option.feedback === "none") submit(next)
               }}><span>{option.label}</span>{option.description ? <span className="wb-interaction-option-description">{option.description}</span> : null}{!option.availability.enabled && option.availability.reason ? <span className="wb-interaction-option-description">{option.availability.reason}</span> : null}</button>)}
             </div>
-            {selected && selected.feedback !== "none" ? <label className="wb-interaction-feedback"><span>反馈{selected.feedback === "required" ? "（必填）" : "（可选）"}</span><textarea rows={3} value={answer?.feedback ?? ""} disabled={!editable} onChange={event => save({ kind: "approval", optionId: selected.id, feedback: event.currentTarget.value })} /></label> : null}
-            <div className="wb-interaction-actions"><button type="button" className="wb-interaction-submit" disabled={!editable || !selected?.availability.enabled || !feedbackValid} title={!selected?.availability.enabled && selected ? selected.availability.reason : reason} onClick={() => { if (answer && selected && feedbackValid) submit(answer) }}>提交</button></div>
+            {selected && selected.feedback !== "none" ? (
+              <label className="wb-interaction-feedback">
+                <span>{selected.feedbackLabel ?? "反馈"}{selected.feedback === "required" ? "（必填）" : "（可选）"}</span>
+                <textarea
+                  rows={3}
+                  placeholder={selected.feedbackPlaceholder}
+                  value={answer?.feedback ?? ""}
+                  disabled={!editable}
+                  onChange={event => save({ kind: "approval", optionId: selected.id, feedback: event.currentTarget.value })}
+                />
+              </label>
+            ) : null}
+            {showSubmit ? (
+              <div className="wb-interaction-actions">
+                <button
+                  type="button"
+                  className="wb-interaction-submit"
+                  disabled={!editable || !selected?.availability.enabled || !feedbackValid}
+                  title={!selected?.availability.enabled && selected ? selected.availability.reason : reason}
+                  onClick={() => { if (answer && selected && feedbackValid) submit(answer) }}
+                >
+                  {selected?.submitLabel ?? "提交"}
+                </button>
+              </div>
+            ) : null}
           </>
         })() : null}
         {interaction.kind === "question" ? (() => {

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 import {
   IconAlertTriangle,
+  IconArrowsMaximize,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
@@ -38,6 +39,8 @@ import {
 } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
+import { parseUndoListMessage } from "./undo-choice.js"
+import { UndoChoiceCard } from "./undo-choice-card.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -85,6 +88,11 @@ export function LocalSessionPage({
   const [planCollapsed, setPlanCollapsed] = useState(false)
   const [dismissedRestoreKey, setDismissedRestoreKey] = useState<string | null>(null)
   const [capabilityError, setCapabilityError] = useState<string | null>(null)
+  const [expandedPlan, setExpandedPlan] = useState<{
+    readonly title: string
+    readonly subtitle?: string
+    readonly markdown: string
+  } | null>(null)
 
   useEffect(() => {
     if (!viewingFile) setPvMax(false)
@@ -92,7 +100,20 @@ export function LocalSessionPage({
 
   useEffect(() => {
     setCapabilityError(null)
+    setExpandedPlan(null)
   }, [conversation.conversationId])
+
+  useEffect(() => {
+    if (!expandedPlan) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      event.stopPropagation()
+      setExpandedPlan(null)
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [expandedPlan])
 
   const availability = execution.getAvailability(conversation.conversationId)
   const hasUnsupportedMaterial = Boolean(execution.textOnly && personal.draft.attachmentIds.length > 0)
@@ -175,6 +196,29 @@ export function LocalSessionPage({
         retryRevision: activeExecution.elicitationRetryRevision,
         readOnly: false,
         availability: { enabled: true },
+        renderPlanPreview: planForm => (
+          <div className="session-plan-elicitation-preview">
+            <div className="session-plan-elicitation-toolbar">
+              <span className="session-plan-elicitation-path">
+                {planForm.displayPath || "执行计划预览"}
+              </span>
+              <button
+                type="button"
+                className="session-plan-zoom-btn"
+                onClick={() => setExpandedPlan({
+                  title: planForm.displayPath ? `执行计划 · ${planForm.displayPath}` : "执行计划详情",
+                  markdown: planForm.markdown,
+                })}
+              >
+                <IconArrowsMaximize size={13} stroke={1.8} aria-hidden="true" />
+                <span>放大查看</span>
+              </button>
+            </div>
+            <div className="session-plan-elicitation-markdown">
+              <Markdown text={planForm.markdown} actions={messageRendering} />
+            </div>
+          </div>
+        ),
       })
     : null
 
@@ -195,7 +239,7 @@ export function LocalSessionPage({
             label: option.label,
             ...(option.id === "reject_with_feedback" ? { description: "拒绝并在下一步填写原因或修改建议" } : {}),
             tone: option.allows ? "positive" as const : "negative" as const,
-            behavior: "immediate" as const,
+            behavior: option.allows ? "confirm" as const : "immediate" as const,
             feedback: "none" as const,
             availability: { enabled: true },
           })),
@@ -206,6 +250,54 @@ export function LocalSessionPage({
   const view = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
+
+  const sendUndoCommand = async (command: string) => {
+    if (!execution.send) {
+      return { status: "rejected" as const, message: "当前无法发送回退命令。" }
+    }
+    return execution.send({
+      scope: {
+        namespace: scope.namespace,
+        accountId: scope.accountId,
+        workspaceId: scope.workspaceId,
+        projectId: conversation.projectId,
+      },
+      conversationId: conversation.conversationId,
+      directoryPath,
+      draftRevision: personal.draft.revision,
+      text: command,
+      referenceIds: [],
+      attachmentIds: [],
+    })
+  }
+
+  const baseEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
+  const undoDisabledReason = !execution.send
+    ? "当前无法发送回退命令"
+    : !availability.available
+      ? availability.reason ?? "本机 Agent 暂不可用"
+      : undefined
+  const renderedEntries = baseEntries.map((entry, idx) => {
+    if (entry.kind !== "message" || entry.role !== "assistant" || entry.streaming) return entry
+    const undoItems = parseUndoListMessage(entry.text)
+    if (!undoItems) return entry
+    const stale = baseEntries.slice(idx + 1).some(
+      later => !(later.kind === "message" && later.role === "assistant" && !later.streaming && !later.text.trim()),
+    )
+    return {
+      kind: "extension" as const,
+      id: entry.id,
+      content: (
+        <UndoChoiceCard
+          items={undoItems}
+          stale={stale}
+          busy={Boolean(activeExecution?.activeTurnId)}
+          disabledReason={undoDisabledReason}
+          onExecuteUndo={sendUndoCommand}
+        />
+      ),
+    }
+  })
 
   const restoreKey = sessionState?.restoreStatus.kind === "reset"
     ? `${conversation.conversationId}:${sessionState.restoreStatus.sessionId}`
@@ -296,6 +388,19 @@ export function LocalSessionPage({
                 if (plan.kind === "markdown") {
                   return (
                     <div key={plan.id} className="session-plan-markdown">
+                      <div className="session-plan-markdown-tools">
+                        <button
+                          type="button"
+                          className="session-plan-zoom-btn"
+                          onClick={() => setExpandedPlan({
+                            title: "执行计划详情",
+                            markdown: plan.content,
+                          })}
+                        >
+                          <IconArrowsMaximize size={12} stroke={1.8} aria-hidden="true" />
+                          <span>放大查看</span>
+                        </button>
+                      </div>
                       <Markdown text={plan.content} actions={messageRendering} />
                     </div>
                   )
@@ -353,7 +458,7 @@ export function LocalSessionPage({
           <div className="session-conversation-wrap">
             <ConversationView
               {...view}
-              entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
+              entries={renderedEntries}
               scope={scope}
               visible={visible && !(viewingFile && pvMax)}
               interaction={interaction}
@@ -419,6 +524,17 @@ export function LocalSessionPage({
                   if (targetScope.conversationId !== scope.conversationId) return
                   const currentText = personal.draft.text
                   const trimmedLeft = currentText.trimStart()
+                  const hasOnlySlashPrefix = !trimmedLeft || (trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft))
+                  if (itemId === "undo" && hasOnlySlashPrefix && execution.send && availability.available && !activeExecution?.activeTurnId) {
+                    onPersonalChange(targetScope, {
+                      kind: "draft-text",
+                      text: "",
+                      selectionStart: 0,
+                      selectionEnd: 0,
+                    })
+                    void sendUndoCommand("/undo list")
+                    return
+                  }
                   const commandPrefix = `/${itemId} `
                   const nextText = trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft)
                     ? commandPrefix
@@ -479,6 +595,35 @@ export function LocalSessionPage({
           </div>
         ) : null}
       </div>
+      {expandedPlan ? (
+        <div
+          className="session-plan-zoom-backdrop"
+          role="presentation"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setExpandedPlan(null)
+          }}
+        >
+          <div className="session-plan-zoom-dialog" role="dialog" aria-modal="true" aria-label={expandedPlan.title}>
+            <div className="session-plan-zoom-head">
+              <div className="session-plan-zoom-title-group">
+                <h3>{expandedPlan.title}</h3>
+                {expandedPlan.subtitle ? <span>{expandedPlan.subtitle}</span> : null}
+              </div>
+              <button
+                type="button"
+                className="session-plan-zoom-close"
+                aria-label="关闭放大查看"
+                onClick={() => setExpandedPlan(null)}
+              >
+                <IconX size={16} stroke={1.8} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="session-plan-zoom-body">
+              <Markdown text={expandedPlan.markdown} actions={messageRendering} />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

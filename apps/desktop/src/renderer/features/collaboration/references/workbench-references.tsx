@@ -27,6 +27,7 @@ const EMPTY_MATERIALS: ReadonlyMap<string, Material> = new Map()
 interface WorkbenchReferenceOptions {
   readonly scope: ProjectNavigationScope | null
   readonly selectedConversationId: string | null
+  readonly preferredConversationId?: string | null
   readonly pageController: SessionPageController
   readonly integration: SessionIntegrationApi
   readonly readSnapshot?: ReferenceActions["readSnapshot"]
@@ -42,7 +43,7 @@ interface WorkbenchReferenceOptions {
 
 /** 快照能力缺失时，工作台沿用原有文件提及和只读页提示。 */
 export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
-  const { scope, selectedConversationId, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
+  const { scope, selectedConversationId, preferredConversationId, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
     members, tasks, knowledge, onChooseMember, onOpenTask } = options
   const { currentUserId: localDeviceId, conversations, directories, resolveOwnerName } = pageController
   const sourceIsListed = selectedConversationId === null || conversations.some(item =>
@@ -230,7 +231,13 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
         ? { ok: true, value: null }
         : { ok: false, message: "来源会话暂不可用。" }
     },
-  }, Boolean(host))
+  }, Boolean(host), preferredConversationId)
+
+  function resolveDirectTargetId(preferredId?: string | null): string | null {
+    if (preferredId && targets.some(item => item.id === preferredId)) return preferredId
+    if (targets.length === 1) return targets[0]!.id
+    return null
+  }
 
   function referenceView(id: string): ConversationReferenceView {
     const snapshot = fixedMaterial(id)
@@ -301,7 +308,13 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
     onSelectCollaborationCandidate(source, target, candidate, mention) {
       if (matchesComposer(source, target) && mention.conversationId === referenceScope.conversationId) {
         if (candidate.kind === "conversation") references.previewConversation(candidate.id, mention)
-        if (candidate.kind === "knowledge") references.previewFixed(candidate.id, mention)
+        if (candidate.kind === "knowledge") {
+          const directId = referenceScope.conversationId && targets.some(item => item.id === referenceScope.conversationId)
+            ? referenceScope.conversationId
+            : resolveDirectTargetId(preferredConversationId)
+          if (directId) references.addFixedToSession(candidate.id, directId, mention)
+          else references.previewFixed(candidate.id, mention)
+        }
         if (candidate.kind === "member" && members?.some(member => member.id === candidate.id)) onChooseMember?.(candidate.id)
         if (candidate.kind === "task" && tasks?.some(task => task.taskId === candidate.id)) onOpenTask?.(candidate.id)
       }
@@ -341,7 +354,11 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
     hooks,
     dialog: references.dialog,
     canReference: Boolean(referenceScope && localDeviceId),
-    previewFixed: references.previewFixed,
+    previewFixed(referenceId: string) {
+      const directId = resolveDirectTargetId(preferredConversationId)
+      if (directId) references.addFixedToSession(referenceId, directId)
+      else references.previewFixed(referenceId)
+    },
     draftMaterials: draftIds.flatMap(id => {
       const material = fixedMaterial(id)
       return material ? [material] : []
