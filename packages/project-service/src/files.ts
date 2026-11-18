@@ -1,6 +1,6 @@
 /** 文件树、候选和只读预览共用项目范围，内容与页签缓存由调用方管理。 */
 import { lstat, opendir, realpath, stat } from "node:fs/promises"
-import { dirname, posix, resolve } from "node:path"
+import { posix, resolve } from "node:path"
 import { digest, gitCommand, gitLine, gitText, utf8 } from "./git-command.js"
 import { ProjectRoot, filesystemError, sameFileVersion, validRelativePath } from "./root.js"
 import { ProjectServiceError } from "./types.js"
@@ -72,16 +72,16 @@ function decodePreview(bytes: Buffer, truncated: boolean): string {
 }
 
 export class ProjectFiles {
-  constructor(private readonly root: ProjectRoot) {}
+  constructor(
+    private readonly root: ProjectRoot,
+    private readonly isGitRepository: boolean,
+  ) {}
 
   async listDirectory(directory = "", cursor?: string): Promise<ProjectDirectory> {
     await this.root.verify()
     const protectedPaths = await gitDirectories(this.root)
-    await this.resolveDirectory(directory, protectedPaths)
-    const indexed = await this.gitIndex(protectedPaths)
-    const listed = indexed
-      ? { entries: await this.classify(indexed.entries.filter(item => parent(item.path) === directory), protectedPaths), truncated: indexed.truncated }
-      : await this.scanDirectory(directory, protectedPaths)
+    // 目录树展示本机实际条目，空目录及被 Git 忽略的普通文件也能由用户主动打开。
+    const listed = await this.scanDirectory(directory, protectedPaths)
     listed.entries.sort(compare)
     const limited = listed.truncated || listed.entries.length > MAX_DIRECTORY_ROWS
     const rows = listed.entries.slice(0, MAX_DIRECTORY_ROWS)
@@ -104,12 +104,12 @@ export class ProjectFiles {
     const protectedPaths = await gitDirectories(this.root)
     await this.resolveDirectory(directory, protectedPaths)
     const term = query.trim()
-    const indexed = await this.gitIndex(protectedPaths)
+    const indexed = term ? await this.gitIndex(protectedPaths) : null
     const source = term
-      ? indexed ?? await this.scanTree(protectedPaths)
-      : indexed
-        ? { entries: indexed.entries.filter(item => parent(item.path) === directory), truncated: indexed.truncated }
-        : await this.scanDirectory(directory, protectedPaths)
+      ? indexed
+        ? { entries: indexed.entries.filter(item => !directory || item.path.startsWith(`${directory}/`)), truncated: indexed.truncated }
+        : await this.scanTree(directory, protectedPaths)
+      : await this.scanDirectory(directory, protectedPaths)
     const matches = term
       ? source.entries.filter(item => item.kind !== "directory").map(item => ({
         item, score: candidateScore(item, term.toLowerCase()),
@@ -167,7 +167,7 @@ export class ProjectFiles {
   private async resolveDirectory(directory: string, protectedPaths: readonly string[]): Promise<string> {
     const path = await this.root.resolveReadable(directory, protectedPaths, true)
     try {
-      if (!(await stat(path)).isDirectory()) throw new ProjectServiceError("unsupported", "目标不是目录。")
+      if (!(await stat(path)).isDirectory()) throw new ProjectServiceError("invalid-path", "目标不是目录。")
       return path
     } catch (error) {
       throw filesystemError(error)
@@ -205,8 +205,8 @@ export class ProjectFiles {
     }
   }
 
-  private async scanTree(protectedPaths: readonly string[]): Promise<Index> {
-    const queue = [""]
+  private async scanTree(directory: string, protectedPaths: readonly string[]): Promise<Index> {
+    const queue = [directory]
     const entries: ProjectEntry[] = []
     let truncated = false
     for (let index = 0; index < queue.length; index++) {
@@ -229,7 +229,8 @@ export class ProjectFiles {
   }
 
   private async gitIndex(protectedPaths: readonly string[]): Promise<Index | null> {
-    // 在登记根执行 ls-files，子目录仓库的结果也保持相对于登记根。
+    // 用户只选仓库子目录时沿用普通目录搜索，不扩大到仓库根或隐藏其中的普通文件。
+    if (!this.isGitRepository) return null
     const result = await gitCommand(this.root.path, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
       timeout: 5_000, maxBuffer: 16 * 1024 * 1024,
     })

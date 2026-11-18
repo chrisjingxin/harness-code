@@ -36,7 +36,7 @@ export function filesystemError(error: unknown): ProjectServiceError {
 
 /** 保留合法路径的原字面值，拒绝宿主可能另作解释的路径。 */
 export function validRelativePath(path: string): boolean {
-  if (!path || isAbsolute(path) || /^[a-z]:|^\\\\/i.test(path) || path.includes("\0")) return false
+  if (!path || isAbsolute(path) || /^[a-z]:|^\\\\/i.test(path) || path.includes("\0") || path.includes("\\")) return false
   if (process.platform === "win32" && /[\\:]/.test(path)) return false
   return path.split("/").every(part => part && part !== "." && part !== ".." && part.toLowerCase() !== ".git"
     && !(process.platform === "win32" && (/[ .]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part))))
@@ -90,7 +90,7 @@ export class ProjectRoot {
     try {
       const actual = await realpath(lexical)
       this.assertReadable(actual, protectedPaths)
-      if (directory && actual !== lexical) throw new ProjectServiceError("unsupported", "目录链接不可展开。")
+      if (directory && actual !== lexical) throw new ProjectServiceError("outside-project", "目录链接不可展开。")
       return actual
     } catch (error) {
       throw filesystemError(error)

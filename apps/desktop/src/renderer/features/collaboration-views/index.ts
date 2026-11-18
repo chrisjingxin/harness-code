@@ -9,6 +9,6 @@ export {
   UserAvatar,
 } from "./collab-overlays.js"
 export { ArrowLeftIcon } from "./collab-icons.js"
-export { memberRoleLabel, TASK_PRIO_LABEL, TASK_STATUS_LABEL, useCollabStore } from "./collab-store.js"
+export { memberRoleLabel, TASK_PRIO_LABEL, TASK_STATUS_LABEL } from "./collab-store.js"
 export type { CollabKnowledge, CollabKnowledgeScope, CollabTask, CollabTaskPrio, CollabTaskStatus } from "./collab-store.js"
 export { TeamKnowledgePage } from "./knowledge-page.js"

@@ -19,12 +19,13 @@ interface LiveTeamKnowledgeProps {
   readonly rendering: RenderingActions
   readonly ownerName: (id: string) => string
   readonly canReference: boolean
+  readonly initialItemId?: string
   previewFixed(id: string): void
   refreshMetadata(scope: ProjectNavigationScope): void
 }
 
 export function LiveTeamKnowledge({
-  host, scope, teamName, revision, rendering, ownerName, canReference, previewFixed, refreshMetadata,
+  host, scope, teamName, revision, rendering, ownerName, canReference, initialItemId, previewFixed, refreshMetadata,
 }: LiveTeamKnowledgeProps) {
   const { workspaceId, accountId, namespace } = scope
   const [queryInput, setQueryInput] = useState("")
@@ -72,7 +73,7 @@ export function LiveTeamKnowledge({
       scope={{ namespace, accountId, teamId: workspaceId }}
       teamName={teamName}
       items={items}
-      initialItemId={updated?.itemId}
+      initialItemId={updated ? updated.itemId : initialItemId}
       rendering={rendering}
       onEditItem={itemId => setEditing({ itemId })}
       controls={<form className="team-knowledge-toolbar" onSubmit={event => {

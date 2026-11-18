@@ -17,7 +17,7 @@ const allowed = {
   "packages/project-service": ["@workbench/contracts"],
   "packages/workbench-ui": ["@workbench/contracts"],
   "apps/runner": ["@workbench/runner-core", "@workbench/project-service"],
-  "apps/desktop": ["@workbench/contracts", "@workbench/ui", "@workbench/acp-runtime"],
+  "apps/desktop": ["@workbench/contracts", "@workbench/ui", "@workbench/acp-runtime", "@workbench/project-service"],
 }
 const forbidden = /(?:@za38\/|@opentui\/|bun-ffi-structs|react-devtools-core|za38-agent|harness-provider|deepagents)/
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
@@ -56,8 +56,8 @@ function validateImport(specifier, file, owner, packages) {
   if (!(name in declarations)) throw new Error(`未声明依赖 ${name}`)
   const target = packages.get(name)
   if (target) {
-    if (name === "@workbench/acp-runtime" && !inside(file, join(owner.directory, "src", "main"))) {
-      throw new Error("本机 ACP 运行时只能在桌面主进程装配")
+    if (["@workbench/acp-runtime", "@workbench/project-service"].includes(name) && owner.path === "apps/desktop" && !inside(file, join(owner.directory, "src", "main"))) {
+      throw new Error("本机 ACP 运行时与项目服务只能在桌面主进程装配")
     }
     if (!allowed[owner.path].includes(name)) throw new Error(`禁止反向依赖 ${name}`)
     const suffix = specifier.slice(name.length)
@@ -132,13 +132,16 @@ function selfCheck() {
     ["@workbench/contracts", { manifest: { exports: { ".": "./index.js", "./runtime": "./runtime.js" } } }],
     ["@workbench/ui", { manifest: { exports: { ".": "./index.js" } } }],
     ["@workbench/acp-runtime", { manifest: { exports: { ".": "./index.js" } } }],
+    ["@workbench/project-service", { manifest: { exports: { ".": "./index.js" } } }],
   ])
   validateImport("@workbench/contracts/runtime", "/project/core/src/index.ts", owner, packages)
   for (const path of ["@workbench/contracts/private", "@workbench/ui", "@za38/protocol", "../../other/index.js", "missing-package"]) assert.throws(() => validateImport(path, "/project/core/src/index.ts", owner, packages), undefined, path)
   assert.throws(() => validateImport("node:fs", "/project/ui/src/index.ts", { ...owner, manifest: { name: "@workbench/ui" } }, packages))
-  const desktop = { path: "apps/desktop", directory: "/project/desktop", manifest: { name: "@workbench/desktop", dependencies: { "@workbench/acp-runtime": "0.2.0" } } }
+  const desktop = { path: "apps/desktop", directory: "/project/desktop", manifest: { name: "@workbench/desktop", dependencies: { "@workbench/acp-runtime": "0.2.0", "@workbench/project-service": "0.2.0" } } }
   validateImport("@workbench/acp-runtime", "/project/desktop/src/main/local-acp-host.ts", desktop, packages)
+  validateImport("@workbench/project-service", "/project/desktop/src/main/local-directory-host.ts", desktop, packages)
   for (const layer of ["preload", "renderer"]) {
+    assert.throws(() => validateImport("@workbench/project-service", `/project/desktop/src/${layer}/index.ts`, desktop, packages))
     assert.throws(() => validateImport("@workbench/acp-runtime", `/project/desktop/src/${layer}/index.ts`, desktop, packages))
   }
   assert.equal(publicEntry({ "./runtime": "./dist/runtime.js", "./ui": "./dist/ui.js" }, "./ui"), true)

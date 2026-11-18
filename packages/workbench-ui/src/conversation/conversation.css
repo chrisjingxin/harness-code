@@ -315,6 +315,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   flex: 0 0 auto;
   gap: 5px;
   height: 26px;
+  white-space: nowrap;
   padding: 0 8px;
   border: 0;
   border-radius: var(--radius-control);
@@ -322,7 +323,6 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   color: var(--fg-2, var(--text-soft));
   font: inherit;
   font-size: var(--text-xs, 12px);
-  white-space: nowrap;
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease;
 }
@@ -342,12 +342,13 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   font-size: 11px;
   line-height: 1;
 }
-.wb-composer-hint { color: var(--meta, var(--subtle)); font-size: var(--text-xs, 12px); white-space: nowrap; }
+.wb-composer-hint { min-width: 0; overflow: hidden; color: var(--meta, var(--subtle)); font-size: var(--text-xs, 12px); text-overflow: ellipsis; white-space: nowrap; }
 .wb-composer-send, .wb-composer-cancel {
   display: inline-grid;
   place-items: center;
   width: 30px;
   height: 30px;
+  flex: 0 0 auto;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -386,8 +387,8 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-mention-open button:disabled, .wb-composer-reference button:disabled { opacity: .5; cursor: not-allowed; }
 .wb-mention-footer { overflow: hidden; padding: 6px 8px 2px; border-top: 0; box-shadow: inset 0 1px 0 var(--border-soft, var(--line-soft)); color: var(--meta, var(--muted)); font-family: var(--font-mono); font-size: var(--text-2xs, 11px); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 
-.wb-composer-control { position: relative; flex: 0 0 auto; min-width: 0; }
-.wb-composer-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; max-width: 220px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--fg-2, var(--muted)); font-size: var(--text-xs, 12px); cursor: pointer; }
+.wb-composer-control { position: relative; flex: 0 0 auto; min-width: 0; max-width: 100%; }
+.wb-composer-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; max-width: min(220px, 100%); padding: 0 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--fg-2, var(--muted)); font-size: var(--text-xs, 12px); cursor: pointer; }
 .wb-composer-chip:hover:not(:disabled), .wb-composer-chip[aria-expanded="true"] { background: var(--hover); color: var(--fg, var(--text)); }
 .wb-composer-chip:disabled { opacity: .55; cursor: not-allowed; }
 .wb-composer-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

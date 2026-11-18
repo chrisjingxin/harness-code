@@ -200,12 +200,12 @@ export function ProjectInfoPage({
                       <span className="l">我的会话</span>
                     </div>
                     <div className="stat">
-                      <span className="n">{taskCount ?? 0}</span>
+                      <span className="n">{taskCount ?? "—"}</span>
                       <span className="l">任务</span>
                     </div>
                     <div className="stat">
-                      <span className="n">{knowledgeCount ?? 0}</span>
-                      <span className="l">项目知识</span>
+                      <span className="n">{knowledgeCount ?? "—"}</span>
+                      <span className="l">团队知识</span>
                     </div>
                   </div>
                 </>

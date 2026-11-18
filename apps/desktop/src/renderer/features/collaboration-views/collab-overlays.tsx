@@ -6,8 +6,8 @@ import type { ReactElement } from "react"
 import type { NavigationMember, NavigationSessionEntry } from "@workbench/ui"
 import { resolveFallbackDemoAvatar, resolveUserPhoto } from "../../demo-avatars.js"
 import { BookOpenIcon, CloseIcon, LockIcon, SearchIcon, TaskIcon } from "./collab-icons.js"
-import { memberRoleLabel, TASK_STATUS_LABEL } from "./collab-store.js"
-import type { CollabKnowledge, CollabKnowledgeScope, CollabTask } from "./collab-store.js"
+import { memberRoleLabel } from "./collab-store.js"
+import type { CollabKnowledgeScope, CollabTask } from "./collab-store.js"
 
 export function UserAvatar({
   user,
@@ -311,6 +311,11 @@ type PaletteItem =
   | { kind: "task"; id: string; title: string; sub: string; user?: NavigationMember }
   | { kind: "knowledge"; id: string; title: string; sub: string; user?: NavigationMember }
 
+/** 搜索任务只使用服务端摘要中的标题、状态和被指派人。 */
+export type PaletteTaskSummary = { readonly id: string; readonly title: string; readonly statusLabel: string; readonly assigneeId: string }
+/** 知识搜索使用条目与版本摘要；正文在用户打开后读取。 */
+export type PaletteKnowledgeSummary = { readonly id: string; readonly title: string; readonly category: string; readonly version: number }
+
 /** ⌘K 全局搜索命令面板。 */
 export function CommandPaletteModal({
   open,
@@ -321,6 +326,7 @@ export function CommandPaletteModal({
   peerSessions,
   tasks,
   knowledge,
+  metadataMessage,
   onClose,
   onSelectSession,
   onSelectTask,
@@ -332,8 +338,9 @@ export function CommandPaletteModal({
   readonly selfUserId: string
   readonly mySessions: readonly NavigationSessionEntry[]
   readonly peerSessions: readonly NavigationSessionEntry[]
-  readonly tasks: readonly CollabTask[]
-  readonly knowledge: readonly CollabKnowledge[]
+  readonly tasks: readonly PaletteTaskSummary[]
+  readonly knowledge: readonly PaletteKnowledgeSummary[]
+  readonly metadataMessage?: string
   readonly onClose: () => void
   readonly onSelectSession: (conversationId: string) => void
   readonly onSelectTask: (taskId: string) => void
@@ -394,7 +401,7 @@ export function CommandPaletteModal({
       })
     }
 
-    const tks = tasks.filter(t => hit(t.title) || hit(t.desc)).slice(0, cap)
+    const tks = tasks.filter(t => hit(t.title)).slice(0, cap)
     if (tks.length) {
       out.push({
         label: "任务",
@@ -402,13 +409,13 @@ export function CommandPaletteModal({
           kind: "task",
           id: t.id,
           title: t.title,
-          sub: `${projectName} · ${TASK_STATUS_LABEL[t.status]}`,
-          user: memberById.get(t.toUserId),
+          sub: `${projectName} · ${t.statusLabel}`,
+          user: memberById.get(t.assigneeId),
         })),
       })
     }
 
-    const kbs = knowledge.filter(k => hit(k.title) || hit(k.sum)).slice(0, cap)
+    const kbs = knowledge.filter(k => hit(k.title) || hit(k.category)).slice(0, cap)
     if (kbs.length) {
       out.push({
         label: "知识",
@@ -416,8 +423,7 @@ export function CommandPaletteModal({
           kind: "knowledge",
           id: k.id,
           title: k.title,
-          sub: `${k.scope === "workspace" ? "Workspace 团队" : projectName} · ${k.version}`,
-          user: memberById.get(k.authorUserId),
+          sub: `团队知识 · ${k.category} · v${k.version}`,
         })),
       })
     }
@@ -478,6 +484,7 @@ export function CommandPaletteModal({
         </div>
 
         <div className="palette-list" role="listbox" aria-label="搜索结果">
+          {metadataMessage && <div className="p-hint" role="status">{metadataMessage}</div>}
           {groups.length === 0 ? (
             <div className="pop-empty">
               没有匹配的内容。

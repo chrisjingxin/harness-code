@@ -5,19 +5,58 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: Codex
 priority: P1
-status: 进行中
+status: 待验收
 owner: Codex
 branch: harness_lody
-scope: 将旧文件读取和 Git 策略提取到 project-service，接入新项目/平台端口、目录占用与独立验证。
-acceptance: 文件只读预览和 Git 选择提交/非 force 推送保留原行为；操作落到原设备项目，任何 ACP 后端可用且不回引旧 CLI。
-user_docs: 实现阶段按范围更新独立桌面用户指南、docs/user/快速开始.md 与 docs/user/安全与沙箱.md；当前不新增产品运行承诺
+scope: 将本机文件与 Git 通用逻辑收敛到 project-service，由正式桌面保留授权绑定并复用；跨机器实时文件/Git 退出本期，产品 Git 写入口暂缓。
+acceptance: 正式桌面沿用原端口完成本机目录、候选、预览与 Git 状态/Diff，非 Git 和仓库子目录可阅读；保持路径保护、有界结果和明确错误，底层提交/推送与现有调用方保留，无旧 CLI 依赖。
+user_docs: 沿用 docs/user/独立桌面工作台.md、docs/user/快速开始.md 与 docs/user/安全与沙箱.md 的本机阅读及写入口暂缓说明；共享用户说明由统筹整合
 developer_docs: docs/developer/research/199-文件与Git服务迁移.md；docs/developer/spec/HC-199-文件与Git服务迁移.md；docs/developer/plan/HC-199-文件与Git服务迁移.md；docs/developer/todo/HC-199-文件与Git服务迁移.md
-test_evidence: 本机与原设备只读路由停点已通过统筹复核，受影响构建、类型、双端共同契约、依赖边界及隔离 Java/真实 Runner 五项读取冒烟通过
+test_evidence: 2026-11-18 本机通用包构建、project-service/desktop/runner 类型、边界及真实 FS/Git 宿主测试 9/9 通过；HC-202 已回调正式 macOS Electron 的真实文件树/中央分屏预览/Git Diff 主路径通过，详见本卡组合冒烟记录；历史本机写入与原设备路由证据保留但不代表新版开放远端路由
 references: docs/developer/task/HC-192-协作工作台与会话交接.md；设计基线 02505619be4026c3dba0ec27aca729ae01a26968
 completed_at: -
 ---
 
 # HC-199 文件与Git服务迁移
+
+## 当前范围与验收（2026-11-18）
+
+原本通用包已有文件/Git 能力，正式桌面却维护独立读取。本轮按用户与统筹派发完成同一套通用逻辑的复用：用户选择本机目录 → 桌面按账号/团队/Project/会话保存服务实例 → 通用包核对真实根并读取 → 桌面映射现有只读端口。
+
+- [x] 通用文件读取与 Git 状态/Diff 由 `packages/project-service` 根出口提供，正式宿主不再维护独立文件扫描、预览、Git 子进程或快照算法。
+- [x] 原 LocalDirectoryHost、IPC、ProjectReadAction 形状保留；账号与会话绑定留在宿主，切换账号/重新绑定期间的旧结果被丢弃。
+- [x] 非 Git 和 Git 仓库子目录仍能浏览、搜候选和预览；目录树保留空目录/普通忽略文件，候选限制在所选范围，常见产物目录继续隐藏。
+- [x] 路径穿越、管理目录与越界链接被拒绝，根内普通文件链接可预览；分页/游标、256 KiB / 2,000 行预览截断和错误映射保留。
+- [x] Git 状态/Diff 复用内容/索引/HEAD 版本快照，内容变化后旧快照不可继续读 Diff；非 Git 保持原平静空态。
+- [x] 底层选择提交/普通推送保留，产品写入口继续暂缓；未新增远程控制、后端/ACP 协议或线上字段。
+
+生产范围仅 project-service、desktop main 的 local-directory-host 与最小依赖/边界清单。HC-202 独占 renderer 并承担正式窗口装配冒烟。总看板、架构、项目衔接与共享用户说明由统筹整合；本卡不编辑这些共享文件。
+
+跨机器均只读且不访问对方实时文件/Git。旧 WSS 原设备读取退出本期验收，仅留历史证据。未来恢复产品 Git 写入口前，仍须接入实际 Agent/Git 统一写占用并验证在途写入；该后续前置没有被本轮读服务复用替代。完整故障组合、Windows 和统一回归由 HC-204 承接。
+
+### 本次实现及验证记录
+
+- `LocalDirectoryService` 从约 806 行收敛为只读授权与端口映射；每个绑定创建独立 project-service，包返回规范根路径与绑定时完整 Git 根标识。通用包补齐桌面实际目录展示和目录内候选范围，保留预览及 Git 已有策略。
+- desktop 增加 `@workbench/project-service` 依赖；根锁仅增加对应 workspace 依赖。边界允许 desktop main 从根出口消费，新增反例确保 preload/renderer 不能直接导入本机服务。未新增安装链或外部包。
+- `npm run build --workspace @workbench/project-service` 通过。首次 desktop 类型检查发现旧 contracts/acp-runtime/UI dist 与当前源码不一致；在与 HC-202 协调的时隙运行 `npm run build --workspace @workbench/contracts --workspace @workbench/acp-runtime --workspace @workbench/ui`，三包通过。随后将 renderer palette 的两项类型缺口交 HC-202 在其归属文件修复。
+- `bun test apps/desktop/tests/local-directory-host.test.ts`：9 pass / 0 fail。使用独立临时目录和真实本机 Git，覆盖文件树/候选/预览/状态/Diff 正常路径、非 Git / 仓库子目录、受限子目录搜索、空目录/普通忽略文件、分页与旧游标失效、截断元数据、Git 管理目录/链接保护、未跟踪文件 Diff、内容变化后旧快照拒绝及根替换。
+- `npm run typecheck --workspace @workbench/project-service --workspace @workbench/desktop --workspace @workbench/runner` 与 `npm run check:boundaries -- --self-check` 均通过；完整平台/异常矩阵未重跑。原底层提交/推送实现文件未改，沿用下方 2026-11-11 临时仓库/bare remote 证据，不将其表述为产品写入口已恢复。
+
+本轮差异复核确认：宿主只消费包根出口，不再创建 Git 子进程或直接读取正文；原 git.ts/git-state.ts/git-write.ts/git-command.ts 未修改，公共线上契约与 IPC 未改。`git diff --check` 通过。`docs:check` 被本次范围外的 `docs/developer/research/198-会话交接与内容引用.md` 中已删除的 `DeviceAppService.java` 链接阻断，未改 HC-198。`openwiki code --update --print` 返回命令不可用，生成 Wiki 未手工修改。
+
+已向 HC-202 主动交付宿主消费情况并释放全部共享构建时隙；本卡不启动或管理其 Electron/Java/MySQL。本机正式宿主读取主路径与 HC-202 回调的正式窗口组合冒烟均已通过，本卡继续按本期范围标待验收。无提交、推送或归档，不轮询。
+
+### 正式窗口组合冒烟补记（2026-11-18，复用 HC-202 回调）
+
+HC-202 在约定时隙构建正式桌面并完成一次 macOS Electron 主路径。其回调与本卡核对的 JSON、截图一致：登录 → 当前 Project → 本人新会话选择临时 Git 根 → 右侧真实 `review.ts` 文件树 → HC-222 中央右分屏源码预览 → 关闭标签保留草稿 → 真实变更列表与 Diff。文件工作区内容为 `const next = 2;`，HEAD 内容为 `const next = 1;`，窗口源码与 Diff 分别显示对应内容和增删行；本卡另以只读 Git/文件命令核对了这两个值。
+
+环境为 Electron 45.2.3、JDK 21、当前源码重建 Java（loopback 50727）与隔离 MySQL 8.4.11。HC-202 证据 `evidence.json` 中 tree、centralRightSplit、closable、draftPreserved、diff 均为 true，warnings 为空；`conversation-file.png` 和 `git-diff.png` 可见实际文件正文与差异。证据位置与进程收尾由 [HC-202 Task](HC-202-桌面工作台视图迁移.md#本期协作装配收口2026-11-18) 维护，本卡只消费其回调，不重复启动或管理该实例。
+
+这次 Agent 使用确定性 ACP 子进程，目录选择器返回为脚本准备；它证明正式 Electron 与真实本机文件/Git 服务的组合路径，不代表真实模型网关或人工系统选择器已验。非 Git 与相关路径边界沿用本卡已通过的 9/9 宿主证据。未运行产品提交/推送；Windows、完整异常组合与最终验收仍归 HC-204。
+
+## 历史范围说明
+
+以下 2026-11-11 的需求、依赖和验收项保留当时分工与证据。当前实施与状态以本页 2026-11-18 范围为准，不恢复跨设备下行、线上写入或旧授权设计。
 
 ## 当前可做与等待范围（2026-11-11）
 
@@ -50,7 +89,7 @@ ACP Agent 与 Git 写占用的生命周期接合、Agent 在途写入及相关 A
 
 可与 HC-195/196/197 和 HC-206/207/208 同时开发，使用临时仓库/bare remote 验证本机策略；真实跨设备另验。公共 schema/OpenAPI/根锁由统筹顺序合入，见[并行开发约定](../project/协作任务并行开发约定.md)。
 
-## 验收结果
+## 历史验收结果（2026-11-11）
 
 - [ ] 没有 Harness/Python 时项目服务可独立运行并由通用 Runner 调用，无旧 CLI/InteractiveController import。
 - [ ] 读取限定绑定项目根，穿越/符号链接等越界被拒绝；加载、错误、过大/截断与只读状态完整。

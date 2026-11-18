@@ -85,6 +85,10 @@ export type ProjectCommitResult =
 
 /** 本机服务。读取失败抛出稳定错误，写入分别返回未调用、确切失败、成功或待确认。 */
 export interface ProjectService {
+  /** 用户选定目录的规范绝对路径，仅供本机宿主保存绑定，不传到共享历史。 */
+  readonly directoryPath: string
+  /** 绑定时是否正好选中完整 Git 工作树根；子目录仍可读文件。 */
+  readonly isGitRepository: boolean
   listDirectory(directory?: string, cursor?: string): Promise<ProjectDirectory>
   searchCandidates(input: { directory: string; query: string; limit?: number }): Promise<ProjectCandidates>
   readPreview(path: string): Promise<ProjectPreview>

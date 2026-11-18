@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@workbench/acp-runtime": "0.2.0",
+    "@workbench/project-service": "0.2.0",
     "@workbench/contracts": "0.2.0",
     "@workbench/ui": "0.2.0",
     "react": "19.3.0",

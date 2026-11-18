@@ -25,8 +25,8 @@ import type { ProjectPageProviders } from "./features/project-navigation/index.j
 import { createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
 import type { LocalSessionExecutionPort, ProjectConversationSummary } from "./features/session/index.js"
 import { createCollaborationPageProviders } from "./features/collaboration/collaboration-pages.js"
-import { useCollaborationMetadata } from "./features/collaboration/metadata.js"
-import { LiveProjectTasks, ProjectTaskPublication, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
+import { useCollaborationMetadata, useTeamKnowledgeMetadata } from "./features/collaboration/metadata.js"
+import { LiveProjectTasks, ProjectTaskPublication, labels as taskStatusLabels, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
 import type { TasksContext } from "./features/collaboration/tasks/live-project-tasks.js"
 import { LiveTeamKnowledge } from "./features/collaboration/knowledge/live-team-knowledge.js"
 import { createBoardPageProvider } from "./features/board/board-provider.js"
@@ -257,6 +257,8 @@ function WorkspaceProjectWorkbench(props: {
   const currentPage = shell.personal.page
   const { taskRevision, knowledgeRevision, refreshTaskMetadata, refreshKnowledgeMetadata } = useCollaborationMetadata(shell.scope)
   const taskRows = useProjectTaskMetadata(props.collaborationApps, shell.scope, taskRevision)
+  const knowledgeRows = useTeamKnowledgeMetadata(props.collaborationApps, shell.scope, knowledgeRevision)
+  const [knowledgeSelection, setKnowledgeSelection] = useState<{ scope: typeof shell.scope; id: string; revision: number } | null>(null)
   const taskCount = taskRows.status === "ready" ? taskRows.tasks.filter(task =>
     task.assigneeId === props.user.id && task.status !== "done" && task.status !== "cancelled").length : null
   const [publishing, setPublishing] = useState<{ scope: typeof shell.scope; page: typeof currentPage; assigneeId?: string; sourceId?: string } | null>(null)
@@ -388,8 +390,10 @@ function WorkspaceProjectWorkbench(props: {
         render({ scope, page, visible }) {
           if (!visible || page.kind !== "knowledge") return null
           return <div className="collaboration-page-scroll" key={JSON.stringify(scope)}>
-            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName}
+            <LiveTeamKnowledge key={knowledgeSelection?.scope === scope ? knowledgeSelection.revision : 0}
+              host={taskContext.host} scope={scope} teamName={props.workspaceName}
               ownerName={pageController.resolveOwnerName} rendering={pageController.rendering}
+              initialItemId={knowledgeSelection?.scope === scope ? knowledgeSelection.id : undefined}
               revision={knowledgeRevision} refreshMetadata={refreshKnowledgeMetadata}
               canReference={references.canReference} previewFixed={references.previewFixed} />
           </div>
@@ -423,8 +427,23 @@ function WorkspaceProjectWorkbench(props: {
       setSettingsOpen={props.setSettingsOpen}
       personalError={props.personalError}
       taskCount={taskCount}
+      collaborationMetadata={{
+        tasks: taskRows.status === "ready" ? taskRows.tasks.map(task => ({
+          id: task.taskId, title: task.title, statusLabel: taskStatusLabels[task.status], assigneeId: task.assigneeId,
+        })) : null,
+        knowledge: knowledgeRows.status === "ready" ? knowledgeRows.items.map(item => ({
+          id: item.knowledgeId, title: item.title, category: item.category, version: item.version,
+        })) : null,
+        message: !props.collaborationApps ? "任务与知识服务尚未接入。"
+          : taskRows.status === "error" ? taskRows.message
+          : knowledgeRows.status === "error" ? knowledgeRows.message
+          : taskRows.status === "loading" || knowledgeRows.status === "loading" ? "正在读取任务与知识摘要…" : undefined,
+        openKnowledge: id => {
+          setKnowledgeSelection(previous => ({ scope: shell.scope, id, revision: (previous?.revision ?? 0) + 1 }))
+          shell.openPage({ kind: "knowledge" })
+        },
+      }}
       sessions={projectSessions.navigationSource}
-      sessionIntegration={projectSessions.integration}
       providers={providers}
     />
     {references.dialog}
