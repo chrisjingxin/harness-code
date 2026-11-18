@@ -39,6 +39,8 @@ import json as _json
 from acp.helpers import SessionUpdate, start_tool_call, text_block, tool_content
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanUpdate,
+    PlanEntry,
     SessionInfo,
     SessionInfoUpdate,
     UserMessageChunk,
@@ -48,7 +50,13 @@ from acp.exceptions import RequestError
 
 from harness_agent.host.acp.ext import Negotiation, session_summary_meta
 from harness_agent.host.acp.tool_display import PathLocator, sanitize_line, tool_kind, tool_title
-from harness_agent.host.acp.translate import MAX_OUTPUT_CHARS, bounded_raw_input
+from harness_agent.host.acp.translate import (
+    MAX_OUTPUT_CHARS,
+    bounded_raw_input,
+    compose_plan_entries,
+    goal_plan_entries,
+    is_compose_active,
+)
 from harness_agent.threads.thread_records import ThreadSummary
 
 SESSIONS_PAGE_SIZE: Final = 50
@@ -214,6 +222,25 @@ def replay_updates(
             continue
 
 
+def replay_plan_update(opened: Mapping[str, object]) -> AgentPlanUpdate | None:
+    """从 `open_thread` 状态恢复 ACP `plan` 更新（进行中 Compose 优先于 Goal）。"""
+    compose_progress = opened.get("compose_progress")
+    compose_entries: list[PlanEntry] = []
+    compose_active = False
+    if isinstance(compose_progress, Mapping):
+        compose_active = is_compose_active(compose_progress)
+        if compose_progress.get("status") != "abandoned":
+            compose_entries = compose_plan_entries(compose_progress)
+    goal_entries = goal_plan_entries(opened.get("goal"))
+    if compose_active and compose_entries:
+        return AgentPlanUpdate(session_update="plan", entries=compose_entries)
+    if goal_entries:
+        return AgentPlanUpdate(session_update="plan", entries=goal_entries)
+    if compose_entries:
+        return AgentPlanUpdate(session_update="plan", entries=compose_entries)
+    return None
+
+
 def _fallback_title(first_message: str) -> str | None:
     """取首条消息的单行前 40 字；全空白时返回 `None`（不编造标题）。"""
     line = sanitize_line(first_message)[:SESSION_TITLE_FALLBACK_CHARS]
@@ -228,6 +255,7 @@ __all__ = [
     "REPLAY_CHUNK_CHARS",
     "SESSION_TITLE_FALLBACK_CHARS",
     "iso_from_ms",
+    "replay_plan_update",
     "replay_updates",
     "session_info",
     "session_info_update",

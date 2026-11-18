@@ -96,7 +96,7 @@ _IGNORED_EVENT_PREFIXES: Final = ("compose.", "goal.")
 _COMPOSE_ACTIVE: Final = frozenset({"active", "waiting_user", "verifying"})
 """Compose 还在跑时不发 Goal 计划，避免两套计划叠在同一张 ACP 计划上。"""
 
-_COMPOSE_LABELS: Final = {
+COMPOSE_STAGE_LABELS: Final = {
     "requirement": "需求",
     "grill": "需求",
     "task": "需求",
@@ -105,7 +105,78 @@ _COMPOSE_LABELS: Final = {
     "implement": "实现",
     "review": "检视",
 }
-"""阶段 id 到界面上的中文短名。客户端再按这些名字还原阶段条。"""
+"""阶段 id 到界面上的中文短名。客户端与 `/plan-view` 共用这组名字。"""
+
+
+def is_compose_active(data: Mapping[str, object]) -> bool:
+    """判断 Compose 进度是否处于活动态（进行中 / 等确认 / 校验中）。"""
+    return data.get("status") in _COMPOSE_ACTIVE
+
+
+def compose_plan_entries(data: Mapping[str, object]) -> list[PlanEntry]:
+    """把 `compose.progress`（或持久化 `compose_progress`）的 stages 投影为 ACP `PlanEntry`。"""
+    stages = data.get("stages")
+    if not isinstance(stages, list):
+        return []
+    entries: list[PlanEntry] = []
+    for stage in stages:
+        if not isinstance(stage, Mapping):
+            continue
+        stage_id = stage.get("id")
+        if not isinstance(stage_id, str) or not stage_id:
+            continue
+        label = COMPOSE_STAGE_LABELS.get(stage_id, stage_id)
+        state = stage.get("state")
+        if state == "failed":
+            content = f"{label}（失败）"
+            status: Literal["pending", "in_progress", "completed"] = "completed"
+        elif state == "current":
+            content = label
+            status = "in_progress"
+        elif state in {"confirmed", "skipped"}:
+            content = label
+            status = "completed"
+        else:
+            content = label
+            status = "pending"
+        entries.append(PlanEntry(content=content, priority="medium", status=status))
+    return entries
+
+
+def _goal_criterion_entries(goal: object) -> list[tuple[str, PlanEntry]]:
+    """提取 `(criterion_id, PlanEntry)` 对；供 `goal_plan_entries` 与 `RunTranslator` 共用。"""
+    if not isinstance(goal, Mapping):
+        return []
+    done = goal.get("status") == "complete"
+    criteria = goal.get("criteria")
+    if not isinstance(criteria, list):
+        return []
+    pairs: list[tuple[str, PlanEntry]] = []
+    for item in criteria:
+        if not isinstance(item, Mapping):
+            continue
+        criterion_id = item.get("criterion_id")
+        text = item.get("text")
+        if not isinstance(criterion_id, str) or not criterion_id:
+            continue
+        if not isinstance(text, str) or not text:
+            continue
+        pairs.append(
+            (
+                criterion_id,
+                PlanEntry(
+                    content=text,
+                    priority="medium",
+                    status="completed" if done else "pending",
+                ),
+            )
+        )
+    return pairs
+
+
+def goal_plan_entries(goal: object) -> list[PlanEntry]:
+    """把 Goal 对象的 criteria 投影为 ACP `PlanEntry` 列表。"""
+    return [entry for _, entry in _goal_criterion_entries(goal)]
 
 TERMINAL_EVENT_TYPES: Final = frozenset({"run.completed", "run.cancelled", "run.failed"})
 """Run 终态事件类型。"""
@@ -285,31 +356,7 @@ class RunTranslator:
 
     def _compose_plan(self, data: Mapping[str, object]) -> list[Update]:
         """把 compose.progress.stages 收成一张 ACP 计划。没有 stages 时不发计划。"""
-        stages = data.get("stages")
-        if not isinstance(stages, list):
-            return []
-        entries: list[PlanEntry] = []
-        for stage in stages:
-            if not isinstance(stage, Mapping):
-                continue
-            stage_id = stage.get("id")
-            if not isinstance(stage_id, str) or not stage_id:
-                continue
-            label = _COMPOSE_LABELS.get(stage_id, stage_id)
-            state = stage.get("state")
-            if state == "failed":
-                content = f"{label}（失败）"
-                status = "completed"
-            elif state == "current":
-                content = label
-                status = "in_progress"
-            elif state in {"confirmed", "skipped"}:
-                content = label
-                status = "completed"
-            else:
-                content = label
-                status = "pending"
-            entries.append(PlanEntry(content=content, priority="medium", status=status))
+        entries = compose_plan_entries(data)
         if not entries:
             return []
         return [AgentPlanUpdate(session_update="plan", entries=entries)]
@@ -347,26 +394,9 @@ class RunTranslator:
         if goal is None:
             self._goal_texts.clear()
         elif isinstance(goal, Mapping):
-            done = goal.get("status") == "complete"
-            criteria = goal.get("criteria")
-            if isinstance(criteria, list):
-                for item in criteria:
-                    if not isinstance(item, Mapping):
-                        continue
-                    criterion_id = item.get("criterion_id")
-                    text = item.get("text")
-                    if not isinstance(criterion_id, str) or not criterion_id:
-                        continue
-                    if not isinstance(text, str) or not text:
-                        continue
-                    self._goal_texts[criterion_id] = text
-                    entries.append(
-                        PlanEntry(
-                            content=text,
-                            priority="medium",
-                            status="completed" if done else "pending",
-                        )
-                    )
+            for criterion_id, entry in _goal_criterion_entries(goal):
+                self._goal_texts[criterion_id] = entry.content
+                entries.append(entry)
         else:
             return []
         if self._compose_active:
@@ -958,6 +988,7 @@ def frame_chars(message: object) -> int:
 
 
 __all__ = [
+    "COMPOSE_STAGE_LABELS",
     "MAX_OUTBOUND_FRAME_BYTES",
     "MAX_OUTPUT_CHARS",
     "ApprovalTarget",
@@ -969,5 +1000,8 @@ __all__ = [
     "acp_tool_call_id",
     "acp_child_tool_call_id",
     "bounded_raw_input",
+    "compose_plan_entries",
     "frame_chars",
+    "goal_plan_entries",
+    "is_compose_active",
 ]

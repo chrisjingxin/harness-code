@@ -539,3 +539,160 @@ async def test_threads_read_adds_no_other_frames(tmp_path: Path) -> None:
     ]
     assert updates
     assert {update["sessionUpdate"] for update in updates} <= known
+
+
+async def test_load_session_restores_compose_workflow_and_emits_compose_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """session/load 恢复 Compose 线程的 workflow 配置项，并在响应前发 compose_progress 的 plan。"""
+    host = make_persistent_host(tmp_path)
+
+    async def fake_open_and_watch(_connection: object, _thread_id: str) -> dict[str, object]:
+        return {
+            "thread": {"thread_id": "thread-c"},
+            "messages": [
+                {"kind": "user", "content": "用 compose 做个功能"},
+                {"kind": "assistant", "content": "进入需求阶段"},
+            ],
+            "thread_mode": "compose",
+            "compose_progress": {
+                "status": "active",
+                "stages": [
+                    {"id": "requirement", "state": "confirmed"},
+                    {"id": "spec", "state": "current"},
+                    {"id": "plan", "state": "pending"},
+                ],
+            },
+            "goal": {
+                "goal_id": "g1",
+                "status": "active",
+                "criteria": [{"criterion_id": "c1", "text": "不应盖过 compose"}],
+            },
+        }
+
+    monkeypatch.setattr(host, "open_and_watch_thread", fake_open_and_watch)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        await acp.client.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/load",
+                "params": _load_params("thread-c", host.workspace),
+            }
+        )
+        frames: list[dict[str, Any]] = []
+        while True:
+            frame = await acp.client.read_frame()
+            frames.append(frame)
+            if frame.get("id") == 2:
+                break
+
+    updates = [frame["params"]["update"] for frame in frames if frame.get("method") == "session/update"]
+    assert [u["sessionUpdate"] for u in updates] == [
+        "user_message_chunk",
+        "agent_message_chunk",
+        "plan",
+    ]
+    assert [(e["content"], e["status"]) for e in updates[2]["entries"]] == [
+        ("需求", "completed"),
+        ("规格", "in_progress"),
+        ("计划", "pending"),
+    ]
+    workflow = next(
+        item for item in frames[-1]["result"]["configOptions"] if item["id"] == "workflow"
+    )
+    assert workflow["currentValue"] == "compose"
+    assert acp.server._sessions["thread-c"].workflow == "compose"
+
+
+async def test_load_session_emits_active_goal_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """session/load 在存在活动 goal 时在响应前补发 plan 更新。"""
+    host = make_persistent_host(tmp_path)
+
+    async def fake_open_and_watch(_connection: object, _thread_id: str) -> dict[str, object]:
+        return {
+            "thread": {"thread_id": "thread-g"},
+            "messages": [{"kind": "user", "content": "跑通测试"}],
+            "thread_mode": "build",
+            "compose_progress": None,
+            "goal": {
+                "goal_id": "g1",
+                "status": "active",
+                "criteria": [
+                    {"criterion_id": "c1", "text": "先写失败测试"},
+                    {"criterion_id": "c2", "text": "全部通过"},
+                ],
+            },
+        }
+
+    monkeypatch.setattr(host, "open_and_watch_thread", fake_open_and_watch)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        await acp.client.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/load",
+                "params": _load_params("thread-g", host.workspace),
+            }
+        )
+        frames: list[dict[str, Any]] = []
+        while True:
+            frame = await acp.client.read_frame()
+            frames.append(frame)
+            if frame.get("id") == 2:
+                break
+
+    updates = [frame["params"]["update"] for frame in frames if frame.get("method") == "session/update"]
+    assert [u["sessionUpdate"] for u in updates] == ["user_message_chunk", "plan"]
+    assert [(e["content"], e["status"]) for e in updates[1]["entries"]] == [
+        ("先写失败测试", "pending"),
+        ("全部通过", "pending"),
+    ]
+    workflow = next(
+        item for item in frames[-1]["result"]["configOptions"] if item["id"] == "workflow"
+    )
+    assert workflow["currentValue"] == "build"
+
+
+async def test_load_session_skips_abandoned_compose_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """已放弃的 Compose 进度在 session/load 时不再推送为活动 plan。"""
+    host = make_persistent_host(tmp_path)
+
+    async def fake_open_and_watch(_connection: object, _thread_id: str) -> dict[str, object]:
+        return {
+            "thread": {"thread_id": "thread-a"},
+            "messages": [{"kind": "user", "content": "之前放弃过"}],
+            "thread_mode": "compose",
+            "compose_progress": {
+                "status": "abandoned",
+                "stages": [{"id": "requirement", "state": "current"}],
+            },
+            "goal": None,
+        }
+
+    monkeypatch.setattr(host, "open_and_watch_thread", fake_open_and_watch)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        await acp.client.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/load",
+                "params": _load_params("thread-a", host.workspace),
+            }
+        )
+        frames: list[dict[str, Any]] = []
+        while True:
+            frame = await acp.client.read_frame()
+            frames.append(frame)
+            if frame.get("id") == 2:
+                break
+
+    updates = [frame["params"]["update"] for frame in frames if frame.get("method") == "session/update"]
+    assert [u["sessionUpdate"] for u in updates] == ["user_message_chunk"]

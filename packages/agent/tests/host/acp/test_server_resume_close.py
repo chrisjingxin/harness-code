@@ -315,3 +315,40 @@ async def test_resume_and_close_require_initialize(tmp_path: Path) -> None:
         assert resumed["error"]["data"]["code"] == "NOT_INITIALIZED"
         assert closed["error"]["code"] == -32600
         assert closed["error"]["data"]["code"] == "NOT_INITIALIZED"
+
+
+async def test_resume_restores_compose_workflow_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """session/resume 打开 Compose 线程时恢复 workflow='compose'，仍不回放历史或 plan。"""
+    host = make_persistent_host(tmp_path)
+
+    async def fake_open_and_watch(_connection: object, _thread_id: str) -> dict[str, object]:
+        return {
+            "thread": {"thread_id": "thread-c"},
+            "messages": [{"kind": "user", "content": "历史"}],
+            "thread_mode": "compose",
+            "compose_progress": {
+                "status": "active",
+                "stages": [{"id": "requirement", "state": "current"}],
+            },
+            "goal": None,
+        }
+
+    monkeypatch.setattr(host, "open_and_watch_thread", fake_open_and_watch)
+    async with InProcessAcp(host) as acp:
+        await _initialize(acp.client)
+        resumed = await acp.client.request(
+            2,
+            "session/resume",
+            {"sessionId": "thread-c", "cwd": str(host.workspace), "mcpServers": []},
+        )
+        assert "result" in resumed, resumed
+        await acp.client.read_frame()  # available_commands_update
+        kinds = {u["sessionUpdate"] for u in _session_updates(acp.client.frames)}
+        assert kinds == {"available_commands_update"}
+    workflow = next(
+        item for item in resumed["result"]["configOptions"] if item["id"] == "workflow"
+    )
+    assert workflow["currentValue"] == "compose"
+    assert acp.server._sessions["thread-c"].workflow == "compose"
