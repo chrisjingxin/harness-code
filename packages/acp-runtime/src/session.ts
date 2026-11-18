@@ -1,17 +1,66 @@
 /**
- * 单会话执行：绑定目录 → 受理一轮 → 首次启动并握手 → 提交文本 → 按序交付增量和终态。
- * LocalAcpHost 管理绑定；本模块把子进程和标准 ACP 的细节留在宿主内。
+ * 单会话执行：绑定目录 → 受理一轮 → 首次启动并握手 → 恢复/建会话 → 提交内容块 → 按序交付增量和终态。
+ *
+ * 兼容边界（绝不可破坏 `local-execution-ipc.ts`）：
+ * - `subscribe(...)` 严格只发射 7 类轮次事件（text-delta / thought-delta / tool / permission / completed / cancelled / failed）
+ *   且每轮 `sequence` 从 1 严格递增；
+ * - 会话级更新（plan / commands / modes / configOptions / usage / sessionInfo / replay / elicitation / session-reset）
+ *   全部通过 `subscribeSession(...)` 与 `getState()` 增量提供。
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { realpath, stat } from "node:fs/promises"
 import { Writable } from "node:stream"
-import { ClientSideConnection, ndJsonStream, type RequestPermissionRequest, type RequestPermissionResponse, type SessionNotification } from "@agentclientprotocol/sdk"
+import {
+  ClientSideConnection,
+  PROTOCOL_VERSION,
+  ndJsonStream,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
+  type ListSessionsResponse,
+  type RequestPermissionRequest,
+  type RequestPermissionResponse,
+  type SessionConfigOption,
+  type SessionModeState,
+  type SessionNotification,
+  type SessionUpdate,
+} from "@agentclientprotocol/sdk"
 import { setTimeout as delay } from "node:timers/promises"
 import { agentStdout } from "./agent-stdio.js"
-import { toLocalAcpTool } from "./tool-update.js"
+import { createClientCapabilityHandlers, type ClientCapabilityController } from "./client-capabilities.js"
 import type { NativeBinding } from "./native-binding.js"
-import type { AgentCommand, LocalAcpAvailability, LocalAcpEvent, LocalAcpSendResult, LocalAcpSession } from "./index.js"
+import {
+  buildClientCapabilities,
+  cloneSessionState,
+  emptySessionState,
+  mergeSessionInfo,
+  parseAuthMethods,
+  parseCommands,
+  parseConfigOptions,
+  parseImplementation,
+  parseModels,
+  parseModes,
+  parsePlanEntries,
+  parseUsageUpdate,
+  toReplayFrame,
+  toSdkPromptBlocks,
+  upsertPlan,
+} from "./session-state.js"
+import { toLocalAcpTool } from "./tool-update.js"
+import type {
+  AgentCommand,
+  LocalAcpAvailability,
+  LocalAcpElicitationAnswer,
+  LocalAcpEvent,
+  LocalAcpHostOptions,
+  LocalAcpPromptBlock,
+  LocalAcpReplayFrame,
+  LocalAcpRestoreReason,
+  LocalAcpSendResult,
+  LocalAcpSession,
+  LocalAcpSessionState,
+  LocalAcpSessionUpdateEvent,
+} from "./index.js"
 
 type EventData<T = LocalAcpEvent> = T extends LocalAcpEvent ? Omit<T, "turnId" | "sequence"> : never
 type Turn = {
@@ -28,20 +77,37 @@ type Permission = {
   options: RequestPermissionRequest["options"]
   resolve: (reply: RequestPermissionResponse) => void
 }
-type RestoreFailure = "session-restore-unsupported" | "session-restore-failed"
+type PendingElicitation = {
+  id: string
+  turn?: Turn
+  resolve: (reply: CreateElicitationResponse) => void
+}
 class RestoreError extends Error {
-  constructor(readonly reason: RestoreFailure) { super(reason) }
+  constructor(readonly reason: LocalAcpRestoreReason) { super(reason) }
 }
 const declined: RequestPermissionResponse = { outcome: { outcome: "cancelled" } }
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 15_000
 
 type Agent = {
   child: ChildProcessWithoutNullStreams
   exited: Promise<void>
   connection: ClientSideConnection
+  capabilities: ClientCapabilityController
+  initialized: boolean
   sessionId?: string
+  openingNewSession?: boolean
+  replayingSessionId?: string
+  replayFrames?: LocalAcpReplayFrame[]
+  pendingSessionUpdates?: SessionUpdate[]
   disconnected: boolean
   stopping?: Promise<void>
   exitedConfirmed?: boolean
+}
+
+type OpenedMeta = {
+  readonly modes?: SessionModeState | null
+  readonly configOptions?: readonly SessionConfigOption[] | null
+  readonly models?: unknown
 }
 
 /** 启动和关闭时限各自只约束子进程生命周期，正常回复可持续流式输出。 */
@@ -57,14 +123,25 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+function hasPromptContent(blocks: readonly LocalAcpPromptBlock[]): boolean {
+  if (!blocks.length) return false
+  return blocks.some(block => block.type !== "text" || Boolean(block.text.trim()))
+}
+
 export class BoundSession implements LocalAcpSession {
   readonly #listeners = new Set<(event: LocalAcpEvent) => void>()
+  readonly #sessionListeners = new Set<(event: LocalAcpSessionUpdateEvent) => void>()
   readonly #outbox: LocalAcpEvent[] = []
+  readonly #sessionOutbox: LocalAcpSessionUpdateEvent[] = []
   #emitting = false
+  #emittingSession = false
   #active?: Turn
   #agent?: Agent
+  #openPromise?: Promise<Agent>
   #permission?: Permission
+  #elicitation?: PendingElicitation
   #closing?: Promise<void>
+  #state: LocalAcpSessionState = emptySessionState()
 
   constructor(
     private readonly root: string,
@@ -74,7 +151,16 @@ export class BoundSession implements LocalAcpSession {
     private readonly nativeBinding: NativeBinding,
     private readonly release: () => void,
     private readonly diagnostic: (pid: number, turnId: string | undefined, stderr: string) => void,
+    private readonly options: LocalAcpHostOptions = {},
   ) {}
+
+  private get handshakeTimeoutMs(): number {
+    return this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
+  }
+
+  private get restorePolicy() {
+    return this.options.restorePolicy ?? "fallback-new"
+  }
 
   assertBinding(root: string, device: bigint, inode: bigint): void {
     if (root !== this.root || device !== this.device || inode !== this.inode) {
@@ -86,8 +172,14 @@ export class BoundSession implements LocalAcpSession {
     if (this.#closing) return { available: false, reason: "session-closed" }
     if (!this.command) return { available: false, reason: "agent-not-configured" }
     if (this.#active) return { available: false, reason: "session-busy" }
-    if (this.#agent?.disconnected && this.#agent.stopping && !this.#agent.exitedConfirmed) return { available: false, reason: "agent-disconnected" }
+    if (this.#agent?.disconnected && this.#agent.stopping && !this.#agent.exitedConfirmed) {
+      return { available: false, reason: "agent-disconnected" }
+    }
     return { available: true }
+  }
+
+  getState(): LocalAcpSessionState {
+    return cloneSessionState(this.#state)
   }
 
   subscribe(listener: (event: LocalAcpEvent) => void): () => void {
@@ -96,14 +188,37 @@ export class BoundSession implements LocalAcpSession {
     return () => { this.#listeners.delete(listener) }
   }
 
+  subscribeSession(listener: (event: LocalAcpSessionUpdateEvent) => void): () => void {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    this.#sessionListeners.add(listener)
+    return () => { this.#sessionListeners.delete(listener) }
+  }
+
+  async connect(): Promise<LocalAcpSessionState> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    if (!this.command) throw new Error("尚未配置本机 Agent。")
+    await this.assertDirectoryIntact()
+    const agent = await this.openSessionWithRecovery()
+    if (!agent.sessionId) throw new Error("本机会话尚未打开。")
+    return this.getState()
+  }
+
   send(text: string): LocalAcpSendResult {
+    if (!text.trim()) {
+      const availability = this.getAvailability()
+      return { status: "rejected", reason: availability.available ? "empty-text" : availability.reason }
+    }
+    return this.sendPrompt([{ type: "text", text }])
+  }
+
+  sendPrompt(blocks: readonly LocalAcpPromptBlock[]): LocalAcpSendResult {
     const availability = this.getAvailability()
     if (!availability.available) return { status: "rejected", reason: availability.reason }
-    if (!text.trim()) return { status: "rejected", reason: "empty-text" }
-    const turn = { id: randomUUID(), sequence: 0, prompting: false }
+    if (!hasPromptContent(blocks)) return { status: "rejected", reason: "empty-text" }
+    const turn: Turn = { id: randomUUID(), sequence: 0, prompting: false }
     this.#active = turn
     // 留出当前调用栈，确保消费者先拿到受理结果和 turnId。
-    queueMicrotask(() => void this.run(turn, text))
+    queueMicrotask(() => void this.run(turn, [...blocks]))
     return { status: "accepted", turnId: turn.id }
   }
 
@@ -113,11 +228,12 @@ export class BoundSession implements LocalAcpSession {
     if (turn.cancelling) return true
     turn.cancelling = true
     const agent = this.#agent
+    this.resolvePermission(turn, declined)
+    this.resolveElicitation({ action: "cancel" }, turn)
     if (!turn.prompting || !agent?.sessionId) return true
     // ACP 的取消是通知，只有 prompt 的返回值能确认 Agent 停在何处。
     void agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => this.abortUnconfirmed(turn, agent))
     turn.cancelTimer = setTimeout(() => this.abortUnconfirmed(turn, agent), 10_000)
-    this.resolvePermission(turn, declined)
     return true
   }
 
@@ -132,11 +248,85 @@ export class BoundSession implements LocalAcpSession {
   answerPermission(turnId: string, requestId: string, optionId: string): boolean {
     const pending = this.#permission
     if (!pending || pending.turn.id !== turnId || pending.id !== requestId || pending.turn.cancelling || this.#closing) return false
-    const option = pending.options.find(option => option.optionId === optionId)
+    const option = pending.options.find(item => item.optionId === optionId)
     if (!option) return false
     pending.turn.denied ||= option.kind.startsWith("reject_")
     this.resolvePermission(pending.turn, { outcome: { outcome: "selected", optionId } })
     return true
+  }
+
+  answerElicitation(requestId: string, answer: LocalAcpElicitationAnswer): boolean {
+    const pending = this.#elicitation
+    if (!pending || pending.id !== requestId || this.#closing || pending.turn?.cancelling) return false
+    const reply: CreateElicitationResponse = answer.action === "accept"
+      ? { action: "accept", ...(answer.content !== undefined ? { content: { ...answer.content } } : {}) }
+      : { action: answer.action }
+    this.resolveElicitation(reply)
+    return true
+  }
+
+  async setMode(modeId: string): Promise<void> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    const agent = await this.openSessionWithRecovery()
+    await agent.connection.setSessionMode({ sessionId: agent.sessionId!, modeId })
+    this.updateModeState(modeId, true)
+  }
+
+  async setConfigOption(configId: string, value: string | boolean): Promise<void> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    const agent = await this.openSessionWithRecovery()
+    const payload = typeof value === "boolean"
+      ? { sessionId: agent.sessionId!, configId, type: "boolean" as const, value }
+      : { sessionId: agent.sessionId!, configId, value }
+    const response = await agent.connection.setSessionConfigOption(payload)
+    this.updateConfigOptions(response.configOptions, true)
+  }
+
+  async authenticate(methodId: string): Promise<void> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    if (!this.command) throw new Error("尚未配置本机 Agent。")
+    const agent = await this.ensureInitialized()
+    try {
+      await within(agent.connection.authenticate({ methodId }), this.handshakeTimeoutMs)
+    } catch (error) {
+      if (!agent.sessionId) {
+        await this.stopAgent(agent).catch(() => {})
+        if (this.#agent === agent) this.#agent = undefined
+      }
+      throw error
+    }
+  }
+
+  async listSessions(cursor?: string): Promise<ListSessionsResponse> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    const agent = await this.ensureInitialized()
+    return within(
+      agent.connection.listSessions({ cwd: this.root, ...(cursor !== undefined ? { cursor } : {}) }),
+      this.handshakeTimeoutMs,
+    )
+  }
+
+  async resumeSession(sessionId: string): Promise<LocalAcpSessionState> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    await this.assertDirectoryIntact()
+    const agent = await this.ensureInitialized()
+    const resumed = await within(
+      agent.connection.resumeSession({ sessionId, cwd: this.root, mcpServers: [] }),
+      this.handshakeTimeoutMs,
+    )
+    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+    await this.nativeBinding.write(sessionId)
+    agent.sessionId = sessionId
+    this.resetTransientSessionUpdates()
+    this.applyOpenedResponse(resumed)
+    this.#state = {
+      ...this.#state,
+      connected: true,
+      sessionId,
+      restoreStatus: { kind: "restored", sessionId },
+    }
+    this.emitSession({ type: "session-opened", state: this.getState() })
+    return this.getState()
   }
 
   private requestPermission(agent: Agent, input: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -153,13 +343,45 @@ export class BoundSession implements LocalAcpSession {
       const id = randomUUID()
       this.#permission = { turn, id, options: input.options, resolve }
       this.emit(turn, { type: "permission", request: {
-        id, title: input.toolCall.title || "Agent 请求工具权限",
-        // 附带规范化工具细节（diff、参数、关联位置），供桌面审批卡片呈现决策上下文。
+        id,
+        title: input.toolCall.title || "Agent 请求工具权限",
+        // 附带规范化工具细节（diff、参数、关联位置、终端引用），供桌面审批卡片呈现决策上下文。
         tool: toLocalAcpTool(input.toolCall),
         options: input.options.map(option => ({
           id: option.optionId, label: option.name, allows: option.kind.startsWith("allow_"),
         })),
       } })
+    })
+  }
+
+  private createElicitation(agent: Agent, input: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    if (this.#agent !== agent || agent.disconnected || this.#closing) {
+      return Promise.resolve({ action: "cancel" })
+    }
+    if (input.mode !== "form") {
+      return Promise.resolve({ action: "decline" })
+    }
+    if ("sessionId" in input && agent.sessionId && input.sessionId !== agent.sessionId) {
+      return Promise.resolve({ action: "cancel" })
+    }
+    const turn = this.#active
+    if (turn?.cancelling || this.#elicitation) {
+      return Promise.resolve({ action: "cancel" })
+    }
+    const id = randomUUID()
+    return new Promise(resolve => {
+      this.#elicitation = { id, turn, resolve }
+      this.emitSession({
+        type: "elicitation",
+        request: {
+          id,
+          ...("sessionId" in input ? { sessionId: input.sessionId } : {}),
+          ...("toolCallId" in input && input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+          ...("requestId" in input && input.requestId !== undefined ? { requestId: input.requestId } : {}),
+          message: input.message,
+          requestedSchema: input.requestedSchema,
+        },
+      })
     })
   }
 
@@ -171,38 +393,105 @@ export class BoundSession implements LocalAcpSession {
     this.emit(turn, { type: "permission", request: null })
   }
 
-  private async run(turn: Turn, text: string): Promise<void> {
+  private resolveElicitation(response: CreateElicitationResponse, onlyTurn?: Turn): void {
+    const pending = this.#elicitation
+    if (!pending) return
+    if (onlyTurn && pending.turn !== onlyTurn) return
+    this.#elicitation = undefined
+    pending.resolve(response)
+    this.emitSession({ type: "elicitation", request: null })
+  }
+
+  private async assertDirectoryIntact(): Promise<void> {
+    const root = await realpath(this.root)
+    const identity = await stat(root, { bigint: true })
+    if (!identity.isDirectory()) throw new Error("本机工作目录不可用。")
+    this.assertBinding(root, identity.dev, identity.ino)
+  }
+
+  private async ensureInitialized(): Promise<Agent> {
+    if (this.#closing) throw new Error("本机会话已关闭。")
+    if (!this.command) throw new Error("尚未配置本机 Agent。")
+    const existing = this.#agent
+    if (existing && !existing.disconnected && existing.initialized) return existing
+    if (existing) await this.stopAgent(existing).catch(() => {})
+
+    const agent = this.launchAgent(this.command)
+    this.#agent = agent
     try {
-      const root = await realpath(this.root)
-      const identity = await stat(root, { bigint: true })
-      if (!identity.isDirectory()) throw new Error("本机工作目录不可用。")
-      this.assertBinding(root, identity.dev, identity.ino)
+      const initialized = await within(
+        agent.connection.initialize({
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: buildClientCapabilities(this.options),
+        }),
+        this.handshakeTimeoutMs,
+      )
+      if (initialized.protocolVersion !== PROTOCOL_VERSION || agent.disconnected || this.#closing) {
+        throw new Error("本机 Agent 握手失败。")
+      }
+      agent.initialized = true
+      this.#state = {
+        ...this.#state,
+        connected: true,
+        protocolVersion: initialized.protocolVersion,
+        agentInfo: parseImplementation(initialized.agentInfo),
+        agentCapabilities: initialized.agentCapabilities ? structuredClone(initialized.agentCapabilities) : undefined,
+        authMethods: parseAuthMethods(initialized.authMethods),
+      }
+      this.emitSession({ type: "initialized", state: this.getState() })
+      return agent
+    } catch (error) {
+      await this.stopAgent(agent).catch(() => {})
+      if (this.#agent === agent) this.#agent = undefined
+      throw error
+    }
+  }
+
+  /** 串行化初始化与建会话/恢复逻辑；出错时清理本次失败的 Agent 进程，不影响下次发送。 */
+  private async openSessionWithRecovery(): Promise<Agent> {
+    if (this.#openPromise) return this.#openPromise
+    const current = this.#agent
+    if (current && !current.disconnected && current.sessionId) return current
+
+    const promise = (async () => {
+      const agent = await this.ensureInitialized()
+      if (agent.sessionId) return agent
+      try {
+        await this.openSession(agent)
+        return agent
+      } catch (error) {
+        await this.stopAgent(agent).catch(() => {})
+        if (this.#agent === agent) this.#agent = undefined
+        throw error
+      }
+    })()
+    this.#openPromise = promise
+    try {
+      return await promise
+    } finally {
+      if (this.#openPromise === promise) this.#openPromise = undefined
+    }
+  }
+
+  private async run(turn: Turn, blocks: readonly LocalAcpPromptBlock[]): Promise<void> {
+    try {
+      await this.assertDirectoryIntact()
     } catch {
       this.finish(turn, { type: "failed", reason: "directory-unavailable" })
       return
     }
     if (this.#active !== turn) return
     if (turn.cancelling) { this.finish(turn, { type: "cancelled" }); return }
+
     let agent = this.#agent
-    if (!agent || agent.disconnected) {
+    if (!agent || agent.disconnected || !agent.sessionId) {
       try {
-        if (agent) await this.stopAgent(agent)
-        if (this.#active !== turn) return
-        agent = this.launchAgent(this.command!)
-        this.#agent = agent
-        await this.openSession(agent)
+        agent = await this.openSessionWithRecovery()
       } catch (error) {
-        if (agent) {
-          try {
-            await this.stopAgent(agent)
-            // 只有未取得原生会话的启动失败才可以在下一次发送重新尝试。
-            if (this.#agent === agent) this.#agent = undefined
-          } catch {
-            agent.disconnected = true
-          }
-        }
-        this.finish(turn, { type: "failed", reason: agent && this.#agent === agent ? "agent-disconnected"
-          : error instanceof RestoreError ? error.reason : "agent-start-failed" })
+        this.finish(turn, {
+          type: "failed",
+          reason: error instanceof RestoreError ? error.reason : "agent-start-failed",
+        })
         return
       }
     }
@@ -213,7 +502,7 @@ export class BoundSession implements LocalAcpSession {
     try {
       const result = await agent.connection.prompt({
         sessionId: agent.sessionId!,
-        prompt: [{ type: "text", text }],
+        prompt: toSdkPromptBlocks(blocks),
       })
       this.finish(turn, result.stopReason === "end_turn"
         ? { type: "completed", shareable: !turn.cancelling && !turn.denied && this.#permission?.turn !== turn }
@@ -236,15 +525,35 @@ export class BoundSession implements LocalAcpSession {
     child.stderr.on("data", (chunk: string) => {
       if (child.pid !== undefined) this.diagnostic(child.pid, this.#agent === agent ? this.#active?.id : undefined, chunk.slice(0, 8192))
     })
+    let agent!: Agent
+    const capabilities = createClientCapabilityHandlers({
+      root: this.root,
+      device: this.device,
+      inode: this.inode,
+      env: command.env,
+      enableFs: this.options.enableClientFs !== false,
+      enableTerminal: this.options.enableClientTerminal === true,
+      maxFsFileBytes: this.options.maxFsFileBytes,
+      getSessionId: () => agent.sessionId,
+      isActive: () => this.#agent === agent && !agent.disconnected && !this.#closing,
+    })
     const stream = ndJsonStream(Writable.toWeb(child.stdin), new ReadableStream({ start(controller) { controller.close() } }))
     const connection = new ClientSideConnection(() => ({
       sessionUpdate: async notification => this.onUpdate(agent, notification),
       requestPermission: input => this.requestPermission(agent, input),
+      ...capabilities.handlers,
+      ...(this.options.enableElicitation === true
+        ? { unstable_createElicitation: (input: CreateElicitationRequest) => this.createElicitation(agent, input) }
+        : {}),
     }), { readable: agentStdout(child.stdout), writable: stream.writable })
 
-    const agent: Agent = { child, exited, connection, disconnected: false }
+    agent = { child, exited, connection, capabilities, initialized: false, disconnected: false }
     const disconnected = () => {
       agent.disconnected = true
+      if (this.#agent === agent) {
+        this.#state = { ...this.#state, connected: false }
+        this.resolveElicitation({ action: "cancel" })
+      }
       const turn = this.#agent === agent && agent.sessionId ? this.#active : undefined
       void this.stopAgent(agent).catch(() => {}).then(() => {
         if (turn) this.finish(turn, { type: "failed", reason: "agent-disconnected" })
@@ -257,32 +566,179 @@ export class BoundSession implements LocalAcpSession {
   }
 
   private async openSession(agent: Agent): Promise<void> {
-    const { connection } = agent
-    const initialized = await within(connection.initialize({ protocolVersion: 1, clientCapabilities: {} }), 15_000)
-    if (initialized.protocolVersion !== 1 || agent.disconnected || this.#closing) throw new Error("本机 Agent 握手失败。")
     let nativeId: string | undefined
-    try { nativeId = await this.nativeBinding.read() }
-    catch { throw new RestoreError("session-restore-failed") }
-    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
-    if (nativeId) {
-      if (!initialized.agentCapabilities?.loadSession) throw new RestoreError("session-restore-unsupported")
-      try {
-        // 回放期间尚未绑定 sessionId，也未派发 prompt。旧更新不能进入当前轮。
-        await within(connection.loadSession({ sessionId: nativeId, cwd: this.root, mcpServers: [] }), 15_000)
-      } catch { throw new RestoreError("session-restore-failed") }
-    } else {
-      const opened = await within(connection.newSession({ cwd: this.root, mcpServers: [] }), 15_000)
-      nativeId = opened.sessionId
-      if (!nativeId) throw new Error("无法创建本机 Agent 会话。")
-      if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
-      await this.nativeBinding.write(nativeId)
+    let resetReason: LocalAcpRestoreReason | undefined
+    let staleId: string | undefined
+    try {
+      nativeId = await this.nativeBinding.read()
+    } catch {
+      if (this.restorePolicy === "strict") throw new RestoreError("session-restore-failed")
+      await this.nativeBinding.clear().catch(() => {})
+      resetReason = "session-restore-failed"
+      staleId = "<invalid>"
     }
     if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+
+    if (nativeId) {
+      if (!this.#state.agentCapabilities?.loadSession) {
+        if (this.restorePolicy === "strict") throw new RestoreError("session-restore-unsupported")
+        await this.nativeBinding.clear()
+        resetReason = "session-restore-unsupported"
+        staleId = nativeId
+      } else {
+        const loaded = await this.tryLoadSession(agent, nativeId)
+        if (loaded) return
+        if (this.restorePolicy === "strict") throw new RestoreError("session-restore-failed")
+        await this.nativeBinding.clear().catch(() => {})
+        if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+        resetReason = "session-restore-failed"
+        staleId = nativeId
+      }
+    }
+
+    await this.openNewSession(agent, resetReason ? { reason: resetReason, previousSessionId: staleId ?? "" } : undefined)
+  }
+
+  private async tryLoadSession(agent: Agent, nativeId: string): Promise<boolean> {
+    agent.replayingSessionId = nativeId
+    agent.replayFrames = []
+    agent.pendingSessionUpdates = []
+    this.resetTransientSessionUpdates()
+    try {
+      const loaded = await within(
+        agent.connection.loadSession({ sessionId: nativeId, cwd: this.root, mcpServers: [] }),
+        this.handshakeTimeoutMs,
+      )
+      if (agent.disconnected || this.#closing) return false
+      const replayFrames = agent.replayFrames
+      const pendingUpdates = agent.pendingSessionUpdates
+      agent.replayingSessionId = undefined
+      agent.replayFrames = undefined
+      agent.pendingSessionUpdates = undefined
+      agent.sessionId = nativeId
+      this.applyOpenedResponse(loaded)
+      for (const update of pendingUpdates) this.applySessionUpdateToState(update)
+      this.#state = {
+        ...this.#state,
+        connected: true,
+        sessionId: nativeId,
+        restoreStatus: { kind: "restored", sessionId: nativeId },
+      }
+      this.emitSession({ type: "session-opened", state: this.getState() })
+      for (const frame of replayFrames) this.emitSession({ type: "replay", frame })
+      for (const update of pendingUpdates) this.emitSessionUpdateEvent(update)
+      return true
+    } catch {
+      agent.replayingSessionId = undefined
+      agent.replayFrames = undefined
+      agent.pendingSessionUpdates = undefined
+      this.resetTransientSessionUpdates()
+      return false
+    }
+  }
+
+  private async openNewSession(
+    agent: Agent,
+    resetFrom?: { readonly reason: LocalAcpRestoreReason; readonly previousSessionId: string },
+  ): Promise<void> {
+    agent.openingNewSession = true
+    agent.pendingSessionUpdates = []
+    this.resetTransientSessionUpdates()
+    let opened
+    try {
+      opened = await within(agent.connection.newSession({ cwd: this.root, mcpServers: [] }), this.handshakeTimeoutMs)
+    } finally {
+      agent.openingNewSession = false
+    }
+    const pendingUpdates = agent.pendingSessionUpdates ?? []
+    agent.pendingSessionUpdates = undefined
+    const nativeId = opened.sessionId
+    if (!nativeId) throw new Error("无法创建本机 Agent 会话。")
+    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+    await this.nativeBinding.write(nativeId)
+    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
     agent.sessionId = nativeId
+    this.applyOpenedResponse(opened)
+    for (const update of pendingUpdates) this.applySessionUpdateToState(update)
+    this.#state = {
+      ...this.#state,
+      connected: true,
+      sessionId: nativeId,
+      restoreStatus: resetFrom
+        ? { kind: "reset", reason: resetFrom.reason, previousSessionId: resetFrom.previousSessionId, sessionId: nativeId }
+        : { kind: "new", sessionId: nativeId },
+    }
+    if (resetFrom) {
+      this.emitSession({
+        type: "session-reset",
+        reason: resetFrom.reason,
+        previousSessionId: resetFrom.previousSessionId,
+        sessionId: nativeId,
+      })
+    }
+    this.emitSession({ type: "session-opened", state: this.getState() })
+    for (const update of pendingUpdates) this.emitSessionUpdateEvent(update)
+  }
+
+  private resetTransientSessionUpdates(): void {
+    this.#state = {
+      ...this.#state,
+      modes: undefined,
+      currentModeId: undefined,
+      models: undefined,
+      configOptions: [],
+      availableCommands: [],
+      plans: [],
+      sessionInfo: undefined,
+      usage: undefined,
+    }
+  }
+
+  private applyOpenedResponse(response: OpenedMeta): void {
+    const modes = parseModes(response.modes)
+    const models = parseModels(response.models)
+    const configOptions = parseConfigOptions(response.configOptions)
+    this.#state = {
+      ...this.#state,
+      ...(modes ? { modes, currentModeId: modes.currentModeId } : {}),
+      ...(models ? { models } : {}),
+      ...(response.configOptions ? { configOptions } : {}),
+    }
   }
 
   private onUpdate(agent: Agent, { sessionId, update }: SessionNotification): void {
-    if (!this.#active?.prompting || this.#agent !== agent || agent.sessionId !== sessionId || agent.disconnected) return
+    if (this.#agent !== agent || agent.disconnected || this.#closing) return
+
+    // 1) loadSession 回放窗口：收集回放帧，禁止进入当前轮次的 subscribe() 通道。
+    if (agent.replayingSessionId === sessionId && !agent.sessionId) {
+      const frame = toReplayFrame(update)
+      if (frame) {
+        agent.replayFrames?.push(frame)
+        return
+      }
+      if (this.isSessionLevelUpdate(update)) {
+        agent.pendingSessionUpdates?.push(update)
+      }
+      return
+    }
+
+    // 2) newSession 响应前紧随到达的会话级通知先暂存，拿到 sessionId 后再原子落地。
+    if (agent.openingNewSession && !agent.sessionId && this.isSessionLevelUpdate(update)) {
+      agent.pendingSessionUpdates?.push(update)
+      return
+    }
+
+    if (agent.sessionId !== sessionId) return
+
+    // 3) 已建会话上的会话级更新：无论是否处于 prompting，一律刷新状态并推送到 subscribeSession()。
+    if (this.isSessionLevelUpdate(update)) {
+      this.applySessionUpdateToState(update)
+      this.emitSessionUpdateEvent(update)
+      return
+    }
+
+    // 4) 轮次流式内容与工具更新：仅在当前活跃 prompting 轮次发射给 subscribe()。
+    if (!this.#active?.prompting) return
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
       this.emit(this.#active, { type: "tool", tool: toLocalAcpTool(update) })
       return
@@ -293,14 +749,117 @@ export class BoundSession implements LocalAcpSession {
       }
       return
     }
-    if (update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text" || !update.content.text) return
-    this.emit(this.#active, { type: "text-delta", text: update.content.text, messageId: update.messageId ?? undefined })
+    if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" && update.content.text) {
+      this.emit(this.#active, { type: "text-delta", text: update.content.text, messageId: update.messageId ?? undefined })
+    }
+  }
+
+  private isSessionLevelUpdate(update: SessionUpdate): boolean {
+    switch (update.sessionUpdate) {
+      case "plan":
+      case "plan_update":
+      case "plan_removed":
+      case "available_commands_update":
+      case "current_mode_update":
+      case "config_option_update":
+      case "session_info_update":
+      case "usage_update":
+        return true
+      default:
+        return false
+    }
+  }
+
+  private applySessionUpdateToState(update: SessionUpdate): void {
+    switch (update.sessionUpdate) {
+      case "plan":
+        this.#state = {
+          ...this.#state,
+          plans: upsertPlan(this.#state.plans, { kind: "entries", entries: parsePlanEntries(update.entries) }),
+        }
+        return
+      case "plan_update": {
+        const plan = update.plan
+        const next = plan.type === "items"
+          ? { kind: "entries" as const, id: plan.id, entries: parsePlanEntries(plan.entries) }
+          : plan.type === "markdown"
+            ? { kind: "markdown" as const, id: plan.id, content: plan.content }
+            : { kind: "file" as const, id: plan.id, uri: plan.uri }
+        this.#state = { ...this.#state, plans: upsertPlan(this.#state.plans, next) }
+        return
+      }
+      case "plan_removed":
+        this.#state = { ...this.#state, plans: this.#state.plans.filter(item => item.id !== update.id) }
+        return
+      case "available_commands_update":
+        this.#state = { ...this.#state, availableCommands: parseCommands(update.availableCommands) }
+        return
+      case "current_mode_update":
+        this.updateModeState(update.currentModeId, false)
+        return
+      case "config_option_update":
+        this.updateConfigOptions(update.configOptions, false)
+        return
+      case "session_info_update":
+        this.#state = { ...this.#state, sessionInfo: mergeSessionInfo(this.#state.sessionInfo, update) }
+        return
+      case "usage_update":
+        this.#state = { ...this.#state, usage: parseUsageUpdate(update) }
+        return
+    }
+  }
+
+  private emitSessionUpdateEvent(update: SessionUpdate): void {
+    switch (update.sessionUpdate) {
+      case "plan":
+      case "plan_update":
+      case "plan_removed":
+        this.emitSession({ type: "plan", plans: cloneSessionState(this.#state).plans })
+        return
+      case "available_commands_update":
+        this.emitSession({ type: "available-commands", commands: cloneSessionState(this.#state).availableCommands })
+        return
+      case "current_mode_update":
+        this.emitSession({ type: "current-mode", currentModeId: update.currentModeId })
+        return
+      case "config_option_update":
+        this.emitSession({ type: "config-options", configOptions: cloneSessionState(this.#state).configOptions })
+        return
+      case "session_info_update":
+        if (this.#state.sessionInfo) {
+          this.emitSession({ type: "session-info", sessionInfo: { ...this.#state.sessionInfo } })
+        }
+        return
+      case "usage_update":
+        if (this.#state.usage) {
+          this.emitSession({ type: "usage", usage: structuredClone(this.#state.usage) })
+        }
+        return
+    }
+  }
+
+  private updateModeState(currentModeId: string, emitEvent: boolean): void {
+    const prevModes = this.#state.modes
+    this.#state = {
+      ...this.#state,
+      currentModeId,
+      ...(prevModes ? { modes: { ...prevModes, currentModeId } } : {}),
+    }
+    if (emitEvent) this.emitSession({ type: "current-mode", currentModeId })
+  }
+
+  private updateConfigOptions(raw: readonly SessionConfigOption[], emitEvent: boolean): void {
+    const configOptions = parseConfigOptions(raw)
+    this.#state = { ...this.#state, configOptions }
+    if (emitEvent) this.emitSession({ type: "config-options", configOptions: structuredClone(configOptions) })
   }
 
   private finish(turn: Turn, event: EventData): void {
     if (this.#active !== turn) return
     clearTimeout(turn.cancelTimer)
     this.resolvePermission(turn, declined)
+    this.resolveElicitation({ action: "cancel" }, turn)
+    if (this.#agent) void this.#agent.capabilities.cleanupTerminals().catch(() => {})
     // 终态回调查询可用性时已经空闲。过期请求不能清理下一轮的状态。
     this.#active = undefined
     this.emit(turn, event)
@@ -324,18 +883,41 @@ export class BoundSession implements LocalAcpSession {
     }
   }
 
+  private emitSession(event: LocalAcpSessionUpdateEvent): void {
+    this.#sessionOutbox.push(Object.freeze(event))
+    if (this.#emittingSession) return
+    this.#emittingSession = true
+    try {
+      while (this.#sessionOutbox.length) {
+        const next = this.#sessionOutbox.shift()!
+        for (const listener of [...this.#sessionListeners]) {
+          try { listener(next) } catch { /* 会话级订阅方异常不会打断协议分发。 */ }
+        }
+      }
+    } finally {
+      this.#emittingSession = false
+    }
+  }
+
   close(): Promise<void> {
     // 先登记关闭，终态回调便不能重新发送或递归关闭。
     return this.#closing ??= Promise.resolve().then(async () => {
       if (this.#active) this.finish(this.#active, { type: "failed", reason: "session-closed" })
+      this.resolveElicitation({ action: "cancel" })
       this.#listeners.clear()
+      this.#sessionListeners.clear()
+      this.#state = { ...this.#state, connected: false }
       if (this.#agent) await this.stopAgent(this.#agent)
       this.release()
     })
   }
 
   private stopAgent(agent: Agent): Promise<void> {
-    return agent.stopping ??= this.waitForExit(agent).then(() => { agent.exitedConfirmed = true })
+    return agent.stopping ??= (async () => {
+      await agent.capabilities.cleanupTerminals().catch(() => {})
+      await this.waitForExit(agent)
+      agent.exitedConfirmed = true
+    })()
   }
 
   private async waitForExit(agent: Agent): Promise<void> {
