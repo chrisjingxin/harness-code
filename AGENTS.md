@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-本分支是独立桌面协作工作台，入口为 Electron + React/TypeScript。Harness/Python 是可选 Agent。2026-11-18，HC-197/199/202/211/212 的本期实现与必要验证已交付待验收，当前进度和范围以各 Task 为准。目标 TDSQL、完整中间件与双平台验收由 HC-204 统一处理。
+本分支是独立桌面协作工作台，入口为 Electron + React/TypeScript。Harness/Python 是可选 Agent。2026-11-18，HC-197/199/202/211/212/222 的本期实现与必要验证已交付待验收，当前进度和范围以各 Task 为准。目标 TDSQL、完整中间件与双平台验收由 HC-204 统一处理。
 
 根 npm workspace 只列新平台七个目录。`packages/cli`、`packages/protocol`、`packages/agent` 与 vendor 暂留作后续迁移来源，不进入新产品安装/启动/构建。产品入口说明以 README 和 docs/user 为准，过程文档放 docs/developer。
 
