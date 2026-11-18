@@ -11,11 +11,9 @@ import type { RunnerSupervisor } from "./runner-supervisor.js"
 import { verifyDesktopSource } from "./trusted-source.js"
 import type { CollaborationResult, ConversationRegisterRequest, ConversationStatus, ProjectReadAction } from "@workbench/contracts"
 import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import { parseFixedReference } from "../collaboration-reference.js"
 import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
-import { createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
-import type { LocalExecutionScope } from "../local-execution-host.js"
+import { bindLocalExecutionIpc, createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const USER_ID = /^[0-9a-f]{32}$/
@@ -56,11 +54,6 @@ function isHistoryLimit(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 500)
 }
 
-function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
-  return isObject(value) && isUserId(value.accountId) && isId(value.workspaceId) && isId(value.projectId)
-    && isId(value.conversationId)
-}
-
 export function bindCollaborationIpc(
   window: BrowserWindow,
   trustedUrl: string,
@@ -97,6 +90,7 @@ export function bindCollaborationIpc(
       )
     : null
   const execution = createLocalExecutionIpc(window, identity, uploads, runtime, join(app.getPath("userData"), "local-execution-grants"))
+  const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const channels: string[] = []
@@ -173,27 +167,6 @@ export function bindCollaborationIpc(
     isId(workspaceId) && isId(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
       ? localDirectory.readDirectory(workspaceId, projectId, conversationKey, action)
       : identityError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
-  handle("workbench:local-execution:prepare", 2, (scope, directory) =>
-    isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
-      ? execution.prepare(scope, directory)
-      : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
-  handle("workbench:local-execution:send", 5, (scope, bindingId, requestId, text, referenceIds) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
-      && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768
-      && Array.isArray(referenceIds) && referenceIds.length <= 2000
-      && referenceIds.every(id => parseFixedReference(id) !== null)
-      && (text.trim() || referenceIds.length)
-      ? execution.send(scope, bindingId, requestId, text, referenceIds as string[])
-      : identityError("INVALID_REQUEST", "请输入有效的文本消息或选择可用的固定引用。文字最长 16,384 字符且不超过 32 KiB。"))
-
-  handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId)
-      ? execution.cancel(scope, bindingId, turnId)
-      : identityError("INVALID_REQUEST", "停止参数无效。"))
-  handle("workbench:local-execution:answer-permission", 5, (scope, bindingId, turnId, requestId, optionId) =>
-    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId) && isId(requestId) && isNonEmptyString(optionId, 1024)
-      ? execution.answerPermission(scope, bindingId, turnId, requestId, optionId)
-      : identityError("INVALID_REQUEST", "审批参数无效。"))
 
   const personalChannels = ["personal:load", "personal:save", "personal:close-ready"]
   ipcMain.handle("personal:load", async (event, key: unknown) => {
@@ -244,6 +217,7 @@ export function bindCollaborationIpc(
     if (closeTimer) clearTimeout(closeTimer)
     void execution.dispose().catch(() => {})
     unsubscribe()
+    unbindExecution()
     unbindOrganization()
     unbindProjectUpdates()
     identity.dispose()

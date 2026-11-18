@@ -3,6 +3,7 @@ import { accessSync, constants, existsSync, realpathSync, statSync } from "node:
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { LocalAcpHost, type AgentCommand } from "@workbench/acp-runtime"
+import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 function isExecutableFile(candidate: string): boolean {
   if (!isAbsolute(candidate)) return false
@@ -89,4 +90,31 @@ export function createDesktopLocalAcpHost(env: NodeJS.ProcessEnv = process.env, 
   const command = resolveDesktopLocalAcpCommand(env)
   if (!command) return new LocalAcpHost()
   return new LocalAcpHost(command, { bindingDirectory, bindingNamespace: env.WORKBENCH_SERVICE_ORIGIN })
+}
+
+export type DesktopLocalExecutionRuntime = {
+  readonly localExecution: LocalExecutionRuntime
+  readonly dispose: () => Promise<void>
+}
+
+/** 创建应用级本机执行运行时及退出收口句柄，屏蔽具体 Agent 装配细节。 */
+export function createDesktopLocalExecutionRuntime(
+  env: NodeJS.ProcessEnv,
+  userDataDir: string,
+): DesktopLocalExecutionRuntime {
+  let localExecution: LocalExecutionRuntime
+  try {
+    const command = resolveDesktopLocalAcpCommand(env)
+    if (!command) {
+      localExecution = { error: "尚未配置本机 Agent。请确认本机已安装 harness-agent，或设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
+    } else {
+      localExecution = { host: createDesktopLocalAcpHost(env, join(userDataDir, "local-acp-bindings")) }
+    }
+  } catch {
+    localExecution = { error: "本机 Agent 配置无效。请检查可执行文件的绝对路径及 WORKBENCH_ACP_ARGS_JSON 字符串数组。" }
+  }
+  return {
+    localExecution,
+    dispose: () => ("host" in localExecution ? localExecution.host.close() : Promise.resolve()),
+  }
 }

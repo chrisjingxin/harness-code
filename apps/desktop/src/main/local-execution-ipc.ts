@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import type { BrowserWindow } from "electron"
+import electron, { type BrowserWindow } from "electron"
 import type { LocalAcpEvent, LocalAcpHost, LocalAcpSession, LocalAcpTool, UnavailableReason } from "@workbench/acp-runtime"
 import type { CollaborationResult } from "@workbench/contracts"
 import { localExecutionKey } from "../local-execution-host.js"
@@ -11,6 +11,7 @@ import type { CollaborationState } from "./collaboration-state.js"
 import { identityError } from "./collaboration-state.js"
 import { syncPayloadLimit, type ConversationUploads, type FinalizedToolSummary, type FinalizedTurn } from "./conversation-uploads.js"
 import { parseFixedReference } from "../collaboration-reference.js"
+import { verifyDesktopSource } from "./trusted-source.js"
 
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
@@ -495,5 +496,64 @@ export function createLocalExecutionIpc(
       uploads?.useAccount(null)
       await Promise.all([reset(), uploads?.flush()])
     },
+  }
+}
+
+export type LocalExecutionIpc = ReturnType<typeof createLocalExecutionIpc>
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const USER_ID = /^[0-9a-f]{32}$/
+const isId = (value: unknown): value is string => typeof value === "string" && UUID.test(value)
+const isUserId = (value: unknown): value is string => typeof value === "string" && USER_ID.test(value)
+const isNonEmptyString = (value: unknown, maxLength = 4096): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= maxLength
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+
+function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
+  return isObject(value) && isUserId(value.accountId) && isId(value.workspaceId) && isId(value.projectId)
+    && isId(value.conversationId)
+}
+
+/** 绑定本机执行 IPC 通道；仅接受可信主窗口的定长参数，在窗口关闭时统一注销。 */
+export function bindLocalExecutionIpc(
+  window: BrowserWindow,
+  trustedUrl: string,
+  execution: LocalExecutionIpc,
+): () => void {
+  // 通过默认导入按需读取 ipcMain，避免纯 Node/Bun 单元测试加载本模块时因 electron 占位导出而报错。
+  const { ipcMain } = electron
+  const channels: string[] = []
+  function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {
+    channels.push(channel)
+    ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+      try { verifyDesktopSource(window, trustedUrl, event) }
+      catch { return identityError("REQUEST_SOURCE_REJECTED", "不允许的本机执行请求来源。") }
+      if (args.length !== count) return identityError("INVALID_REQUEST", "请求参数无效。")
+      try { return await action(...args) }
+      catch { return identityError("INTERNAL_ERROR", "操作暂时无法完成。") }
+    })
+  }
+  handle("workbench:local-execution:prepare", 2, (scope, directory) =>
+    isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
+      ? execution.prepare(scope, directory)
+      : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
+  handle("workbench:local-execution:send", 5, (scope, bindingId, requestId, text, referenceIds) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
+      && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768
+      && Array.isArray(referenceIds) && referenceIds.length <= 2000
+      && referenceIds.every(id => parseFixedReference(id) !== null)
+      && (text.trim() || referenceIds.length)
+      ? execution.send(scope, bindingId, requestId, text, referenceIds as string[])
+      : identityError("INVALID_REQUEST", "请输入有效的文本消息或选择可用的固定引用。文字最长 16,384 字符且不超过 32 KiB。"))
+  handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId)
+      ? execution.cancel(scope, bindingId, turnId)
+      : identityError("INVALID_REQUEST", "停止参数无效。"))
+  handle("workbench:local-execution:answer-permission", 5, (scope, bindingId, turnId, requestId, optionId) =>
+    isLocalExecutionScope(scope) && isId(bindingId) && isId(turnId) && isId(requestId) && isNonEmptyString(optionId, 1024)
+      ? execution.answerPermission(scope, bindingId, turnId, requestId, optionId)
+      : identityError("INVALID_REQUEST", "审批参数无效。"))
+  return () => {
+    for (const channel of channels) ipcMain.removeHandler(channel)
   }
 }

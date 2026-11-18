@@ -4,8 +4,8 @@ import { createWindow } from "./window.js"
 import { RunnerSupervisor } from "./runner-supervisor.js"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, dirname, join } from "node:path"
-import { createDesktopLocalAcpHost, resolveDesktopLocalAcpCommand } from "./local-acp-host.js"
+import { basename, dirname } from "node:path"
+import { createDesktopLocalExecutionRuntime } from "./local-acp-host.js"
 import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 if (__WORKBENCH_UI_PREVIEW__) {
@@ -21,22 +21,11 @@ if (__WORKBENCH_UI_PREVIEW__) {
 
 const supervisor = new RunnerSupervisor()
 let execution: LocalExecutionRuntime | undefined
+let disposeExecution: (() => Promise<void>) | undefined
 let tray: Tray | null = null
 let exiting = false
 let quitAllowed = false
 let quitRequested = false
-
-function configureLocalExecution(): LocalExecutionRuntime {
-  try {
-    const command = resolveDesktopLocalAcpCommand(process.env)
-    if (!command) {
-      return { error: "尚未配置本机 Agent。请确认本机已安装 harness-agent，或设置 WORKBENCH_ACP_EXECUTABLE 后重启工作台。" }
-    }
-    return { host: createDesktopLocalAcpHost(process.env, join(app.getPath("userData"), "local-acp-bindings")) }
-  } catch {
-    return { error: "本机 Agent 配置无效。请检查可执行文件的绝对路径及 WORKBENCH_ACP_ARGS_JSON 字符串数组。" }
-  }
-}
 
 function openWindow(): void {
   const window = BrowserWindow.getAllWindows()[0]
@@ -48,7 +37,11 @@ app.setName(__WORKBENCH_UI_PREVIEW__ ? {
   hc205: "工作台主题预览", hc206: "工作台对话预览", hc207: "工作台项目预览", hc217: "工作台项目导航预览", hc218: "工作台会话预览",
 }[__WORKBENCH_UI_PREVIEW__] : "协作工作台")
 app.whenReady().then(() => {
-  if (!__WORKBENCH_UI_PREVIEW__) execution = configureLocalExecution()
+  if (!__WORKBENCH_UI_PREVIEW__) {
+    const runtime = createDesktopLocalExecutionRuntime(process.env, app.getPath("userData"))
+    execution = runtime.localExecution
+    disposeExecution = runtime.dispose
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }] }] : []),
     { label: "编辑", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
@@ -71,12 +64,16 @@ app.on("window-all-closed", () => {
 })
 app.on("before-quit", event => {
   quitRequested = true
-  if (quitAllowed || !supervisor.hasChild()) return
+  if (quitAllowed || (!supervisor.hasChild() && !disposeExecution)) return
   event.preventDefault()
   if (exiting) return
   exiting = true
-  void supervisor.stop().then(stopped => {
-    if (stopped) {
+  const stopExecution = disposeExecution
+    ? disposeExecution().then(() => true, () => false)
+    : Promise.resolve(true)
+  void Promise.all([supervisor.stop(), stopExecution]).then(([runnerStopped, executionStopped]) => {
+    if (runnerStopped && executionStopped) {
+      disposeExecution = undefined
       quitAllowed = true
       app.quit()
       return
