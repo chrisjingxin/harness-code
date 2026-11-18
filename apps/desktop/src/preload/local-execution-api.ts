@@ -4,12 +4,24 @@ import type { DesktopLocalExecutionHost, LocalExecutionNotice } from "../local-e
 
 export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutionHost {
   return {
-    prepare: (scope, directory) => ipc.invoke("workbench:local-execution:prepare", scope, directory),
-    send: (scope, bindingId, requestId, text, referenceIds = []) =>
-      ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds),
+    listProviders: () => ipc.invoke("workbench:local-execution:list-providers"),
+    prepare: (scope, directory, providerId) =>
+      providerId === undefined
+        ? ipc.invoke("workbench:local-execution:prepare", scope, directory)
+        : ipc.invoke("workbench:local-execution:prepare", scope, directory, providerId),
+    send: (scope, bindingId, requestId, text, referenceIds = [], attachments = []) =>
+      attachments.length === 0
+        ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds)
+        : ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds, attachments),
     cancel: (scope, bindingId, turnId) => ipc.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),
     answerPermission: (scope, bindingId, turnId, requestId, optionId) =>
       ipc.invoke("workbench:local-execution:answer-permission", scope, bindingId, turnId, requestId, optionId),
+    setMode: (scope, bindingId, modeId) =>
+      ipc.invoke("workbench:local-execution:set-mode", scope, bindingId, modeId),
+    setConfigOption: (scope, bindingId, configId, value) =>
+      ipc.invoke("workbench:local-execution:set-config-option", scope, bindingId, configId, value),
+    answerElicitation: (scope, bindingId, requestId, answer) =>
+      ipc.invoke("workbench:local-execution:answer-elicitation", scope, bindingId, requestId, answer),
     onNotice: listener => {
       const receive = (_event: unknown, notice: LocalExecutionNotice) => listener(notice)
       ipc.on("workbench:local-execution:notice", receive)

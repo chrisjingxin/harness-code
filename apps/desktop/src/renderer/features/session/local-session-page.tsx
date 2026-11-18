@@ -1,13 +1,23 @@
 /**
  * 本人本机会话页：只服务归属当前账号且在当前设备运行的会话。
  *
- * 【功能定义】
- * 中央复用 @workbench/ui 的 ConversationView 展示消息时间线、工具与输入区；
- * 上方显示本地工作目录切换条与云端共享范围提示；发送与取消严格受控于真实 Agent 执行端口。
+ * 1. 功能定义：中央复用 `@workbench/ui` 的 `ConversationView` 展示时间线、工具、交互表单与输入区；
+ *    实时消费多代理列表、ACP 会话能力（模式/配置/斜杠命令/执行计划/上下文用量/回退提示）与文件分栏。
+ * 2. 协作边界：调用 `contracts.ts` 的 `LocalSessionExecutionPort`、`local-execution-view.ts` 的投影与能力构造函数，
+ *    以及 `elicitation-form.ts` 的通用表单映射器；不得直接调用 Node/Electron 或改动公共 `@workbench/ui`。
  */
 import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
-import { ConversationToolBlocks, ConversationView } from "@workbench/ui"
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconFileText,
+  IconLoader2,
+  IconX,
+} from "@tabler/icons-react"
+import { ConversationToolBlocks, ConversationView, Markdown } from "@workbench/ui"
 import type {
   ConversationActions,
   ConversationComposerView,
@@ -18,9 +28,14 @@ import type {
   RenderingActions,
 } from "@workbench/ui"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
+import { toConversationInteraction, toElicitationAnswer } from "./elicitation-form.js"
 import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
-import { describePermissionRequest, projectLocalExecution } from "./local-execution-view.js"
+import {
+  buildComposerCapabilities,
+  describePermissionRequest,
+  projectLocalExecution,
+} from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
 
@@ -42,6 +57,12 @@ export type LocalSessionPageProps = {
   readonly onOpenFile?: ConversationActions["onOpenFile"]
 }
 
+const PLAN_PRIORITY_LABEL = {
+  high: "高",
+  medium: "中",
+  low: "低",
+} as const
+
 export function LocalSessionPage({
   scope,
   visible,
@@ -61,11 +82,20 @@ export function LocalSessionPage({
 }: LocalSessionPageProps): ReactElement {
   const viewingFile = Boolean(centralFiles && centralFiles.activeCentral !== null)
   const [pvMax, setPvMax] = useState(false)
+  const [planCollapsed, setPlanCollapsed] = useState(false)
+  const [dismissedRestoreKey, setDismissedRestoreKey] = useState<string | null>(null)
+  const [capabilityError, setCapabilityError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!viewingFile) setPvMax(false)
   }, [viewingFile])
+
+  useEffect(() => {
+    setCapabilityError(null)
+  }, [conversation.conversationId])
+
   const availability = execution.getAvailability(conversation.conversationId)
-  const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
+  const hasUnsupportedMaterial = Boolean(execution.textOnly && personal.draft.attachmentIds.length > 0)
   const referenceKey = JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId, conversation.projectId, directoryPath])
   const activeReference = useRef({ key: referenceKey, visible })
   const referenceRequest = useRef(0)
@@ -74,6 +104,7 @@ export function LocalSessionPage({
     activeReference.current.visible = visible
     return () => { activeReference.current.visible = false; referenceRequest.current += 1 }
   }, [referenceKey, visible])
+
   const messageRendering: RenderingActions = {
     ...rendering,
     ...(directoryPath && onOpenFile ? { openFile: async (reference: string, resolved = false) => {
@@ -100,8 +131,22 @@ export function LocalSessionPage({
       onOpenFile(scope, target, path, "central")
     } } : {}),
   }
+
   const activeExecution = execution.getView?.(conversation.conversationId)
+  const sessionState = activeExecution?.sessionState
+  const providers = execution.getProviders?.()
+  const selectedProviderId = execution.getSelectedProviderId?.(conversation.conversationId)
   const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
+  const capabilities = buildComposerCapabilities({
+    providers,
+    selectedProviderId,
+    sessionState,
+    availability,
+    directoryPath,
+    running: Boolean(activeExecution?.activeTurnId),
+    textOnly: execution.textOnly,
+  })
+
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
       ? { enabled: false, reason: attachmentUnavailableReason }
@@ -114,35 +159,195 @@ export function LocalSessionPage({
     primaryActions: canCancel ? "cancel" : "send",
     statusText: hasUnsupportedMaterial ? attachmentUnavailableReason
       : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
-    commands: [],
-    controls: [
-      {
-        id: "agent",
-        label: "Agent",
-        selectedId: "default",
-        availability: availability.available
-          ? { enabled: true }
-          : { enabled: false, reason: availability.reason },
-        items: [{
-          id: "default",
-          label: !availability.available ? "未接入" : execution.textOnly ? "本机 Agent" : "Harness",
-          availability: { enabled: availability.available },
-        }],
-      },
-    ],
+    commands: capabilities.commands,
+    controls: capabilities.controls,
+    ...(capabilities.tabCycle ? { tabCycle: capabilities.tabCycle } : {}),
     projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
       ? { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
       : null,
     references: hooks?.references ?? [],
     attachments: [],
   }
+
   const permission = activeExecution?.permission
+  const translatedElicitation = !permission && activeExecution?.elicitation
+    ? toConversationInteraction(activeExecution.elicitation, {
+        retryRevision: activeExecution.elicitationRetryRevision,
+        readOnly: false,
+        availability: { enabled: true },
+      })
+    : null
+
+  const interaction = permission
+    ? (() => {
+        const described = describePermissionRequest(permission)
+        return {
+          kind: "approval" as const,
+          id: permission.id,
+          title: permission.title,
+          ...(described.description ? { description: described.description } : {}),
+          ...(described.blocks.length ? { preview: <ConversationToolBlocks blocks={described.blocks} /> } : {}),
+          readOnly: false,
+          availability: { enabled: true },
+          retryRevision: activeExecution?.permissionRetryRevision,
+          options: permission.options.map(option => ({
+            id: option.id,
+            label: option.label,
+            ...(option.id === "reject_with_feedback" ? { description: "拒绝并在下一步填写原因或修改建议" } : {}),
+            tone: option.allows ? "positive" as const : "negative" as const,
+            behavior: "immediate" as const,
+            feedback: "none" as const,
+            availability: { enabled: true },
+          })),
+        }
+      })()
+    : translatedElicitation?.interaction ?? null
+
   const view = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
 
+  const restoreKey = sessionState?.restoreStatus.kind === "reset"
+    ? `${conversation.conversationId}:${sessionState.restoreStatus.sessionId}`
+    : null
+  const showRestoreBanner = Boolean(capabilities.restoreNotice && restoreKey && dismissedRestoreKey !== restoreKey)
+  const activePlans = sessionState?.plans ?? []
+
+  const aboveTimelineSlot = showRestoreBanner || capabilityError || activePlans.length > 0 ? (
+    <div className="session-above-timeline">
+      {showRestoreBanner ? (
+        <div className="session-restore-banner" role="status">
+          <IconAlertTriangle size={14} stroke={1.8} />
+          <span className="session-restore-banner-text">{capabilities.restoreNotice}</span>
+          <button
+            type="button"
+            className="session-banner-dismiss"
+            aria-label="关闭恢复提示"
+            onClick={() => setDismissedRestoreKey(restoreKey)}
+          >
+            <IconX size={13} stroke={1.8} />
+          </button>
+        </div>
+      ) : null}
+
+      {capabilityError ? (
+        <div className="session-restore-banner session-restore-banner-error" role="alert">
+          <IconAlertTriangle size={14} stroke={1.8} />
+          <span className="session-restore-banner-text">{capabilityError}</span>
+          <button
+            type="button"
+            className="session-banner-dismiss"
+            aria-label="关闭错误提示"
+            onClick={() => setCapabilityError(null)}
+          >
+            <IconX size={13} stroke={1.8} />
+          </button>
+        </div>
+      ) : null}
+
+      {activePlans.length > 0 ? (
+        <div className="session-plan-card" aria-label="Agent 执行计划">
+          <button
+            type="button"
+            className="session-plan-header"
+            aria-expanded={!planCollapsed}
+            onClick={() => setPlanCollapsed(prev => !prev)}
+          >
+            <span className="session-plan-header-left">
+              {planCollapsed ? <IconChevronRight size={14} stroke={1.8} /> : <IconChevronDown size={14} stroke={1.8} />}
+              <span>执行计划</span>
+            </span>
+            <span className="session-plan-summary">
+              {(() => {
+                const entryPlans = activePlans.filter(p => p.kind === "entries")
+                const total = entryPlans.reduce((sum, p) => sum + p.entries.length, 0)
+                if (total === 0) return `${activePlans.length} 项`
+                const done = entryPlans.reduce((sum, p) => sum + p.entries.filter(e => e.status === "completed").length, 0)
+                return `${done}/${total} 完成`
+              })()}
+            </span>
+          </button>
+          {!planCollapsed ? (
+            <div className="session-plan-body">
+              {activePlans.map((plan, planIdx) => {
+                if (plan.kind === "entries") {
+                  return (
+                    <ul key={plan.id ?? `entries-${planIdx}`} className="session-plan-entries">
+                      {plan.entries.map((entry, entryIdx) => (
+                        <li key={`${planIdx}-${entryIdx}`} className={`session-plan-entry is-${entry.status}`}>
+                          <span className="session-plan-entry-icon" aria-hidden="true">
+                            {entry.status === "completed" ? (
+                              <IconCheck size={13} stroke={2} />
+                            ) : entry.status === "in_progress" ? (
+                              <IconLoader2 size={13} stroke={2} className="session-plan-spin" />
+                            ) : (
+                              <span className="session-plan-dot" />
+                            )}
+                          </span>
+                          <span className="session-plan-entry-content">{entry.content}</span>
+                          <span className={`session-plan-priority is-${entry.priority}`}>
+                            {PLAN_PRIORITY_LABEL[entry.priority]}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                }
+                if (plan.kind === "markdown") {
+                  return (
+                    <div key={plan.id} className="session-plan-markdown">
+                      <Markdown text={plan.content} actions={messageRendering} />
+                    </div>
+                  )
+                }
+                return (
+                  <div key={plan.id} className="session-plan-file">
+                    <IconFileText size={14} stroke={1.8} />
+                    {messageRendering.openFile ? (
+                      <button
+                        type="button"
+                        className="session-plan-file-link"
+                        onClick={() => {
+                          void messageRendering.openFile?.(plan.uri).catch(err => {
+                            setCapabilityError(err instanceof Error ? err.message : "无法打开计划文件。")
+                          })
+                        }}
+                      >
+                        {plan.uri}
+                      </button>
+                    ) : (
+                      <span className="session-plan-file-text">{plan.uri}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  ) : undefined
+
+  const composerSlot = capabilities.usageBadge || hooks?.composerExtra ? (
+    <div className="session-composer-extra">
+      {capabilities.usageBadge ? (
+        <span className="session-usage-badge" title="当前上下文窗口 Token 占用">
+          上下文 {capabilities.usageBadge}
+        </span>
+      ) : null}
+      {hooks?.composerExtra}
+    </div>
+  ) : undefined
+
+  const slots = aboveTimelineSlot || composerSlot
+    ? {
+        ...(aboveTimelineSlot ? { aboveTimeline: aboveTimelineSlot } : {}),
+        ...(composerSlot ? { composer: composerSlot } : {}),
+      }
+    : undefined
+
   return (
-    <section className="session-center" aria-label={conversation.title || "本机会话"}>
+    <section className="session-center" aria-label={conversation.title || sessionState?.sessionTitle || "本机会话"}>
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
           <div className="session-conversation-wrap">
@@ -151,23 +356,7 @@ export function LocalSessionPage({
               entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
               scope={scope}
               visible={visible && !(viewingFile && pvMax)}
-              interaction={permission ? (() => {
-                const described = describePermissionRequest(permission)
-                return {
-                  kind: "approval" as const,
-                  id: permission.id,
-                  title: permission.title,
-                  ...(described.description ? { description: described.description } : {}),
-                  ...(described.blocks.length ? { preview: <ConversationToolBlocks blocks={described.blocks} /> } : {}),
-                  readOnly: false,
-                  availability: { enabled: true },
-                  retryRevision: activeExecution?.permissionRetryRevision,
-                  options: permission.options.map(option => ({
-                    id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
-                    behavior: "immediate", feedback: "none", availability: { enabled: true },
-                  })),
-                }
-              })() : null}
+              interaction={interaction}
               personal={personal}
               actions={{
                 onPersonalChange: (targetScope, change) => {
@@ -206,11 +395,69 @@ export function LocalSessionPage({
                         ),
                     }
                   : {}),
-                onInteractionSubmit: execution.answerPermission ? async (targetScope, id, answer) => {
-                  if (answer.kind !== "approval" || targetScope.conversationId !== scope.conversationId) throw new Error("审批目标已变更。")
-                  await execution.answerPermission!(conversation.conversationId, id, answer.optionId)
-                } : undefined,
-                onCapabilitySelect,
+                onInteractionSubmit: execution.answerPermission || execution.answerElicitation
+                  ? async (targetScope, id, answer) => {
+                      if (targetScope.conversationId !== scope.conversationId) {
+                        throw new Error("交互目标已变更。")
+                      }
+                      if (permission && permission.id === id) {
+                        if (!execution.answerPermission) throw new Error("当前运行宿主不支持权限审批。")
+                        if (answer.kind !== "approval") throw new Error("审批回答格式无效。")
+                        await execution.answerPermission(conversation.conversationId, id, answer.optionId)
+                        return
+                      }
+                      if (translatedElicitation && translatedElicitation.interaction.id === id) {
+                        if (!execution.answerElicitation) throw new Error("当前运行宿主不支持交互表单。")
+                        const mapped = toElicitationAnswer(translatedElicitation.form, answer)
+                        await execution.answerElicitation(conversation.conversationId, id, mapped)
+                        return
+                      }
+                      throw new Error("当前交互请求已结束或变更。")
+                    }
+                  : undefined,
+                onCommand: (targetScope, itemId) => {
+                  if (targetScope.conversationId !== scope.conversationId) return
+                  const currentText = personal.draft.text
+                  const trimmedLeft = currentText.trimStart()
+                  const commandPrefix = `/${itemId} `
+                  const nextText = trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft)
+                    ? commandPrefix
+                    : currentText.trim().length > 0
+                      ? `${commandPrefix}${currentText}`
+                      : commandPrefix
+                  const cursor = commandPrefix.length
+                  onPersonalChange(targetScope, {
+                    kind: "draft-text",
+                    text: nextText,
+                    selectionStart: cursor,
+                    selectionEnd: cursor,
+                  })
+                },
+                onCapabilitySelect: (targetScope, controlId, itemId) => {
+                  onCapabilitySelect?.(targetScope, controlId, itemId)
+                  if (targetScope.conversationId !== scope.conversationId) return
+                  setCapabilityError(null)
+                  if (controlId === "agent") {
+                    void execution.selectProvider?.(conversation.conversationId, itemId).catch(error => {
+                      setCapabilityError(error instanceof Error ? error.message : "切换 Agent 失败。")
+                    })
+                    return
+                  }
+                  if (controlId === "mode") {
+                    void execution.setMode?.(conversation.conversationId, itemId).catch(error => {
+                      setCapabilityError(error instanceof Error ? error.message : "切换会话模式失败。")
+                    })
+                    return
+                  }
+                  if (controlId.startsWith("config:")) {
+                    const configId = controlId.slice("config:".length)
+                    const option = sessionState?.configOptions.find(item => item.id === configId)
+                    const value = option?.type === "boolean" ? itemId === "true" : itemId
+                    void execution.setConfigOption?.(conversation.conversationId, configId, value).catch(error => {
+                      setCapabilityError(error instanceof Error ? error.message : "更新会话配置失败。")
+                    })
+                  }
+                },
                 onReferenceAction: hooks?.onReferenceAction,
                 onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
                 onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
@@ -218,7 +465,7 @@ export function LocalSessionPage({
                 onOpenFile,
                 rendering: messageRendering,
               }}
-              slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
+              slots={slots}
             />
           </div>
         </div>
