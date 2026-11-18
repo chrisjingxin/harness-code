@@ -50,12 +50,12 @@ Zed 等 ACP 客户端：  ACP Client ──stdio──> harness acp（不经桥�
 | 文件 | 职责 |
 |------|------|
 | `stdio.py` | 把真实 stdin/stdout 变成 ACP 专用帧通道；EOF/信号 → 取消 Run → 排空 → 收尾的顺序闸门 |
-| `server.py` | ACP 官方方法的实现入口，分发到 Host。方法见下文「方法表」 |
+| `server.py` | ACP 官方十个方法的实现入口，分发到 Host。方法见下文「方法表」 |
 | `translate.py` | v3 事件 → ACP `session/update` 的翻译器（文本增量、思考、工具生命周期、计划、用量、终态） |
 | `permissions.py` | 审批 ⇄ `session/request_permission` 双向翻译（标准 diff、目录信任、拒绝/取消收敛） |
 | `elicitation.py` | 提问、计划确认、目标确认、拒绝附反馈。全部走 UNSTABLE 的 `elicitation/create` |
-| `sessions.py` | `session/list` 分页、`session/load` 回放：ThreadSummary/历史消息 ↔ SessionInfo/历史帧 |
-| `commands.py` | 内置命令、Skill 命令与 `available_commands_update` |
+| `sessions.py` | `session/list` 分页、`session/load` 回放与 `plan` 状态投影：ThreadSummary/历史消息 ↔ SessionInfo/历史帧 |
+| `commands.py` | 内置命令（含多轮 `/undo`、`/plan`、`/plan-view`、`/goal cancel`）、Skill 命令与 `available_commands_update` |
 | `modes.py` | 审批模式 ⇄ ACP 会话模式（含按能力暴露的 `plan`） |
 | `config.py` | `model` / `workflow` 配置项，以及 `usage_update`、`PromptResponse.usage` |
 | `inline.py` | `resource_link` / `resource` 读入模型输入；记录里只留原文和 `@路径` |
@@ -97,13 +97,13 @@ Zed 等 ACP 客户端：  ACP Client ──stdio──> harness acp（不经桥�
 |---|---|---|
 | `initialize` | 稳定 | 握手。宣告读会话、恢复、关闭、列表、附加目录、内嵌上下文、HTTP MCP；不宣告图片、音频、SSE MCP |
 | `session/new` | 稳定 | 建会话。`cwd` 必须是本进程工作区；可带 `mcpServers`、`additionalDirectories`；响应带 `modes` 和 `configOptions` |
-| `session/load` | 稳定 | 回放完整历史后再响应。不做分页 |
+| `session/load` | 稳定 | 回放完整历史（不做分页），恢复 `workflow`（来自 `thread_mode`），并在存在 `compose_progress` 阶段或 `goal` 条件时推送 `plan` 更新后再响应 |
 | `session/list` | 稳定 | 键集游标，每页 50 条 |
-| `session/prompt` | 稳定 | 一轮用户输入。内置斜杠命令在这里拦截，不启动模型 |
+| `session/prompt` | 稳定 | 一轮用户输入。内置斜杠命令在这里拦截（`/plan <目标>` 与 `/goal <目标>` 会再跑对应 Run，其余不启动模型） |
 | `session/cancel` | 稳定 | 取消该会话当前 Run |
 | `session/set_mode` | 稳定 | 切换审批模式。客户端没声明 `elicitation.form` 时，`plan` 回 `UNKNOWN_MODE` |
 | `session/set_config_option` | 稳定 | 切换 `model` 或 `workflow`，只影响下一轮 |
-| `session/resume` | UNSTABLE | 同一条连接上恢复空闲会话：返回模式和命令表，不回放历史 |
+| `session/resume` | UNSTABLE | 同一条连接上恢复空闲会话：返回模式、恢复 `workflow` 的 `configOptions` 和命令表，不回放历史或 `plan` |
 | `session/close` | UNSTABLE | 取消在途 Run，撤销该会话的附加目录和会话 MCP |
 
 `authenticate`、`session/fork`、`session/delete` 不实现，由 SDK 回方法不存在。
@@ -116,7 +116,7 @@ Agent 发给客户端：
 | `session/request_permission` | 稳定 | 审批和目录信任。文件变更带标准 `diff` |
 | `elicitation/create` | UNSTABLE | 提问、计划确认、目标确认、拒绝后的反馈。没声明 `elicitation.form` 时不发 |
 
-- **事件 → session/update**：正文 `agent_message_chunk`（messageId 维度的前缀 diff，只发增量）；思考 `agent_thought_chunk`；工具 `tool_call`/`tool_call_update`（title/kind/status/content/locations）；用量 `usage_update`；终态体现在 `session/prompt` 响应的 `stopReason`：正常结束为 `end_turn`、取消为 `cancelled`；运行失败以 JSON-RPC 错误返回。
+- **事件 → session/update**：正文 `agent_message_chunk`（messageId 维度的前缀 diff，只发增量）；思考 `agent_thought_chunk`（仅根事件，子代理丢弃并计数）；工具 `tool_call`/`tool_call_update`（title/kind/status/content/locations）；计划 `plan`（来自 `compose.progress`、`goal.changed` 与 `goal.evaluation`，Compose 进行中抑制 Goal 计划）；用量 `usage_update`（`context.updated` 仅投影 `estimated_tokens` → `used` 与 `context_window_tokens` → `size` 并去重；`action`、`input_cap_tokens`、`dynamic_tokens`、`cache_status`、`cached_tokens`、`miss_reason`、`artifact_ids` 不在标准 `usage_update` 上透传；`/compact` 单独读 `input_cap_tokens`）；终态体现在 `session/prompt` 响应的 `stopReason`：正常结束为 `end_turn`、取消为 `cancelled`；运行失败以 JSON-RPC 错误返回。
 - **审批 ⇄ request_permission**：v3 approval/directory_trust 统一翻成一个 `request_permission`；决定（allow/reject/kind）⇄ `selected.optionId`；`cancelled` 在取消与断连两个方向都成立。标准 diff 在工具卡的 `content` 里。声明了 `approval` 时，选项 `scope` 和原始 `requests` 挂 `_meta.harnessCode.approval`。
 - **审批模式 ⇄ 会话模式**：`session/new`/`session/load`/`session/resume` 的 `modes` 承载 `default`/`auto-edit`/`auto`/`yolo`，声明了表单能力时再加 `plan`。Host 广播的模式变化转成 `current_mode_update`。批准计划后回到进入计划前的模式。
 
@@ -175,11 +175,11 @@ Agent 发给客户端：
 
 | 原有功能 | 状态 | 证据或去向 | 层 |
 |---|---|---|---|
-| `/help`、`/quit`（别名 `q`） | 已覆盖 | 命令表由 Agent 下发，退出是客户端自己的事。`test_server_commands.py` 的 `test_empty_commands_still_sends_update` | ① |
-| `/new`（别名 `clear`） | 已覆盖 | 测试客户端保留本地命令 `thread.new`。`packages/cli` 的命令表测试 | ① |
-| `/compact`、`/btw`、`/redo`、`/title`、`/goal`、`/abandon` | 已覆盖 | 见缺口表 GAP-07、10、09、39、03、04 | ④ |
+| `/help`、`/quit`（别名 `q`） | 未覆盖（客户端本地职责） | `harness acp` 不实现 `/help` 或 `/quit`；命令表由 Agent 通过 `available_commands_update` 下发（`test_server_commands.py` 的 `test_empty_commands_still_sends_update` 只验证推送命令表），帮助弹窗与退出动作归层 ① 客户端自理（目前 `acp-web` 与桌面端均未提供） | ① |
+| `/new`（别名 `clear`） | 部分覆盖 | `acp-web` 保留侧栏本地按钮 `thread.new`（`packages/cli/src/acp-web/client/runtime.ts`）；桌面端侧栏新建会话同理，无 ACP 斜杠命令 `/new` | ① |
+| `/compact`、`/btw`、`/redo`、`/title`、`/goal`、`/abandon` | 已覆盖 | 见缺口表 GAP-07、10、09、39、03、04；其中 `/goal` 已支持 `cancel` / `cancel_pending`（`test_builtin_commands.py` 的 `test_goal_cancel_maps_to_cancel_pending`） | ④ |
 | `/undo`（别名 `rewind`、`rollback`）最近一轮 | 已覆盖 | GAP-09。参数 `both`、`code`、`conversation` | ④ |
-| `/undo` 打开历史回合选择器 | 未覆盖 | GAP-40。ACP 只回最近一轮 | ④，选择器在 ① |
+| `/undo` 列出并回退指定历史回合 | 已覆盖 | GAP-40（已关闭）。支持 `/undo list` 与 `/undo <N> [both|code|conversation]` / `/undo [both|code|conversation] <N>`（`test_builtin_commands.py` 的 `test_undo_list_and_multiturn_index_selection`）；图形选择器可在 ① 按需消费 `list_turns` / `/undo list` | ④（选择器可选在 ①） |
 | `/resume`（别名 `continue`、`threads`） | 已覆盖 | `session/list` 加 `session/load`。`test_server_sessions.py` | ④ |
 | `/model`（别名 `models`） | 已覆盖 | 配置项 `model`。GAP-08 | ④ |
 | `/skills` 调用 | 已覆盖 | `skill:` 命令。GAP-28 | ④ |
@@ -189,7 +189,7 @@ Agent 发给客户端：
 | `/mcp` 查看和增删 | 未覆盖 | 已有 GAP-15。会话建立时带上的 MCP 见已关闭的 GAP-21 | HC-201 |
 | `/web` | 未覆盖 | GAP-46。和 GAP-20 相邻：一个是接管活进程，一个是刷新把进程杀掉 | ① / HC-197 |
 | `/new-work` | 未覆盖 | GAP-43。`/abandon` 已有 | ④ |
-| `/plan`、`/plan-view` | 已覆盖 | 会话模式 `plan` 加标准 `plan` 更新。GAP-02；`test_goal_changed_becomes_a_plan` | ④ |
+| `/plan`、`/plan-view` | 已覆盖 | `/plan` 在声明 `elicitation.form` 时切到 `plan` 模式并可选带目标开跑（未声明时明确提示需要 `elicitation.form`）；`/plan-view` 调 `open_thread(..., assume_idle=False)` 只读展示当前计划正文、Compose 阶段与 Goal 状态。`test_builtin_commands.py` 的 `test_plan_command_without_forms_explains_requirement`、`test_plan_command_with_forms_switches_mode_and_starts_optional_run`、`test_plan_view_formats_plan_compose_and_goal_without_running_model` | ④ |
 | `/code-index` | 未覆盖 | 已有 GAP-17 | HC-201 |
 | `/status` | 部分覆盖 | 用量和模式已有。配置路径、版本等查看属于已有 GAP-18，不另编号 | ① + HC-201 |
 
@@ -231,8 +231,9 @@ Agent 发给客户端：
 | 方法 | 状态 |
 |---|---|
 | `initialize`、`run.start`、`run.cancel`、`run.set_approval_mode`、`context.compact` | 已覆盖 |
-| `threads.list`、`threads.open`、`threads.watch`、`threads.unwatch`、`threads.side_question`、`threads.set_title`、`threads.undo`、`threads.redo`、`threads.list_turns` | 已覆盖。`watch` 变成会话保持连接。`list_turns` 只为最近一轮服务，选更早回合见 GAP-40 |
-| `models.list`、`compose.inspect`、`compose.abandon`、`goal.inspect`、`goal.request`、`goal.mutate` | 已覆盖 |
+| `threads.list`、`threads.open`、`threads.watch`、`threads.unwatch`、`threads.side_question`、`threads.set_title`、`threads.undo`、`threads.redo`、`threads.list_turns` | 已覆盖。`watch` 变成会话保持连接；`threads.list_turns` 同时支撑 `/undo`（最近一轮）、`/undo list` 与 `/undo <N>` 多轮回退（GAP-40 已关闭）；`threads.open` 在 `session/load` / `session/resume` 恢复 `workflow`（`thread_mode`）、在 `session/load` 回放历史并投影 `compose_progress`/`goal` 为 `plan`，以及供 `/plan-view` 读取 `plan` 正文与状态 |
+| `models.list`、`compose.abandon`、`goal.inspect`、`goal.request`、`goal.mutate` | 已覆盖（`goal.mutate` 现覆盖 `pause`、`resume`、`clear` 与 `cancel_pending`；`goal.request` 不暴露 `kind="replace"` 与 CAS 字段） |
+| `compose.inspect` | 未暴露独立 RPC（`HostServicePort` 无该方法；经由 `open_thread` 返回的 `compose_progress` 在 `session/load` 投影 `plan` 与 `/plan-view` 只读展示间接覆盖） |
 | `commands.bind` | 已覆盖。Agent 自己推命令表，客户端不再绑定 |
 | `config.show`、`config.path`、`config.details`、`config.preview`、`config.commit`、`settings.list`、`settings.set`、`settings.remove` | 未覆盖，GAP-18 |
 | `skills.*`、`plugins.*` | 未覆盖，GAP-13、GAP-14。调用 Skill 除外 |
@@ -243,7 +244,12 @@ Agent 发给客户端：
 | `host.attachment.create`、`host.attachment.revoke` | 未覆盖，GAP-46。会话附加目录是另一件事，已由 GAP-27 关闭 |
 | `host.control.acquire`、`host.control.release`、`host.control.status` | 未覆盖，GAP-47 |
 
-通知 `thread.summary`、`thread.approval_mode` 已覆盖。`code_index.changed` 随 GAP-17。事件 `run.*`、`content.delta`、`reasoning.delta`、`tool.*`、`compose.*`、`goal.changed` 已覆盖。`skill.loaded` 只在调用 Skill 时出现。`goal.evaluation` 没有单独的界面，目标确认走表单。
+通知 `thread.summary`（→ `session_info_update`）、`thread.approval_mode`（→ `current_mode_update`）、`commands.catalog`（→ `available_commands_update`）已覆盖；`code_index.changed` 随 GAP-17 未覆盖。
+
+事件翻译与静默丢弃口径（`translate.py`）：
+- **已翻译**：`content.delta` → `agent_message_chunk`、`reasoning.delta` → `agent_thought_chunk`（仅根事件，子代理丢弃并计数）、`tool.{started,delta,completed}` → `tool_call`/`tool_call_update`、`compose.progress` → `plan`、`compose.summary` → `agent_message_chunk`、`goal.changed` 与 **`goal.evaluation`** → `plan`（Compose 进行中时抑制 Goal 计划；`test_translate.py` 的 `test_goal_changed_becomes_a_plan`、`test_compose_progress_suppresses_goal_plan_but_keeps_text`、`test_goal_evaluation_result_uses_passed_or_satisfied`）、`context.updated` → `usage_update`（仅投影 `estimated_tokens` 与 `context_window_tokens` 两字段并去重；`action`、`input_cap_tokens`、`dynamic_tokens`、`cache_status`、`cached_tokens`、`miss_reason`、`artifact_ids` 不在标准 `usage_update` 上透传）、`run.{completed,cancelled,failed}` → `PromptResponse` / JSON-RPC 错误。
+- **静默忽略（`_IGNORED_EVENT_TYPES`）**：`run.started`、`run.progress`、`skill.loaded`、`interaction.resolved`（以及未单独翻译的 `compose.*`/`goal.*` 子事件前缀）。
+- **回放状态恢复（`session/load` / `session/resume`）**：两者均从 `opened["thread_mode"]` 恢复 `session.workflow`（`build` / `compose`）使 `configOptions["workflow"]` 保持一致；`session/load` 在回放消息历史帧后、返回响应前，把 `opened["compose_progress"]`（非 `abandoned`）或 `opened["goal"]` 投影为 `AgentPlanUpdate(session_update="plan")`（`test_server_sessions.py` 与 `test_server_resume_close.py`）。`plan` 正文通过 `/plan-view` 按需查看，不在 `session/load` 自动灌入消息流。
 
 交互：`approval`、`question`、`directory_trust`、`plan`、`goal` 已覆盖。`plugin_consent` 见 GAP-45。
 
@@ -311,7 +317,7 @@ Agent 发给客户端：
 | GAP-37 | Agent 命令缺字段且晚到无补全 | 命令更新晚于 500ms 到达则这页无补全；与内置重名的命令被丢弃 | 命令缺来源字段，空表不推送 | 来源字段；new/load 后必推命令表；目录变化整表重发 | 已关闭 | `test_server_commands.py` 的 `test_empty_commands_still_sends_update`；`test_builtin_commands.py` 的 `test_catalog_change_replaces_the_table_for_every_session` | HC-200 |
 | GAP-38 | 审批 `payload.requests` 无 ACP 来源 | 由 `toolCall.rawInput` 合成而非 v3 原样 | `request_permission` 无原始 requests 字段 | 声明 `approval` 时携带 `requests` | 已关闭 | `test_permissions.py` 的 `test_approval_extension_writes_scope_and_truncates_huge_requests` | HC-200 |
 | GAP-39 | 手动重命名会话（`/title`） | `/title xx` 被当普通消息发给 Agent | 内置命令被隐藏；ACP 无改名方法 | `/title` 后发 `session_info_update` | 已关闭 | `test_builtin_commands.py` 的 `test_title_updates_the_session_before_the_prompt_response` | HC-200 |
-| GAP-40 | 选择更早的回合再撤销 | `/undo` 只能回最近一轮，不能点开历史回合 | TUI 有回合选择器，ACP 没有 | 斜杠命令增加回合参数；选择器放在客户端 | 未开始 | 覆盖矩阵 S7。来源 `commands.ts` 的 `thread.undo` | 建议新任务，或并入 HC-206 的客户端选择器。本任务不实现 |
+| GAP-40 | 选择更早的回合再撤销 | `/undo` 只能回最近一轮，不能查看或指定历史回合 | TUI 有回合选择器，ACP 原先只回最近一轮 | 支持 `/undo list` 与 `/undo <N> [both|code|conversation]`（图形选择器按需在客户端消费） | 已关闭 | `test_builtin_commands.py` 的 `test_undo_list_and_multiturn_index_selection` | HC-227 |
 | GAP-41 | 查看并指定 Agent | 没有 `/agents` 列表 | 子代理卡片已有，手动挑选没有 | Harness 斜杠命令 | 未开始 | 覆盖矩阵 S7。来源 `agents.list` / `agents.inspect` | 建议并入 HC-201。本任务不实现 |
 | GAP-42 | Agent Team | 没有查看、生成、运行、取消 | 标准 ACP 没有 Team | Harness 斜杠命令 | 未开始 | 覆盖矩阵 S7。来源 `teams.*` | 建议新任务。本任务不建、不实现 |
 | GAP-43 | `/new-work` | 不能放下当前 Compose 并马上开始新目标 | 只有 `/abandon` | Harness 斜杠命令 | 未开始 | 覆盖矩阵 S7。来源 `compose.new-work` | 建议新任务。本任务不实现 |
@@ -320,4 +326,4 @@ Agent 发给客户端：
 | GAP-46 | TUI `/web` 接管活进程 | 不能把正在跑的 TUI 原进程交给浏览器 | `host.attachment` 没有 ACP 对应 | 平台把 Agent 进程留住，再让页面接上 | 未开始 | 覆盖矩阵 S7。与 GAP-20 不同 | HC-197 |
 | GAP-47 | 控制权交接 | 第二个查看者不能接手同一运行 | `host.control.*` 没有 ACP 对应 | 设备与会话交接 | 未开始 | 覆盖矩阵 S7 | HC-196 |
 
-证据里的测试文件，没写目录的都在 `packages/agent/tests/host/acp/`；写了 `tests/host/` 的在 `packages/agent/tests/host/`。归 HC-200 且已实现的行都是「已关闭」。GAP-40 到 GAP-47 是 S7 新登记的，尚未实现，也不在本任务里做。
+证据里的测试文件，没写目录的都在 `packages/agent/tests/host/acp/`；写了 `tests/host/` 的在 `packages/agent/tests/host/`。归 HC-200 且已实现的行都是「已关闭」。GAP-40 已由 HC-227 在内核 ACP 侧关闭；GAP-41 到 GAP-47 仍为 S7 登记的未开始项，不在 HC-200/HC-227 内做。

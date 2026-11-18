@@ -48,9 +48,10 @@ CAP_RUN_SUMMARY: Final = "runSummary"
 """能力名：`session/prompt` 响应的 `_meta.harnessCode.run`。"""
 
 CAP_SESSION_SUMMARY: Final = "sessionSummary"
+"""能力名：`SessionInfo._meta.harnessCode.summary`（`session/list` 摘要元数据）。"""
 
 CAP_SUBAGENT: Final = "subagent"
-"""能力名：`SessionInfo._meta.harnessCode.summary`（列表与回放都带）。"""
+"""能力名：子代理工具卡的 `_meta.harnessCode.parent`（挂载到父 `task` 卡）。"""
 
 CAP_GOAL: Final = "goal"
 """能力名：Goal 确认之后的计划条目。`/goal` 命令是否出现在菜单里看的是表单能力，不是这个名字。"""

@@ -35,7 +35,6 @@ import asyncio
 import contextlib
 import os
 import re
-import sys
 import time
 import uuid
 from collections.abc import Coroutine, Mapping, Sequence
@@ -81,16 +80,22 @@ from harness_agent.extensions.plugin_skills import SkillError
 from harness_agent.extensions.skills import SkillError as CatalogSkillError
 from harness_agent.host.acp.commands import (
     ABANDON_TEXT,
+    PLAN_ALREADY_TEXT,
+    PLAN_REQUIRES_FORMS_TEXT,
+    PLAN_SWITCHED_TEXT,
     QUEUED_GOAL_TEXT,
     REDO_TEXT,
     TITLE_TEXT,
     UNDO_TEXT,
     CommandIndex,
     GoalVerb,
+    UndoCall,
     compact_sentence,
     goal_inspect_text,
     goal_mutate_text,
     parse_builtin,
+    plan_view_text,
+    undo_list_text,
     undo_target,
     validate_builtin,
 )
@@ -138,6 +143,7 @@ from harness_agent.host.acp.sessions import (
     SESSIONS_PAGE_SIZE,
     decode_cursor,
     encode_cursor,
+    replay_plan_update,
     replay_updates,
     session_info,
     session_info_update,
@@ -235,6 +241,14 @@ class _GoalResume:
 
     run_id: str
     run_input: GoalContinuationRunInput
+    command: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class _PlanFollow:
+    """带后续文本的 `/plan <目标>`：已切入 plan 模式，接着在 plan 模式跑一轮。"""
+
+    prompt_text: str
     command: dict[str, object]
 
 
@@ -368,52 +382,8 @@ def _truncate(text: str) -> str:
     return text[: MAX_PROMPT_SUMMARY_CHARS - 1] + "…"
 
 
-def prompt_text(prompt: Sequence[object]) -> str:
-    """把 ACP prompt 内容块转成发送给模型的纯文本。
-
-    输入：`PromptRequest.prompt`（SDK 已解析成模型对象列表）。
-    输出：多块用换行拼接的文本。
-    异常：`RequestError(-32602)`——嵌入资源/图片/音频不支持（能力里已声明不支持），
-          文本全空白也拒绝（Run 不接受空消息）。
-    """
-    parts: list[str] = []
-    for block in prompt:
-        block_type = getattr(block, "type", None)
-        if block_type == "text":
-            parts.append(str(getattr(block, "text", "")))
-        elif block_type == "resource_link":
-            parts.append(_resource_link_text(str(getattr(block, "uri", ""))))
-        else:
-            raise RequestError(
-                -32602,
-                "UNSUPPORTED_CONTENT_BLOCK",
-                {"code": "UNSUPPORTED_CONTENT_BLOCK", "type": block_type},
-            )
-    text = "\n".join(parts)
-    if not text.strip():
-        raise RequestError(
-            -32602,
-            "EMPTY_PROMPT",
-            {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
-        )
-    return text
-
-
-def _resource_link_text(uri: str) -> str:
-    """把 `file://` 链接转成 `@路径`；其它 scheme 原样保留为 `@uri`。
-
-    工作区内的绝对路径交给模型更自然（与 CLI 的 `@` 提及一致）；工作区判断不在
-    这里做，因为只是文本提示，越界的绝对路径仍会被文件工具自己的边界检查拒绝。
-    """
-    prefix = "file://"
-    if uri.startswith(prefix):
-        path = uri[len(prefix) :]
-        return f"@{path}"
-    return f"@{uri}"
-
-
 class AcpServer:
-    """ACP 服务端：实现 SDK 需要的四个方法，其余由 SDK 回 -32601。"""
+    """ACP 服务端：实现 SDK 需要的十个方法，其余由 SDK 回 -32601。"""
 
     def __init__(self, host: HostServicePort, *, log: object | None = None) -> None:
         """保存 Host 与诊断日志；连接、会话、队列都在第一次方法调用时创建。"""
@@ -736,11 +706,17 @@ class AcpServer:
         self._begin_request()
         try:
             opened = await self._host.open_and_watch_thread(connection, session_id)
+            thread_mode = opened.get("thread_mode")
+            if thread_mode in {"build", "compose"}:
+                session.workflow = cast(str, thread_mode)
             if replay:
                 messages = opened.get("messages")
                 if isinstance(messages, Sequence) and not isinstance(messages, str):
                     for update in replay_updates(session_id, messages, PathLocator(self._host.resolve_display_path)):
                         await self._send(session_id, update)
+                plan_update = replay_plan_update(opened)
+                if plan_update is not None:
+                    await self._send(session_id, plan_update)
         except BaseException as exc:
             # 失败时把占位、订阅、在途计数全部收干净，否则该会话永远 busy。
             if created:
@@ -837,14 +813,15 @@ class AcpServer:
         session.cancel_requested = False
         self._begin_request()
         try:
-            text, model_message = await self._prepare_prompt(prompt)
+            text, pieces = await self._prepare_prompt_parts(prompt)
         except BaseException:
             session.busy = False
             self._finish_request()
             raise
         builtin = parse_builtin(text, forms=self._forms)
         goal_follow: GoalProposalRunInput | GoalContinuationRunInput | None = None
-        goal_command: dict[str, object] | None = None
+        plan_follow: _PlanFollow | None = None
+        command_meta_payload: dict[str, object] | None = None
         preset_run_id: str | None = None
         if builtin is not None:
             try:
@@ -866,10 +843,14 @@ class AcpServer:
                 self._finish_request()
                 self._log_request("session/prompt", started)
                 return handled
-            if isinstance(handled, _GoalResume):
-                preset_run_id = handled.run_id
-            goal_follow = handled.run_input
-            goal_command = handled.command
+            if isinstance(handled, _PlanFollow):
+                plan_follow = handled
+                command_meta_payload = handled.command
+            else:
+                if isinstance(handled, _GoalResume):
+                    preset_run_id = handled.run_id
+                goal_follow = handled.run_input
+                command_meta_payload = handled.command
         run_id = preset_run_id or str(uuid.uuid4())
         # 续跑可能再接一轮。结束时每一轮都要摘掉，不能只摘最后一轮的编号。
         tracked_runs = [run_id]
@@ -879,11 +860,16 @@ class AcpServer:
         try:
             # `/goal` 即使用户停在 Compose，也按 Build 跑确认；其余沿用会话工作模式。
             workflow: InteractionMode = "build" if goal_follow is not None or session.workflow != "compose" else "compose"
-            run_input = goal_follow if goal_follow is not None else UserRunInput(
-                text,
-                requested_skill=self._commands.match(text),
-                model_message=None if model_message == text else model_message,
-            )
+            if goal_follow is not None:
+                run_input: UserRunInput | GoalProposalRunInput | GoalContinuationRunInput = goal_follow
+            else:
+                user_text = plan_follow.prompt_text if plan_follow is not None else text
+                model_message = join_model_message(pieces, user_text) if pieces else None
+                run_input = UserRunInput(
+                    user_text,
+                    requested_skill=self._commands.match(user_text),
+                    model_message=model_message,
+                )
             outcome = await self._await_host_run(
                 connection,
                 session,
@@ -927,8 +913,8 @@ class AcpServer:
             self._finish_request()
         self._log_request("session/prompt", started)
         response = self._prompt_response(outcome, session)
-        if goal_command is not None and self._ext.commands:
-            merged = merge_harness_meta(response.field_meta, command_meta(goal_command))
+        if command_meta_payload is not None and self._ext.commands:
+            merged = merge_harness_meta(response.field_meta, command_meta(command_meta_payload))
             response = response.model_copy(update={"field_meta": merged})
         return response
 
@@ -1524,8 +1510,8 @@ class AcpServer:
             workflow=session.workflow,
         )
 
-    async def _prepare_prompt(self, prompt: Sequence[object]) -> tuple[str, str]:
-        """把内容块收成（记录原文, 给模型的正文）。
+    async def _prepare_prompt_parts(self, prompt: Sequence[object]) -> tuple[str, list[str]]:
+        """把内容块收成（记录原文, 附加上下文块列表）。
 
         记录里只有用户文本和 `@路径`。授权根内的文件内容只出现在模型正文前面。
         图片、音频和二进制嵌入资源仍然拒绝。
@@ -1558,7 +1544,7 @@ class AcpServer:
                 "EMPTY_PROMPT",
                 {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
             )
-        return text, join_model_message(pieces, text)
+        return text, pieces
 
     async def _inline_link(self, uri: str, budget: InlineBudget) -> tuple[str, str | None]:
         """根内文件读入内联块；其它链接保持 `@uri`，不读盘。"""
@@ -1682,8 +1668,8 @@ class AcpServer:
         connection: ProtocolConnection,
         session: _Session,
         call: Any,
-    ) -> PromptResponse | _GoalFollow | _GoalResume:
-        """执行一条内置命令。创建目标或恢复续跑时返回后续 Run，其余直接回复。"""
+    ) -> PromptResponse | _GoalFollow | _GoalResume | _PlanFollow:
+        """执行一条内置命令。创建目标、恢复续跑或带目标的 `/plan` 交给后续 Run，其余直接回复。"""
         checked = validate_builtin(call)
         session_id = session.session_id
         if call.name == "compact":
@@ -1706,17 +1692,25 @@ class AcpServer:
                 ephemeral=True,
             )
         if call.name == "undo":
-            mode = checked if isinstance(checked, str) else "both"
-            target = undo_target(await self._host.list_turns(connection, session_id))
+            assert isinstance(checked, UndoCall)
+            turns = await self._host.list_turns(connection, session_id)
+            if checked.list_only:
+                return await self._command_reply(
+                    session_id,
+                    undo_list_text(turns),
+                    {"name": "undo", "action": "list"},
+                )
+            target = undo_target(turns, turn_number=checked.turn_number)
             result = await self._host.undo_thread(
-                connection, session_id, str(target["turn_id"]), mode
+                connection, session_id, str(target["turn_id"]), checked.mode
             )
             files = result.get("restored_files_count")
             turn = target.get("turn_index")
+            turn_num = turn if isinstance(turn, int) else (checked.turn_number or 0)
             return await self._command_reply(
                 session_id,
                 UNDO_TEXT.format(
-                    turn=turn if isinstance(turn, int) else 0,
+                    turn=turn_num,
                     files=files if isinstance(files, int) else 0,
                 ),
                 {"name": "undo", "historyChanged": True},
@@ -1746,9 +1740,38 @@ class AcpServer:
         if call.name == "abandon":
             await self._host.compose_abandon(connection, session_id, call.args or None)
             return await self._command_reply(session_id, ABANDON_TEXT, {"name": "abandon"})
+        if call.name == "plan":
+            return await self._run_plan(session, call.args)
+        if call.name == "plan-view":
+            opened = await self._host.open_thread(session_id, assume_idle=False)
+            return await self._command_reply(
+                session_id, plan_view_text(opened), {"name": "plan-view"}
+            )
         if call.name == "goal" and isinstance(checked, GoalVerb):
             return await self._run_goal(connection, session_id, checked)
         raise RpcError(-32602, "INVALID_COMMAND_ARGUMENTS")
+
+    async def _run_plan(self, session: _Session, args: str) -> PromptResponse | _PlanFollow:
+        """`/plan`：需 `elicitation.form`；无参切模式并推通知，带正文则在 plan 模式启动一轮 Run。"""
+        session_id = session.session_id
+        if not self._forms:
+            return await self._command_reply(
+                session_id, PLAN_REQUIRES_FORMS_TEXT, {"name": "plan"}
+            )
+        previous_mode = session.approval_mode
+        if previous_mode != "plan":
+            session.mode_before_plan = previous_mode
+            session.approval_mode = "plan"
+            await self._send(
+                session_id,
+                CurrentModeUpdate(
+                    session_update="current_mode_update", current_mode_id="plan"
+                ),
+            )
+        if not args:
+            reply = PLAN_ALREADY_TEXT if previous_mode == "plan" else PLAN_SWITCHED_TEXT
+            return await self._command_reply(session_id, reply, {"name": "plan"})
+        return _PlanFollow(prompt_text=args, command={"name": "plan"})
 
     async def _run_goal(
         self,
@@ -2134,14 +2157,6 @@ def _pair_dict(entries: object) -> dict[str, str]:
     return result
 
 
-def _report_ignored(name: str, values: Sequence[object] | None) -> None:
-    """在 stderr 记一行「忽略了几个」，绝不回显内容（可能含命令、环境变量与密钥）。"""
-    if not values:
-        return
-    sys.stderr.write(f"harness-agent acp: ignoring {len(values)} {name}\n")
-    sys.stderr.flush()
-
-
 def _fit_update(update: Any) -> Any:
     """超过单帧上限时依次丢弃 rawInput、rawOutput，最后截 content。
 
@@ -2189,6 +2204,5 @@ __all__ = [
     "MAX_PROMPT_SUMMARY_CHARS",
     "PROTOCOL_VERSION",
     "AcpServer",
-    "prompt_text",
     "to_request_error",
 ]
