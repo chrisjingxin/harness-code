@@ -47,6 +47,12 @@ export type ProjectFileContent = {
   freshness: "live" | "cached"
 }
 
+export type ProjectFileTargetLine = {
+  readonly line: number
+  readonly endLine?: number
+  readonly seq: number
+}
+
 export type ProjectFileView =
   | { status: "loading"; path: string }
   | { status: "ready"; file: ProjectFileContent; refreshError?: string }

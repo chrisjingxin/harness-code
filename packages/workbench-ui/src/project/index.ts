@@ -4,6 +4,6 @@ export { ProjectFilePanel, ProjectFileTab } from "./file-view.js"
 export type { ProjectFilePanelProps, ProjectFileTabProps } from "./file-view.js"
 export type {
   ProjectScope, ProjectAvailability, ProjectActionAvailability, ProjectTreeRow, ProjectTreeView,
-  ProjectFileContent, ProjectFileView, ProjectChangedFile, ProjectChangesView, ProjectGates,
+  ProjectFileContent, ProjectFileTargetLine, ProjectFileView, ProjectChangedFile, ProjectChangesView, ProjectGates,
   ProjectPersonalView, ProjectActions, ProjectDockProps, ProjectGitCommitItem,
 } from "./types.js"

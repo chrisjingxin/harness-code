@@ -41,8 +41,5 @@
     "typescript": "6.0.3",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1"
-  },
-  "overrides": {
-    "vite": "8.3.4"
   }
 }

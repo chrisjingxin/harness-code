@@ -932,7 +932,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         targetConvScope.conversationId,
         request,
       ),
-    onOpenFile: (targetConvScope, targetProject, relativePath, destination) => {
+    onOpenFile: (targetConvScope, targetProject, relativePath, destination, lineRange) => {
       const mode = destination === "preview" ? "preview" : "central"
       localDir.openFileTab(
         {
@@ -945,6 +945,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         relativePath,
         mode,
         "code",
+        lineRange,
       )
       if (mode === "preview") onOpenRightPanel?.()
     },
@@ -961,6 +962,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         tabs: central.centralTabs,
         activeCentral: central.activeCentral,
         mode: central.mode,
+        targetLocation: central.targetLocation,
         files: central.files,
         changes: central.changes,
         refreshGate: central.refreshGate,

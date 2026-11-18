@@ -50,11 +50,19 @@ type TreeState = {
   readonly error: string | null
 }
 
+type SessionTargetLocation = {
+  readonly path: string
+  readonly line: number
+  readonly endLine?: number
+  readonly seq: number
+}
+
 type SessionWorkspaceRuntime = {
   readonly loaded: boolean
   readonly directory: DirectoryState
   readonly personal: ProjectPersonal
   readonly centralMode: "code" | "diff"
+  readonly targetLocation: SessionTargetLocation | null
   readonly positions: Readonly<Record<string, { area: ScrollArea; path: string; top: number; left: number }>>
   readonly tree: TreeState
   readonly files: Readonly<Record<string, ProjectFileView>>
@@ -85,6 +93,7 @@ const DEFAULT_RUNTIME: SessionWorkspaceRuntime = {
   directory: { status: "idle", boundPath: null, isGitRepository: false, error: null },
   personal: DEFAULT_PROJECT_PERSONAL,
   centralMode: "code",
+  targetLocation: null,
   positions: {},
   tree: { status: "idle", entriesByDir: {}, loadingDirs: [], truncatedDirs: [], error: null },
   files: {},
@@ -204,6 +213,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   const fileSeqRef = useRef<Record<string, number>>({})
   const dirSeqRef = useRef<Record<string, number>>({})
   const changesSeqRef = useRef<Record<string, number>>({})
+  const targetSeqRef = useRef(0)
 
   const mutateRuntime = useCallback((
     targetScope: ProjectNavigationScope,
@@ -631,9 +641,19 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     path: string,
     destination: "preview" | "central",
     mode: "code" | "diff" = "code",
+    lineRange?: { readonly line: number; readonly endLine?: number },
   ) => {
     const name = basenameOf(path)
+    const nextTarget: SessionTargetLocation | undefined = lineRange
+      ? {
+          path,
+          line: lineRange.line,
+          ...(lineRange.endLine !== undefined ? { endLine: lineRange.endLine } : {}),
+          seq: ++targetSeqRef.current,
+        }
+      : undefined
     mutateRuntime(targetScope, conversationId, prev => {
+      const targetLocation = nextTarget ?? (prev.targetLocation?.path === path ? null : prev.targetLocation)
       if (destination === "central") {
         const exists = prev.personal.centralPaths.includes(path)
         const nextCentralPaths = exists
@@ -642,6 +662,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
         return {
           ...prev,
           centralMode: mode,
+          targetLocation,
           personal: {
             ...prev.personal,
             view: { ...prev.personal.view, selectedPath: path },
@@ -658,6 +679,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
         : [...existing.slice(-(MAX_DOCK_TABS - 1)), { path, name }]
       return {
         ...prev,
+        targetLocation,
         personal: {
           ...prev.personal,
           view: {
@@ -1025,6 +1047,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
       centralTabs: runtime.personal.centralPaths.map(path => ({ path, name: basenameOf(path) })),
       activeCentral: runtime.personal.activeCentral,
       mode: runtime.centralMode,
+      targetLocation: runtime.targetLocation,
       files: runtime.files,
       changes: runtime.changes,
       positions: runtime.positions,

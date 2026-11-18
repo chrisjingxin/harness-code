@@ -24,14 +24,14 @@ export type { FileDiffLineKind, FileDiffLine, FileDiffHunk, ParsedFileDiff, File
 export { ProjectDock, ProjectFileTab, ProjectFilePanel } from "./project/index.js"
 export type {
   ProjectFilePanelProps, ProjectFileTabProps, ProjectScope, ProjectAvailability, ProjectActionAvailability,
-  ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileView, ProjectChangedFile, ProjectChangesView,
+  ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileTargetLine, ProjectFileView, ProjectChangedFile, ProjectChangesView,
   ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps, ProjectGitCommitItem,
 } from "./project/index.js"
 export { ConversationView, ConversationToolBlocks } from "./conversation/index.js"
 export type {
   ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft,
   ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,
-  ConversationInteractionAnswer, ConversationInteractionView,
+  ConversationFileLineRange, ConversationInteractionAnswer, ConversationInteractionView,
   ConversationMentionOrigin, ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
   ConversationReferenceView, ConversationScope, ConversationSendResult, ConversationCollaborationCandidate, ConversationCollaborationCandidateResult,
   ConversationTimelineActivity,

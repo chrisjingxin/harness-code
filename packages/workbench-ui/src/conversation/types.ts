@@ -267,6 +267,11 @@ export type ConversationSendResult =
   | { readonly status: "accepted" }
   | { readonly status: "rejected" | "unknown"; readonly message: string }
 
+export type ConversationFileLineRange = {
+  readonly line: number
+  readonly endLine?: number
+}
+
 /**
  * 动作均为用户意图。调用方负责身份有效性、草稿条件清空及结果未知后的禁用/确认；
  * 组件卸载后装配方仍须保留在途和未知结果，不能把一次回调当成真实 Agent 已执行。
@@ -286,7 +291,7 @@ export interface ConversationActions {
   readonly onRequestCollaborationCandidates?: (scope: ConversationScope, target: ConversationProjectTarget, query: string) => Promise<ConversationCollaborationCandidateResult>
   /** 只上报选中的协作对象和发起位置，草稿由装配方另行确认和更新。 */
   readonly onSelectCollaborationCandidate?: (scope: ConversationScope, target: ConversationProjectTarget, candidate: ConversationCollaborationCandidate, origin: ConversationMentionOrigin) => void
-  readonly onOpenFile?: (scope: ConversationScope, target: ConversationProjectTarget, relativePath: string, destination: "preview" | "central") => void
+  readonly onOpenFile?: (scope: ConversationScope, target: ConversationProjectTarget, relativePath: string, destination: "preview" | "central", lineRange?: ConversationFileLineRange) => void
   readonly onReferenceAction?: (scope: ConversationScope, id: string, action: "open" | "refresh" | "remove") => void
   readonly rendering?: RenderingActions
 }

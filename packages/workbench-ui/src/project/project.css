@@ -163,6 +163,7 @@
 .project-file-preview-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .project-file-preview-tools .wb-icon-button { width: 26px; height: 26px; }
 .project-file-code-view {
+  position: relative;
   flex: 1; min-height: 0; display: flex; overflow: auto;
   background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
 }
@@ -176,13 +177,29 @@
 .project-file-code-meta .project-file-code-status, .project-file-code-error .project-file-code-status { margin: 0; }
 .project-file-code-error .project-file-code-status { color: var(--danger-fg); }
 .project-line-numbers {
-  flex: 0 0 auto; padding: 12px 9px;
+  flex: 0 0 auto; padding: 12px 0;
   box-shadow: inset -1px 0 0 var(--line-soft);
   color: var(--subtle); background: var(--surface);
-  font: 12.5px/1.65 var(--font-mono); text-align: right; user-select: none; white-space: pre;
+  font: 12.5px/1.65 var(--font-mono); text-align: right; user-select: none;
   font-variant-numeric: tabular-nums;
 }
-.project-file-code-pre { margin: 0; padding: 12px 14px; color: var(--text); font: 12.5px/1.65 var(--font-mono); white-space: pre; }
+.project-line-number { display: block; padding: 0 9px; }
+.project-line-number.is-target {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.project-file-code-pre { flex: 1 0 auto; margin: 0; padding: 12px 14px; color: var(--text); font: 12.5px/1.65 var(--font-mono); white-space: pre; }
+.project-file-code-pre.has-target-line {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    color-mix(in srgb, var(--accent) 12%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-position: 0 calc(12px + var(--hl-offset, 0) * 1lh);
+  background-size: 100% calc(var(--hl-span, 1) * 1lh);
+}
 .project-file-code-pre code { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; word-break: normal; }
 
 /* 中央分屏文件页签（对齐原型稿 .fp-tab-wrap） */

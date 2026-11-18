@@ -6,8 +6,8 @@
   "scripts": {
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "electron-vite dev",
-    "preview": "electron-vite preview --skipBuild",
+    "dev": "node -e \"import('electron')\" && electron-vite dev",
+    "preview": "node -e \"import('electron')\" && electron-vite preview --skipBuild",
     "dev:ui-preview": "node ../../scripts/workbench/ui-preview.mjs hc205 dev",
     "build:ui-preview": "node ../../scripts/workbench/ui-preview.mjs hc205 build",
     "preview:ui": "node ../../scripts/workbench/ui-preview.mjs hc205 preview",
@@ -41,8 +41,8 @@
     "@types/react-dom": "19.3.0",
     "electron": "42.3.0",
     "electron-vite": "4.0.0",
-    "vite": "8.3.4",
-    "@vitejs/plugin-react": "6.0.2"
+    "vite": "7.3.7",
+    "@vitejs/plugin-react": "5.1.4"
   },
   "main": "dist/main/index.js"
 }

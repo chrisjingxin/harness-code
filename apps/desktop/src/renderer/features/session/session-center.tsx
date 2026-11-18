@@ -14,6 +14,7 @@ import type {
   ProjectActionAvailability,
   ProjectChangesView,
   ProjectDockProps,
+  ProjectFileTargetLine,
   ProjectFileView,
   ProjectScope,
   RenderingActions,
@@ -37,6 +38,7 @@ export type SessionCentralFilesState = {
   readonly tabs: readonly CentralFileTabItem[]
   readonly activeCentral: string | null
   readonly mode?: "code" | "diff"
+  readonly targetLocation?: { readonly path: string; readonly line: number; readonly endLine?: number; readonly seq: number } | null
   readonly files: Readonly<Record<string, ProjectFileView>>
   readonly changes?: ProjectChangesView
   readonly refreshGate: ProjectActionAvailability
@@ -98,15 +100,29 @@ function CentralFilePanelWithScroll({
   const active = state.activeCentral === tab.path
   const encoded = encodeURIComponent(tab.path)
   const saved = state.positions[`central\0${tab.path}`]
+  const rawLoc = state.targetLocation
+  const targetLine: ProjectFileTargetLine | null = rawLoc && rawLoc.path === tab.path
+    ? { line: rawLoc.line, endLine: rawLoc.endLine, seq: rawLoc.seq }
+    : null
+  const lastAppliedSeqRef = useRef<number | null>(null)
+  const scrollLockTopRef = useRef<number | null>(null)
 
   useLayoutEffect(() => {
-    if (!active || !wrapRef.current || !saved) return
+    if (!active || !wrapRef.current) return
     const scrollBox = wrapRef.current.querySelector<HTMLElement>(".project-file-code-view, .project-file-markdown-view")
-    if (scrollBox) {
+    if (!scrollBox) return
+    if (scrollLockTopRef.current !== null) {
+      scrollBox.scrollTop = scrollLockTopRef.current
+      scrollBox.scrollLeft = 0
+      scrollLockTopRef.current = null
+      return
+    }
+    if (targetLine && lastAppliedSeqRef.current !== targetLine.seq) return
+    if (saved) {
       scrollBox.scrollTop = saved.top
       scrollBox.scrollLeft = saved.left
     }
-  }, [active, saved, preview])
+  }, [active, saved, preview, targetLine])
 
   useEffect(() => {
     const root = wrapRef.current
@@ -137,6 +153,12 @@ function CentralFilePanelWithScroll({
         panelId={`session-central-panel-${encoded}`}
         rendering={state.rendering}
         preview={preview}
+        targetLine={targetLine}
+        onTargetLineApplied={top => {
+          if (targetLine) lastAppliedSeqRef.current = targetLine.seq
+          scrollLockTopRef.current = top
+          state.onSaveScroll("central", tab.path, top, 0)
+        }}
       />
     </div>
   )
@@ -225,6 +247,19 @@ export function SessionCentralFilePanels({
 }): ReactElement | null {
   const paneRef = useRef<HTMLElement>(null)
   const [mdPreviewByPath, setMdPreviewByPath] = useState<Record<string, boolean>>({})
+  const [syncedTargetSeq, setSyncedTargetSeq] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    const loc = state.targetLocation
+    if (!loc || loc.seq === syncedTargetSeq) return
+    setSyncedTargetSeq(loc.seq)
+    const targetView = state.files[loc.path]
+    const targetIsMarkdown = /\.(?:md|mdx|markdown)$/i.test(loc.path)
+      || (targetView?.status === "ready" && targetView.file.language === "markdown")
+    if (targetIsMarkdown) {
+      setMdPreviewByPath(prev => (prev[loc.path] === false ? prev : { ...prev, [loc.path]: false }))
+    }
+  }, [state.targetLocation, syncedTargetSeq, state.files])
 
   useEffect(() => {
     if (!state.activeCentral) return

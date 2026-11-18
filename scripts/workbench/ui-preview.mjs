@@ -1,6 +1,7 @@
 /** 独立预览编排：先构建公开包，再用同一桌面安全配置启动专用产物。 */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { spawn, spawnSync } from "node:child_process"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -39,7 +40,11 @@ const cli = join(root, "node_modules/electron-vite/bin/electron-vite.js")
 const config = join(desktop, configs[previewId])
 const args = operation === "dev" ? [] : [operation]
 args.push("--config", config)
-if (operation !== "build") args.push("--entry", output)
+if (operation !== "build") {
+  // Electron 40+ 移除了 postinstall，electron-vite@4 只读 path.txt，需先触发按需下载。
+  createRequire(join(desktop, "package.json"))("electron")
+  args.push("--entry", output)
+}
 const env = { ...process.env }
 // 避免继承生产服务地址、任意入口和禁用 sandbox 的调试设置。
 for (const key of ["WORKBENCH_SERVICE_ORIGIN", "WORKBENCH_UI_PREVIEW_DATA", "ELECTRON_ENTRY", "ELECTRON_RENDERER_URL", "ELECTRON_CLI_ARGS", "ELECTRON_EXEC_PATH", "ELECTRON_RUN_AS_NODE", "NO_SANDBOX"]) delete env[key]

@@ -1,33 +1,9 @@
 /** 桌面三进程构建边界；preload 打包成 sandbox 可加载的单个 CommonJS 文件。 */
-import { defineConfig } from "electron-vite"
+import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import react from "@vitejs/plugin-react"
-import { builtinModules } from "node:module"
 import { resolve } from "node:path"
 
 type PreviewTarget = "hc205" | "hc206" | "hc207" | "hc217" | "hc218"
-
-const nodeAndElectronExternal = [
-  "electron",
-  /^electron\/.+/,
-  ...builtinModules.flatMap(name => [name, `node:${name}`]),
-]
-
-const mainDeps = [
-  "@workbench/acp-runtime",
-  "@workbench/ui",
-  "@tabler/icons-react",
-  "react",
-  "react-dom",
-  "ajv",
-  "ajv-formats",
-  "tough-cookie",
-]
-
-const mainExternal = [
-  ...nodeAndElectronExternal,
-  ...mainDeps,
-  ...mainDeps.map(dep => new RegExp(`^${dep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/.+`)),
-]
 
 /** 预览身份只由各自的固定构建配置选择；正式构建没有运行时入口开关。 */
 export function desktopConfig(preview: PreviewTarget | null = null) {
@@ -39,18 +15,13 @@ export function desktopConfig(preview: PreviewTarget | null = null) {
     // 将公开 schema 源编入 main，避免外置 JSON 丢失 Node 所需的导入属性。
     main: {
       define: { __WORKBENCH_UI_PREVIEW__: JSON.stringify(preview) },
-      build: {
-        outDir: profile ? resolve(profile.output, "main") : "dist/main",
-        rollupOptions: { external: mainExternal },
-      },
+      plugins: [externalizeDepsPlugin({ exclude: ["@workbench/contracts"] })],
+      build: { outDir: profile ? resolve(profile.output, "main") : "dist/main" },
     },
     preload: {
       build: {
         outDir: profile ? resolve(profile.output, "preload") : "dist/preload",
-        rollupOptions: {
-          external: nodeAndElectronExternal,
-          output: { format: "cjs", entryFileNames: "index.cjs" },
-        },
+        rollupOptions: { output: { format: "cjs", entryFileNames: "index.cjs" } },
       },
     },
     renderer: {
@@ -68,7 +39,7 @@ export function desktopConfig(preview: PreviewTarget | null = null) {
       server: { host: "127.0.0.1" },
       build: {
         outDir: profile ? resolve(profile.output, "renderer") : "dist/renderer",
-        rollupOptions: { input: resolve(profile ? profile.root : "src/renderer", "index.html") },
+        ...(profile ? { rollupOptions: { input: resolve(profile.root, "index.html") } } : {}),
       },
     },
   })

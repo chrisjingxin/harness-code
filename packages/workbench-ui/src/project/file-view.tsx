@@ -3,13 +3,13 @@
  * 页面装配方决定文件身份、缓存和权限；这里不读取磁盘或发起网络请求。
  */
 import { IconExternalLink, IconRefresh, IconX } from "@tabler/icons-react"
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
 import { HighlightedCode } from "../rendering/highlighted-code.js"
 import { Markdown } from "../rendering/markdown.js"
 import type { RenderingActions } from "../rendering/types.js"
-import type { ProjectActionAvailability, ProjectFileView, ProjectScope } from "./types.js"
+import type { ProjectActionAvailability, ProjectFileTargetLine, ProjectFileView, ProjectScope } from "./types.js"
 
 /** 中央文件页签由总页签控制选中、排列和键盘；关闭是独立按钮。 */
 export type ProjectFileTabProps = {
@@ -50,13 +50,16 @@ export type ProjectFilePanelProps = {
   /** 外部分屏顶栏接管 Markdown 预览开关时传入，未传则保留内部切换状态。 */
   preview?: boolean
   onPreviewChange?(preview: boolean): void
+  /** 可选源码定位与高亮区间；每次 seq 变化都会重新定位并切回源码视图。 */
+  targetLine?: ProjectFileTargetLine | null
+  onTargetLineApplied?(scrollTop: number): void
 }
 
-export function ProjectFilePanel({ scope, path, view, refresh, onRefresh, active, tabId, panelId, rendering, preview, onPreviewChange }: ProjectFilePanelProps): ReactElement {
+export function ProjectFilePanel({ scope, path, view, refresh, onRefresh, active, tabId, panelId, rendering, preview, onPreviewChange, targetLine, onTargetLineApplied }: ProjectFilePanelProps): ReactElement {
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} className="project-workbench-file-panel"
     hidden={!active} inert={!active}>
     <ProjectFileReader scope={scope} path={path} view={view} refresh={refresh} onRefresh={onRefresh} rendering={rendering}
-      preview={preview} onPreviewChange={onPreviewChange} />
+      preview={preview} onPreviewChange={onPreviewChange} active={active} targetLine={targetLine} onTargetLineApplied={onTargetLineApplied} />
   </section>
 }
 
@@ -71,11 +74,20 @@ type ProjectFileReaderProps = {
   rendering?: RenderingActions
   preview?: boolean
   onPreviewChange?(preview: boolean): void
+  active?: boolean
+  targetLine?: ProjectFileTargetLine | null
+  onTargetLineApplied?(scrollTop: number): void
 }
 
 /** 中央与右侧的文件阅读器分别保留源码／预览选择，不改变文件读取与授权。 */
 export function ProjectFileReader(props: ProjectFileReaderProps): ReactElement {
   const [internalPreview, setInternalPreview] = useState(true)
+  const lastTargetSeq = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (!props.targetLine || props.targetLine.seq === lastTargetSeq.current) return
+    lastTargetSeq.current = props.targetLine.seq
+    if (props.preview === undefined) setInternalPreview(false)
+  }, [props.targetLine, props.preview])
   const preview = props.preview ?? internalPreview
   const handlePreviewChange = (next: boolean) => {
     setInternalPreview(next)
@@ -85,7 +97,8 @@ export function ProjectFileReader(props: ProjectFileReaderProps): ReactElement {
   const isMarkdown = view?.status === "ready" && (view.file.language === "markdown" || /\.(?:md|mdx|markdown)$/i.test(props.path))
   return <>
     <ProjectFileHeader {...props} markdown={isMarkdown} preview={preview} onPreviewChange={handlePreviewChange} />
-    <ProjectFileContentView path={props.path} view={view} preview={isMarkdown && preview} rendering={props.rendering} />
+    <ProjectFileContentView path={props.path} view={view} preview={isMarkdown && preview} rendering={props.rendering}
+      active={props.active ?? true} targetLine={props.targetLine} onTargetLineApplied={props.onTargetLineApplied} />
   </>
 }
 
@@ -137,16 +150,53 @@ function matchingView(path: string, view?: ProjectFileView): ProjectFileView | u
 }
 
 /** 行号与源码共享滚动容器；Markdown 预览沿用会话的安全渲染器。 */
-function ProjectFileContentView({ path, view: rawView, preview, rendering }: { path: string; view?: ProjectFileView; preview: boolean; rendering?: RenderingActions }): ReactElement {
+function ProjectFileContentView({ path, view: rawView, preview, rendering, active, targetLine, onTargetLineApplied }: {
+  path: string
+  view?: ProjectFileView
+  preview: boolean
+  rendering?: RenderingActions
+  active: boolean
+  targetLine?: ProjectFileTargetLine | null
+  onTargetLineApplied?(scrollTop: number): void
+}): ReactElement {
   const view = matchingView(path, rawView)
+  const codeViewRef = useRef<HTMLDivElement>(null)
+  const appliedSeqRef = useRef<number | null>(null)
+  const readyFile = view?.status === "ready" ? view.file : undefined
+  const lineCount = readyFile ? Math.max(1, readyFile.lineCount) : 0
+  const hlStart = readyFile && targetLine ? Math.max(1, Math.min(lineCount, targetLine.line)) : null
+  const hlEnd = readyFile && targetLine && hlStart !== null ? Math.max(hlStart, Math.min(lineCount, targetLine.endLine ?? targetLine.line)) : null
+
+  useLayoutEffect(() => {
+    if (!active || !readyFile || preview || !targetLine || hlStart === null || appliedSeqRef.current === targetLine.seq) return
+    const container = codeViewRef.current
+    if (!container) return
+    const lineEl = container.querySelector<HTMLElement>(`[data-line="${hlStart}"]`)
+    if (!lineEl) return
+    const targetTop = Math.max(0, lineEl.offsetTop - Math.max(48, Math.floor((container.clientHeight - lineEl.offsetHeight) / 3)))
+    container.scrollTop = targetTop
+    container.scrollLeft = 0
+    appliedSeqRef.current = targetLine.seq
+    onTargetLineApplied?.(targetTop)
+  }, [active, readyFile, preview, targetLine, hlStart, onTargetLineApplied])
+
   if (!view || view.status === "loading") return <div className="project-file-code-view"><p className="project-file-code-status">加载中…</p></div>
   if (view.status === "ready") {
     const { file } = view
     if (preview) return <div className="project-file-markdown-view"><Markdown text={file.content} actions={rendering} /></div>
-    const numbers = Array.from({ length: file.lineCount }, (_, index) => String(index + 1)).join("\n")
-    return <div className="project-file-code-view">
-      <div className="project-line-numbers" aria-hidden="true">{numbers}</div>
-      <pre className="project-file-code-pre"><code data-language={file.language ?? undefined}>
+    const hasHighlight = hlStart !== null && hlEnd !== null
+    return <div ref={codeViewRef} className="project-file-code-view">
+      <div className="project-line-numbers" aria-hidden="true">
+        {Array.from({ length: file.lineCount }, (_, index) => {
+          const ln = index + 1
+          const isTarget = hasHighlight && ln >= hlStart && ln <= hlEnd
+          return <span key={ln} data-line={ln} className={isTarget ? "project-line-number is-target" : "project-line-number"}>{ln}</span>
+        })}
+      </div>
+      <pre
+        className={hasHighlight ? "project-file-code-pre has-target-line" : "project-file-code-pre"}
+        style={hasHighlight ? { ["--hl-offset" as string]: String(hlStart - 1), ["--hl-span" as string]: String(hlEnd - hlStart + 1) } : undefined}
+      ><code data-language={file.language ?? undefined}>
         <HighlightedCode code={file.content} language={file.language} />
       </code></pre>
     </div>

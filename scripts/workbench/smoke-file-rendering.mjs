@@ -18,11 +18,17 @@ assert.equal(fileIconFor("config.json").type, "json")
 
 assert.deepEqual(resolveSessionFileReference("README.md", "/work/project"), { path: "README.md", exact: false })
 assert.deepEqual(resolveSessionFileReference("src/app.ts", "/work/project"), { path: "src/app.ts", exact: true })
-assert.deepEqual(resolveSessionFileReference("/work/project/src/app.ts:20", "/work/project"), { path: "src/app.ts", exact: true })
-assert.deepEqual(resolveSessionFileReference("file:///work/project/a%20b.md#L5", "/work/project"), { path: "a b.md", exact: true })
+assert.deepEqual(resolveSessionFileReference("/work/project/src/app.ts:20", "/work/project"), { path: "src/app.ts", exact: true, line: 20 })
+assert.deepEqual(resolveSessionFileReference("file:///work/project/a%20b.md#L5", "/work/project"), { path: "a b.md", exact: true, line: 5 })
 assert.deepEqual(resolveSessionFileReference("C:\\Work\\Project\\src\\app.ts", "c:\\work\\project"), { path: "src/app.ts", exact: true })
+assert.deepEqual(resolveSessionFileReference("/README.md:34", "/Users/demo/Lumno"), { path: "README.md", exact: true, line: 34 })
+assert.deepEqual(resolveSessionFileReference("/src/index.ts:10-25", "/Users/demo/Lumno"), { path: "src/index.ts", exact: true, line: 10, endLine: 25 })
+assert.deepEqual(resolveSessionFileReference("README.md#L8-L12", "/Users/demo/Lumno"), { path: "README.md", exact: false, line: 8, endLine: 12 })
 for (const unsafe of ["../secret.ts", "%2e%2e/secret.ts", "/work/project-other/secret.ts", ".git/config", "file://other/work/project/a.ts", "javascript:alert.ts"]) {
   assert.equal(resolveSessionFileReference(unsafe, "/work/project"), null, unsafe)
+}
+for (const unsafe of ["/Users/other/README.md", "/etc/passwd", "file:///README.md"]) {
+  assert.equal(resolveSessionFileReference(unsafe, "/Users/demo/Lumno"), null, unsafe)
 }
 
 const message = renderToStaticMarkup(createElement(Markdown, { text: "`src/main.ts` 和 `const x = 1`" }))
@@ -58,6 +64,14 @@ assert.doesNotMatch(markdown, /<script>/)
 const source = panel("example.txt", null)
 assert.match(source, /project-file-code-pre/)
 assert.doesNotMatch(source, /Markdown 显示方式/)
+
+const targeted = renderToStaticMarkup(createElement(ProjectFilePanel, {
+  scope: {}, path: "README.md", view: { status: "ready", file: { path: "README.md", language: "markdown", content, sizeBytes: 60, lineCount: 5 } },
+  refresh: { enabled: true }, onRefresh() {}, active: true, tabId: "tab", panelId: "panel",
+  preview: false, targetLine: { line: 2, endLine: 3, seq: 1 },
+}))
+assert.match(targeted, /project-line-number is-target/)
+assert.match(targeted, /has-target-line/)
 
 const taskList = renderToStaticMarkup(createElement(Markdown, { text: "- [x] 校验请求号\n- [ ] 补充测试" }))
 assert.equal((taskList.match(/type="checkbox"/g) ?? []).length, 2)

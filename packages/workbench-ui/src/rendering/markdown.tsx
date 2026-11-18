@@ -231,11 +231,13 @@ function renderInlineToken(token: Token, key: string, fileReferences: boolean): 
   }
 }
 
+const FILE_LINE_SUFFIX_RE = /(?:#L\d+(?:-L?\d+)?|:\d+(?:-\d+|:\d+)?)$/i
+
 /** 只识别看起来像文件的本地引用；具体路径和授权由装配方及宿主再次校验。 */
 function isLocalFileReference(value: string, knownOnly: boolean): boolean {
   if (!value || /[\u0000-\u001f\u007f]/u.test(value) || value.startsWith("//")) return false
   if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^file:\/\//i.test(value) && !/^[a-z]:[\\/]/i.test(value)) return false
-  const path = value.replace(/(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?)$/i, "")
+  const path = value.replace(FILE_LINE_SUFFIX_RE, "")
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? ""
   return fileIconFor(name).type !== "default" || (!knownOnly && /\.[\p{L}\p{N}_-]{1,24}$/u.test(name))
 }
@@ -254,7 +256,8 @@ export function FileReference({ path, children, code = false, openFile: supplied
     return () => { active.current = false; sequence.current += 1 }
   }, [])
   useEffect(() => { sequence.current += 1; setChoices([]); setError(""); setPending(false) }, [path])
-  const icon = <FileTypeIcon name={path.replace(/(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?)$/i, "")} />
+  const lineSuffix = path.match(FILE_LINE_SUFFIX_RE)?.[0] ?? ""
+  const icon = <FileTypeIcon name={path.replace(FILE_LINE_SUFFIX_RE, "")} />
   if (!openFile) return code
     ? <code className="markdown-file-reference">{icon}{children}</code>
     : <span className="markdown-file-reference">{icon}{children}</span>
@@ -275,7 +278,7 @@ export function FileReference({ path, children, code = false, openFile: supplied
       onClick={() => { void open(path) }}>{icon}{children}</button>
     {choices.length ? <span className="markdown-file-options" role="group" aria-label="选择同名文件">
       <span>请选择文件：</span>{choices.map(choice => <button type="button" key={choice} disabled={pending}
-        onClick={() => { void open(choice, true) }}>{choice}</button>)}
+        onClick={() => { void open(lineSuffix && !FILE_LINE_SUFFIX_RE.test(choice) ? `${choice}${lineSuffix}` : choice, true) }}>{choice}</button>)}
     </span> : null}
     {error ? <span className="markdown-file-error" role="status">{error}</span> : null}
   </span>

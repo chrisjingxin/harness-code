@@ -9,6 +9,7 @@ export type {
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,
+  ConversationFileLineRange,
   ConversationInteractionAnswer,
   ConversationInteractionView,
   ConversationMentionOrigin,

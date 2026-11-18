@@ -97,7 +97,7 @@ export function LocalSessionPage({
         path = matches[0]!
       }
       if (!isCurrent()) return
-      onOpenFile(scope, target, path, "central")
+      onOpenFile(scope, target, path, "central", file.line !== undefined ? { line: file.line, endLine: file.endLine } : undefined)
     } } : {}),
   }
   const activeExecution = execution.getView?.(conversation.conversationId)
