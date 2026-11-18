@@ -27,6 +27,8 @@ export type SyncedTurnRange = {
 export type LocalExecutionView = {
   readonly activeTurnId: string | null
   readonly activeTurnAssistantMessageId?: string
+  /** 记录上一条正文之后是否出现过工具或审批；仅夹杂思考时不切分新正文段。 */
+  readonly activeTurnAssistantBreak?: boolean
   readonly entries: readonly LocalEntry[]
   readonly revision: number
   readonly permissionRetryRevision?: number
@@ -95,9 +97,17 @@ function splitToolTitle(
   rawTitle: string | undefined,
   locations: LocalExecutionTool["locations"],
   diffs: LocalExecutionTool["diffs"],
+  kind?: LocalExecutionTool["kind"],
 ): { readonly label: string; readonly summary?: string; readonly originalName?: string } {
   const trimmed = rawTitle?.trim()
   if (trimmed) {
+    if (kind === "execute") {
+      return {
+        label: "终端命令",
+        summary: trimmed,
+        originalName: trimmed,
+      }
+    }
     const match = /^([a-z][a-z0-9_:-]*)\s+(.+)$/i.exec(trimmed)
     if (match) {
       return {
@@ -146,6 +156,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       ...state,
       activeTurnId: update.turnId,
       activeTurnAssistantMessageId: undefined,
+      activeTurnAssistantBreak: undefined,
       settledPermissionAnchors: undefined,
       entries: [...state.entries, {
         kind: "message", id, role: "user", text: update.text, author: update.author, referenceIds: update.referenceIds, createdAtMs: Date.now(),
@@ -214,6 +225,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       : state.settledPermissionAnchors
     return {
       ...state,
+      activeTurnAssistantBreak: true,
       entries: baseEntries,
       permission: update.request,
       ...(settledPermissionAnchors ? { settledPermissionAnchors } : {}),
@@ -237,7 +249,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     }
     const status = update.tool.status
     const detail = mergeToolDetail(existing?.detail, mergedTool)
-    const header = splitToolTitle(mergedTool.title, mergedTool.locations, mergedTool.diffs)
+    const header = splitToolTitle(mergedTool.title, mergedTool.locations, mergedTool.diffs, mergedTool.kind)
     const item: Tool = {
       kind: "tool", id,
       label: header.label,
@@ -252,6 +264,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     const entries = existing ? settled.map(entry => entry.id === id ? item : entry) : [...settled, item]
     return {
       ...state,
+      activeTurnAssistantBreak: true,
       entries,
       toolSnapshots: { ...state.toolSnapshots, [id]: mergedTool },
       revision: state.revision + 1,
@@ -290,14 +303,34 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     if (canAppendToTail && last?.kind === "message") {
       entries = settled.map(entry => entry === last ? { ...last, text: last.text + update.text, streaming: true } : entry)
     } else {
-      const paused = finishStreamingAssistant(settled, entryPrefix)
-      const count = paused.filter(entry => entry.kind === "message" && entry.id.startsWith(assistantPrefix)).length
-      const segmentId = count === 0 ? assistantPrefix : `${assistantPrefix}:${count}`
-      entries = [...paused, { kind: "message", id: segmentId, role: "assistant", text: update.text, streaming: true } satisfies Message]
+      // 两段正文之间只出现过思考且 messageId 未变时，把新片段并回原正文并移至思考条目之后。
+      const reasoningPrefix = `${entryPrefix}:reasoning:`
+      let mergeIndex = -1
+      if (!messageIdChanged && !state.activeTurnAssistantBreak) {
+        let idx = settled.length - 1
+        while (idx >= 0 && settled[idx]!.kind === "reasoning" && settled[idx]!.id.startsWith(reasoningPrefix)) {
+          idx -= 1
+        }
+        const candidate = idx >= 0 ? settled[idx] : undefined
+        if (idx < settled.length - 1 && candidate?.kind === "message" && candidate.role === "assistant" && candidate.id.startsWith(assistantPrefix)) {
+          mergeIndex = idx
+        }
+      }
+      if (mergeIndex >= 0) {
+        const target = settled[mergeIndex] as Message
+        const merged: Message = { ...target, text: target.text + update.text, streaming: true }
+        entries = [...settled.slice(0, mergeIndex), ...settled.slice(mergeIndex + 1), merged]
+      } else {
+        const paused = finishStreamingAssistant(settled, entryPrefix)
+        const count = paused.filter(entry => entry.kind === "message" && entry.id.startsWith(assistantPrefix)).length
+        const segmentId = count === 0 ? assistantPrefix : `${assistantPrefix}:${count}`
+        entries = [...paused, { kind: "message", id: segmentId, role: "assistant", text: update.text, streaming: true } satisfies Message]
+      }
     }
     return {
       ...state,
       activeTurnAssistantMessageId: update.messageId ?? state.activeTurnAssistantMessageId,
+      activeTurnAssistantBreak: false,
       entries,
       revision: state.revision + 1,
     }
@@ -333,6 +366,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     ...state,
     activeTurnId: null,
     activeTurnAssistantMessageId: undefined,
+    activeTurnAssistantBreak: undefined,
     permission: null,
     entries,
     revision: state.revision + Number(entries.length !== state.entries.length || entries.some((entry, idx) => entry !== state.entries[idx])),

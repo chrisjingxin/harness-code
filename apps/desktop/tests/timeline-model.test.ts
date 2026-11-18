@@ -81,3 +81,38 @@ test("splitTurnProcess：单段过程不包外层；多轮思考与工具在正�
   assert.equal(answering.processSegments.length, 4)
   assert.equal(answering.finalEntry?.id, "final")
 })
+
+test("splitTurnProcess：末尾仅跟思考条目时不把助手最终回复吞入思考过程", () => {
+  const withTrailingThought = splitTurnProcess([
+    reasoning("r-1", false),
+    tool("t-1", "completed"),
+    message("final", false),
+    reasoning("r-2", false),
+  ])
+  assert.equal(withTrailingThought.finalEntry?.id, "final")
+  assert.equal(withTrailingThought.processSummary?.label, "思考 2 次 · 1 个操作")
+  assert.equal(withTrailingThought.processSummary?.running, false)
+  assert.equal(withTrailingThought.processSegments.length, 3)
+
+  const withActiveTrailingThought = splitTurnProcess(
+    [reasoning("r-1", false), tool("t-1", "completed"), message("final", false), reasoning("r-2", true)],
+    { active: true, label: "执行中" },
+  )
+  assert.equal(withActiveTrailingThought.finalEntry?.id, "final")
+  assert.equal(withActiveTrailingThought.processSummary?.running, true)
+
+  const singleTrailingThought = splitTurnProcess([message("final", false), reasoning("r-2", false)])
+  assert.equal(singleTrailingThought.finalEntry?.id, "final")
+  assert.equal(singleTrailingThought.processSummary, null)
+  assert.equal(singleTrailingThought.processSegments.length, 1)
+
+  const toolAfterMessage = splitTurnProcess([
+    reasoning("r-1", false),
+    message("mid", false),
+    tool("t-2", "completed"),
+    reasoning("r-2", false),
+  ])
+  assert.equal(toolAfterMessage.finalEntry, undefined)
+  assert.equal(toolAfterMessage.processSummary?.label, "思考 2 次 · 1 个操作")
+  assert.equal(toolAfterMessage.processSegments.length, 4)
+})

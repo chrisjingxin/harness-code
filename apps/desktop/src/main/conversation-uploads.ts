@@ -9,14 +9,26 @@ import type { CollaborationError, CollaborationResult, ConversationSyncRequest, 
 import { localExecutionKey, type LocalExecutionScope, type LocalExecutionUploadNotice } from "../local-execution-host.js"
 
 export const syncPayloadLimit = 32 * 1024
+const MAX_TOOL_SUMMARIES = 50
+const BATCH_PAYLOAD_BUDGET = 900 * 1024
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT"
 const canRetry = (error: CollaborationError) =>
   error.retryable || ["NETWORK_UNAVAILABLE", "SERVICE_UNAVAILABLE", "INVALID_SERVER_RESPONSE"].includes(error.code)
+
+export type FinalizedToolSummary = {
+  readonly label: string
+  readonly name?: string
+  readonly summary?: string
+  readonly status: "completed" | "failed"
+  readonly tone: "read" | "write" | "neutral"
+  readonly occurredAtMs: number
+}
 
 export type FinalizedTurn = {
   turnId: string
   userText: string
   referenceIds?: readonly string[]
+  tools?: readonly FinalizedToolSummary[]
   reply: string | undefined
   acceptedAtMs: number
   completedAtMs: number
@@ -52,6 +64,54 @@ function briefExcerpt(text: string): string {
   return text.slice(0, 800).replace(/\s+/g, " ").trim().slice(0, 240)
 }
 
+function fitJsonStringField(
+  value: string,
+  limitBytes: number,
+  render: (candidate: string | undefined) => string,
+): string | undefined {
+  if (!value) return undefined
+  if (Buffer.byteLength(render(value), "utf8") <= limitBytes) return value
+  const chars = [...value]
+  let low = 0
+  let high = chars.length
+  while (low < high) {
+    const mid = (low + high + 1) >> 1
+    const candidate = mid > 0 ? `${chars.slice(0, mid).join("")}…` : undefined
+    if (Buffer.byteLength(render(candidate), "utf8") <= limitBytes) low = mid
+    else high = mid - 1
+  }
+  return low > 0 ? `${chars.slice(0, low).join("")}…` : undefined
+}
+
+function buildToolSummaryPayload(tool: FinalizedToolSummary, maxBytes: number): string | null {
+  const status = tool.status === "failed" ? "failed" : "completed"
+  const tone = tool.tone === "read" || tool.tone === "write" ? tool.tone : "neutral"
+  const render = (label: string, name?: string, summary?: string) => JSON.stringify({
+    label,
+    ...(name ? { name } : {}),
+    ...(summary ? { summary } : {}),
+    status,
+    tone,
+  })
+  const rawLabel = tool.label || "Agent 工具"
+  const full = render(rawLabel, tool.name, tool.summary)
+  if (Buffer.byteLength(full, "utf8") <= maxBytes) return full
+
+  // 超限先保住标签，再分别裁剪 name 与 summary；若仍超限则跳过，避免阻断整轮文本定稿同步。
+  const safeLabel = fitJsonStringField(rawLabel, Math.min(512, maxBytes), candidate => render(candidate ?? "工具"))
+    ?? "工具"
+  if (Buffer.byteLength(render(safeLabel), "utf8") > maxBytes) return null
+  const nameLimit = tool.summary ? Math.min(2048, Math.floor(maxBytes / 4)) : maxBytes
+  const safeName = tool.name
+    ? fitJsonStringField(tool.name, nameLimit, candidate => render(safeLabel, candidate))
+    : undefined
+  const safeSummary = tool.summary
+    ? fitJsonStringField(tool.summary, maxBytes, candidate => render(safeLabel, safeName, candidate))
+    : undefined
+  const bounded = render(safeLabel, safeName, safeSummary)
+  return Buffer.byteLength(bounded, "utf8") <= maxBytes ? bounded : null
+}
+
 /** 待传文件按账号隔离。切换账号时取消旧网络请求，保留其本机文件。 */
 export class ConversationUploads {
   #account: { id: string; controller: AbortController } | null = null
@@ -77,18 +137,38 @@ export class ConversationUploads {
     this.#wake()
   }
 
-  /** 只接收已完成的文本轮。超出单条载荷上限时保留本机显示并报告共享失败。 */
+  /** 只接收已完成的文本轮（含本轮已终态工具摘要）。超出单条载荷上限时保留本机显示并报告共享失败。 */
   async enqueue(scope: LocalExecutionScope, turn: FinalizedTurn): Promise<void> {
     const { turnId, userText, reply, acceptedAtMs, completedAtMs } = turn
-    const messages: WaitingTurn["messages"] = [
-      { type: "user", occurredAtMs: acceptedAtMs,
-        payload: JSON.stringify({ text: userText, ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}) }) },
-      { type: "assistant", occurredAtMs: completedAtMs, payload: JSON.stringify({ text: reply }) },
-    ]
-    if (reply === undefined || messages.some(message => Buffer.byteLength(message.payload, "utf8") > syncPayloadLimit)) {
+    const userMessage: Omit<SyncMessage, "sequence"> = {
+      type: "user",
+      occurredAtMs: acceptedAtMs,
+      payload: JSON.stringify({ text: userText, ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}) }),
+    }
+    const assistantMessage: Omit<SyncMessage, "sequence"> = {
+      type: "assistant",
+      occurredAtMs: completedAtMs,
+      payload: JSON.stringify({ text: reply }),
+    }
+    const userBytes = Buffer.byteLength(userMessage.payload, "utf8")
+    const assistantBytes = Buffer.byteLength(assistantMessage.payload, "utf8")
+    if (reply === undefined || userBytes > syncPayloadLimit || assistantBytes > syncPayloadLimit) {
       this.#report(scope, turnId, "本轮正文超出单条共享消息的 32 KiB 上限。")
       return
     }
+    let remainingBatchBytes = BATCH_PAYLOAD_BUDGET - userBytes - assistantBytes
+    const toolMessages: Omit<SyncMessage, "sequence">[] = []
+    for (const tool of (turn.tools ?? []).slice(0, MAX_TOOL_SUMMARIES)) {
+      if (remainingBatchBytes <= 0) break
+      const payload = buildToolSummaryPayload(tool, Math.min(syncPayloadLimit, remainingBatchBytes))
+      if (!payload) continue
+      const occurredAtMs = Number.isSafeInteger(tool.occurredAtMs) && tool.occurredAtMs >= 0
+        ? tool.occurredAtMs
+        : completedAtMs
+      toolMessages.push({ type: "tool_summary", occurredAtMs, payload })
+      remainingBatchBytes -= Buffer.byteLength(payload, "utf8")
+    }
+    const messages: WaitingTurn["messages"] = [userMessage, ...toolMessages, assistantMessage]
     const path = join(this.root, scope.accountId, scope.conversationId + ".json")
     try {
       await this.#mutate(async () => {

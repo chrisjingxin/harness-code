@@ -342,3 +342,84 @@ test("applyLocalExecutionUpdate records permission-decision at permission settle
     assert.equal(history.title, "edit_file package-settings.json")
   }
 })
+
+test("正文之间仅夹杂思考且未切换 messageId 时合并为一条正文并移到思考之后", () => {
+  let state = applyLocalExecutionUpdate(accepted(), { kind: "assistant-text", turnId: "t-1", text: "`wc -l pi", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "确认文件名" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "-probe.txt`", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "再补一句" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: " 已确认", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "finished", turnId: "t-1" })
+
+  assert.deepEqual(
+    state.entries.map(e => e.id),
+    [
+      "local-execution:t-1:user",
+      "local-execution:t-1:reasoning:0",
+      "local-execution:t-1:reasoning:1",
+      "local-execution:t-1:assistant",
+    ],
+  )
+  const assistant = state.entries[3]
+  assert.equal(assistant?.kind, "message")
+  if (assistant?.kind === "message") {
+    assert.equal(assistant.text, "`wc -l pi-probe.txt` 已确认")
+    assert.equal(assistant.streaming, false)
+  }
+})
+
+test("工具、审批或 messageId 切换后穿插思考仍开启新的正文段", () => {
+  let state = applyLocalExecutionUpdate(accepted(), { kind: "assistant-text", turnId: "t-1", text: "第一段", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "tool", turnId: "t-1", tool: tool("c-1", { title: "read_file a.ts", status: "completed" }) })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "工具后思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第二段", messageId: "m-1" })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "换段前思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第三段", messageId: "m-2" })
+  state = applyLocalExecutionUpdate(state, {
+    kind: "permission",
+    turnId: "t-1",
+    request: { id: "p-1", title: "审批", options: [{ id: "ok", label: "允许", allows: true }] },
+  })
+  state = applyLocalExecutionUpdate(state, { kind: "permission", turnId: "t-1", request: null })
+  state = applyLocalExecutionUpdate(state, { kind: "thought", turnId: "t-1", text: "审批后思考" })
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId: "t-1", text: "第四段", messageId: "m-2" })
+  state = applyLocalExecutionUpdate(state, { kind: "finished", turnId: "t-1" })
+
+  const assistants = state.entries.filter(e => e.kind === "message" && e.role === "assistant")
+  assert.deepEqual(
+    assistants.map(a => a.kind === "message" ? [a.id, a.text] : []),
+    [
+      ["local-execution:t-1:assistant", "第一段"],
+      ["local-execution:t-1:assistant:1", "第二段"],
+      ["local-execution:t-1:assistant:2", "第三段"],
+      ["local-execution:t-1:assistant:3", "第四段"],
+    ],
+  )
+})
+
+test("execute 工具保留完整命令字符串，不按首个空格拆分成 label 和 summary", () => {
+  let state = applyLocalExecutionUpdate(accepted(), {
+    kind: "tool",
+    turnId: "t-1",
+    tool: tool("cmd-1", { title: "wc -l pi-probe.txt", kind: "execute", status: "completed" }),
+  })
+  state = applyLocalExecutionUpdate(state, {
+    kind: "tool",
+    turnId: "t-1",
+    tool: tool("cmd-2", { title: "ls", kind: "execute", status: "completed" }),
+  })
+  const cmd1 = state.entries.find(e => e.id === "local-execution:t-1:tool:cmd-1")
+  const cmd2 = state.entries.find(e => e.id === "local-execution:t-1:tool:cmd-2")
+  assert.equal(cmd1?.kind, "tool")
+  if (cmd1?.kind === "tool") {
+    assert.equal(cmd1.label, "终端命令")
+    assert.equal(cmd1.summary, "wc -l pi-probe.txt")
+    assert.equal(cmd1.originalName, "wc -l pi-probe.txt")
+  }
+  assert.equal(cmd2?.kind, "tool")
+  if (cmd2?.kind === "tool") {
+    assert.equal(cmd2.label, "终端命令")
+    assert.equal(cmd2.summary, "ls")
+    assert.equal(cmd2.originalName, "ls")
+  }
+})

@@ -62,9 +62,23 @@ export function splitTurnProcess(
   entries: readonly ConversationTimelineEntry[],
   activity?: ConversationTimelineActivity | null,
 ): TurnProcessSplit {
-  const last = entries.at(-1)
-  const finalEntry = last && last.kind === "message" && last.role === "assistant" ? last : undefined
-  const processEntries = finalEntry ? entries.slice(0, -1) : entries
+  // 若末尾只跟着追尾思考（reasoning），回溯跳过它们：只要紧邻一条助手回复且其后无工具/审批，
+  // 仍把它当作 finalEntry 留在折叠区外，避免最终回答被吞进“思考过程”。
+  let finalIndex = -1
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!
+    if (entry.kind === "reasoning") continue
+    if (entry.kind === "message" && entry.role === "assistant") {
+      finalIndex = index
+    }
+    break
+  }
+  const finalEntry = finalIndex >= 0
+    ? (entries[finalIndex] as Extract<ConversationTimelineEntry, { kind: "message" }>)
+    : undefined
+  const processEntries = finalIndex >= 0
+    ? [...entries.slice(0, finalIndex), ...entries.slice(finalIndex + 1)]
+    : entries
   const processSegments = segmentAgentEntries(processEntries)
   if (processSegments.length < 2) {
     return { processSummary: null, processSegments, finalEntry }
