@@ -116,11 +116,12 @@ const sampleConversation: ConversationPersonal = {
   syncCache: null,
 }
 
-test("PersonalStore 在 60 秒 TTL 内复用已校验授权，到期后重新向服务端核验", async t => {
+test("PersonalStore 在 60 秒 TTL 内复用已校验授权，到期后重新向服务端核验", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hc225-personal-ttl-"))
+  const realDateNow = Date.now
   try {
     let nowMs = 1_700_000_000_000
-    t.mock.method(Date, "now", () => nowMs)
+    Date.now = () => nowMs
 
     const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
     const store = new PersonalStore(mock.state, ORIGIN, dir)
@@ -148,6 +149,7 @@ test("PersonalStore 在 60 秒 TTL 内复用已校验授权，到期后重新向
     assert.equal((await store.save(convKey, 2, sampleConversation)).ok, true)
     assert.equal(mock.counts().getConversationCalls, 3)
   } finally {
+    Date.now = realDateNow
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -209,11 +211,12 @@ test("PersonalStore 合并同一授权键的并发在途请求，并在失败时
   }
 })
 
-test("PersonalStore 在身份代次变化、权限失效或过期撤销时淘汰缓存", async t => {
+test("PersonalStore 在身份代次变化、权限失效或过期撤销时淘汰缓存", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hc225-personal-evict-"))
+  const realDateNow = Date.now
   try {
     let nowMs = 1_700_000_000_000
-    t.mock.method(Date, "now", () => nowMs)
+    Date.now = () => nowMs
 
     const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
     const store = new PersonalStore(mock.state, ORIGIN, dir)
@@ -282,6 +285,7 @@ test("PersonalStore 在身份代次变化、权限失效或过期撤销时淘汰
     assert.equal((await store.save(convKey, 2, sampleConversation)).ok, false)
     assert.equal(mock.counts().getConversationCalls, 5)
   } finally {
+    Date.now = realDateNow
     await rm(dir, { recursive: true, force: true })
   }
 })
