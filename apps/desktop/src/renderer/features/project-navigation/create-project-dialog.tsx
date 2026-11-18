@@ -4,8 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react"
 import { IconX } from "@tabler/icons-react"
-import type { MemberSummary } from "@workbench/contracts"
-import type { OrganizationHost } from "../../../organization-host.js"
+import type { MemberSummary, OrganizationHost } from "@workbench/contracts"
 import { memberRoleLabel, UserAvatar } from "../collaboration-views/index.js"
 import { organizationMessage } from "./organization-errors.js"
 

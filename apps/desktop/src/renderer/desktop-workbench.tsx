@@ -4,20 +4,21 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react"
 import type {
+  AccountPersonal,
+  CollaborationAppsHost,
   CollaborationHost,
   DesktopHost,
   LocalDirectoryHost,
+  OrganizationHost,
+  PersonalHost,
   ProjectConversationHost,
+  ProjectUpdatesHost,
   ThemeMode,
   UserSummary,
   WindowState,
   ZoomAction,
 } from "@workbench/contracts"
-import type { AccountPersonal, PersonalHost } from "../personal-host.js"
-import type { OrganizationHost } from "../organization-host.js"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
-import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import type { ProjectUpdatesHost } from "../project-updates-host.js"
 import { ACCENT_OPTIONS, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "@workbench/ui"
 import type { AccentId, NavigationWorkspaceItem } from "@workbench/ui"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"

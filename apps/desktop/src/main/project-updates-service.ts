@@ -4,8 +4,9 @@
  * 退出或团队变化时取消读取、确认等待和退避计时。
  */
 import { setTimeout as delay } from "node:timers/promises"
-import type { BoardResponse, CollaborationResult, NotificationEvent } from "@workbench/contracts"
-import type { ProjectUpdatesNotice, ProjectUpdatesStatus } from "../project-updates-host.js"
+import type {
+  BoardResponse, CollaborationResult, NotificationEvent, ProjectUpdatesNotice, ProjectUpdatesStatus,
+} from "@workbench/contracts"
 import { notificationCursor } from "./project-notification-cursor.js"
 
 export interface ProjectUpdatesNetwork {

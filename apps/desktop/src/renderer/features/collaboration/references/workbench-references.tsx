@@ -3,9 +3,8 @@
  * 仅在应用草稿后保留已确认的固定材料，个人记录只接收材料标识。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { TaskSummary } from "@workbench/contracts"
+import type { CollaborationAppsHost, TaskSummary } from "@workbench/contracts"
 import type { ConversationCollaborationCandidate, ConversationProjectTarget, ConversationReferenceView, ConversationScope, ConversationTimelineEntry } from "@workbench/ui"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import { decodeHistoryToTimelineEntries } from "../../session/index.js"

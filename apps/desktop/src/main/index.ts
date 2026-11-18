@@ -1,7 +1,6 @@
-/** 应用级 Runner 与窗口分离。关窗释放页面会话，明确退出等待本机子进程收敛。 */
+/** 应用生命周期与窗口分离。关窗释放页面会话，明确退出等待本机执行句柄收敛。 */
 import { app, BrowserWindow, dialog, Menu, nativeImage, Tray } from "electron"
 import { createWindow } from "./window.js"
-import { RunnerSupervisor } from "./runner-supervisor.js"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname } from "node:path"
@@ -9,7 +8,7 @@ import { createDesktopLocalExecutionRuntime } from "./local-acp-host.js"
 import type { LocalExecutionRuntime } from "./local-execution-ipc.js"
 
 if (__WORKBENCH_UI_PREVIEW__) {
-  // 预览是独立进程，不能读写正式工作台的用户目录或设备账本。
+  // 预览是独立进程，不能读写正式工作台的用户目录或账号凭据。
   const previewData = process.env.WORKBENCH_UI_PREVIEW_DATA
   const previewPrefix = `${__WORKBENCH_UI_PREVIEW__}-ui-preview-`
   if (!previewData || dirname(realpathSync(previewData)) !== realpathSync(tmpdir()) || !basename(previewData).startsWith(previewPrefix)) {
@@ -19,7 +18,6 @@ if (__WORKBENCH_UI_PREVIEW__) {
   app.setPath("sessionData", previewData)
 }
 
-const supervisor = new RunnerSupervisor()
 let execution: LocalExecutionRuntime | undefined
 let disposeExecution: (() => Promise<void>) | undefined
 let tray: Tray | null = null
@@ -30,7 +28,7 @@ let quitRequested = false
 function openWindow(): void {
   const window = BrowserWindow.getAllWindows()[0]
   if (window) { window.show(); window.focus() }
-  else if (!exiting) createWindow(supervisor, () => { quitRequested = false; quitAllowed = false; exiting = false }, execution)
+  else if (!exiting) createWindow(() => { quitRequested = false; quitAllowed = false; exiting = false }, execution)
 }
 
 app.setName(__WORKBENCH_UI_PREVIEW__ ? {
@@ -64,15 +62,12 @@ app.on("window-all-closed", () => {
 })
 app.on("before-quit", event => {
   quitRequested = true
-  if (quitAllowed || (!supervisor.hasChild() && !disposeExecution)) return
+  if (quitAllowed || !disposeExecution) return
   event.preventDefault()
   if (exiting) return
   exiting = true
-  const stopExecution = disposeExecution
-    ? disposeExecution().then(() => true, () => false)
-    : Promise.resolve(true)
-  void Promise.all([supervisor.stop(), stopExecution]).then(([runnerStopped, executionStopped]) => {
-    if (runnerStopped && executionStopped) {
+  void disposeExecution().then(() => true, () => false).then(executionStopped => {
+    if (executionStopped) {
       disposeExecution = undefined
       quitAllowed = true
       app.quit()
@@ -80,7 +75,7 @@ app.on("before-quit", event => {
     }
     exiting = false
     quitRequested = false
-    dialog.showErrorBox("停止未确认", "本机执行器尚未确认退出。请稍后再试。")
+    dialog.showErrorBox("停止未确认", "本机执行句柄尚未确认退出。请稍后再试。")
   })
 })
 app.on("will-quit", () => { tray?.destroy() })

@@ -1,9 +1,8 @@
-import type { CollaborationHost, DesktopHost, LocalDirectoryHost, ProjectConversationHost } from "@workbench/contracts"
-import type { PersonalHost } from "../personal-host.js"
-import type { OrganizationHost } from "../organization-host.js"
+import type {
+  CollaborationAppsHost, CollaborationHost, DesktopHost, LocalDirectoryHost, OrganizationHost, PersonalHost,
+  ProjectConversationHost, ProjectUpdatesHost,
+} from "@workbench/contracts"
 import type { DesktopLocalExecutionHost } from "../local-execution-host.js"
-import type { CollaborationAppsHost } from "../collaboration-apps-host.js"
-import type { ProjectUpdatesHost } from "../project-updates-host.js"
 
 declare module "*.jpg" {
   const src: string

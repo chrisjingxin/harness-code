@@ -1,5 +1,5 @@
 /** 跟踪每个个人范围的最新修订；过期回包不能掩盖新保存的错误。 */
-import type { PersonalHost, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "../personal-host.js"
+import type { PersonalHost, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "@workbench/contracts"
 
 export class PersonalPersistence {
   #revisions = new Map<string, number>()

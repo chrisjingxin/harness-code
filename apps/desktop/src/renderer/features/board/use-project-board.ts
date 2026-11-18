@@ -1,7 +1,6 @@
 /** 进入看板或收到刷新意图时加载聚合。同范围保留旧内容，迟到的其他项目响应直接丢弃。 */
 import { useCallback, useEffect, useState } from "react"
-import type { BoardResponse } from "@workbench/contracts"
-import type { ProjectUpdatesHost } from "../../../project-updates-host.js"
+import type { BoardResponse, ProjectUpdatesHost } from "@workbench/contracts"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 
 type BoardState = {

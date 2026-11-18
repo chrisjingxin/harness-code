@@ -8,7 +8,6 @@ import { Ajv2020 } from "ajv/dist/2020.js"
 import formats from "ajv-formats"
 import platform from "@workbench/contracts/schema/platform" with { type: "json" }
 import conversationSchema from "@workbench/contracts/schema/conversation" with { type: "json" }
-import executionSchema from "@workbench/contracts/schema/execution" with { type: "json" }
 import projectSchema from "@workbench/contracts/schema/project" with { type: "json" }
 import organizationSchema from "@workbench/contracts/schema/organization" with { type: "json" }
 import collaborationSchema from "@workbench/contracts/schema/collaboration" with { type: "json" }
@@ -99,7 +98,7 @@ export class CollaborationClient {
     this.#transport = transport
     formats.default(this.#ajv)
     // 类型统一按"Schema 名#类型名"定位；只在所有 Schema 中唯一的类型名才允许省略前缀，重名类型必须写全。
-    const schemas = { platform, conversation: conversationSchema, execution: executionSchema, project: projectSchema, organization: organizationSchema, collaboration: collaborationSchema }
+    const schemas = { platform, conversation: conversationSchema, project: projectSchema, organization: organizationSchema, collaboration: collaborationSchema }
     const bare = new Map<string, string | null>()
     for (const [key, schema] of Object.entries(schemas)) {
       this.#ajv.addSchema(schema)

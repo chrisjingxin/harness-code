@@ -6,7 +6,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { IconArrowLeft } from "@tabler/icons-react"
-import type { CollaborationHost, UserSummary } from "@workbench/contracts"
+import type {
+  CollaborationHost,
+  OrganizationHost,
+  ProjectNavigationPersonal,
+  ProjectPage,
+  UserSummary,
+  WorkspacePersonal,
+} from "@workbench/contracts"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "@workbench/ui"
 import type {
   CollaborationContextView,
@@ -14,8 +21,6 @@ import type {
   NavigationWorkspaceItem,
   ProjectNavigationActions,
 } from "@workbench/ui"
-import type { OrganizationHost } from "../../../organization-host.js"
-import type { ProjectNavigationPersonal, ProjectPage, WorkspacePersonal } from "../../../personal-host.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
 import type { ProjectConversationSummary, SessionIntegrationApi } from "../session/index.js"
 import {

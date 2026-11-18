@@ -1,8 +1,7 @@
 /** Workspace 知识的正式装配。列表和历史只读元数据，正文按用户选择的版本读取。 */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
-import type { CollaborationResult, KnowledgeDetail, KnowledgeVersion } from "@workbench/contracts"
+import type { CollaborationAppsHost, CollaborationResult, KnowledgeDetail, KnowledgeVersion } from "@workbench/contracts"
 import type { RenderingActions } from "@workbench/ui"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
 import { knowledgeReferenceId } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import { readPages } from "../metadata.js"

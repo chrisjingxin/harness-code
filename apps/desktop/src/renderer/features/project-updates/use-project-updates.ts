@@ -1,7 +1,6 @@
 /** 在团队外壳接收轻量事件。工作区内切页或切项目只替换当前刷新接点。 */
 import { useLayoutEffect, useRef, useState } from "react"
-import type { NotificationEvent } from "@workbench/contracts"
-import type { ProjectUpdatesHost, ProjectUpdatesStatus } from "../../../project-updates-host.js"
+import type { NotificationEvent, ProjectUpdatesHost, ProjectUpdatesStatus } from "@workbench/contracts"
 
 export interface ProjectUpdateTargets {
   readonly projectId: string | null

@@ -6,7 +6,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
-import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "../personal-host.js"
+import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "@workbench/contracts"
 import type { CollaborationState } from "./collaboration-state.js"
 
 type Identity = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
@@ -204,12 +204,19 @@ export class PersonalStore {
     if (key.kind === "workspace") parts.push(key.workspaceId)
     if (key.kind === "projectNavigation" || key.kind === "projectDraft") {
       // 项目记录与准备页草稿只给仍可访问该项目的账号读写；被移出后旧选择随之失效。
-      const detail = await this.identity.getProject(key.workspaceId, key.projectId)
+      const detail = await this.identity.withWorkspace(
+        key.workspaceId,
+        client => client.getProject(key.workspaceId, key.projectId),
+        { publishConnectionError: false },
+      )
       if (!detail.ok || !this.#current(identity) || detail.value.project.projectId !== key.projectId) return fail("无法确认项目访问权限，请重试。")
       parts.push(key.workspaceId, key.projectId)
     }
     if (key.kind === "conversation" || key.kind === "sessionWorkspace") {
-      const detail = await this.identity.getProjectConversation(key.workspaceId, key.projectId, key.conversationId)
+      const detail = await this.identity.withWorkspace(
+        key.workspaceId,
+        client => client.getProjectConversation(key.workspaceId, key.projectId, key.conversationId),
+      )
       if (!detail.ok || !this.#current(identity)) return fail("无法确认会话访问权限，请重试。")
       const conversation = detail.value.conversation
       if (conversation.projectId !== key.projectId || conversation.conversationId !== key.conversationId) return fail("会话范围已变化，请重试。")

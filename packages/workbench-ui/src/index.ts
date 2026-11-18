@@ -1,8 +1,6 @@
 /** 通用桌面基础视图的公开入口；宿主原生能力由 props 注入。 */
-export { Workbench } from "./workbench.js"
 export { IdentityPanel } from "./identity/identity-panel.js"
 export { useCollaborationIdentity } from "./identity/use-collaboration-identity.js"
-export { DeviceRegistrationPanel } from "./device-registration/device-registration.js"
 export { BrandMark, RoleAvatar } from "./common/brand.js"
 export { ACCENT_OPTIONS, DEFAULT_ACCENT, isAccentId } from "./theme/accent.js"
 export type { AccentId } from "./theme/accent.js"

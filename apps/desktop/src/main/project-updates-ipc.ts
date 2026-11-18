@@ -1,17 +1,13 @@
-/** 具名看板和通知 IPC。每次请求校验来源，在登录代次或顶层页面改变时销毁旧订阅。 */
-import { app, ipcMain } from "electron"
-import type { BrowserWindow, IpcMainInvokeEvent } from "electron"
+/** 具名看板和通知 IPC。每次请求经统一守卫校验来源与参数，在登录代次或顶层页面改变时销毁旧订阅。 */
+import { app } from "electron"
+import type { BrowserWindow } from "electron"
 import { join } from "node:path"
-import { projectUpdatesChannels } from "../project-updates-host.js"
-import { identityError } from "./collaboration-state.js"
+import { projectUpdatesChannels } from "@workbench/contracts"
 import type { CollaborationState } from "./collaboration-state.js"
+import { createCollaborationIpcRegistrar, formatIpcError, isUuid } from "./ipc-guard.js"
 import { isNotificationCursor } from "./project-notification-cursor.js"
 import { ProjectUpdatesService } from "./project-updates-service.js"
 import type { ProjectUpdatesNetwork } from "./project-updates-service.js"
-import { verifyDesktopSource } from "./trusted-source.js"
-
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-const isId = (value: unknown): value is string => typeof value === "string" && uuid.test(value)
 
 /** 与正式 Collaboration IPC 共用同一窗口身份和客户端；调用方在销毁身份前解绑。 */
 export function bindProjectUpdatesIpc(
@@ -23,11 +19,15 @@ export function bindProjectUpdatesIpc(
   // 窗口关闭回调运行时已不能从窗口取 webContents；清理时只检查绑定时持有的引用。
   const contents = window.webContents
   const network: ProjectUpdatesNetwork = {
-    readProjectBoard: (workspaceId, projectId) => identity.applicationWorkspace(
-      workspaceId, client => client.readProjectBoard(workspaceId, projectId),
+    readProjectBoard: (workspaceId, projectId) => identity.withWorkspace(
+      workspaceId,
+      client => client.readProjectBoard(workspaceId, projectId),
+      { publishConnectionError: false },
     ),
-    streamProjectNotifications: (workspaceId, afterId, signal, onConnected, onEvent) => identity.applicationWorkspace(
-      workspaceId, client => client.streamProjectNotifications(workspaceId, afterId, signal, onConnected, onEvent),
+    streamProjectNotifications: (workspaceId, afterId, signal, onConnected, onEvent) => identity.withWorkspace(
+      workspaceId,
+      client => client.streamProjectNotifications(workspaceId, afterId, signal, onConnected, onEvent),
+      { publishConnectionError: false },
     ),
   }
   const updates = new ProjectUpdatesService(join(app.getPath("userData"), "notification-cursors"), origin)
@@ -41,36 +41,36 @@ export function bindProjectUpdatesIpc(
   const stopForRendererExit = () => updates.stop()
   contents.on("render-process-gone", stopForRendererExit)
 
-  function handle(channel: string, count: number, action: (...args: unknown[]) => unknown) {
-    ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-      try { verifyDesktopSource(window, trustedUrl, event) }
-      catch { return identityError("REQUEST_SOURCE_REJECTED", "不允许的看板或通知请求来源。") }
-      if (args.length !== count) return identityError("INVALID_REQUEST", "看板或通知请求参数无效。")
-      try { return await action(...args) }
-      catch { return identityError("INTERNAL_ERROR", "看板或通知暂时不可用。") }
-    })
-  }
+  const ipc = createCollaborationIpcRegistrar({
+    window,
+    trustedUrl,
+    messages: {
+      sourceRejected: "不允许的看板或通知请求来源。",
+      invalidRequest: "看板或通知请求参数无效。",
+      internalError: "看板或通知暂时不可用。",
+    },
+  })
 
   function checkWorkspace(workspaceId: unknown) {
     const current = identity.personalIdentity()
-    if (!current) return identityError("AUTHENTICATION_REQUIRED", "请先登录。")
-    if (!isId(workspaceId) || !current.workspaces.includes(workspaceId)) {
-      return identityError("RESOURCE_NOT_FOUND", "团队不可用。")
+    if (!current) return formatIpcError("AUTHENTICATION_REQUIRED", "请先登录。")
+    if (!isUuid(workspaceId) || !current.workspaces.includes(workspaceId)) {
+      return formatIpcError("RESOURCE_NOT_FOUND", "团队不可用。")
     }
     return { ok: true as const, value: current }
   }
 
-  handle(projectUpdatesChannels.board, 2, async (workspaceId, projectId) => {
-    if (!isId(workspaceId) || !isId(projectId)) return identityError("INVALID_REQUEST", "看板范围无效。")
+  ipc.handle(projectUpdatesChannels.board, 2, async (workspaceId, projectId) => {
+    if (!isUuid(workspaceId) || !isUuid(projectId)) return formatIpcError("INVALID_REQUEST", "看板范围无效。")
     const result = await network.readProjectBoard(workspaceId, projectId)
     if (result.ok && result.value.projectId !== projectId) {
-      return identityError("INVALID_SERVER_RESPONSE", "看板响应所属项目不符。")
+      return formatIpcError("INVALID_SERVER_RESPONSE", "看板响应所属项目不符。")
     }
     return result
   })
 
-  handle(projectUpdatesChannels.subscribe, 2, (workspaceId, subscriptionId) => {
-    if (!isId(workspaceId) || !isId(subscriptionId)) return identityError("INVALID_REQUEST", "通知范围无效。")
+  ipc.handle(projectUpdatesChannels.subscribe, 2, (workspaceId, subscriptionId) => {
+    if (!isUuid(workspaceId) || !isUuid(subscriptionId)) return formatIpcError("INVALID_REQUEST", "通知范围无效。")
     const authorized = checkWorkspace(workspaceId)
     if (!authorized.ok) return authorized
     updates.subscribe({
@@ -89,11 +89,11 @@ export function bindProjectUpdatesIpc(
     return { ok: true, value: null }
   })
 
-  handle(projectUpdatesChannels.acknowledge, 2, (subscriptionId, id) => {
-    if (isId(subscriptionId) && isNotificationCursor(id) && id > 0) updates.acknowledge(subscriptionId, id)
+  ipc.handle(projectUpdatesChannels.acknowledge, 2, (subscriptionId, id) => {
+    if (isUuid(subscriptionId) && isNotificationCursor(id) && id > 0) updates.acknowledge(subscriptionId, id)
   })
-  handle(projectUpdatesChannels.unsubscribe, 1, subscriptionId => {
-    if (isId(subscriptionId)) updates.stop(subscriptionId)
+  ipc.handle(projectUpdatesChannels.unsubscribe, 1, subscriptionId => {
+    if (isUuid(subscriptionId)) updates.stop(subscriptionId)
   })
 
   return () => {
@@ -103,8 +103,6 @@ export function bindProjectUpdatesIpc(
       contents.removeListener("did-start-navigation", stopForNavigation)
       contents.removeListener("render-process-gone", stopForRendererExit)
     }
-    for (const [name, channel] of Object.entries(projectUpdatesChannels)) {
-      if (name !== "notice") ipcMain.removeHandler(channel)
-    }
+    ipc.dispose()
   }
 }

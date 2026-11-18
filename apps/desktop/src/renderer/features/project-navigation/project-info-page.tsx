@@ -4,10 +4,9 @@
  * 只有服务端返回 role = owner 且项目未归档时才展示编辑与成员/仓库管理操作，严格消费真实 OrganizationHost。
  */
 import { useState } from "react"
-import type { CollaborationResult, MemberSummary, ProjectDetailResponse } from "@workbench/contracts"
+import type { CollaborationResult, MemberSummary, OrganizationHost, ProjectDetailResponse } from "@workbench/contracts"
 import { MemberAvatar } from "@workbench/ui"
 import type { NavigationAvailability } from "@workbench/ui"
-import type { OrganizationHost } from "../../../organization-host.js"
 import { resolveUserPhoto } from "../../demo-avatars.js"
 import { memberRoleLabel } from "../collaboration-views/index.js"
 import { organizationMessage } from "./organization-errors.js"

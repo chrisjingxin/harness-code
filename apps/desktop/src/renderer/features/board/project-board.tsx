@@ -1,8 +1,7 @@
 /** 项目中央看板。只展示简报、任务和同步状态，定位动作交给 Project 外壳。 */
 import { useMemo, useState } from "react"
-import type { BoardConversation, BoardResponse } from "@workbench/contracts"
+import type { BoardConversation, BoardResponse, ProjectUpdatesStatus } from "@workbench/contracts"
 import { MemberAvatar } from "@workbench/ui"
-import type { ProjectUpdatesStatus } from "../../../project-updates-host.js"
 import type { SessionSyncState } from "../session/contracts.js"
 import { formatShortTime } from "../session/session-model.js"
 import { boardTaskStatuses, buildBoardModel, getBoardSyncLabel } from "./board-model.js"

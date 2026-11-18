@@ -3,8 +3,7 @@
  * 角色与状态决定展示的动作，版本校验、关联和重放以服务结果为准。
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
-import type { CollaborationResult, TaskDetail, TaskStatus, TaskSummary } from "@workbench/contracts"
-import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.js"
+import type { CollaborationAppsHost, CollaborationResult, TaskDetail, TaskStatus, TaskSummary } from "@workbench/contracts"
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope, ProjectNavigator } from "../../project-navigation/index.js"
 import type { ProjectConversationSummary, SessionDraftScope, SessionDraftTarget, SessionIntegrationApi } from "../../session/index.js"

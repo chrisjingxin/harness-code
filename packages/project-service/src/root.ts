@@ -34,10 +34,10 @@ export function filesystemError(error: unknown): ProjectServiceError {
   }
 }
 
-/** 保留合法路径的原字面值，拒绝宿主可能另作解释的路径。 */
+/** 保留合法路径的原字面值，拒绝宿主可能另作解释的绝对路径、反斜杠、空字节、`.`/`..` 与 `.git` 片段。 */
 export function validRelativePath(path: string): boolean {
-  if (!path || isAbsolute(path) || /^[a-z]:|^\\\\/i.test(path) || path.includes("\0")) return false
-  if (process.platform === "win32" && /[\\:]/.test(path)) return false
+  if (!path || isAbsolute(path) || /^[a-z]:|^\\\\/i.test(path) || path.includes("\0") || path.includes("\\")) return false
+  if (process.platform === "win32" && /:/.test(path)) return false
   return path.split("/").every(part => part && part !== "." && part !== ".." && part.toLowerCase() !== ".git"
     && !(process.platform === "win32" && (/[ .]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part))))
 }
@@ -50,7 +50,9 @@ export class ProjectRoot {
   }
 
   static async bind(path: string): Promise<ProjectRoot> {
-    if (!isAbsolute(path)) throw new ProjectServiceError("invalid-path", "宿主须提供项目根的绝对路径。")
+    if (!path || path.includes("\0") || !isAbsolute(path)) {
+      throw new ProjectServiceError("invalid-path", "宿主须提供项目根的绝对路径。")
+    }
     try {
       const canonical = await realpath(path)
       const info = await stat(canonical)
