@@ -42,6 +42,70 @@ export function isTurnActive(entries: readonly ConversationTimelineEntry[], acti
   )
 }
 
+/** 一轮正文前的可执行/思考过程摘要；仅在过程跨越多个片段时用于总览折叠。 */
+export type ProcessSummary = {
+  readonly id: string
+  readonly label: string
+  readonly failedCount: number
+  readonly hasThought: boolean
+  readonly running: boolean
+}
+
+export type TurnProcessSplit = {
+  readonly processSummary: ProcessSummary | null
+  readonly processSegments: readonly TimelineSegment[]
+  readonly finalEntry?: Extract<ConversationTimelineEntry, { kind: "message" }>
+}
+
+/** 拆分一轮的“过程片段”与末尾正文；过程达到 ≥2 段时收进外层总览折叠组。 */
+export function splitTurnProcess(
+  entries: readonly ConversationTimelineEntry[],
+  activity?: ConversationTimelineActivity | null,
+): TurnProcessSplit {
+  const last = entries.at(-1)
+  const finalEntry = last && last.kind === "message" && last.role === "assistant" ? last : undefined
+  const processEntries = finalEntry ? entries.slice(0, -1) : entries
+  const processSegments = segmentAgentEntries(processEntries)
+  if (processSegments.length < 2) {
+    return { processSummary: null, processSegments, finalEntry }
+  }
+  let thoughtCount = 0
+  let toolCount = 0
+  let failedCount = 0
+  let interactionCount = 0
+  let stepRunning = false
+  for (const entry of processEntries) {
+    if (entry.kind === "reasoning") {
+      thoughtCount += 1
+      if (entry.active) stepRunning = true
+    } else if (entry.kind === "tool") {
+      toolCount += 1
+      if (entry.status === "failed") failedCount += 1
+      if (entry.status === "running") stepRunning = true
+    } else if (entry.kind === "interaction-history") {
+      interactionCount += 1
+    } else if (entry.kind === "message" && entry.role === "assistant" && entry.streaming) {
+      stepRunning = true
+    }
+  }
+  const parts: string[] = []
+  if (thoughtCount > 0) parts.push(thoughtCount === 1 ? "思考过程" : `思考 ${thoughtCount} 次`)
+  if (toolCount > 0) parts.push(`${toolCount} 个操作`)
+  if (interactionCount > 0) parts.push(`${interactionCount} 次审批`)
+  const turnActive = isTurnActive(entries, activity)
+  return {
+    processSummary: {
+      id: `process:${processEntries[0]!.id}`,
+      label: parts.join(" · ") || "执行过程",
+      failedCount,
+      hasThought: thoughtCount > 0,
+      running: turnActive && (!finalEntry || stepRunning),
+    },
+    processSegments,
+    finalEntry,
+  }
+}
+
 /** 锚点刻度项：只含提问本身的折叠文本与时间，不包含回答摘要。 */
 export type MinimapItem = {
   readonly entryId: string

@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
-import { ConversationView } from "@workbench/ui"
+import { ConversationToolBlocks, ConversationView } from "@workbench/ui"
 import type {
   ConversationActions,
   ConversationComposerView,
@@ -22,7 +22,7 @@ import { ChevronDownIcon, FolderIcon } from "./icons.js"
 import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename, formatShortTime } from "./session-model.js"
-import { projectLocalExecution } from "./local-execution-view.js"
+import { describePermissionRequest, projectLocalExecution } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
 
@@ -191,15 +191,23 @@ export function LocalSessionPage({
               entries={hooks?.renderHistoryReferences?.(view.entries) ?? view.entries}
               scope={scope}
               visible={visible && !(viewingFile && pvMax)}
-              interaction={permission ? {
-                kind: "approval", id: permission.id, title: permission.title, readOnly: false,
-                availability: { enabled: true },
-                retryRevision: activeExecution?.permissionRetryRevision,
-                options: permission.options.map(option => ({
-                  id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
-                  behavior: "immediate", feedback: "none", availability: { enabled: true },
-                })),
-              } : null}
+              interaction={permission ? (() => {
+                const described = describePermissionRequest(permission)
+                return {
+                  kind: "approval" as const,
+                  id: permission.id,
+                  title: permission.title,
+                  ...(described.description ? { description: described.description } : {}),
+                  ...(described.blocks.length ? { preview: <ConversationToolBlocks blocks={described.blocks} /> } : {}),
+                  readOnly: false,
+                  availability: { enabled: true },
+                  retryRevision: activeExecution?.permissionRetryRevision,
+                  options: permission.options.map(option => ({
+                    id: option.id, label: option.label, tone: option.allows ? "positive" : "negative",
+                    behavior: "immediate", feedback: "none", availability: { enabled: true },
+                  })),
+                }
+              })() : null}
               personal={personal}
               actions={{
                 onPersonalChange: (targetScope, change) => {

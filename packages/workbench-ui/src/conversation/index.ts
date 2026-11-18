@@ -1,5 +1,6 @@
 /** 对话区入口；根包导出由统筹按停点顺序集成。 */
 export { ConversationView } from "./view.js"
+export { ConversationToolBlocks } from "./tool-blocks.js"
 export type {
   ConversationActions,
   ConversationAvailability,

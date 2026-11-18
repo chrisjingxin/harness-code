@@ -71,5 +71,34 @@ test("content 含 diff 但无文本时仍回退 rawOutput", () => {
 test("tool_call_update 的缺省字段保持 undefined", () => {
   const update: ToolCallUpdate = { toolCallId: "call-9", status: "in_progress" }
   const tool = toLocalAcpTool(update)
-  assert.deepEqual(tool, { id: "call-9", status: "in_progress", title: undefined, kind: undefined, input: undefined, output: undefined, diffs: undefined })
+  assert.deepEqual(tool, {
+    id: "call-9",
+    status: "in_progress",
+    title: undefined,
+    kind: undefined,
+    input: undefined,
+    output: undefined,
+    diffs: undefined,
+    locations: undefined,
+  })
+})
+
+test("locations 提取有效路径与正整数行号，过滤控制字符并截断至 8 项", () => {
+  const tool = toLocalAcpTool(baseCall({
+    locations: [
+      { path: " src/a.ts ", line: 12 },
+      { path: "src/b.ts", line: 0 },
+      { path: "src/c.ts", line: 1.5 },
+      { path: "bad\npath.ts", line: 3 },
+      { path: "   " },
+      ...Array.from({ length: 10 }, (_, idx) => ({ path: `src/item-${idx}.ts`, line: idx + 1 })),
+    ],
+  }))
+  assert.equal(tool.locations?.length, 8)
+  assert.deepEqual(tool.locations?.slice(0, 4), [
+    { path: "src/a.ts", line: 12 },
+    { path: "src/b.ts" },
+    { path: "src/c.ts" },
+    { path: "src/item-0.ts", line: 1 },
+  ])
 })

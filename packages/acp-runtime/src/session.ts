@@ -154,6 +154,8 @@ export class BoundSession implements LocalAcpSession {
       this.#permission = { turn, id, options: input.options, resolve }
       this.emit(turn, { type: "permission", request: {
         id, title: input.toolCall.title || "Agent 请求工具权限",
+        // 附带规范化工具细节（diff、参数、关联位置），供桌面审批卡片呈现决策上下文。
+        tool: toLocalAcpTool(input.toolCall),
         options: input.options.map(option => ({
           id: option.optionId, label: option.name, allows: option.kind.startsWith("allow_"),
         })),

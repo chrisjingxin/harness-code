@@ -8,6 +8,10 @@ export type LocalExecutionScope = {
 }
 export type LocalExecutionAvailability = { readonly available: boolean; readonly reason?: string }
 export type LocalExecutionBinding = LocalExecutionAvailability & { readonly bindingId: string }
+export type LocalExecutionToolLocation = {
+  readonly path: string
+  readonly line?: number
+}
 export type LocalExecutionTool = {
   readonly id: string
   readonly title?: string
@@ -16,10 +20,12 @@ export type LocalExecutionTool = {
   readonly input?: string
   readonly output?: string
   readonly diffs?: readonly { readonly path: string; readonly oldText?: string; readonly newText: string }[]
+  readonly locations?: readonly LocalExecutionToolLocation[]
 }
 export type LocalExecutionPermission = {
   readonly id: string
   readonly title: string
+  readonly tool?: LocalExecutionTool
   readonly options: readonly { readonly id: string; readonly label: string; readonly allows: boolean }[]
 }
 export type LocalExecutionReceipt =
@@ -32,6 +38,9 @@ export type LocalExecutionUploadNotice = {
   readonly turnId: string
   readonly kind: "upload"
   readonly failure?: string
+  /** 上传确认后附带服务器写入的最小/最大 sequence，供渲染端去重已同步记录。 */
+  readonly firstSequence?: number
+  readonly syncedSequence?: number
 }
 
 export type LocalExecutionNotice = LocalExecutionUploadNotice | ({
@@ -40,7 +49,7 @@ export type LocalExecutionNotice = LocalExecutionUploadNotice | ({
   readonly turnId: string
 } & (
   | { readonly kind: "accepted"; readonly requestId: string; readonly text: string }
-  | { readonly kind: "text"; readonly sequence: number; readonly text: string }
+  | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
   | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
   | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
   | { readonly kind: "permission"; readonly sequence: number; readonly request: LocalExecutionPermission | null }

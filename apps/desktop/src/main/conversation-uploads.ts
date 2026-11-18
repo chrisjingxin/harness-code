@@ -107,8 +107,23 @@ export class ConversationUploads {
   /** 关窗只等待已受理的落盘，已固定序号的批次可由下一次登录重发。 */
   flush(): Promise<void> { return this.#writing }
 
-  #report(scope: LocalExecutionScope, turnId: string, failure?: string): void {
-    this.notify({ scope, turnId, kind: "upload", failure: failure ? `会话共享失败：${failure}` : undefined })
+  #report(
+    scope: LocalExecutionScope,
+    turnId: string,
+    failure?: string,
+    firstSequence?: number,
+    syncedSequence?: number,
+  ): void {
+    this.notify({
+      scope,
+      turnId,
+      kind: "upload",
+      failure: failure ? `会话共享失败：${failure}` : undefined,
+      // 仅在整批成功确认水位后附带 sequence 区间，防止渲染端提前消隐未落盘的本地记录。
+      ...(failure || firstSequence === undefined || syncedSequence === undefined
+        ? {}
+        : { firstSequence, syncedSequence }),
+    })
   }
 
   #mutate<T>(change: () => Promise<T>): Promise<T> {
@@ -204,6 +219,6 @@ export class ConversationUploads {
     signal.throwIfAborted()
 
     await this.#editHead(path, turn.turnId, pending => { pending.turns.shift() })
-    if (!signal.aborted) this.#report(scope, turn.turnId)
+    if (!signal.aborted) this.#report(scope, turn.turnId, undefined, firstSequence, finalSequence)
   }
 }

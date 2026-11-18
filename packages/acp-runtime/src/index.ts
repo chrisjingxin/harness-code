@@ -24,10 +24,18 @@ export type LocalAcpSendResult =
   | { readonly status: "accepted"; readonly turnId: string }
   | { readonly status: "rejected"; readonly reason: UnavailableReason | "empty-text" }
 
+/** 工具关联的工作区文件与行号，供工具卡片摘要和审批预览展示。 */
+export type LocalAcpToolLocation = {
+  readonly path: string
+  readonly line?: number
+}
+
 /** 选项来自 Agent，界面只传回该请求的选项标识。 */
 export type LocalAcpPermission = {
   readonly id: string
   readonly title: string
+  /** 触发权限审批的原工具细节（含 diff、参数与关联路径），供界面直接展示。 */
+  readonly tool?: LocalAcpTool
   readonly options: readonly { readonly id: string; readonly label: string; readonly allows: boolean }[]
 }
 
@@ -47,6 +55,7 @@ export type LocalAcpTool = {
   readonly input?: string
   readonly output?: string
   readonly diffs?: readonly LocalAcpToolDiff[]
+  readonly locations?: readonly LocalAcpToolLocation[]
 }
 
 type Failure = {

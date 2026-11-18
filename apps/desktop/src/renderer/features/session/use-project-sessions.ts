@@ -159,6 +159,8 @@ export type UseProjectSessionsOptions = {
   readonly selectedConversationId: string | null
   readonly execution?: LocalSessionExecutionPort
   readonly onOpenConversation?: (conversation: ProjectConversationSummary) => void
+  /** @ 提及点击「预览」时展开右侧文件预览面板，无需切出中央对话。 */
+  readonly onOpenRightPanel?: () => void
 }
 
 /** 协调当前项目的会话元数据列表、按需正文增量拉取、草稿与个人同步缓存持久化。 */
@@ -176,6 +178,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedConversationId,
     execution,
     onOpenConversation,
+    onOpenRightPanel,
   } = options
 
   const currentScopeKey = makeScopeKey(scope)
@@ -815,9 +818,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       personal: applyConversationPersonalChange(previous.personal, { kind: "clear-draft", expectedRevision: revision }),
     }), true)
   }, [updateRecord])
+  const refreshWorkspaceRef = useRef<((source: ProjectNavigationScope, id: string) => Promise<void>) | null>(null)
+  const refreshExecutionWorkspace = useCallback((source: ProjectNavigationScope, id: string) => {
+    if (!mountedRef.current) return
+    void refreshWorkspaceRef.current?.(source, id)
+  }, [])
   const localExecutionPort = useLocalExecution(
     localExecution, scope, selectedIsLocal ? selectedConversationId : null,
-    selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我", commitAcceptedDraft,
+    selectedDirectoryPath, directorySelectionRevision, memberNameById.get(userId) ?? "我",
+    commitAcceptedDraft,
+    refreshExecutionWorkspace,
   )
 
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
@@ -857,6 +867,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedIsLocal,
   })
 
+  refreshWorkspaceRef.current = localDir.refreshWorkspace
   const [draftToReveal, setDraftToReveal] = useState<{ scopeKey: string; deviceId: string; id: string } | null>(null)
   useLayoutEffect(() => {
     if (!draftToReveal) return
@@ -878,6 +889,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
 
   const rendering: RenderingActions = useMemo(() => ({
     copyText: text => host.copyText(text),
+    openExternal: href => host.openExternal(href),
   }), [host])
 
   const pageController: SessionPageController = useMemo(() => ({
@@ -913,7 +925,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         targetConvScope.conversationId,
         request,
       ),
-    onOpenFile: (targetConvScope, targetProject, relativePath, _destination) => {
+    onOpenFile: (targetConvScope, targetProject, relativePath, destination) => {
+      const mode = destination === "preview" ? "preview" : "central"
       localDir.openFileTab(
         {
           namespace: targetConvScope.namespace,
@@ -923,9 +936,10 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         },
         targetConvScope.conversationId,
         relativePath,
-        "central",
+        mode,
         "code",
       )
+      if (mode === "preview") onOpenRightPanel?.()
     },
     getCentralFiles: ({ scope: pageScope, conversation }): SessionCentralFilesState => {
       const central = localDir.getCentralState(pageScope, conversation.conversationId)

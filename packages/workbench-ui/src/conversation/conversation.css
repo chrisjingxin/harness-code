@@ -1,8 +1,8 @@
 /* 对话区样式：只引用公共主题变量；文件、导航和整体三栏布局由其他区域负责。 */
 /* 时间线先让出待处理表单的自然高度，再独立滚动，避免长历史把表单挤成一条缝。 */
 /* 锚定刻度列以会话容器定位为参照，容器查询按会话宽度而不是窗口宽度决定显隐。 */
-/* 外拓 6px 给工作日志悬停胶囊留出左边距，同时保持内部正文与页头/输入框在同一直线上。 */
-.wb-conversation { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 48px; margin-inline: -6px; container-type: inline-size; }
+/* 外拓 6px 给工作日志悬停胶囊留出左边距，同时保持内部正文与页头/输入框在同一直线上；clip 防止焦点触发外层误滚动。 */
+.wb-conversation { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 48px; margin-inline: -6px; overflow: hidden; overflow: clip; container-type: inline-size; }
 .wb-conversation[hidden] { display: none; }
 .wb-conversation-scroll {
   flex: 1 1 auto;
@@ -96,8 +96,10 @@
 .wb-conversation-tool,
 .wb-conversation-reasoning,
 .wb-conversation-tool-group,
+.wb-conversation-process,
 .wb-conversation-interaction-history { width: 100%; min-width: 0; margin: 1px 0; }
-.wb-conversation-agent-group > .wb-conversation-tool-group { margin-top: 2px; }
+.wb-conversation-agent-group > .wb-conversation-tool-group,
+.wb-conversation-agent-group > .wb-conversation-process { margin-top: 2px; }
 
 /* 通用折叠容器：组体始终挂载，用 grid 行高过渡；收起时内容对焦点与读屏隐藏。 */
 .wb-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms ease, opacity 180ms ease; opacity: 0; }
@@ -158,6 +160,19 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-tool-group-body[data-fade-top="true"][data-fade-bottom="true"] { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
 .wb-conversation-tool-group-body[data-fade-top="true"]:not([data-fade-bottom="true"]) { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px); mask-image: linear-gradient(to bottom, transparent, #000 16px); }
 .wb-conversation-tool-group-body[data-fade-bottom="true"]:not([data-fade-top="true"]) { -webkit-mask-image: linear-gradient(to top, transparent, #000 16px); mask-image: linear-gradient(to top, transparent, #000 16px); }
+
+/* 整轮多阶段过程总览：执行中展开，开始回复或结束后用 slow 缓动收起成一行。 */
+.wb-conversation-process-header { display: flex; align-items: center; gap: 7px; width: calc(100% + 12px); margin-inline: -6px; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
+button.wb-conversation-process-header { cursor: pointer; }
+button.wb-conversation-process-header:hover { background: var(--hover); }
+button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
+.wb-conversation-process-label { min-width: 0; color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
+.wb-conversation-process-progress { color: var(--muted); }
+.wb-conversation-process-failures { color: var(--danger-text); }
+.wb-conversation-process-header .wb-conversation-chevron { margin-left: auto; }
+.wb-conversation-process-disclosure { transition: grid-template-rows var(--motion-slow, 320ms) var(--ease-out-expo, ease), opacity 220ms ease; }
+.wb-conversation-process-body { margin: 0 0 6px 6.25px; padding: 2px 0 2px 12px; border-left: 1.5px solid var(--border); }
+.wb-conversation-process-body .wb-conversation-reply-actions { display: none; }
 
 .wb-conversation-detail-card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--tool-output-bg); }
 .wb-conversation-detail-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
@@ -243,7 +258,8 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
   /* 减少动态效果时进场只保留 ≤120ms 的透明度淡入，去掉位移。 */
   .wb-conversation-timeline [data-enter="true"] { animation-name: wb-conversation-enter-fade !important; animation-duration: 120ms !important; }
   /* 折叠容器不做高度过渡、文字不扫光、详情不位移动画。 */
-  .wb-disclosure { transition: none; }
+  .wb-disclosure,
+  .wb-conversation-process-disclosure { transition: none; }
   .wb-conversation-shimmer { animation: none; -webkit-mask-image: none; mask-image: none; }
   .wb-conversation-tool-details-disclosure[data-open="true"],
   .wb-conversation-to-bottom,
@@ -255,7 +271,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 }
 
 /* 输入区 1:1 还原原型稿 .composer 悬浮圆角卡片、@ 快捷按钮与 30px 圆形发送键。 */
-.wb-conversation-view { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; width: 100%; }
+.wb-conversation-view { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; width: 100%; overflow: hidden; overflow: clip; }
 .wb-conversation-view[hidden] { display: none; }
 .wb-composer-bar { flex: 0 0 auto; min-width: 0; background: transparent; }
 .wb-composer-inner { position: relative; width: 100%; max-width: 740px; margin-inline: auto; padding-top: 8px; }
@@ -404,6 +420,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-block-number { padding-right: 9px; color: var(--subtle); text-align: right; user-select: none; }
 .wb-conversation-block-notice { margin: 4px 10px; color: var(--muted); font-size: 12px; }
 .wb-conversation-diff > div { display: grid; grid-template-columns: 25px minmax(0, 1fr); padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-conversation-diff-context { color: var(--muted); }
 .wb-conversation-diff-add { background: var(--diff-add-bg); }
 .wb-conversation-diff-add > span:first-child { color: var(--diff-add-sign); }
 .wb-conversation-diff-remove { background: var(--diff-remove-bg); }
@@ -422,6 +439,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-interaction-deadline.is-expired { color: var(--danger-text); }
 .wb-interaction-description { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wb-interaction-preview, .wb-interaction-extension { min-width: 0; overflow-wrap: anywhere; }
+.wb-interaction-preview { max-height: 168px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); padding-top: 6px; scrollbar-width: thin; }
 .wb-interaction-approval-options { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .wb-interaction-option, .wb-interaction-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control-compact); padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text-soft); font-size: 13px; cursor: pointer; }
 .wb-interaction-option-positive { color: var(--success-text); }

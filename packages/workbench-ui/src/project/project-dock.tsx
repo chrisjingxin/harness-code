@@ -68,6 +68,8 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
     if (target?.dataset.panel === "files" || target?.dataset.panel === "changes") actions.selectPanel(scope, target.dataset.panel)
   }
 
+  const showInlinePreview = !preferCentralFileOpen || personal.fileTabs.length > 0
+
   return <aside className="project-context-dock" style={{ width: personal.dockOpen ? personal.dockWidthPx : 0 }}
     data-active-panel={panel} aria-label="项目文件与变更" aria-hidden={personal.dockOpen ? undefined : true} inert={!personal.dockOpen}>
     <div className={`project-dock-resize${dragging ? " is-dragging" : ""}`} role="separator" aria-orientation="vertical"
@@ -89,8 +91,8 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
     {availability.state !== "available" ? <p className="project-availability" role="status">{availability.message}</p> : null}
 
     <div id={`${uid}-files-panel`} role="tabpanel" aria-labelledby={`${uid}-files-tab`}
-      className={`project-dock-body${preferCentralFileOpen ? " is-tree-only" : " project-dock-code-body"}`} hidden={panel !== "files"} inert={panel !== "files"}>
-      {denied ? <p className="project-panel-empty">当前无权查看项目文件。</p> : preferCentralFileOpen ? (
+      className={`project-dock-body${!showInlinePreview ? " is-tree-only" : " project-dock-code-body"}`} hidden={panel !== "files"} inert={panel !== "files"}>
+      {denied ? <p className="project-panel-empty">当前无权查看项目文件。</p> : !showInlinePreview ? (
         <div className="project-dock-files-scroll" key={identity}>
           <ProjectFileExplorer
             scope={scope}
@@ -115,7 +117,8 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
       ) : (
         <div className={`project-code-layout${personal.fileTabs.length ? " has-file-preview" : ""}`} key={identity}>
           <ProjectFileExplorer scope={scope} projectName={projectName} tree={tree} selectedPath={personal.selectedPath}
-            refresh={gates.refreshTree} open={gates.openFile} actions={actions} treeRef={treeRef} statusByPath={statusByPath} />
+            refresh={gates.refreshTree} open={gates.openFile} actions={actions} treeRef={treeRef}
+            preferCentralFileOpen={preferCentralFileOpen} statusByPath={statusByPath} />
           <ProjectDockFiles {...props} treeRef={treeRef} uid={uid} />
         </div>
       )}

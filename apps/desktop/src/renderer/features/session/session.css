@@ -6,6 +6,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  overflow: clip;
   background: var(--bg);
   color: var(--text);
 }
@@ -134,6 +135,8 @@
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
   padding: 0 var(--pad-stage, 24px) 18px;
@@ -562,6 +565,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  overflow: clip;
 }
 .session-conversation-column {
   display: flex;
@@ -569,6 +573,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  overflow: clip;
 }
 
 .session-chat-split.has-split {

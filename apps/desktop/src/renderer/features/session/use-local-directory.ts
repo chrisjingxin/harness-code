@@ -708,6 +708,33 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     void loadFilePreview(targetScope, conversationId, path)
   }, [loadFilePreview])
 
+  /**
+   * 仅刷新当前会话已展开目录、已打开预览标签与 Git 变更快照，不重置用户的选中和折叠位置。
+   * 供本机 Agent 工具完成写文件/命令执行后调用，让右侧文件栏与中央差异视图实时反映磁盘改动。
+   */
+  const refreshWorkspace = useCallback(async (targetScope: ProjectNavigationScope, conversationId: string) => {
+    const key = makeKey(targetScope, conversationId)
+    const runtime = runtimesRef.current[key]
+    if (!runtime || runtime.directory.status !== "ready" || !localDirectory) return
+    const dirsToLoad = ["", ...runtime.personal.expanded]
+    const filesToLoad = new Set<string>([
+      ...runtime.personal.view.fileTabs.map(tab => tab.path),
+      ...runtime.personal.centralPaths,
+    ])
+    const diffPath = runtime.centralMode === "diff" && runtime.personal.activeCentral
+      ? runtime.personal.activeCentral
+      : runtime.personal.diffPath
+    await Promise.all([
+      ...dirsToLoad.map(dir => loadDirectoryEntries(targetScope, conversationId, dir)),
+      ...Array.from(filesToLoad).map(path => loadFilePreview(targetScope, conversationId, path)),
+      ...(runtime.directory.isGitRepository ? [loadGitStatus(targetScope, conversationId)] : []),
+    ])
+    const nextSnapshot = runtimesRef.current[key]?.changes.repository?.snapshot
+    if (runtime.directory.isGitRepository && diffPath && nextSnapshot) {
+      await loadDiff(targetScope, conversationId, nextSnapshot, diffPath)
+    }
+  }, [localDirectory, loadDirectoryEntries, loadFilePreview, loadGitStatus, loadDiff])
+
   const savePosition = useCallback((
     targetScope: ProjectNavigationScope,
     conversationId: string,
@@ -1018,6 +1045,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     setCentralMode,
     openDiffFile,
     refreshFile,
+    refreshWorkspace,
     savePosition,
     requestFileCandidates,
   }), [
@@ -1031,6 +1059,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     setCentralMode,
     openDiffFile,
     refreshFile,
+    refreshWorkspace,
     savePosition,
     requestFileCandidates,
   ])

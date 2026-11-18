@@ -54,6 +54,26 @@ function toDiffs(update: ToolCall | ToolCallUpdate): LocalAcpTool["diffs"] {
 }
 
 /** 单条 tool_call / tool_call_update 通知的显示投影；未携带的字段一律缺省。 */
+import type { LocalAcpToolLocation } from "./index.js"
+
+const MAX_LOCATIONS = 8
+const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/
+
+/** 提取并清洗工具关联路径，过滤控制字符与无效行号，并限制上限以防 IPC 载荷膨胀。 */
+function toLocations(locations: (ToolCall | ToolCallUpdate)["locations"]): readonly LocalAcpToolLocation[] | undefined {
+  if (!Array.isArray(locations) || locations.length === 0) return undefined
+  const items: LocalAcpToolLocation[] = []
+  for (const item of locations) {
+    if (!item || typeof item.path !== "string") continue
+    const path = item.path.trim()
+    if (!path || CONTROL_CHAR_PATTERN.test(path)) continue
+    const line = typeof item.line === "number" && Number.isSafeInteger(item.line) && item.line > 0 ? item.line : undefined
+    items.push(line === undefined ? { path } : { path, line })
+    if (items.length >= MAX_LOCATIONS) break
+  }
+  return items.length > 0 ? items : undefined
+}
+
 export function toLocalAcpTool(update: ToolCall | ToolCallUpdate): LocalAcpTool {
   return {
     id: update.toolCallId,
@@ -63,5 +83,6 @@ export function toLocalAcpTool(update: ToolCall | ToolCallUpdate): LocalAcpTool 
     input: toInput(update.rawInput),
     output: toOutput(update),
     diffs: toDiffs(update),
+    locations: toLocations(update.locations),
   }
 }

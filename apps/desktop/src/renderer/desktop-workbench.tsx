@@ -283,6 +283,16 @@ function WorkspaceProjectWorkbench(props: {
     selectedConversationId,
     execution: props.execution,
     onOpenConversation: locateConversation,
+    onOpenRightPanel: () => {
+      if (shell.workspace.status !== "ready" || shell.workspace.value.panels.right.open) return
+      shell.saveWorkspace({
+        ...shell.workspace.value,
+        panels: {
+          ...shell.workspace.value.panels,
+          right: { ...shell.workspace.value.panels.right, open: true },
+        },
+      })
+    },
   })
   const { pageController, integration } = projectSessions
   const scope = shell.scope

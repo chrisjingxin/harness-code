@@ -14,7 +14,11 @@ import { parseFixedReference } from "../collaboration-reference.js"
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type DirectoryGrant = { readonly path: string; readonly dev: bigint; readonly ino: bigint }
-type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & { sequence: number }
+type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & {
+  sequence: number
+  lastMessageId?: string
+  needsSegmentBreak?: boolean
+}
 type Binding = {
   readonly id: string
   readonly login: Login
@@ -204,22 +208,38 @@ export function createLocalExecutionIpc(
             if (!turn || turn.turnId !== event.turnId || turn.sequence + 1 !== event.sequence) return
             turn.sequence = event.sequence
             if (event.type === "text-delta") {
-              if (turn.reply !== undefined) {
-                turn.reply = turn.reply.length + event.text.length <= syncPayloadLimit ? turn.reply + event.text : undefined
+              if (turn.reply !== undefined && event.text) {
+                // 工具/思考/审批打断或 messageId 切换后插入段落空行，避免上传定稿将两段回复粘连。
+                const needsBreak = turn.reply.length > 0 && (
+                  turn.needsSegmentBreak
+                  || (event.messageId !== undefined && turn.lastMessageId !== undefined && event.messageId !== turn.lastMessageId)
+                )
+                const addition = (needsBreak ? "\n\n" : "") + event.text
+                turn.reply = turn.reply.length + addition.length <= syncPayloadLimit ? turn.reply + addition : undefined
+                turn.needsSegmentBreak = false
               }
-              publish(login, { ...source, kind: "text", text: event.text })
+              if (event.messageId !== undefined) turn.lastMessageId = event.messageId
+              publish(login, {
+                ...source,
+                kind: "text",
+                text: event.text,
+                ...(event.messageId !== undefined ? { messageId: event.messageId } : {}),
+              })
               return
             }
             if (event.type === "thought-delta") {
               // 思考片段只走时间线展示，不进入 turn.reply，避免随定稿上传。
+              if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
               publish(login, { ...source, kind: "thought", text: event.text })
               return
             }
             if (event.type === "tool") {
+              if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
               publish(login, { ...source, kind: "tool", tool: event.tool })
               return
             }
             if (event.type === "permission") {
+              if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
               publish(login, { ...source, kind: "permission", request: event.request })
               return
             }

@@ -14,7 +14,7 @@ import { formatElapsed } from "../common/formatters.js"
 import { Markdown } from "../rendering/markdown.js"
 import type { RenderingActions } from "../rendering/types.js"
 import { Disclosure } from "./disclosure.js"
-import { deriveMinimapItems, isTurnActive, segmentAgentEntries } from "./timeline-model.js"
+import { deriveMinimapItems, splitTurnProcess, type ProcessSummary, type TimelineSegment } from "./timeline-model.js"
 import { TimelineMinimap } from "./timeline-minimap.js"
 import { ConversationToolCard } from "./tool-card.js"
 import type { ConversationTimelineActivity, ConversationTimelineEntry, ConversationTimelineProps } from "./types.js"
@@ -108,7 +108,12 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
   )
 }
 
-/** 一组最多包含一个 Assistant 消息；工具和推理不改变原始顺序。 */
+function localExecutionTurnPrefix(entryId: string): string | null {
+  const match = /^(local-execution:[^:]+):/.exec(entryId)
+  return match?.[1] ?? null
+}
+
+/** 一轮 Agent 内部按思考/工具自然分段的多个正文保持同组；历史中的独立相邻助手回复仍各自成组。 */
 function groupEntries(entries: readonly ConversationTimelineEntry[]): ConversationTimelineEntry[][] {
   const groups: ConversationTimelineEntry[][] = []
   for (let index = 0; index < entries.length; index += 1) {
@@ -119,16 +124,21 @@ function groupEntries(entries: readonly ConversationTimelineEntry[]): Conversati
     }
     const group = [item]
     let hasAssistant = isAssistant(item)
+    let prev = item
     while (index + 1 < entries.length) {
       const next = entries[index + 1]
       if (isAssistant(next)) {
-        if (hasAssistant) break
+        const sameLocalTurn = localExecutionTurnPrefix(item.id) !== null
+          && localExecutionTurnPrefix(item.id) === localExecutionTurnPrefix(next.id)
+        // 工具/思考后续接的正文或同一本机轮次的连续分段保持同组，避免多插一行 Agent 名称栏。
+        if (hasAssistant && !isAgentContinuation(prev) && !sameLocalTurn) break
         hasAssistant = true
       } else if (!isAgentContinuation(next)) {
         break
       }
       index += 1
       group.push(next)
+      prev = next
     }
     groups.push(group)
   }
@@ -140,7 +150,7 @@ function isAssistant(entry: ConversationTimelineEntry): entry is MessageEntry {
 }
 
 function isAgentContinuation(entry: ConversationTimelineEntry): boolean {
-  return entry.kind === "reasoning" || entry.kind === "tool"
+  return entry.kind === "reasoning" || entry.kind === "tool" || entry.kind === "interaction-history"
 }
 
 /** Agent 组成分：Agent 回答或它的工具/推理延续。 */
@@ -178,36 +188,162 @@ function TimelineGroup({
   }
   /* 整组同时出现时只播一次组级动效；组已存在、后续追加的单条仍各自播进入。 */
   const groupIsNew = entries.every(entry => isNewEntry(entry.id))
-  const turnActive = isTurnActive(entries, activity)
+  const { processSummary, processSegments, finalEntry } = splitTurnProcess(entries, activity)
+  const segmentProps = { groupIsNew, lastId, isNewEntry, expandedTools, expandedOutputs, onToggleTool, onToggleOutput, rendering }
   return (
     <div className="wb-conversation-agent-group" data-enter={groupIsNew || undefined}>
       <MessageMeta role="assistant" author={assistant?.author?.displayName} createdAtMs={assistant?.createdAtMs} />
-      {segmentAgentEntries(entries).map(segment => segment.kind === "tool-group" ? (
-        <ToolGroupRows
-          key={segment.id}
-          groupId={segment.id}
-          tools={segment.tools}
-          turnActive={turnActive}
-          enter={!groupIsNew && segment.tools.every(tool => isNewEntry(tool.id))}
+      {processSummary ? (
+        <ProcessGroupRows summary={processSummary} segments={processSegments} {...segmentProps} />
+      ) : processSegments.map(segment => renderTimelineSegment({ segment, ...segmentProps }))}
+      {finalEntry ? (
+        <TimelineRow
+          key={finalEntry.id}
+          entry={finalEntry}
+          grouped
+          enter={!groupIsNew && isNewEntry(finalEntry.id)}
+          lastId={lastId}
           expandedTools={expandedTools}
           expandedOutputs={expandedOutputs}
           onToggleTool={onToggleTool}
           onToggleOutput={onToggleOutput}
           rendering={rendering}
         />
-      ) : (
-        <TimelineRow key={segment.entry.id} entry={segment.entry} grouped enter={!groupIsNew && isNewEntry(segment.entry.id)} lastId={lastId} expandedTools={expandedTools} expandedOutputs={expandedOutputs} onToggleTool={onToggleTool} onToggleOutput={onToggleOutput} rendering={rendering} />
-      ))}
+      ) : null}
       {activity ? <ActivityStatus activity={activity} /> : null}
     </div>
   )
 }
 
-/** 工具组头：N 个操作、失败数与运行进度；运行中或整轮进行时强制展开。 */
+function renderTimelineSegment({
+  segment,
+  groupIsNew,
+  lastId,
+  isNewEntry,
+  expandedTools,
+  expandedOutputs,
+  onToggleTool,
+  onToggleOutput,
+  rendering,
+}: {
+  segment: TimelineSegment
+  groupIsNew: boolean
+  lastId: string | null
+  isNewEntry: (id: string) => boolean
+  expandedTools: readonly string[]
+  expandedOutputs: readonly string[]
+  onToggleTool?: (id: string) => void
+  onToggleOutput?: (id: string) => void
+  rendering?: RenderingActions
+}): ReactElement {
+  return segment.kind === "tool-group" ? (
+    <ToolGroupRows
+      key={segment.id}
+      groupId={segment.id}
+      tools={segment.tools}
+      enter={!groupIsNew && segment.tools.every(tool => isNewEntry(tool.id))}
+      expandedTools={expandedTools}
+      expandedOutputs={expandedOutputs}
+      onToggleTool={onToggleTool}
+      onToggleOutput={onToggleOutput}
+      rendering={rendering}
+    />
+  ) : (
+    <TimelineRow
+      key={segment.entry.id}
+      entry={segment.entry}
+      grouped
+      enter={!groupIsNew && isNewEntry(segment.entry.id)}
+      lastId={lastId}
+      expandedTools={expandedTools}
+      expandedOutputs={expandedOutputs}
+      onToggleTool={onToggleTool}
+      onToggleOutput={onToggleOutput}
+      rendering={rendering}
+    />
+  )
+}
+
+/** 一轮正文前的思考与工具过程总览：执行中保持展开，开始输出最终正文或结束后自动收起为单行，可手动展开。 */
+function ProcessGroupRows({
+  summary,
+  segments,
+  groupIsNew,
+  lastId,
+  isNewEntry,
+  expandedTools,
+  expandedOutputs,
+  onToggleTool,
+  onToggleOutput,
+  rendering,
+}: {
+  summary: ProcessSummary
+  segments: readonly TimelineSegment[]
+  groupIsNew: boolean
+  lastId: string | null
+  isNewEntry: (id: string) => boolean
+  expandedTools: readonly string[]
+  expandedOutputs: readonly string[]
+  onToggleTool?: (id: string) => void
+  onToggleOutput?: (id: string) => void
+  rendering?: RenderingActions
+}): ReactElement {
+  const forced = summary.running
+  const expanded = forced || expandedTools.includes(summary.id)
+  const detailsId = `${summary.id}:body`.replaceAll(":", "-")
+  const Icon = forced ? Loader2 : summary.hasThought ? Brain : Wrench
+  const iconClass = forced ? "wb-conversation-tool-icon wb-conversation-spin" : "wb-conversation-tool-icon"
+  const labelNode = (
+    <span className="wb-conversation-process-label">
+      {summary.label}
+      {forced ? <span className="wb-conversation-process-progress"> · 正在执行</span> : null}
+      {summary.failedCount > 0 ? <span className="wb-conversation-process-failures"> · 含 {summary.failedCount} 个失败</span> : null}
+    </span>
+  )
+  return (
+    <div className="wb-conversation-process">
+      {onToggleTool ? (
+        <button
+          type="button"
+          className="wb-conversation-process-header"
+          aria-expanded={expanded}
+          aria-controls={expanded ? detailsId : undefined}
+          aria-disabled={forced || undefined}
+          onClick={() => { if (!forced) onToggleTool(summary.id) }}
+        >
+          <Icon aria-hidden="true" className={iconClass} />
+          {labelNode}
+          <ChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
+        </button>
+      ) : (
+        <div className="wb-conversation-process-header">
+          <Icon aria-hidden="true" className={iconClass} />
+          {labelNode}
+        </div>
+      )}
+      <Disclosure open={expanded} className="wb-conversation-process-disclosure">
+        <div id={detailsId} className="wb-conversation-process-body">
+          {segments.map(segment => renderTimelineSegment({
+            segment,
+            groupIsNew,
+            lastId,
+            isNewEntry,
+            expandedTools,
+            expandedOutputs,
+            onToggleTool,
+            onToggleOutput,
+            rendering,
+          }))}
+        </div>
+      </Disclosure>
+    </div>
+  )
+}
+
+/** 工具组头：N 个操作、失败数与运行进度；组内有工具运行时强制展开。 */
 function ToolGroupRows({
   groupId,
   tools,
-  turnActive,
   enter,
   expandedTools,
   expandedOutputs,
@@ -217,7 +353,6 @@ function ToolGroupRows({
 }: {
   groupId: string
   tools: readonly ToolEntry[]
-  turnActive: boolean
   enter: boolean
   expandedTools: readonly string[]
   expandedOutputs: readonly string[]
@@ -228,7 +363,7 @@ function ToolGroupRows({
   const runningIndex = tools.findIndex(tool => tool.status === "running")
   const running = runningIndex >= 0
   const failedCount = tools.filter(tool => tool.status === "failed").length
-  const forced = running || turnActive
+  const forced = running
   const expanded = forced || expandedTools.includes(groupId)
   const detailsId = `${groupId}:body`.replaceAll(":", "-")
   const bodyRef = useRef<HTMLDivElement | null>(null)

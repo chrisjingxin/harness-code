@@ -9,8 +9,10 @@ import type {
 } from "../../../local-execution-host.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
-import { applyLocalExecutionUpdate, emptyLocalExecutionView } from "./local-execution-view.js"
+import { applyLocalExecutionUpdate, describePermissionRequest, emptyLocalExecutionView } from "./local-execution-view.js"
 import type { LocalExecutionView } from "./local-execution-view.js"
+
+const WORKSPACE_MUTATING_TOOL_KINDS = new Set(["edit", "delete", "move", "execute"])
 
 export const attachmentUnavailableReason = "本机 Agent 暂不支持附件。移除附件后可发送，当前草稿已保留。"
 const unknownReason = "发送结果待确认。请保留当前草稿，等待本机执行状态更新。"
@@ -53,6 +55,7 @@ export function useLocalExecution(
   selectionRevision: number,
   ownerName: string,
   onAccepted: (scope: ProjectNavigationScope, conversationId: string, revision: number) => void,
+  onWorkspaceRefresh?: (scope: ProjectNavigationScope, conversationId: string) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
@@ -63,13 +66,13 @@ export function useLocalExecution(
     return { scope, key: localExecutionKey(scope), directory, selectionRevision }
   }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision])
   const screens = useRef(new Map<string, Screen>())
-  const current = useRef({ target, onAccepted, ownerName })
+  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName })
   const mounted = useRef(false)
   const [, refresh] = useReducer(revision => revision + 1, 0)
 
   useLayoutEffect(() => {
-    current.current = { target, onAccepted, ownerName }
-  }, [target, onAccepted, ownerName])
+    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName }
+  }, [target, onAccepted, onWorkspaceRefresh, ownerName])
 
   function accept(screen: Screen, flight: Flight, conversationId: string, turnId: string, text: string): void {
     if (flight.turnId !== undefined) return
@@ -119,19 +122,27 @@ export function useLocalExecution(
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
       flight.lastSequence = notice.sequence
       if (notice.kind === "permission") {
-        screen.timeline = { ...screen.timeline, permission: notice.request }
+        screen.timeline = applyLocalExecutionUpdate(screen.timeline, {
+          kind: "permission", turnId: notice.turnId, request: notice.request,
+        })
         refresh()
         return
       }
       screen.timeline = applyLocalExecutionUpdate(screen.timeline, notice.kind === "text"
-        ? { kind: "assistant-text", turnId: notice.turnId, text: notice.text }
+        ? { kind: "assistant-text", turnId: notice.turnId, text: notice.text, messageId: notice.messageId }
         : notice.kind === "tool" ? notice
           : notice.kind === "thought" ? { kind: "thought", turnId: notice.turnId, text: notice.text }
             : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
+      if (notice.kind === "tool"
+        && (notice.tool.status === "completed" || notice.tool.status === "failed")
+        && (WORKSPACE_MUTATING_TOOL_KINDS.has(notice.tool.kind ?? "") || Boolean(notice.tool.diffs?.length))) {
+        current.current.onWorkspaceRefresh?.(flight.scope, notice.scope.conversationId)
+      }
       if (notice.kind === "finished") {
         screen.flight = undefined
         screen.terminal = notice
         if (screen.binding?.bindingId === notice.bindingId) screen.availability = notice.availability
+        current.current.onWorkspaceRefresh?.(flight.scope, notice.scope.conversationId)
       }
       refresh()
     })
@@ -195,10 +206,14 @@ export function useLocalExecution(
       const source = current.current.target
       const screen = source && screens.current.get(source.key)
       const flight = screen?.flight
-      if (!source || source.scope.conversationId !== id || !screen || !flight?.turnId || screen.timeline.permission?.id !== requestId) {
+      const pendingPermission = screen?.timeline.permission
+      if (!source || source.scope.conversationId !== id || !screen || !flight?.turnId || pendingPermission?.id !== requestId) {
         throw new Error("审批请求已变更。")
       }
-      const result = await host.answerPermission(source.scope, flight.bindingId, flight.turnId, requestId, optionId)
+      const turnId = flight.turnId
+      const chosenOption = pendingPermission.options.find(option => option.id === optionId)
+      const described = describePermissionRequest(pendingPermission)
+      const result = await host.answerPermission(source.scope, flight.bindingId, turnId, requestId, optionId)
       if (!result.ok) {
         if (screen.timeline.permission?.id === requestId) {
           screen.timeline = { ...screen.timeline, failure: result.error.message,
@@ -207,6 +222,16 @@ export function useLocalExecution(
         }
         throw new Error(result.error.message)
       }
+      // 审批确认后立即把用户的真实决策写入本轮时间线历史，即使 permission:null 或 finished 先到达也不丢失。
+      screen.timeline = applyLocalExecutionUpdate(screen.timeline, {
+        kind: "permission-decision",
+        turnId,
+        requestId,
+        title: pendingPermission.title,
+        optionLabel: chosenOption?.label ?? optionId,
+        description: described.description,
+      })
+      refresh()
     },
     async send(input) {
       if (input.attachmentIds.length) return { status: "rejected", message: attachmentUnavailableReason }
