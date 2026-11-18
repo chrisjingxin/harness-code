@@ -163,3 +163,33 @@ test("_meta.harnessCode 解析辅助函数安全提取工作流/计划/目标/�
   )
   assert.equal(parseHarnessSessionSummaryMeta(null), undefined)
 })
+
+test("resolveHarnessCommand 在 Git worktree 目录下自动回溯发现主仓库的 packages/agent/.venv", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc-harness-wt-"))
+  try {
+    const isWin = process.platform === "win32"
+    const mainRepo = join(root, "main-repo")
+    const worktreeRepo = join(root, "wt-repo")
+    const worktreeGitMeta = join(mainRepo, ".git", "worktrees", "wt-repo")
+    const agentDir = join(mainRepo, "packages", "agent")
+    const venvBin = join(agentDir, ".venv", isWin ? "Scripts" : "bin")
+    const venvCli = join(venvBin, isWin ? "harness-agent.exe" : "harness-agent")
+    await Promise.all([
+      mkdir(worktreeRepo, { recursive: true }),
+      mkdir(worktreeGitMeta, { recursive: true }),
+      mkdir(venvBin, { recursive: true }),
+    ])
+    await writeFile(join(worktreeGitMeta, "commondir"), "../..\n", "utf8")
+    await writeFile(join(worktreeRepo, ".git"), `gitdir: ${worktreeGitMeta}\n`, "utf8")
+    await makeExecutable(venvCli)
+
+    const resolved = resolveHarnessCommand({ PATH: "" }, { searchFrom: [worktreeRepo], includeDefaultGuiPath: false })
+    assert.equal(resolved.available, true)
+    if (resolved.available) {
+      assert.equal(resolved.source, "venv-cli")
+      assert.equal(resolved.command.executable, venvCli)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -539,22 +539,22 @@ test("buildComposerCapabilities 生成多代理/模式/配置控件、workflow t
   assert.deepEqual(caps.controls.map(c => c.id), ["agent", "mode", "config:model", "config:workflow", "config:thought_level"])
   assert.equal(caps.controls[0]?.selectedId, "harness")
   assert.equal(caps.controls[0]?.items[1]?.availability.enabled, false)
-  assert.deepEqual(caps.tabCycle, { controlId: "config:workflow", itemIds: ["build", "compose"] })
+  // 存在多模式时 tabCycle 优先绑定 mode（模式轮转）
+  assert.deepEqual(caps.tabCycle, { controlId: "mode", itemIds: ["default", "plan"] })
   assert.equal(caps.usageBadge, "1.5k/100k")
   assert.ok(caps.restoreNotice?.includes("不支持恢复"))
 
-  // 无 workflow 配置时 tabCycle 回落到 mode
-  const withoutWorkflow = buildComposerCapabilities({
+  // 仅单一模式时 tabCycle 回落到工作流配置项
+  const withSingleMode = buildComposerCapabilities({
     sessionState: {
       ...sessionState,
-      providerId: "pi",
-      configOptions: sessionState.configOptions.filter(c => c.id !== "workflow"),
+      modes: { currentModeId: "default", availableModes: [{ id: "default", name: "逐项确认" }] },
     },
     availability: { available: true },
     directoryPath: "/tmp/ws",
     running: false,
   })
-  assert.deepEqual(withoutWorkflow.tabCycle, { controlId: "mode", itemIds: ["default", "plan"] })
+  assert.deepEqual(withSingleMode.tabCycle, { controlId: "config:workflow", itemIds: ["build", "compose"] })
 })
 
 test("extractFileAttachments 从发送文本提取工作区 @file 令牌并拦截越界路径与邮箱", () => {

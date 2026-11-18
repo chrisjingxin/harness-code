@@ -1,39 +1,66 @@
 /**
- * 受控输入区：复用旧 Web 的聊天输入、上弹菜单、文件提及和发送/停止布局。
+ * 受控输入区：提供消息编辑、@ 分类引用（文件/知识库/会话/任务/成员）、/ 斜杠命令与 Tab 模式轮转。
  *
- * 草稿及身份由调用方保存。文件沿用原目录查询；项目会话只上报选择，由装配方取材和确认。
- * 输入或光标变化 → 匹配 @ token → 绑定 scope/目标/修订发请求 → 仅接收当前请求结果。
+ * 草稿及身份由调用方保存；所有候选列表与操作意图均经回调上报装配方，组件自身不保存第二份真实数据源。
  */
-import { IconAlertTriangle, IconArrowUp, IconCheck, IconChevronDown, IconPlayerStopFilled, IconX } from "@tabler/icons-react"
+import {
+  IconAlertTriangle,
+  IconArrowUp,
+  IconBook,
+  IconCheck,
+  IconChecklist,
+  IconChevronDown,
+  IconFolder,
+  IconMessages,
+  IconPlayerStopFilled,
+  IconUser,
+  IconX,
+} from "@tabler/icons-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
+import { FileTypeIcon } from "../common/file-type-icon.js"
 import { extractMentionToken, mentionWindow, replaceMentionToken } from "./mention-policy.js"
-import type { MentionToken } from "./mention-policy.js"
 import type {
   ConversationActions,
+  ConversationCollaborationCandidate,
+  ConversationCollaborationCandidateResult,
   ConversationComposerView,
   ConversationDraft,
   ConversationFileCandidate,
   ConversationFileCandidateResult,
   ConversationMenuItemView,
   ConversationScope,
-  ConversationCollaborationCandidate,
-  ConversationCollaborationCandidateResult,
   ConversationTimelineActivity,
 } from "./types.js"
 
 type BrowseState = { targetKey: string; tokenStart: number; baseQuery: string; directory: string }
 type CandidateState<T> = { key: string; result?: T }
 type MentionCandidate = ConversationFileCandidate | ConversationCollaborationCandidate
+type MentionGroup = "file" | "knowledge" | "conversation" | "task" | "member"
+type MentionTab = "all" | MentionGroup
+type MentionEntry = { readonly key: string; readonly group: MentionGroup; readonly item: MentionCandidate }
 type Control = ConversationComposerView["controls"][number]
 
 function candidateKey(item: MentionCandidate): string {
   return `${item.kind}:${"relativePath" in item ? item.relativePath : item.id}`
 }
 
-const collaborationLabels: Record<ConversationCollaborationCandidate["kind"], string> = {
-  conversation: "项目会话", member: "项目成员", task: "项目任务", knowledge: "团队知识",
+const MENTION_GROUP_LABELS: Record<MentionGroup, string> = {
+  file: "工作区文件",
+  knowledge: "团队知识库",
+  conversation: "项目会话",
+  task: "项目任务",
+  member: "项目成员",
+}
+
+const MENTION_TAB_LABELS: Record<MentionTab, string> = {
+  all: "全部",
+  file: "文件",
+  knowledge: "知识库",
+  conversation: "会话",
+  task: "任务",
+  member: "成员",
 }
 
 interface ComposerProps {
@@ -58,10 +85,12 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const composing = useRef(false)
   const pendingCaret = useRef<number | null>(null)
+  const wasEditableRef = useRef(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [browse, setBrowse] = useState<BrowseState | null>(null)
+  const [mentionTab, setMentionTab] = useState<MentionTab>("all")
   const [fileState, setFileState] = useState<CandidateState<ConversationFileCandidateResult> | null>(null)
   const [collaborationState, setCollaborationState] = useState<CandidateState<ConversationCollaborationCandidateResult> | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -93,13 +122,42 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const collaborationResult = showCollaboration && collaborationState?.key === requestKey ? collaborationState.result : undefined
   const files = fileResult?.status === "ready" ? fileResult.items.slice(0, 1000) : []
   const collaborationItems = collaborationResult?.status === "ready" ? collaborationResult.items.slice(0, 1000) : []
-  const candidates = [...collaborationItems, ...files]
+
+  // 将所有候选按语义分组排列（文件 → 知识库 → 会话 → 任务 → 成员），确保视觉分组与键盘上下键顺序完全一致。
+  const knowledgeItems = collaborationItems.filter(item => item.kind === "knowledge")
+  const conversationItems = collaborationItems.filter(item => item.kind === "conversation")
+  const taskItems = collaborationItems.filter(item => item.kind === "task")
+  const memberItems = collaborationItems.filter(item => item.kind === "member")
+  const allEntries: MentionEntry[] = [
+    ...files.map(item => ({ key: candidateKey(item), group: "file" as const, item })),
+    ...knowledgeItems.map(item => ({ key: candidateKey(item), group: "knowledge" as const, item })),
+    ...conversationItems.map(item => ({ key: candidateKey(item), group: "conversation" as const, item })),
+    ...taskItems.map(item => ({ key: candidateKey(item), group: "task" as const, item })),
+    ...memberItems.map(item => ({ key: candidateKey(item), group: "member" as const, item })),
+  ]
+  const activeTab: MentionTab = showCollaboration && !directory ? mentionTab : "all"
+  const filteredEntries = activeTab === "all" ? allEntries : allEntries.filter(entry => entry.group === activeTab)
+  const groupCounts: Record<MentionTab, number> = {
+    all: allEntries.length,
+    file: files.length,
+    knowledge: knowledgeItems.length,
+    conversation: conversationItems.length,
+    task: taskItems.length,
+    member: memberItems.length,
+  }
+  const availableTabs: readonly MentionTab[] = groupCounts.member > 0
+    ? ["all", "file", "knowledge", "conversation", "task", "member"]
+    : ["all", "file", "knowledge", "conversation", "task"]
+
   // 一组结果比另一组更早返回时，仍保留用户已选中的条目。
-  const candidateIndex = Math.max(0, candidates.findIndex(item => candidateKey(item) === selected))
-  const candidateWindow = mentionWindow(candidateIndex, windowStart, candidates.length)
-  const firstVisibleFile = Math.max(0, candidateWindow.start - collaborationItems.length)
-  const lastVisibleFile = Math.max(0, candidateWindow.end - collaborationItems.length)
-  const candidateTotal = fileResult?.total !== undefined ? collaborationItems.length + fileResult.total : (showCollaboration ? candidates.length : "?")
+  const candidateIndex = Math.max(0, filteredEntries.findIndex(entry => entry.key === selected))
+  const candidateWindow = mentionWindow(candidateIndex, windowStart, filteredEntries.length)
+  const visibleEntries = filteredEntries.slice(candidateWindow.start, candidateWindow.end)
+  const candidateTotal = activeTab === "file"
+    ? (fileResult?.total ?? files.length)
+    : activeTab === "all" && fileResult?.total !== undefined
+      ? collaborationItems.length + fileResult.total
+      : filteredEntries.length
   const canEdit = Boolean(actions.onPersonalChange)
   const hasContent = draft.text.trim().length > 0 || draft.referenceIds.length > 0 || draft.attachmentIds.length > 0
   const showSend = model.primaryActions === "send" || model.primaryActions === "both"
@@ -111,6 +169,22 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     setFileState(null)
     setCollaborationState(null)
   }
+
+  // 进入可编辑会话且焦点停留在 body 时自动聚焦输入框，方便用户直接输入或按 Tab 切换模式。
+  useEffect(() => {
+    const editableNow = Boolean(visible && canEdit)
+    const justEntered = editableNow && !wasEditableRef.current
+    wasEditableRef.current = editableNow
+    if (!justEntered) return
+    const active = document.activeElement
+    if (!active || active === document.body) {
+      textareaRef.current?.focus()
+    }
+  }, [visible, canEdit])
+
+  useEffect(() => {
+    if (!mentionVisible) setMentionTab("all")
+  }, [mentionVisible])
 
   useEffect(() => {
     if (!requestKey || !token) return
@@ -156,6 +230,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     setCollaborationState(null)
     setCommandOpen(false)
     setBrowse(null)
+    setMentionTab("all")
     setDismissed(null)
     pendingCaret.current = null
   }, [visible])
@@ -180,7 +255,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     const lineHeight = Number.parseFloat(style.lineHeight) || 21
     const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0)
     const maxHeight = lineHeight * 8 + padding
-    textarea.style.height = `${Math.min(maxHeight, Math.max(46, textarea.scrollHeight))}px`
+    textarea.style.height = `${Math.min(maxHeight, Math.max(44, textarea.scrollHeight))}px`
     // 窗口变矮时 CSS 会进一步限制高度，长草稿仍须能在输入框内滚动。
     textarea.style.overflowY = "auto"
   }, [draft.text])
@@ -226,7 +301,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }
 
   const selectCandidate = (item: MentionCandidate) => {
-    if (!token || !mentionVisible || !actions.onPersonalChange || !candidates.includes(item)) return
+    if (!token || !mentionVisible || !actions.onPersonalChange || !filteredEntries.some(entry => entry.item === item)) return
     if (!("relativePath" in item)) {
       if (!target || !actions.onSelectCollaborationCandidate) return
       invalidateCandidates()
@@ -251,9 +326,9 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }
 
   const moveCandidate = (delta: number) => {
-    const next = clamp(candidateIndex + delta, candidates.length)
-    setSelected(candidates[next] ? candidateKey(candidates[next]) : null)
-    setWindowStart(mentionWindow(next, candidateWindow.start, candidates.length).start)
+    const next = clamp(candidateIndex + delta, filteredEntries.length)
+    setSelected(filteredEntries[next] ? filteredEntries[next].key : null)
+    setWindowStart(mentionWindow(next, candidateWindow.start, filteredEntries.length).start)
   }
 
   const selectCommand = (item: ConversationMenuItemView | undefined) => {
@@ -270,12 +345,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       event.stopPropagation()
       invalidateCandidates()
       setCommandIndex(0)
-      setCommandOpen(true)
+      setCommandOpen(value => !value)
       return
     }
-    // 反向或带修饰键的 Tab 留给系统和浏览器焦点导航。
-    if (event.key === "Tab" && (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)) return
-    if (commandOpen) {
+    if (event.key === "Tab" && (event.ctrlKey || event.metaKey || event.altKey)) return
+    if (commandOpen && !event.shiftKey) {
       if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Tab", "Escape"].includes(event.key)) {
         event.preventDefault()
         event.stopPropagation()
@@ -287,7 +361,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         return
       }
     }
-    if (mentionVisible && token) {
+    if (mentionVisible && token && !event.shiftKey) {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(tokenKey); invalidateCandidates(); return }
       if (event.key === "ArrowLeft" && directory && !query) {
         event.preventDefault()
@@ -302,13 +376,14 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         moveCandidate(event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : event.key === "PageDown" ? 8 : -8)
         return
       }
-      if (event.key === "ArrowRight" && candidates[candidateIndex]?.kind === "directory") {
-        event.preventDefault(); event.stopPropagation(); selectCandidate(candidates[candidateIndex]); return
+      const activeCandidate = filteredEntries[candidateIndex]?.item
+      if (event.key === "ArrowRight" && activeCandidate?.kind === "directory") {
+        event.preventDefault(); event.stopPropagation(); selectCandidate(activeCandidate); return
       }
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault()
         event.stopPropagation()
-        if (candidates[candidateIndex]) selectCandidate(candidates[candidateIndex])
+        if (activeCandidate) selectCandidate(activeCandidate)
         return
       }
     }
@@ -319,7 +394,19 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       setHint(actions.onCancel && model.cancel.enabled ? "可使用停止按钮请求中断。" : model.cancel.reason || "当前没有可用的停止操作。")
       return
     }
-    if (event.key === "Tab" && visible && canEdit && !hasContent && !activity?.active && !showCancel && !sendBlocked && !cancelBlocked && model.tabCycle && actions.onCapabilitySelect) {
+    // 支持“空输入按 Tab”以及“任意编辑态按 Shift+Tab”快速轮转模式（或配置项）。
+    if (
+      event.key === "Tab"
+      && visible
+      && canEdit
+      && !activity?.active
+      && !showCancel
+      && !sendBlocked
+      && !cancelBlocked
+      && model.tabCycle
+      && actions.onCapabilitySelect
+      && (event.shiftKey || !hasContent)
+    ) {
       const control = model.controls.find(item => item.id === model.tabCycle?.controlId)
       if (!control?.availability.enabled) return
       // 按装配方名单去重并跳过无效选项，不能从控件名称或排列猜测模式。
@@ -350,61 +437,180 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     actions.onPersonalChange(scope, { kind: "draft-text", text: nextText, selectionStart: cursor, selectionEnd: cursor })
     textareaRef.current?.focus()
   }
+  const toggleCommandMenu = () => {
+    if (!canEdit || !visible || !actions.onPersonalChange) return
+    invalidateCandidates()
+    setHint("")
+    if (commandOpen) {
+      setCommandOpen(false)
+      textareaRef.current?.focus()
+      return
+    }
+    if (!draft.text.trim()) {
+      setCommandIndex(0)
+      setCommandOpen(true)
+      pendingCaret.current = 1
+      actions.onPersonalChange(scope, { kind: "draft-text", text: "/", selectionStart: 1, selectionEnd: 1 })
+    } else {
+      setCommandIndex(0)
+      setCommandOpen(true)
+      textareaRef.current?.focus()
+    }
+  }
   const displayStatus = localStatus || hint || model.statusText
+
+  const showCategoryEmpty = () => {
+    if (activeTab === "file") {
+      if (!fileResult) return <p className="wb-composer-menu-empty">正在查找工作区文件…</p>
+      if (fileResult.status !== "ready") return <p className="wb-composer-menu-empty">{fileResult.message || "文件候选不可用"}</p>
+      if (files.length === 0) return <p className="wb-composer-menu-empty">没有匹配的工作区文件</p>
+      return null
+    }
+    if (activeTab === "all") {
+      const filesLoading = !fileResult
+      const collabLoading = showCollaboration && !collaborationResult
+      if (filesLoading && collabLoading) return <p className="wb-composer-menu-empty">正在查找文件与协作内容…</p>
+      if (!filesLoading && !collabLoading && filteredEntries.length === 0) {
+        return <p className="wb-composer-menu-empty">没有匹配的文件、知识库或会话</p>
+      }
+      return null
+    }
+    if (!collaborationResult) return <p className="wb-composer-menu-empty">正在查找{MENTION_TAB_LABELS[activeTab]}…</p>
+    if (collaborationResult.status !== "ready") return <p className="wb-composer-menu-empty">{collaborationResult.message || "协作候选暂不可用"}</p>
+    if (filteredEntries.length === 0) return <p className="wb-composer-menu-empty">暂无匹配的{MENTION_TAB_LABELS[activeTab]}</p>
+    return null
+  }
 
   return (
     <div className="wb-composer-bar">
       <form ref={rootRef} className="wb-composer-inner" onSubmit={handleSubmit}>
         {commandOpen ? (
-          <div className="wb-command-menu" role="listbox" aria-label="命令菜单">
-            {matchedCommands.length === 0 ? <p className="wb-composer-menu-empty">无匹配命令</p> : matchedCommands.map((item, index) => (
-              <button key={item.id} type="button" role="option" aria-selected={index === clamp(commandIndex, matchedCommands.length)} aria-disabled={!item.availability.enabled || !actions.onCommand} data-selected={index === clamp(commandIndex, matchedCommands.length)} className="wb-command-item" title={item.availability.reason} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setCommandIndex(index)} onClick={() => selectCommand(item)}>
-                <span>{item.label}</span><small>{item.availability.enabled ? item.description : item.availability.reason || "当前不可用"}</small>
+          <div className="wb-command-menu" role="listbox" aria-label="斜杠命令菜单">
+            {model.commands.length === 0 ? (
+              <p className="wb-composer-menu-empty">当前 Agent 暂未提供斜杠命令，可直接输入消息。</p>
+            ) : matchedCommands.length === 0 ? (
+              <p className="wb-composer-menu-empty">无匹配的斜杠命令</p>
+            ) : matchedCommands.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                role="option"
+                aria-selected={index === clamp(commandIndex, matchedCommands.length)}
+                aria-disabled={!item.availability.enabled || !actions.onCommand}
+                data-selected={index === clamp(commandIndex, matchedCommands.length)}
+                className="wb-command-item"
+                title={item.availability.reason}
+                onMouseDown={event => event.preventDefault()}
+                onMouseEnter={() => setCommandIndex(index)}
+                onClick={() => selectCommand(item)}
+              >
+                <span>{item.label}</span>
+                <small>{item.availability.enabled ? item.description : item.availability.reason || "当前不可用"}</small>
               </button>
             ))}
           </div>
         ) : null}
         {mentionVisible && token ? (
-          <div className="wb-mention-menu" aria-label={showCollaboration ? "提及菜单" : "文件提及菜单"} onWheel={event => { event.preventDefault(); moveCandidate(event.deltaY >= 0 ? 1 : -1) }}>
-            <div role="listbox" aria-label={showCollaboration ? "提及候选" : "文件候选"}>
-              {showCollaboration && <div role="group" aria-label="协作候选">
-                {!collaborationResult && <p className="wb-composer-menu-empty">正在查找协作候选…</p>}
-                {collaborationResult && collaborationResult.status !== "ready" && <p className="wb-composer-menu-empty">{collaborationResult.message || "协作候选暂不可用"}</p>}
-                {collaborationResult?.status === "ready" && collaborationItems.length === 0 && <p className="wb-composer-menu-empty">没有匹配的协作候选</p>}
-                {collaborationItems.slice(candidateWindow.start, candidateWindow.end).map((item, localIndex) => {
-                  const index = candidateWindow.start + localIndex
-                  const key = candidateKey(item)
-                  return <div className="wb-mention-row" key={key}>
-                    <button type="button" role="option" aria-selected={index === candidateIndex} data-selected={index === candidateIndex} className="wb-mention-item" onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSelected(key)} onClick={() => selectCandidate(item)}>
-                      <span className="wb-mention-path">{item.title}<small> · {item.detail ? `${item.detail} · ` : ""}{collaborationLabels[item.kind]}</small></span>
-                    </button>
-                  </div>
-                })}
-              </div>}
-              <div role="group" aria-label="文件">
-                {!fileResult && <p className="wb-composer-menu-empty">正在查找文件…</p>}
-                {fileResult && fileResult.status !== "ready" && <p className="wb-composer-menu-empty">{fileResult.message || "文件候选不可用"}</p>}
-                {fileResult?.status === "ready" && files.length === 0 && <p className="wb-composer-menu-empty">没有匹配的文件</p>}
-                {files.slice(firstVisibleFile, lastVisibleFile).map((item, localIndex) => {
-                  const index = collaborationItems.length + firstVisibleFile + localIndex
-                  const key = candidateKey(item)
-                  return (
-                    <div className="wb-mention-row" key={key}>
-                      <button type="button" role="option" aria-selected={index === candidateIndex} data-selected={index === candidateIndex} className="wb-mention-item" title={item.relativePath} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSelected(key)} onClick={() => selectCandidate(item)}>
-                        <HighlightedPath item={item} />
-                      </button>
-                      {item.kind !== "directory" ? <span className="wb-mention-open">
-                        <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在右侧预览"} aria-label={`预览 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "preview") }}>预览</button>
-                        <button type="button" disabled={!actions.onOpenFile || !target} title={!actions.onOpenFile ? "当前无法打开文件" : "在中央打开"} aria-label={`打开 ${item.relativePath}`} onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "central") }}>打开</button>
-                      </span> : null}
-                    </div>
-                  )
-                })}
+          <div className="wb-mention-menu" aria-label={showCollaboration ? "提及与引用菜单" : "文件提及菜单"} onWheel={event => { event.preventDefault(); moveCandidate(event.deltaY >= 0 ? 1 : -1) }}>
+            {showCollaboration && !directory ? (
+              <div className="wb-mention-tabs" role="tablist" aria-label="引用类别">
+                {availableTabs.map(tab => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === tab}
+                    className={`wb-mention-tab${activeTab === tab ? " is-active" : ""}`}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => {
+                      setMentionTab(tab)
+                      setSelected(null)
+                      setWindowStart(0)
+                    }}
+                  >
+                    <span>{MENTION_TAB_LABELS[tab]}</span>
+                    <span className="wb-mention-tab-count">{groupCounts[tab]}</span>
+                  </button>
+                ))}
               </div>
+            ) : null}
+            <div className="wb-mention-list" role="listbox" aria-label={showCollaboration ? "提及候选" : "文件候选"}>
+              {showCategoryEmpty()}
+              {visibleEntries.map((entry, localIndex) => {
+                const index = candidateWindow.start + localIndex
+                const showGroupHeader = activeTab === "all" && (localIndex === 0 || visibleEntries[localIndex - 1]?.group !== entry.group)
+                const item = entry.item
+                const isSelected = index === candidateIndex
+                return (
+                  <div key={entry.key}>
+                    {showGroupHeader ? (
+                      <div className="wb-mention-group-title" aria-hidden="true">{MENTION_GROUP_LABELS[entry.group]}</div>
+                    ) : null}
+                    <div className="wb-mention-row">
+                      {"relativePath" in item ? (
+                        <>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            data-selected={isSelected}
+                            className="wb-mention-item"
+                            title={item.relativePath}
+                            onMouseDown={event => event.preventDefault()}
+                            onMouseEnter={() => setSelected(entry.key)}
+                            onClick={() => selectCandidate(item)}
+                          >
+                            <span className="wb-mention-icon" aria-hidden="true">
+                              {item.kind === "directory"
+                                ? <IconFolder size={14} />
+                                : <FileTypeIcon name={item.relativePath.split("/").at(-1) ?? item.relativePath} size={14} />}
+                            </span>
+                            <HighlightedPath item={item} />
+                          </button>
+                          {item.kind !== "directory" ? (
+                            <span className="wb-mention-open">
+                              <button
+                                type="button"
+                                disabled={!actions.onOpenFile || !target}
+                                title={!actions.onOpenFile ? "当前无法查看文件" : "在右侧分屏打开文件查看内容"}
+                                aria-label={`分屏查看 ${item.relativePath}`}
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => { if (target) actions.onOpenFile?.(scope, target, item.relativePath, "central") }}
+                              >
+                                分屏查看
+                              </button>
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          data-selected={isSelected}
+                          className="wb-mention-item"
+                          onMouseDown={event => event.preventDefault()}
+                          onMouseEnter={() => setSelected(entry.key)}
+                          onClick={() => selectCandidate(item)}
+                        >
+                          <span className="wb-mention-icon" aria-hidden="true">
+                            {renderCollaborationIcon(item.kind)}
+                          </span>
+                          <span className="wb-mention-collab-text">
+                            <span className="wb-mention-collab-title">{item.title}</span>
+                            {item.detail ? <span className="wb-mention-detail">{item.detail}</span> : null}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
             <div className="wb-mention-footer">
-              @ /{directory ? ` ${directory}` : ""}{candidates.length ? ` · ${candidateIndex + 1}/${candidateTotal}` : ""}
-              {fileResult?.truncated || (fileResult?.items.length ?? 0) > 1000 ? " · 文件结果已截断（最多展示 1000 项）" : ""}
+              <span>@ /{directory ? ` ${directory}` : ""}{filteredEntries.length ? ` · ${candidateIndex + 1}/${candidateTotal}` : ""}</span>
+              <span className="wb-mention-footer-hint">↵ 插入引用 · ↑↓ 选择 · Esc 关闭</span>
+              {fileResult?.truncated || (fileResult?.items.length ?? 0) > 1000 ? <span> · 结果已截断（最多 1000 项）</span> : null}
             </div>
           </div>
         ) : null}
@@ -424,18 +630,59 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             if (!item) return <span key={id}>附件资料暂不可用</span>
             return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><IconX aria-hidden="true" /></button></span>
           })}</div> : null}
-          <textarea ref={textareaRef} className="wb-composer-textarea" rows={1} value={draft.text} disabled={!canEdit} placeholder={canEdit ? "描述你要做的事，输入 @ 可以引用文件，输入 / 唤起命令…" : "当前无法编辑草稿"} aria-label="消息，Enter 发送，Shift+Enter 换行" onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }} onKeyDown={handleKeyDown} />
+          <textarea
+            ref={textareaRef}
+            className="wb-composer-textarea"
+            rows={1}
+            value={draft.text}
+            disabled={!canEdit}
+            placeholder={canEdit ? "描述任务，@ 引用文件/知识/会话，/ 唤起命令…" : "当前无法编辑草稿"}
+            aria-label="消息，Enter 发送，Shift+Enter 换行"
+            onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+            onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+            onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }}
+            onCompositionStart={() => { composing.current = true }}
+            onCompositionEnd={() => { composing.current = false }}
+            onKeyDown={handleKeyDown}
+          />
           <div className="wb-composer-rail">
             <div className="wb-composer-rail-left">
-              <button type="button" className="wb-composer-tool" disabled={!canEdit || !visible} title="输入 @ 引用工作区文件" onClick={insertMention}>
+              <button
+                type="button"
+                className="wb-composer-tool"
+                disabled={!canEdit || !visible}
+                title="输入 @ 引用工作区文件、团队知识或项目会话"
+                onMouseDown={event => event.preventDefault()}
+                onClick={insertMention}
+              >
                 <span className="wb-composer-kbd" aria-hidden="true">@</span>
-                <span>引用文件</span>
+                <span>引用</span>
               </button>
-              {model.controls.map(control => <CapabilityMenu key={control.id} scope={scope} control={control} onSelect={actions.onCapabilitySelect} />)}
+              <button
+                type="button"
+                className="wb-composer-tool"
+                disabled={!canEdit || !visible}
+                aria-expanded={commandOpen}
+                title="输入 / 或点击查看可用斜杠命令（Ctrl/Cmd+K）"
+                onMouseDown={event => event.preventDefault()}
+                onClick={toggleCommandMenu}
+              >
+                <span className="wb-composer-kbd" aria-hidden="true">/</span>
+                <span>命令</span>
+              </button>
+              {model.controls.map(control => (
+                <CapabilityMenu
+                  key={control.id}
+                  scope={scope}
+                  control={control}
+                  isTabCycle={model.tabCycle?.controlId === control.id}
+                  onSelect={actions.onCapabilitySelect}
+                />
+              ))}
               {children}
             </div>
             <div className="wb-composer-rail-right">
-              <span className="wb-composer-hint">只在本机执行 · Enter 发送</span>
+              <span className="wb-composer-hint">⏎ 发送</span>
               {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
               {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><IconArrowUp aria-hidden="true" /></button> : null}
             </div>
@@ -447,12 +694,31 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   )
 }
 
-function CapabilityMenu({ scope, control, onSelect }: { scope: ConversationScope; control: Control; onSelect?: ConversationActions["onCapabilitySelect"] }): ReactElement {
+function renderCollaborationIcon(kind: ConversationCollaborationCandidate["kind"]): ReactElement {
+  switch (kind) {
+    case "knowledge": return <IconBook size={14} />
+    case "conversation": return <IconMessages size={14} />
+    case "task": return <IconChecklist size={14} />
+    case "member": return <IconUser size={14} />
+  }
+}
+
+function CapabilityMenu({ scope, control, isTabCycle, onSelect }: {
+  scope: ConversationScope
+  control: Control
+  isTabCycle: boolean
+  onSelect?: ConversationActions["onCapabilitySelect"]
+}): ReactElement {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
   const menu = useRef<HTMLDivElement | null>(null)
   const selected = control.items.find(item => item.id === control.selectedId)
+  const displayLabel = selected ? selected.label : control.label
+  const tooltip = control.availability.reason
+    || (!onSelect
+      ? "当前不可切换"
+      : `${control.label}：${displayLabel}${isTabCycle ? "（按 Tab 或 Shift+Tab 轮转）" : ""}`)
 
   useEffect(() => {
     if (!open) return
@@ -483,7 +749,21 @@ function CapabilityMenu({ scope, control, onSelect }: { scope: ConversationScope
     // 焦点在触发按钮与菜单选项之间移动时保持打开；离开整个控件后及时收起。
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
   }}>
-    <button ref={trigger} type="button" className="wb-composer-chip" disabled={!control.availability.enabled || !onSelect} title={control.availability.reason || (!onSelect ? "当前不可切换" : undefined)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><span>{selected && selected.label !== control.label ? `${control.label}：${selected.label}` : control.label}</span><IconChevronDown aria-hidden="true" /></button>
+    <button
+      ref={trigger}
+      type="button"
+      className={`wb-composer-chip${isTabCycle ? " is-tab-cycle" : ""}`}
+      disabled={!control.availability.enabled || !onSelect}
+      title={tooltip}
+      aria-label={`${control.label}：${displayLabel}`}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onClick={() => setOpen(value => !value)}
+    >
+      <span className="wb-composer-chip-label">{displayLabel}</span>
+      {isTabCycle ? <kbd className="wb-composer-tab-badge" aria-hidden="true">Tab</kbd> : null}
+      <IconChevronDown aria-hidden="true" />
+    </button>
     {open ? <div ref={menu} className="wb-capability-menu" role="menu" aria-label={control.label} onKeyDown={onMenuKey}>
       {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <IconCheck size={13} aria-hidden="true" /> : null}</button>)}
     </div> : null}

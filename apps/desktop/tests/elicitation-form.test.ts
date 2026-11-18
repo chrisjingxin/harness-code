@@ -171,7 +171,10 @@ test("只有必填 feedback 时识别为拒绝原因表单，空输入按 declin
   assert.ok(converted)
   assert.equal(converted.interaction.kind, "question")
   if (converted.interaction.kind !== "question") return
+  assert.equal(converted.interaction.title, "请补充说明")
+  assert.equal(converted.interaction.description, undefined)
   assert.equal(converted.interaction.questions[0]?.id, "feedback")
+  assert.equal(converted.interaction.questions[0]?.text, "请说明拒绝原因，Agent 会据此调整")
   assert.equal(converted.interaction.questions[0]?.required, true)
 
   assert.deepEqual(
@@ -226,4 +229,33 @@ test("通用 schema 属性支持 enum、boolean、number 与空 schema 返回 nu
     content: { confirm: "yes", dryRun: true, retries: 3, note: "ok" },
   })
   assert.deepEqual(toElicitationAnswer(generic.form, { kind: "decline" }), { action: "decline" })
+})
+
+test("单题 q_0 当 header 与问题正文相同时，卡片标题收敛为“请确认细节”而不重复展示问题", () => {
+  const questionText = "README 只写了「请遵守除零保护规范」，没规定具体行为。divide 在 b === 0 时应如何处理？"
+  const single = toConversationInteraction({
+    id: "el-single-dup",
+    message: questionText,
+    requestedSchema: {
+      type: "object",
+      properties: {
+        q_0: {
+          type: "string",
+          title: questionText,
+          oneOf: [
+            { const: "a", title: "抛 RangeError" },
+            { const: "b", title: "返回 undefined" },
+          ],
+        },
+        q_0_other: { type: "string", title: "其他（可选）" },
+      },
+      required: ["q_0"],
+    },
+  })
+  assert.ok(single)
+  assert.equal(single.interaction.kind, "question")
+  if (single.interaction.kind !== "question") return
+  assert.equal(single.interaction.title, "请确认细节")
+  assert.equal(single.interaction.description, undefined)
+  assert.equal(single.interaction.questions[0]?.text, questionText)
 })

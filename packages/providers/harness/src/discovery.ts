@@ -5,9 +5,9 @@
  * → 活跃虚拟环境 / PATH 中的 `harness-agent` 顺序查找本机可用的 Harness ACP 进程入口。
  * 【协作边界】只检查文件与执行权限，绝不通过 shell 拼接命令；保留虚拟环境原始可执行路径以维持 pyvenv 配置。
  */
-import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs"
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path"
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { LocalAcpProviderDiscoveryOptions, LocalAcpProviderResolution } from "./types.js"
 
@@ -32,6 +32,38 @@ function ancestorDirs(start: string, depth = 7): string[] {
     current = parent
   }
   return dirs
+}
+
+/**
+ * 若当前目录位于 Git 关联 worktree 内（`.git` 为指向主仓库 `.git/worktrees/<name>` 的文本文件），
+ * 解析并返回主仓库根目录，以便 worktree 也能直接复用主仓库的 `packages/agent/.venv`。
+ */
+function resolveGitMainWorktreeRoot(startDir: string): string | undefined {
+  for (const dir of ancestorDirs(startDir)) {
+    const dotGit = join(dir, ".git")
+    try {
+      if (!existsSync(dotGit) || !statSync(dotGit).isFile()) continue
+      const content = readFileSync(dotGit, "utf8").slice(0, 2048)
+      const match = /^gitdir:\s*(.+)$/m.exec(content)
+      if (!match?.[1]) continue
+      const rawGitDir = match[1].trim()
+      const gitDir = isAbsolute(rawGitDir) ? resolve(rawGitDir) : resolve(dir, rawGitDir)
+      const commonDirFile = join(gitDir, "commondir")
+      if (existsSync(commonDirFile)) {
+        const commonRel = readFileSync(commonDirFile, "utf8").trim()
+        if (commonRel) {
+          const commonGitDir = isAbsolute(commonRel) ? resolve(commonRel) : resolve(gitDir, commonRel)
+          return dirname(commonGitDir)
+        }
+      }
+      if (basename(dirname(gitDir)) === "worktrees" && basename(dirname(dirname(gitDir))) === ".git") {
+        return dirname(dirname(dirname(gitDir)))
+      }
+    } catch {
+      continue
+    }
+  }
+  return undefined
 }
 
 function resolveSafeHome(env: NodeJS.ProcessEnv, override?: string): string {
@@ -135,14 +167,19 @@ export function resolveHarnessCommand(
 ): LocalAcpProviderResolution {
   const isWin = process.platform === "win32"
   const augmentedPath = buildAugmentedGuiPath(env, options)
-  const roots = new Set<string>(
-    options.searchFrom
-      ? options.searchFrom.flatMap(entry => ancestorDirs(entry))
-      : [
-          ...ancestorDirs(dirname(fileURLToPath(import.meta.url))),
-          ...ancestorDirs(process.cwd()),
-        ],
-  )
+  const baseRoots = options.searchFrom
+    ? options.searchFrom.flatMap(entry => ancestorDirs(entry))
+    : [
+        ...ancestorDirs(dirname(fileURLToPath(import.meta.url))),
+        ...ancestorDirs(process.cwd()),
+      ]
+  const roots = new Set<string>(baseRoots)
+  for (const seed of options.searchFrom ?? [dirname(fileURLToPath(import.meta.url)), process.cwd()]) {
+    const mainRoot = resolveGitMainWorktreeRoot(seed)
+    if (mainRoot) {
+      for (const candidate of ancestorDirs(mainRoot)) roots.add(candidate)
+    }
+  }
 
   for (const root of roots) {
     const agentDir = join(root, "packages", "agent")

@@ -310,15 +310,29 @@ export class BoundSession implements LocalAcpSession {
     if (this.#closing) throw new Error("本机会话已关闭。")
     await this.assertDirectoryIntact()
     const agent = await this.ensureInitialized()
-    const resumed = await within(
-      agent.connection.resumeSession({ sessionId, cwd: this.root, mcpServers: [] }),
-      this.handshakeTimeoutMs,
-    )
-    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
-    await this.nativeBinding.write(sessionId)
-    agent.sessionId = sessionId
+    // 整个恢复握手及原生绑定落盘期间均保持 openingNewSession，防止 Agent 抢先推送的命令/状态更新丢失。
+    agent.openingNewSession = true
+    agent.pendingSessionUpdates = []
+    agent.sessionId = undefined
     this.resetTransientSessionUpdates()
+    let resumed: Awaited<ReturnType<Agent["connection"]["resumeSession"]>>
+    let pendingUpdates: SessionUpdate[] = []
+    try {
+      resumed = await within(
+        agent.connection.resumeSession({ sessionId, cwd: this.root, mcpServers: [] }),
+        this.handshakeTimeoutMs,
+      )
+      if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+      await this.nativeBinding.write(sessionId)
+      if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+      agent.sessionId = sessionId
+      pendingUpdates = agent.pendingSessionUpdates ?? []
+    } finally {
+      agent.openingNewSession = false
+      agent.pendingSessionUpdates = undefined
+    }
     this.applyOpenedResponse(resumed)
+    for (const update of pendingUpdates) this.applySessionUpdateToState(update)
     this.#state = {
       ...this.#state,
       connected: true,
@@ -326,6 +340,7 @@ export class BoundSession implements LocalAcpSession {
       restoreStatus: { kind: "restored", sessionId },
     }
     this.emitSession({ type: "session-opened", state: this.getState() })
+    for (const update of pendingUpdates) this.emitSessionUpdateEvent(update)
     return this.getState()
   }
 
@@ -641,23 +656,28 @@ export class BoundSession implements LocalAcpSession {
     agent: Agent,
     resetFrom?: { readonly reason: LocalAcpRestoreReason; readonly previousSessionId: string },
   ): Promise<void> {
+    // 保持 openingNewSession 覆盖整个 newSession + nativeBinding 落盘过程：
+    // Agent 在返回 NewSessionResponse 的同时可能异步推送 available_commands_update，
+    // 若提前清掉标志而此时 nativeBinding 尚未写完、sessionId 仍为 undefined，命令更新会被丢弃。
     agent.openingNewSession = true
     agent.pendingSessionUpdates = []
     this.resetTransientSessionUpdates()
-    let opened
+    let opened: Awaited<ReturnType<Agent["connection"]["newSession"]>>
+    let nativeId: string
+    let pendingUpdates: SessionUpdate[] = []
     try {
       opened = await within(agent.connection.newSession({ cwd: this.root, mcpServers: [] }), this.handshakeTimeoutMs)
+      nativeId = opened.sessionId
+      if (!nativeId) throw new Error("无法创建本机 Agent 会话。")
+      if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+      await this.nativeBinding.write(nativeId)
+      if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+      agent.sessionId = nativeId
+      pendingUpdates = agent.pendingSessionUpdates ?? []
     } finally {
       agent.openingNewSession = false
+      agent.pendingSessionUpdates = undefined
     }
-    const pendingUpdates = agent.pendingSessionUpdates ?? []
-    agent.pendingSessionUpdates = undefined
-    const nativeId = opened.sessionId
-    if (!nativeId) throw new Error("无法创建本机 Agent 会话。")
-    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
-    await this.nativeBinding.write(nativeId)
-    if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
-    agent.sessionId = nativeId
     this.applyOpenedResponse(opened)
     for (const update of pendingUpdates) this.applySessionUpdateToState(update)
     this.#state = {

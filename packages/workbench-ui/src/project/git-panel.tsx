@@ -184,7 +184,69 @@ export function ProjectGitPanel({
     actions.setSelectedChanges(scope, next)
   }
 
-  const branchName = repository?.branch ?? "未检出分支"
+  if (!repository) {
+    if (changes.status === "loading") {
+      return (
+        <section className="project-git-panel" aria-label="Git 变更与提交" aria-busy="true">
+          <div className="project-git-non-repo">
+            <span className="project-git-non-repo-badge" aria-hidden="true">
+              <IconGitBranch size={18} />
+            </span>
+            <h3>正在检测 Git 仓库…</h3>
+          </div>
+        </section>
+      )
+    }
+    if (changes.status === "error") {
+      return (
+        <section className="project-git-panel" aria-label="Git 变更与提交" aria-busy={changes.busy}>
+          <div className="project-git-non-repo" role="alert">
+            <span className="project-git-non-repo-badge is-error" aria-hidden="true">
+              <IconGitBranch size={18} />
+            </span>
+            <h3>暂时无法读取 Git 状态</h3>
+            <p>{changes.message || "读取当前目录的 Git 状态失败，请重试。"}</p>
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-small"
+              disabled={Boolean(refreshReason)}
+              title={refreshReason ?? "重试检测"}
+              onClick={() => actions.refreshChanges(scope)}
+            >
+              <IconRefresh size={13} aria-hidden="true" />
+              <span>重试</span>
+            </button>
+          </div>
+        </section>
+      )
+    }
+    const friendlyMessage = changes.message && !changes.message.includes("不是 Git 仓库")
+      ? changes.message
+      : "你仍可正常浏览文件、用 @ 引用文件并与 Agent 对话。如需在此查看代码变更与提交记录，可在该目录执行 git init 后点击重新检测。"
+    return (
+      <section className="project-git-panel" aria-label="Git 变更与提交" aria-busy={changes.busy}>
+        <div className="project-git-non-repo">
+          <span className="project-git-non-repo-badge" aria-hidden="true">
+            <IconGitBranch size={18} />
+          </span>
+          <h3>当前文件夹未启用 Git</h3>
+          <p>{friendlyMessage}</p>
+          <button
+            type="button"
+            className="wb-button wb-button-secondary wb-button-small"
+            disabled={Boolean(refreshReason)}
+            title={refreshReason ?? "重新检测当前目录是否已初始化 Git"}
+            onClick={() => actions.refreshChanges(scope)}
+          >
+            <IconRefresh size={13} aria-hidden="true" />
+            <span>重新检测</span>
+          </button>
+        </div>
+      </section>
+    )
+  }
+
+  const branchName = repository.branch ?? "未检出分支"
 
   return <section className="project-git-panel" aria-label="Git 变更与提交" aria-busy={changes.busy}>
     <div className="project-git-top">

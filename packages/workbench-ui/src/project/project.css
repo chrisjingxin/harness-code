@@ -529,3 +529,42 @@
 }
 .git-hist-foot .gh-branch { font-family: var(--font-mono); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 0; min-width: 0; }
 
+.project-git-non-repo {
+  margin: auto 14px;
+  padding: 20px 16px;
+  border-radius: var(--radius-lg, 10px);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+.project-git-non-repo-badge {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.project-git-non-repo-badge.is-error {
+  background: var(--danger-soft, color-mix(in srgb, var(--danger, #dc2626) 10%, transparent));
+  color: var(--danger-fg, #dc2626);
+}
+.project-git-non-repo h3 {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+}
+.project-git-non-repo p {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+  line-height: 1.65;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+

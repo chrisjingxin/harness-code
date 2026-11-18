@@ -3,7 +3,7 @@
  * 仅在应用草稿后保留已确认的固定材料，个人记录只接收材料标识。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { CollaborationAppsHost, TaskSummary } from "@workbench/contracts"
+import type { CollaborationAppsHost, KnowledgeSummary, TaskSummary } from "@workbench/contracts"
 import type { ConversationCollaborationCandidate, ConversationProjectTarget, ConversationReferenceView, ConversationScope, ConversationTimelineEntry } from "@workbench/ui"
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
@@ -33,6 +33,7 @@ interface WorkbenchReferenceOptions {
   readonly host?: CollaborationAppsHost
   readonly members?: readonly { id: string; name: string }[]
   readonly tasks?: readonly TaskSummary[]
+  readonly knowledge?: readonly KnowledgeSummary[]
   onChooseMember?(memberId: string): void
   onOpenTask?(taskId: string): void
   chooseDirectory(): Promise<string | null>
@@ -42,7 +43,7 @@ interface WorkbenchReferenceOptions {
 /** 快照能力缺失时，工作台沿用原有文件提及和只读页提示。 */
 export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
   const { scope, selectedConversationId, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
-    members, tasks, onChooseMember, onOpenTask } = options
+    members, tasks, knowledge, onChooseMember, onOpenTask } = options
   const { currentUserId: localDeviceId, conversations, directories, resolveOwnerName } = pageController
   const sourceIsListed = selectedConversationId === null || conversations.some(item =>
     item.conversationId === selectedConversationId && item.projectId === scope?.projectId)
@@ -249,25 +250,35 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
   const hooks: SessionExternalHooks | undefined = referenceScope ? {
     async onRequestCollaborationCandidates(source, target, query) {
       if (!matchesComposer(source, target)) return { status: "unavailable", items: [], message: "发起会话已变化。" }
-      const prefix = /^(会话|成员|任务|知识)(?:[\s:：]*)/.exec(query)
-      const group = prefix?.[1]
+      const prefix = /^(会话|成员|任务|知识库|知识)(?:[\s:：]*)/.exec(query)
+      const group = prefix?.[1] === "知识库" ? "知识" : prefix?.[1]
       const search = query.slice(prefix?.[0].length ?? 0).toLocaleLowerCase()
-      if (group === "知识") {
-        if (!host) return { status: "unavailable", items: [], message: "团队知识暂不可用。" }
-        const items = await readPages(
-          afterId => host.listKnowledge(referenceScope.workspaceId, search, afterId),
-          page => page.items, () => matchesComposer(source, target),
-        )
-        return { status: "ready", items: items.filter(item => !item.archived).map(item => ({
-          kind: "knowledge", id: knowledgeReferenceId({ knowledgeId: item.knowledgeId, versionId: item.currentVersionId }),
-          title: item.title, detail: item.category,
-        })) }
+      if (group === "知识" && !host && knowledge === undefined) {
+        return { status: "unavailable", items: [], message: "团队知识暂不可用。" }
       }
       const items: ConversationCollaborationCandidate[] = []
+      if (!group || group === "知识") {
+        let knowledgeList = knowledge
+        if (knowledgeList === undefined && host) {
+          knowledgeList = await readPages(
+            afterId => host.listKnowledge(referenceScope.workspaceId, group === "知识" ? search : "", afterId),
+            page => page.items,
+            () => matchesComposer(source, target),
+          )
+        }
+        items.push(...(knowledgeList ?? []).filter(item => !item.archived).map(item => ({
+          kind: "knowledge" as const,
+          id: knowledgeReferenceId({ knowledgeId: item.knowledgeId, versionId: item.currentVersionId }),
+          title: item.title,
+          detail: `${item.category} · v${item.version} · ${item.termKey}`,
+        })))
+      }
       if (!group || group === "会话") {
         items.push(...integration.listProjectConversations(referenceScope).map(item => ({
-          kind: "conversation" as const, id: item.conversationId,
-          title: item.title || "未命名会话", detail: resolveOwnerName(item.ownerUserId),
+          kind: "conversation" as const,
+          id: item.conversationId,
+          title: item.title || "未命名会话",
+          detail: `${resolveOwnerName(item.ownerUserId)} · #${item.conversationId.slice(-4)}`,
         })))
       }
       if (onChooseMember && (!group || group === "成员")) {
@@ -278,8 +289,14 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
           kind: "task" as const, id: item.taskId, title: item.title, detail: resolveOwnerName(item.assigneeId),
         })))
       }
+      const categoryKeyword: Record<ConversationCollaborationCandidate["kind"], string> = {
+        knowledge: "知识库", conversation: "会话", task: "任务", member: "成员",
+      }
       return { status: "ready", items: items.filter(item =>
-        item.title.toLocaleLowerCase().includes(search) || item.detail.toLocaleLowerCase().includes(search)) }
+        !search
+        || item.title.toLocaleLowerCase().includes(search)
+        || item.detail.toLocaleLowerCase().includes(search)
+        || categoryKeyword[item.kind].includes(search)) }
     },
     onSelectCollaborationCandidate(source, target, candidate, mention) {
       if (matchesComposer(source, target) && mention.conversationId === referenceScope.conversationId) {

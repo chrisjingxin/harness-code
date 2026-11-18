@@ -183,6 +183,17 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
             <div className="team-knowledge-content-heading">
               <h2>{selected.title}</h2>
               <div className="team-knowledge-content-actions">
+                {actions.onReference && version && readable ? (
+                  <button
+                    type="button"
+                    className="wb-button wb-button-primary wb-button-small"
+                    disabled={!version.referenceAvailability.enabled}
+                    title={version.referenceAvailability.reason ?? "将该版本固定内容引用到当前会话"}
+                    onClick={() => actions.onReference?.(scope, version.itemId, version.versionId, version.reference)}
+                  >
+                    引用到会话
+                  </button>
+                ) : null}
                 {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>编辑条目</button>}
                 <button type="button" className="wb-button wb-button-secondary wb-button-small"
                   disabled={!historyAvailable || history.status === "loading"}
