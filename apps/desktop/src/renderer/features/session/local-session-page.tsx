@@ -5,7 +5,7 @@
  * 中央复用 @workbench/ui 的 ConversationView 展示消息时间线、工具与输入区；
  * 上方显示本地工作目录切换条与云端共享范围提示；发送与取消严格受控于真实 Agent 执行端口。
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 import { ConversationView } from "@workbench/ui"
 import type {
@@ -24,6 +24,7 @@ import type { SessionCentralFilesState } from "./session-center.js"
 import { directoryBasename, formatShortTime } from "./session-model.js"
 import { projectLocalExecution } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
+import { resolveSessionFileReference } from "./session-file-reference.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -72,6 +73,40 @@ export function LocalSessionPage({
   const availability = execution.getAvailability(conversation.conversationId)
   const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
   const folderName = directoryBasename(directoryPath)
+  const referenceKey = JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId, conversation.projectId, directoryPath])
+  const activeReference = useRef({ key: referenceKey, visible })
+  const referenceRequest = useRef(0)
+  activeReference.current = { key: referenceKey, visible }
+  useEffect(() => {
+    activeReference.current.visible = visible
+    return () => { activeReference.current.visible = false; referenceRequest.current += 1 }
+  }, [referenceKey, visible])
+  const messageRendering: RenderingActions = {
+    ...rendering,
+    ...(directoryPath && onOpenFile ? { openFile: async (reference: string, resolved = false) => {
+      const request = ++referenceRequest.current
+      // 查找较慢时，旧点击不能覆盖用户后来选择的文件或会话。
+      const isCurrent = () => activeReference.current.visible && activeReference.current.key === referenceKey && referenceRequest.current === request
+      const file = resolveSessionFileReference(reference, directoryPath)
+      if (!file) throw new Error("只能打开当前工作目录内的文件。")
+      const target = { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
+      let path = file.path
+      if (!resolved && !file.exact) {
+        if (!onRequestFileCandidates) throw new Error("无法查找文件，请从文件树打开。")
+        const result = await onRequestFileCandidates(scope, target, {
+          requestId: 0, draftRevision: 0, tokenStart: 0, tokenEnd: 0, directory: "", query: path,
+        })
+        if (!isCurrent()) return
+        if (result.status !== "ready") throw new Error(result.message || "文件查找失败。")
+        const matches = result.items.filter(item => item.kind !== "directory" && item.name === path).map(item => item.relativePath)
+        if (matches.length === 0) throw new Error(result.truncated ? "文件搜索结果不完整，请从文件树打开。" : "未找到文件，请检查工作目录。")
+        if (matches.length > 1 || result.truncated) return matches
+        path = matches[0]!
+      }
+      if (!isCurrent()) return
+      onOpenFile(scope, target, path, "central")
+    } } : {}),
+  }
   const activeExecution = execution.getView?.(conversation.conversationId)
   const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
   const composer: ConversationComposerView = {
@@ -90,12 +125,16 @@ export function LocalSessionPage({
     controls: [
       {
         id: "agent",
-        label: execution.textOnly ? "本机 Agent" : "Harness",
+        label: "Agent",
         selectedId: "default",
         availability: availability.available
           ? { enabled: true }
           : { enabled: false, reason: availability.reason },
-        items: [{ id: "default", label: execution.textOnly || availability.available ? "本机 Agent" : "未接入", availability: { enabled: availability.available } }],
+        items: [{
+          id: "default",
+          label: !availability.available ? "未接入" : execution.textOnly ? "本机 Agent" : "Harness",
+          availability: { enabled: availability.available },
+        }],
       },
     ],
     projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
@@ -209,7 +248,7 @@ export function LocalSessionPage({
                 onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
                 onRequestFileCandidates,
                 onOpenFile,
-                rendering,
+                rendering: messageRendering,
               }}
               slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
             />

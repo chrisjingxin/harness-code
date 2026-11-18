@@ -2,9 +2,10 @@
 /** @jsxImportSource react */
 
 import { lexer, type Token, type Tokens } from "marked"
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
 
+import { FileTypeIcon, fileIconFor } from "../common/file-type-icon.js"
 import { CodeBlock } from "./code-block.js"
 import type { MarkdownProps, RenderingActions } from "./types.js"
 
@@ -109,13 +110,34 @@ function renderBlock(token: Token, key: string): ReactNode {
   }
 }
 
+/** 任务列表已由外层 <li> 渲染复选框，需剥离 marked 留在块首或首段内的重复 checkbox token。 */
+function stripLeadingTaskCheckbox(tokens: readonly Token[]): readonly Token[] {
+  const trimmed = tokens[0]?.type === "checkbox" ? tokens.slice(1) : tokens
+  const first = trimmed[0]
+  if (
+    first
+    && (first.type === "paragraph" || first.type === "text")
+    && "tokens" in first
+    && Array.isArray(first.tokens)
+    && first.tokens[0]?.type === "checkbox"
+  ) {
+    return [{ ...first, tokens: first.tokens.slice(1) } as Token, ...trimmed.slice(1)]
+  }
+  return trimmed
+}
+
 /** list_item 单独抽出来以便把任务复选框 token 提升为可读控件。 */
 function renderListItem(item: Tokens.ListItem, key: string): ReactNode {
   // 松散列表的 item.tokens 是 paragraph 等 block；紧凑列表则是带 nested tokens 的 text。
   // 一律按 block 渲染，否则 paragraph 会落到 inline 的 default 分支，把 ** 与反引号当纯文本。
-  const body = item.tokens && item.tokens.length > 0
-    ? renderBlocks(item.tokens, key)
-    : item.text
+  const effectiveTokens = item.task && item.tokens
+    ? stripLeadingTaskCheckbox(item.tokens)
+    : item.tokens
+  const body = effectiveTokens && effectiveTokens.length > 0
+    ? renderBlocks(effectiveTokens, key)
+    : item.task
+      ? item.text.replace(/^\s*\[[ xX]\]\s+/, "")
+      : item.text
   if (item.task) {
     const checked = item.checked === true
     return (
@@ -137,28 +159,30 @@ function renderTableCell(cell: Tokens.TableCell, key: string, header: boolean): 
   )
 }
 
-function renderInline(tokens: readonly Token[] | undefined, prefix: string, fallback = ""): ReactNode[] {
+function renderInline(tokens: readonly Token[] | undefined, prefix: string, fallback = "", fileReferences = true): ReactNode[] {
   if (!tokens || tokens.length === 0) return fallback ? [fallback] : []
-  return tokens.map((token, index) => renderInlineToken(token, `${prefix}-inline-${index}`))
+  return tokens.map((token, index) => renderInlineToken(token, `${prefix}-inline-${index}`, fileReferences))
 }
 
-function renderInlineToken(token: Token, key: string): ReactNode {
+function renderInlineToken(token: Token, key: string, fileReferences: boolean): ReactNode {
   switch (token.type) {
     case "strong": {
       const strong = token as Tokens.Strong
-      return <strong key={key}>{renderInline(strong.tokens, key, strong.text)}</strong>
+      return <strong key={key}>{renderInline(strong.tokens, key, strong.text, fileReferences)}</strong>
     }
     case "em": {
       const em = token as Tokens.Em
-      return <em key={key}>{renderInline(em.tokens, key, em.text)}</em>
+      return <em key={key}>{renderInline(em.tokens, key, em.text, fileReferences)}</em>
     }
     case "del": {
       const del = token as Tokens.Del
-      return <del key={key}>{renderInline(del.tokens, key, del.text)}</del>
+      return <del key={key}>{renderInline(del.tokens, key, del.text, fileReferences)}</del>
     }
     case "codespan": {
       const code = token as Tokens.Codespan
-      return <code key={key}>{code.text}</code>
+      // ponytail: 无空白的代码片段才推测为文件；带空格的路径可通过 Markdown 链接明确指定。
+      const file = fileReferences && /^[^\s<>"'`=(){}]+$/u.test(code.text) && isLocalFileReference(code.text, true)
+      return file ? <FileReference key={key} path={code.text} code>{code.text}</FileReference> : <code key={key}>{code.text}</code>
     }
     case "br":
       return <br key={key} />
@@ -177,10 +201,11 @@ function renderInlineToken(token: Token, key: string): ReactNode {
     }
     case "link": {
       const link = token as Tokens.Link
-      const children = renderInline(link.tokens, key, link.text)
+      const children = renderInline(link.tokens, key, link.text, false)
       const href = safeLink(link.href)
-      if (!href) return <span key={key} className="markdown-unsafe-link">{children}</span>
-      return <SafeLink key={key} href={href}>{children}</SafeLink>
+      if (href) return <SafeLink key={key} href={href}>{children}</SafeLink>
+      if (fileReferences && isLocalFileReference(link.href, false)) return <FileReference key={key} path={link.href}>{children}</FileReference>
+      return <span key={key} className="markdown-unsafe-link">{children}</span>
     }
     case "image": {
       // 图片只显示 alt 文本；不渲染 <img>，不发起任何网络请求。
@@ -198,12 +223,62 @@ function renderInlineToken(token: Token, key: string): ReactNode {
     case "text": {
       const textToken = token as Tokens.Text
       return textToken.tokens && textToken.tokens.length > 0
-        ? <span key={key}>{renderInline(textToken.tokens, key, textToken.text)}</span>
+        ? <span key={key}>{renderInline(textToken.tokens, key, textToken.text, fileReferences)}</span>
         : <span key={key}>{textToken.text}</span>
     }
     default:
       return <span key={key}>{safeTokenText(token)}</span>
   }
+}
+
+/** 只识别看起来像文件的本地引用；具体路径和授权由装配方及宿主再次校验。 */
+function isLocalFileReference(value: string, knownOnly: boolean): boolean {
+  if (!value || /[\u0000-\u001f\u007f]/u.test(value) || value.startsWith("//")) return false
+  if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^file:\/\//i.test(value) && !/^[a-z]:[\\/]/i.test(value)) return false
+  const path = value.replace(/(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?)$/i, "")
+  const name = path.replaceAll("\\", "/").split("/").at(-1) ?? ""
+  return fileIconFor(name).type !== "default" || (!knownOnly && /\.[\p{L}\p{N}_-]{1,24}$/u.test(name))
+}
+
+/** 消息中的文件只在宿主提供本机打开能力时可点；同名文件需要用户明确选择。 */
+export function FileReference({ path, children, code = false, openFile: suppliedOpenFile }: { path: string; children: ReactNode; code?: boolean; openFile?: RenderingActions["openFile"] }): ReactElement {
+  const contextOpenFile = useContext(ActionsContext)?.openFile
+  const openFile = suppliedOpenFile ?? contextOpenFile
+  const [choices, setChoices] = useState<readonly string[]>([])
+  const [error, setError] = useState("")
+  const [pending, setPending] = useState(false)
+  const active = useRef(true)
+  const sequence = useRef(0)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false; sequence.current += 1 }
+  }, [])
+  useEffect(() => { sequence.current += 1; setChoices([]); setError(""); setPending(false) }, [path])
+  const icon = <FileTypeIcon name={path.replace(/(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?)$/i, "")} />
+  if (!openFile) return code
+    ? <code className="markdown-file-reference">{icon}{children}</code>
+    : <span className="markdown-file-reference">{icon}{children}</span>
+  const open = async (candidate: string, resolved = false): Promise<void> => {
+    const current = ++sequence.current
+    setPending(true); setError("")
+    try {
+      const matches = await openFile(candidate, resolved)
+      if (active.current && sequence.current === current) setChoices(matches ?? [])
+    } catch (failure) {
+      if (active.current && sequence.current === current) setError(failure instanceof Error ? failure.message : "文件打开失败。")
+    } finally {
+      if (active.current && sequence.current === current) setPending(false)
+    }
+  }
+  return <span className="markdown-file-control">
+    <button type="button" className="markdown-file-reference" title={path} aria-label={`打开文件 ${path}`} disabled={pending}
+      onClick={() => { void open(path) }}>{icon}{children}</button>
+    {choices.length ? <span className="markdown-file-options" role="group" aria-label="选择同名文件">
+      <span>请选择文件：</span>{choices.map(choice => <button type="button" key={choice} disabled={pending}
+        onClick={() => { void open(choice, true) }}>{choice}</button>)}
+    </span> : null}
+    {error ? <span className="markdown-file-error" role="status">{error}</span> : null}
+  </span>
 }
 
 /** heading depth 固定到 h2~h6；h1 升级为 h2 避免和页面主标题重复。 */

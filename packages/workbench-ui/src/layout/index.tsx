@@ -196,9 +196,13 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
     };
   }, [props.setPanelWidth]);
 

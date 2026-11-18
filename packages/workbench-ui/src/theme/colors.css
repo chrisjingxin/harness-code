@@ -48,8 +48,8 @@
   --command-text: var(--text-soft);
   --composer-bg: var(--surface);
   --drawer-bg: var(--surface);
-  --inline-code-text: var(--accent-hover);
-  --code-bg: var(--accent-soft);
+  --inline-code-text: color-mix(in srgb, var(--accent) 55%, var(--text));
+  --code-bg: var(--surface-2);
   --code-border: var(--accent-border);
   --link-text: var(--accent);
   --link-text-hover: var(--accent-hover);
@@ -67,10 +67,15 @@
   --diff-add-sign: #166534;
   --diff-remove-sign: #b91c1c;
   /* 文件类型图标色：取自语法色板；装饰性图标，不参与文字对比度验收。 */
-  --file-ts: #1f6c9f;
+  --file-ts: #245de8;
   --file-js: #8a5a1f;
+  --file-python: #306998;
+  --file-go: #006d7c;
+  --file-rust: #a2411b;
   --file-code: #3a5e36;
-  --file-style: #6e4f7e;
+  --file-style: #0073ae;
+  --file-html: #d95813;
+  --file-json: #b66b00;
   --file-config: #2f5d6e;
   --file-image: #9f2f2d;
   --elev-ring: 0 0 0 1px var(--line);
@@ -79,18 +84,18 @@
   --shadow: var(--elev-pop);
   --shadow-float: var(--elev-raised);
 
-  --syntax-comment: #8f8c84;
-  --syntax-keyword: #9f2f2d;
-  --syntax-function: #1f6c9f;
-  --syntax-variable: #6e4f7e;
-  --syntax-string: #3a5e36;
-  --syntax-number: #8a5a1f;
-  --syntax-type: #2f5d6e;
-  --syntax-operator: #6b5f4e;
-  --syntax-punctuation: #8f8c84;
-  --syntax-tag: #9f2f2d;
-  --syntax-attribute: #1f6c9f;
-  --syntax-constant: #8a5a1f;
+  --syntax-comment: #6c6b66;
+  --syntax-keyword: #005fb8;
+  --syntax-function: #b91f4d;
+  --syntax-variable: #73378d;
+  --syntax-string: #417300;
+  --syntax-number: #9b1c67;
+  --syntax-type: #006978;
+  --syntax-operator: #80530e;
+  --syntax-punctuation: #666666;
+  --syntax-tag: #b91f4d;
+  --syntax-attribute: #005fb8;
+  --syntax-constant: #9b1c67;
 
   /* 品牌、消息与选中各用独立语义；不把紫色铺满消息流。 */
   --sidebar-bg: #f4f4f6;
@@ -157,8 +162,8 @@
   --command-text: var(--text-soft);
   --composer-bg: var(--surface);
   --drawer-bg: var(--surface);
-  --inline-code-text: var(--accent-hover);
-  --code-bg: var(--accent-soft);
+  --inline-code-text: color-mix(in srgb, var(--accent) 75%, var(--text));
+  --code-bg: var(--surface-2);
   --code-border: var(--accent-border);
   --link-text: var(--accent-hover);
   --link-text-hover: var(--accent-hover);
@@ -178,8 +183,13 @@
   /* 文件类型图标色：dark 语法色板的柔彩映射。 */
   --file-ts: #a8c9e8;
   --file-js: #e0c28a;
+  --file-python: #8bc5ed;
+  --file-go: #76d0dc;
+  --file-rust: #e5ad8d;
   --file-code: #a6cdac;
   --file-style: #cdb8e0;
+  --file-html: #ff9b66;
+  --file-json: #ffc264;
   --file-config: #a6c6cc;
   --file-image: #e5b0ae;
   --elev-ring: 0 0 0 1px var(--line);
@@ -188,18 +198,18 @@
   --shadow: var(--elev-pop);
   --shadow-float: var(--elev-raised);
 
-  --syntax-comment: #8a877f;
-  --syntax-keyword: #e5b0ae;
-  --syntax-function: #a8c9e8;
-  --syntax-variable: #cdb8e0;
-  --syntax-string: #a6cdac;
-  --syntax-number: #e0c28a;
-  --syntax-type: #a6c6cc;
-  --syntax-operator: #bfb7a6;
-  --syntax-punctuation: #b5b2aa;
-  --syntax-tag: #e5b0ae;
-  --syntax-attribute: #a8c9e8;
-  --syntax-constant: #e0c28a;
+  --syntax-comment: #aaa9a3;
+  --syntax-keyword: #82bfff;
+  --syntax-function: #ff94aa;
+  --syntax-variable: #d7b8f0;
+  --syntax-string: #add987;
+  --syntax-number: #f1accd;
+  --syntax-type: #83d2d8;
+  --syntax-operator: #e2c18b;
+  --syntax-punctuation: #c5c5c2;
+  --syntax-tag: #ff94aa;
+  --syntax-attribute: #82bfff;
+  --syntax-constant: #f1accd;
 
   /* 品牌、消息与选中各用独立语义；不把紫色铺满消息流。 */
   --sidebar-bg: #141418;

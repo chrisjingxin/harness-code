@@ -123,10 +123,10 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     <WindowPreferences {...props.preferences} />
     <div className="desktop-set-section">快捷键</div>
     <div className="kbd-grid" aria-label="快捷键一览">
-      <div className="kbd-item"><span>命令面板</span><span className="kbd"><kbd>⌘</kbd><kbd>K</kbd></span></div>
-      <div className="kbd-item"><span>收起 / 展开左栏</span><span className="kbd"><kbd>⌘</kbd><kbd>\</kbd></span></div>
-      <div className="kbd-item"><span>发送消息</span><span className="kbd"><kbd>Enter</kbd></span></div>
-      <div className="kbd-item"><span>关闭弹窗 / 浮层</span><span className="kbd"><kbd>Esc</kbd></span></div>
+      <div className="kbd-item"><span>命令面板</span><span className="kbd-combo"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+      <div className="kbd-item"><span>收起 / 展开左栏</span><span className="kbd-combo"><kbd>⌘</kbd><kbd>\</kbd></span></div>
+      <div className="kbd-item"><span>发送消息</span><span className="kbd-combo"><kbd>Enter</kbd></span></div>
+      <div className="kbd-item"><span>关闭弹窗 / 浮层</span><span className="kbd-combo"><kbd>Esc</kbd></span></div>
     </div>
     <div className="desktop-set-section">账号与团队</div>
     <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />

@@ -10,11 +10,19 @@
 
 /* 文件树和对话路径共用文件类型色，保持图标独立于各区布局。 */
 .wb-file-type-icon { display: block; flex-shrink: 0; color: var(--muted); }
+.wb-file-type-badge { display: inline-flex; align-items: center; justify-content: center; font: 700 9px/1 var(--font-mono); letter-spacing: -.04em; }
 .wb-file-type-icon-ts { color: var(--file-ts); }
 .wb-file-type-icon-js { color: var(--file-js); }
+.wb-file-type-icon-python { color: var(--file-python); }
+.wb-file-type-icon-go { color: var(--file-go); }
+.wb-file-type-icon-rust { color: var(--file-rust); }
+.wb-file-type-icon-shell { color: var(--file-code); }
 .wb-file-type-icon-code { color: var(--file-code); }
 .wb-file-type-icon-style { color: var(--file-style); }
+.wb-file-type-icon-html { color: var(--file-html); }
+.wb-file-type-icon-json { color: var(--file-json); }
 .wb-file-type-icon-config { color: var(--file-config); }
+.wb-file-type-icon-data { color: var(--file-config); }
 .wb-file-type-icon-image { color: var(--file-image); }
 .wb-file-type-icon-doc, .wb-file-type-icon-default { color: var(--muted); }
 

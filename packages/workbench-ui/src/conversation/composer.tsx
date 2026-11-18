@@ -4,7 +4,7 @@
  * 草稿及身份由调用方保存。文件沿用原目录查询；项目会话只上报选择，由装配方取材和确认。
  * 输入或光标变化 → 匹配 @ token → 绑定 scope/目标/修订发请求 → 仅接收当前请求结果。
  */
-import { AlertTriangle, ArrowUp, ChevronDown, X } from "lucide-react"
+import { AlertTriangle, ArrowUp, Check, ChevronDown, X } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
@@ -483,9 +483,9 @@ function CapabilityMenu({ scope, control, onSelect }: { scope: ConversationScope
     // 焦点在触发按钮与菜单选项之间移动时保持打开；离开整个控件后及时收起。
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
   }}>
-    <button ref={trigger} type="button" className="wb-composer-chip" disabled={!control.availability.enabled || !onSelect} title={control.availability.reason || (!onSelect ? "当前不可切换" : undefined)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><span>{control.label}{selected ? `：${selected.label}` : ""}</span><ChevronDown aria-hidden="true" /></button>
+    <button ref={trigger} type="button" className="wb-composer-chip" disabled={!control.availability.enabled || !onSelect} title={control.availability.reason || (!onSelect ? "当前不可切换" : undefined)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}><span>{selected && selected.label !== control.label ? `${control.label}：${selected.label}` : control.label}</span><ChevronDown aria-hidden="true" /></button>
     {open ? <div ref={menu} className="wb-capability-menu" role="menu" aria-label={control.label} onKeyDown={onMenuKey}>
-      {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <span aria-hidden="true">✓</span> : null}</button>)}
+      {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <Check size={13} aria-hidden="true" /> : null}</button>)}
     </div> : null}
   </div>
 }

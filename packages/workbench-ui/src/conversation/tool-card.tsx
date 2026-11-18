@@ -196,7 +196,7 @@ function ConversationToolOutput({
         </button>
       </header>
       <div className="wb-conversation-detail-body" data-clamped={collapsible && !expanded}>
-        {blocks.length ? <ConversationToolBlocks blocks={blocks} /> : <pre className="wb-conversation-detail-pre">{displayed}</pre>}
+        {blocks.length ? <ConversationToolBlocks blocks={blocks} rendering={rendering} /> : <pre className="wb-conversation-detail-pre">{displayed}</pre>}
       </div>
       {collapsible ? (
         <button type="button" className="wb-conversation-detail-expand" disabled={!onToggle} onClick={onToggle}>

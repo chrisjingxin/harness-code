@@ -45,3 +45,12 @@
 - [x] 容器宽度 <980px、提问少于 2 条或触屏时隐藏。
 - [x] 本机会话的提问补上 `createdAtMs`，锚点预览能显示时间。
 - [ ] **检查与验证**：同停点 1 的命令；对 conversation 目录运行 `impeccable detect --json`；冒烟正常路径；截图（1280 / 980 / 760、深色）。到达后停下汇报。
+
+## 会话阅读补充（2026-11-17）
+
+- [x] 文件树、页签和消息内文件名复用类型图标；回到底部按钮只显示箭头。
+- [x] 中央／右侧 Markdown 支持预览与源码切换；复用已有安全渲染与文件内容。
+- [x] 提高浅／深主题语法色对比度，行内代码颜色由当前强调色派生。
+- [x] `npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`node --experimental-strip-types scripts/workbench/smoke-file-rendering.mjs` 通过；受控项目／会话预览中检查了双入口切换、浅／深色和箭头跳转。
+- 限制：Markdown 图片显示替代文字，相对链接不打开；未扩展本机文件读取接口。原停点 3 的其余验收继续按原清单处理。
+- [x] 本机会话中的文件引用与工具详情路径支持打开只读预览；同名选择与目录外拒绝已在受控会话中冒烟。

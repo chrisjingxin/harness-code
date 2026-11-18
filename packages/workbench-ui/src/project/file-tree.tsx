@@ -145,8 +145,8 @@ function ProjectFileTree({
         <span className="project-file-row-arrow" aria-hidden="true">
           {row.kind === "directory" ? row.expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
         </span>
-        {row.kind === "directory" ? <Folder size={13} aria-hidden="true" className="project-file-row-icon" />
-          : row.kind === "symlink" ? <FileSymlink size={13} aria-hidden="true" className="project-file-row-icon" />
+        {row.kind === "directory" ? <Folder size={14} aria-hidden="true" className="project-file-row-icon" />
+          : row.kind === "symlink" ? <FileSymlink size={14} aria-hidden="true" className="project-file-row-icon" />
             : <FileTypeIcon name={row.name} />}
         <span className="project-file-row-name" title={row.path}>{row.name}</span>
         {badgeTxt ? <span className={`f-badge ${badgeCls}`}>{badgeTxt}</span> : null}

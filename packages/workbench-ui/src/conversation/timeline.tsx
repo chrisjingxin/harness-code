@@ -98,7 +98,6 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               onClick={scroll.scrollToBottom}
             >
               <ArrowDown aria-hidden="true" />
-              <span>{scroll.hasNewOutput ? "有新输出" : "回到底部"}</span>
               {scroll.hasNewOutput ? <span aria-hidden="true" className="wb-conversation-to-bottom-dot" /> : null}
             </button>
           ) : null}
@@ -372,12 +371,19 @@ function TimelineRow({
     if (entry.role === "system") {
       return <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className="wb-conversation-system" role="status">{entry.text}</div>
     }
+    const isStreaming = entry.role === "assistant" && Boolean(entry.streaming && entry.id === lastId)
     return (
       <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className={`wb-conversation-message wb-conversation-message-${entry.role}`}>
         {grouped && entry.role === "assistant" ? null : <MessageMeta role={entry.role} author={entry.author?.displayName} createdAtMs={entry.createdAtMs} />}
         <div className="wb-conversation-message-body">
-          <div className="wb-conversation-message-content">
-            {entry.role === "assistant" ? <>{entry.text ? <Markdown text={entry.text} actions={rendering} /> : null}{entry.streaming && entry.id === lastId ? <span className="wb-conversation-streaming-cursor" aria-hidden="true" /> : null}</> : entry.text}
+          <div className="wb-conversation-message-content" data-streaming={isStreaming || undefined}>
+            {entry.role === "assistant"
+              ? entry.text
+                ? <Markdown text={entry.text} actions={rendering} />
+                : isStreaming
+                  ? <span className="wb-conversation-streaming-cursor" aria-hidden="true" />
+                  : null
+              : entry.text}
           </div>
         </div>
         {entry.role === "assistant" && !entry.streaming && entry.text.trim().length > 0 && typeof rendering?.copyText === "function" ? (

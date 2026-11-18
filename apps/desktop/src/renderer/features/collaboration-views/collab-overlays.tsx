@@ -208,7 +208,8 @@ export function CollabMembersPopover({
               className={`pop-member${ownerFilter === "all" ? " is-active" : ""}`}
               onClick={() => setOwnerFilter("all")}
             >
-              <span className="pm-body" style={{ paddingLeft: 4 }}>
+              <span className="av-fallback" style={{ ["--av" as string]: "24px" }} aria-hidden="true">全</span>
+              <span className="pm-body">
                 <span className="pm-name">全部成员</span>
                 <span className="pm-role">{members.length} 人 · 本项目</span>
               </span>

@@ -111,6 +111,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-height: 0;
   max-height: 360px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -127,7 +128,7 @@
 }
 .pop-member {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   width: 100%;
   padding: 6px;
@@ -161,7 +162,7 @@
 .pop-member .pm-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
 .pop-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .pop-filters { display: flex; align-items: center; gap: 8px; padding: 8px 10px; box-shadow: inset 0 -1px 0 var(--border-soft); }
-.pop-list { padding: 4px 6px 8px; max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.pop-list { flex: 1 1 auto; min-height: 0; padding: 4px 6px 8px; max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
 .pop-item {
   display: flex;
   align-items: center;

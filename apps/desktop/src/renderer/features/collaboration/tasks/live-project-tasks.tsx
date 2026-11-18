@@ -195,10 +195,10 @@ function LiveTaskDetail({ context, taskId, navigator }: { context: TasksContext;
   }, [host, scope, materialKey, attempt])
 
   if (!detail) return <section className="project-task-page">
-    <button className="wb-button wb-button-quiet" onClick={back}>返回项目任务</button>
+    <button type="button" className="wb-button wb-button-quiet wb-button-small project-task-back" onClick={back}>返回项目任务</button>
     <h1>任务详情</h1>
     <p role={notice ? "alert" : "status"}>{notice || "正在读取任务…"}</p>
-    {notice && <button className="wb-button wb-button-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button>}
+    {notice && <button type="button" className="wb-button wb-button-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button>}
   </section>
 
   const task = detail.task
@@ -247,52 +247,60 @@ function LiveTaskDetail({ context, taskId, navigator }: { context: TasksContext;
 
   return <ProjectTaskDetail task={display} onBack={back}>
     <section className="project-task-detail-section">
-      <h2>任务操作</h2>
-      <p>版本 {task.version}</p>
-      {canReference && <button className="wb-button wb-button-secondary" onClick={() => setDraftAction("reference")}>引用任务材料</button>}
-      {linked && <button className="wb-button wb-button-secondary" onClick={() => {
-        if (!navigator.locateConversation(linked)) setNotice("关联会话当前不可用。")
-      }}>打开关联会话</button>}
+      <div className="project-task-section-head">
+        <h2>任务操作</h2>
+        <span className="project-task-version">版本 {task.version}</span>
+        <button type="button" className="wb-button wb-button-quiet wb-button-small" disabled={busy} onClick={() => setAttempt(value => value + 1)}>刷新任务</button>
+      </div>
+      {(canReference || linked) && (
+        <div className="project-task-action-row">
+          {canReference && <button type="button" className="wb-button wb-button-secondary" onClick={() => setDraftAction("reference")}>引用任务材料</button>}
+          {linked && <button type="button" className="wb-button wb-button-secondary" onClick={() => {
+            if (!navigator.locateConversation(linked)) setNotice("关联会话当前不可用。")
+          }}>打开关联会话</button>}
+        </div>
+      )}
       <fieldset className="project-task-fields" disabled={busy}>
         <legend className="wb-sr-only">可用操作</legend>
         {creator && task.status === "todo" && <>
           <label>编辑任务说明<textarea value={description ?? detail.description} onChange={event => setDescription(event.target.value)} /></label>
-          <button className="wb-button wb-button-secondary" disabled={!description?.trim()} onClick={() => {
+          <button type="button" className="wb-button wb-button-secondary" disabled={!description?.trim()} onClick={() => {
             if (!description) return
             void write({ description }, requestId => host.editTask(workspaceId, projectId, taskId, { description, expectedVersion: task.version, requestId }))
           }}>保存说明</button>
         </>}
-        {assignee && task.status === "todo" && <button className="wb-button wb-button-primary" onClick={() => transition("doing")}>接收任务</button>}
+        {assignee && task.status === "todo" && <button type="button" className="wb-button wb-button-primary" onClick={() => transition("doing")}>接收任务</button>}
         {assignee && task.status === "doing" && <>
           {!linked && currentLocal.length > 0 && <>
             <label>本机会话<select value={linkId} onChange={event => setLinkId(event.target.value)}>
               <option value="">选择会话</option>
               {currentLocal.map(item => <option key={item.conversationId} value={item.conversationId}>{item.title || "未命名会话"}</option>)}
             </select></label>
-            <button className="wb-button wb-button-secondary" disabled={!linkId} onClick={() => void write({ linkId }, requestId =>
+            <button type="button" className="wb-button wb-button-secondary" disabled={!linkId} onClick={() => void write({ linkId }, requestId =>
               host.linkTaskConversation(workspaceId, projectId, taskId, { conversationId: linkId, expectedVersion: task.version, requestId }),
             )}>关联会话</button>
           </>}
-          <button className="wb-button wb-button-primary" disabled={!canStart} onClick={() => setDraftAction("start")}>在本机开始</button>
+          <button type="button" className="wb-button wb-button-primary" disabled={!canStart} onClick={() => setDraftAction("start")}>在本机开始</button>
           <label>验收说明<textarea value={note} onChange={event => setNote(event.target.value)} /></label>
           <label>提交标识（可选）<input value={commitSha} onChange={event => setCommitSha(event.target.value)} /></label>
-          <button className="wb-button wb-button-secondary" disabled={Boolean(commitSha.trim() && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commitSha.trim()))}
+          <button type="button" className="wb-button wb-button-secondary" disabled={Boolean(commitSha.trim() && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commitSha.trim()))}
             onClick={() => transition("review")}>提交验收</button>
         </>}
         {creator && task.status === "review" && <>
           <label>验收说明<textarea value={note} onChange={event => setNote(event.target.value)} /></label>
-          <button className="wb-button wb-button-primary" onClick={() => transition("done")}>通过验收</button>
-          <button className="wb-button wb-button-secondary" onClick={() => transition("todo")}>退回待接收</button>
+          <div className="project-task-action-row">
+            <button type="button" className="wb-button wb-button-primary" onClick={() => transition("done")}>通过验收</button>
+            <button type="button" className="wb-button wb-button-secondary" onClick={() => transition("todo")}>退回待接收</button>
+          </div>
         </>}
         {creator && ["todo", "doing", "review"].includes(task.status) &&
-          <button className="wb-button wb-button-secondary" onClick={() => transition("cancelled")}>取消任务</button>}
+          <button type="button" className="wb-button wb-button-secondary" onClick={() => transition("cancelled")}>取消任务</button>}
       </fieldset>
       {notice && <p className="project-task-error" role="alert">{notice}</p>}
-      <button className="wb-button wb-button-quiet" disabled={busy} onClick={() => setAttempt(value => value + 1)}>刷新任务</button>
     </section>
     <section className="project-task-detail-section">
       <h2>流转记录</h2>
-      <ol>{detail.transitions.map(item => <li key={item.version}>
+      <ol className="project-task-transitions">{detail.transitions.map(item => <li key={item.version}>
         {ownerName(item.actorId)} · {item.fromStatus ? `${labels[item.fromStatus]} → ` : ""}{labels[item.toStatus]} · v{item.version}
         {" · "}<time dateTime={new Date(item.occurredAtMs).toISOString()}>{new Date(item.occurredAtMs).toLocaleString()}</time>
         {item.note && <p className="project-task-text">{item.note}</p>}

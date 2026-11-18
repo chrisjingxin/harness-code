@@ -75,12 +75,18 @@ export function LiveTeamKnowledge({
       initialItemId={updated?.itemId}
       rendering={rendering}
       onEditItem={itemId => setEditing({ itemId })}
-      controls={<form className="project-task-filters" onSubmit={event => {
+      controls={<form className="team-knowledge-toolbar" onSubmit={event => {
         event.preventDefault()
         if (query !== queryInput.trim()) { setItems({ status: "loading" }); setQuery(queryInput.trim()) }
         else refreshMetadata(scope)
       }}>
-        <input aria-label="搜索团队知识" value={queryInput} onChange={event => setQueryInput(event.target.value)} />
+        <input
+          className="team-knowledge-search-input"
+          aria-label="搜索团队知识"
+          placeholder="搜索标题或关键词…"
+          value={queryInput}
+          onChange={event => setQueryInput(event.target.value)}
+        />
         <button className="wb-button wb-button-secondary" type="submit">搜索</button>
         <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button>
       </form>}

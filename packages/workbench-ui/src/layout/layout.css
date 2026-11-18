@@ -36,9 +36,12 @@
 }
 .collaboration-traffic-drag {
   flex: none;
-  height: 40px;
+  height: 44px;
   width: 100%;
   -webkit-app-region: drag;
+}
+.collaboration-layout.is-macos .collaboration-traffic-drag {
+  height: 36px;
 }
 
 .collaboration-left-resize {
@@ -95,7 +98,7 @@
   padding-left: 14px;
 }
 .collaboration-layout.is-macos[data-left-mode="hidden"] .collaboration-header.desktop-titlebar-macos {
-  padding-left: 118px;
+  padding-left: 122px;
 }
 .collaboration-layout:not(.is-macos)[data-left-mode="hidden"] .collaboration-header {
   padding-left: 50px;
@@ -106,14 +109,15 @@
 
 .collaboration-header-toggle {
   position: absolute;
-  top: 10px;
+  top: 14px;
   left: 12px;
   z-index: 45;
   width: 28px;
   height: 28px;
 }
 .collaboration-layout.is-macos .collaboration-header-toggle {
-  left: 80px;
+  top: 4px;
+  left: 84px;
 }
 
 .collaboration-header-toggle,
@@ -275,8 +279,8 @@
 }
 .collaboration-modal-close {
   position: absolute;
-  right: 14px;
-  top: 14px;
+  right: 16px;
+  top: 16px;
   z-index: 2;
 }
 

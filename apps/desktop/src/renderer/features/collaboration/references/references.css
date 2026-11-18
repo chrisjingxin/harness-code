@@ -3,31 +3,33 @@
   width: min(540px, calc(100% - 32px));
   max-height: calc(100% - 32px);
   padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-surface);
+  border: 0;
+  border-radius: var(--radius-xl);
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow);
+  box-shadow: var(--elev-pop);
 }
-.conversation-reference-dialog::backdrop { background: var(--overlay-scrim); }
-.conversation-reference-dialog h2 { margin: 0 0 14px; font-size: 17px; }
-.conversation-reference-dialog h3 { margin: 0; font-size: 14px; }
-.conversation-reference-dialog p { margin: 8px 0; color: var(--muted); font-size: 13px; }
+.conversation-reference-dialog::backdrop { background: var(--overlay-scrim); backdrop-filter: blur(2px); }
+.conversation-reference-dialog h2 { margin: 0 0 14px; font-size: var(--text-lg); color: var(--fg); }
+.conversation-reference-dialog h3 { margin: 0; font-size: var(--text-md); color: var(--fg); }
+.conversation-reference-dialog p { margin: 8px 0; color: var(--muted); font-size: var(--text-sm); }
 .conversation-reference-dialog [role="alert"] { color: var(--danger-text); }
 .conversation-reference-material dl { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 10px; }
-.conversation-reference-material dl div { display: flex; gap: 6px; font-size: 12px; }
+.conversation-reference-material dl div { display: flex; gap: 6px; font-size: var(--text-xs); }
 .conversation-reference-material dt { color: var(--muted); }
-.conversation-reference-material dd { margin: 0; }
+.conversation-reference-material dd { margin: 0; color: var(--fg-2); }
 .conversation-reference-text {
   max-height: 12em;
-  padding: 9px 11px;
+  padding: 10px 12px;
   overflow: auto;
-  border-radius: var(--radius-control);
-  border-left: 2px solid var(--accent-border-strong);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: var(--text-sm);
+  line-height: 1.65;
 }
 .conversation-reference-targets {
   min-width: 0;

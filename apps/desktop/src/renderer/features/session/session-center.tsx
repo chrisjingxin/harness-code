@@ -7,9 +7,9 @@
  * 2. `SessionCentralFileTabs` / `SessionCentralFilePanels`：复用 `@workbench/ui` 的 `ProjectFileTab` 与
  *    `ProjectFilePanel` 在中央对话区旁边打开多个源代码文件，同时保持 `ConversationView` 常驻挂载不丢位置。
  */
-import { Fragment, useEffect, useLayoutEffect, useRef } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
-import { ProjectDock, ProjectFilePanel, ProjectFileTab } from "@workbench/ui"
+import { FileTypeIcon, ProjectDock, ProjectFilePanel, ProjectFileTab } from "@workbench/ui"
 import type {
   ProjectActionAvailability,
   ProjectChangesView,
@@ -22,7 +22,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CloseIcon,
-  FileDocIcon,
   FolderIcon,
   MaximizeIcon,
   MinimizeIcon,
@@ -89,9 +88,11 @@ export function SessionCentralTabBar({ state }: { readonly state: SessionCentral
 function CentralFilePanelWithScroll({
   tab,
   state,
+  preview,
 }: {
   readonly tab: CentralFileTabItem
   readonly state: SessionCentralFilesState
+  readonly preview?: boolean
 }): ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null)
   const active = state.activeCentral === tab.path
@@ -100,19 +101,22 @@ function CentralFilePanelWithScroll({
 
   useLayoutEffect(() => {
     if (!active || !wrapRef.current || !saved) return
-    const scrollBox = wrapRef.current.querySelector<HTMLElement>(".project-file-content")
+    const scrollBox = wrapRef.current.querySelector<HTMLElement>(".project-file-code-view, .project-file-markdown-view")
     if (scrollBox) {
       scrollBox.scrollTop = saved.top
       scrollBox.scrollLeft = saved.left
     }
-  }, [active, saved])
+  }, [active, saved, preview])
 
   useEffect(() => {
     const root = wrapRef.current
     if (!root) return
     const onScroll = (event: Event) => {
       const target = event.target
-      if (target instanceof HTMLElement && target.classList.contains("project-file-content")) {
+      if (
+        target instanceof HTMLElement
+        && (target.classList.contains("project-file-code-view") || target.classList.contains("project-file-markdown-view"))
+      ) {
         state.onSaveScroll("central", tab.path, target.scrollTop, target.scrollLeft)
       }
     }
@@ -132,6 +136,7 @@ function CentralFilePanelWithScroll({
         tabId={`session-central-tab-${encoded}`}
         panelId={`session-central-panel-${encoded}`}
         rendering={state.rendering}
+        preview={preview}
       />
     </div>
   )
@@ -219,6 +224,7 @@ export function SessionCentralFilePanels({
   readonly onToggleMaximized?: () => void
 }): ReactElement | null {
   const paneRef = useRef<HTMLElement>(null)
+  const [mdPreviewByPath, setMdPreviewByPath] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!state.activeCentral) return
@@ -238,6 +244,9 @@ export function SessionCentralFilePanels({
   const activePath = state.activeCentral
   const activeFile = state.files[activePath]
   const mode = state.mode ?? "code"
+  const isMarkdown = activeFile?.status === "ready"
+    && (activeFile.file.language === "markdown" || /\.(?:md|mdx|markdown)$/i.test(activePath))
+  const mdPreview = mdPreviewByPath[activePath] ?? true
   const changedFiles = state.changes?.repository?.files ?? []
   const cIdx = changedFiles.findIndex(f => f.path === activePath)
   const st = fileStatusCode(cIdx >= 0 ? changedFiles[cIdx]?.status : undefined)
@@ -258,7 +267,7 @@ export function SessionCentralFilePanels({
                   title={tab.path}
                   onClick={() => state.onSelectFile(tab.path)}
                 >
-                  <FileDocIcon size={12} />
+                  <FileTypeIcon name={tab.name} size={13} />
                   <span className="t-mono">{tab.name}</span>
                 </button>
                 <button
@@ -322,7 +331,26 @@ export function SessionCentralFilePanels({
 
       <div className="fp-meta">
         <span className="fp-full" title={activePath}>{activePath}</span>
-        <span style={{ flex: "1 1 0" }} />
+        {mode === "code" && isMarkdown && (
+          <div className="seg fp-md-seg" role="group" aria-label="Markdown 显示方式">
+            <button
+              type="button"
+              className={mdPreview ? "is-active" : undefined}
+              aria-pressed={mdPreview}
+              onClick={() => setMdPreviewByPath(prev => ({ ...prev, [activePath]: true }))}
+            >
+              预览
+            </button>
+            <button
+              type="button"
+              className={!mdPreview ? "is-active" : undefined}
+              aria-pressed={!mdPreview}
+              onClick={() => setMdPreviewByPath(prev => ({ ...prev, [activePath]: false }))}
+            >
+              源码
+            </button>
+          </div>
+        )}
         {activeFile?.status === "ready" && (
           <>
             {activeFile.file.language && <span className="fp-info">{activeFile.file.language}</span>}
@@ -368,7 +396,7 @@ export function SessionCentralFilePanels({
           <CentralDiffContent path={activePath} state={state} />
         ) : (
           state.tabs.map(tab => (
-            <CentralFilePanelWithScroll key={tab.path} tab={tab} state={state} />
+            <CentralFilePanelWithScroll key={tab.path} tab={tab} state={state} preview={mdPreviewByPath[tab.path] ?? true} />
           ))
         )}
       </div>

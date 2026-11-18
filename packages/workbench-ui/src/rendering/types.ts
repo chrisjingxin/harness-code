@@ -2,6 +2,8 @@
 export interface RenderingActions {
   copyText?: (text: string) => Promise<void>
   openExternal?: (href: string) => Promise<void>
+  /** 打开会话工作目录中的文件；返回多个路径时由用户选择，resolved 表示选择了明确路径。 */
+  openFile?: (path: string, resolved?: boolean) => Promise<readonly string[] | void>
 }
 
 export interface MarkdownProps { text: string; actions?: RenderingActions }

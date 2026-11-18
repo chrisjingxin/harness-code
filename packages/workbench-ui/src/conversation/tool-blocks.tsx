@@ -3,7 +3,8 @@
  * 路径图标共用 HC-207 实现；本模块不读取文件、解析私有载荷或解释审批。
  */
 import type { ReactElement } from "react"
-import { FileTypeIcon } from "../common/file-type-icon.js"
+import { FileReference } from "../rendering/markdown.js"
+import type { RenderingActions } from "../rendering/types.js"
 import type { ConversationToolBlock } from "./types.js"
 
 type DisplayLine = { readonly number?: number; readonly text: string }
@@ -46,22 +47,21 @@ export function countToolBlockLines(blocks: readonly ConversationToolBlock[]): n
   }, 0)
 }
 
-function PathLabel({ path }: { path: string }): ReactElement {
-  const name = path.split(/[\\/]/).pop() || path
-  return <div className="wb-conversation-block-path"><FileTypeIcon name={name} size={14} /><span>{path}</span></div>
+function PathLabel({ path, openFile }: { path: string; openFile?: RenderingActions["openFile"] }): ReactElement {
+  return <div className="wb-conversation-block-path"><FileReference path={path} openFile={openFile}>{path}</FileReference></div>
 }
 
 function NumberedLines({ lines }: { lines: readonly DisplayLine[] }): ReactElement {
   return <div className="wb-conversation-block-lines">{lines.map((line, index) => <div className="wb-conversation-block-line" key={index}><span className="wb-conversation-block-number" aria-hidden="true">{line.number ?? ""}</span><span>{line.text || "\u00a0"}</span></div>)}</div>
 }
 
-export function ConversationToolBlocks({ blocks }: { blocks: readonly ConversationToolBlock[] }): ReactElement {
+export function ConversationToolBlocks({ blocks, rendering }: { blocks: readonly ConversationToolBlock[]; rendering?: RenderingActions }): ReactElement {
   return <div className="wb-conversation-blocks">{blocks.map((block, index) => {
     if (block.kind === "text" || block.kind === "json") return <pre className="wb-conversation-detail-pre" key={index}>{block.text}</pre>
-    if (block.kind === "file") return <section className="wb-conversation-block" key={index}><div className="wb-conversation-block-heading"><PathLabel path={block.path} /><span>{block.rangeLabel}</span></div><NumberedLines lines={block.lines} />{block.truncated ? <p className="wb-conversation-block-notice">内容已截断</p> : null}</section>
-    if (block.kind === "paths") return <div className="wb-conversation-block" key={index}>{block.paths.map((path, pathIndex) => <PathLabel key={pathIndex} path={path} />)}</div>
-    if (block.kind === "matches") return <div className="wb-conversation-block" key={index}>{block.groups.map((group, groupIndex) => <section key={groupIndex}><PathLabel path={group.path} /><NumberedLines lines={group.lines} /></section>)}</div>
-    if (block.kind === "diff") return <div className="wb-conversation-block" key={index}>{block.path ? <PathLabel path={block.path} /> : null}<div className="wb-conversation-diff">{block.rows.map((row, rowIndex) => <div key={rowIndex} className={`wb-conversation-diff-${row.kind}`}><span aria-hidden="true">{row.kind === "add" ? "+" : row.kind === "remove" ? "−" : " "}</span><span>{row.text || "\u00a0"}</span></div>)}</div></div>
+    if (block.kind === "file") return <section className="wb-conversation-block" key={index}><div className="wb-conversation-block-heading"><PathLabel path={block.path} openFile={rendering?.openFile} /><span>{block.rangeLabel}</span></div><NumberedLines lines={block.lines} />{block.truncated ? <p className="wb-conversation-block-notice">内容已截断</p> : null}</section>
+    if (block.kind === "paths") return <div className="wb-conversation-block" key={index}>{block.paths.map((path, pathIndex) => <PathLabel key={pathIndex} path={path} openFile={rendering?.openFile} />)}</div>
+    if (block.kind === "matches") return <div className="wb-conversation-block" key={index}>{block.groups.map((group, groupIndex) => <section key={groupIndex}><PathLabel path={group.path} openFile={rendering?.openFile} /><NumberedLines lines={group.lines} /></section>)}</div>
+    if (block.kind === "diff") return <div className="wb-conversation-block" key={index}>{block.path ? <PathLabel path={block.path} openFile={rendering?.openFile} /> : null}<div className="wb-conversation-diff">{block.rows.map((row, rowIndex) => <div key={rowIndex} className={`wb-conversation-diff-${row.kind}`}><span aria-hidden="true">{row.kind === "add" ? "+" : row.kind === "remove" ? "−" : " "}</span><span>{row.text || "\u00a0"}</span></div>)}</div></div>
     if (block.kind === "terminal") return <div className="wb-conversation-block wb-conversation-terminal" key={index}>{block.command ? <div className="wb-conversation-terminal-command">$ {block.command}</div> : null}<pre className="wb-conversation-detail-pre">{block.lines.join("\n")}</pre>{block.truncated ? <p className="wb-conversation-block-notice">输出已截断</p> : null}</div>
     return null
   })}</div>

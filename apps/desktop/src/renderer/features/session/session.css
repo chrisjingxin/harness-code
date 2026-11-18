@@ -136,7 +136,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px var(--pad-stage, 24px) 18px;
+  padding: 0 var(--pad-stage, 24px) 18px;
 }
 
 .session-conversation-wrap[hidden] {
@@ -360,7 +360,7 @@
 
 .session-ro-strip-wrap {
   flex: none;
-  padding: 10px 28px 0;
+  padding: 10px var(--pad-stage, 24px) 0;
 }
 
 .session-remote-synced-note {
@@ -398,7 +398,7 @@
 
 .session-remote-action-bar {
   flex: none;
-  padding: 8px 28px 18px;
+  padding: 8px var(--pad-stage, 24px) 18px;
   background: transparent;
 }
 
@@ -597,13 +597,16 @@
   flex-direction: column;
   background: var(--surface);
 }
+/* 与右侧 ProjectDock 顶栏保持 40px 同高与统一底边线，消除分屏交界断阶。 */
 .filepane-head {
   display: flex;
   align-items: stretch;
   gap: 6px;
   flex: none;
-  padding: 6px 8px 0 10px;
-  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
+  height: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+  box-shadow: inset 0 -1px 0 var(--line);
 }
 .fp-tabs {
   display: flex;
@@ -621,7 +624,6 @@
   display: inline-flex;
   align-items: center;
   flex: none;
-  padding-bottom: 2px;
   border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
 }
 .fp-tab-wrap.is-active {
@@ -633,7 +635,7 @@
   align-items: center;
   gap: 5px;
   max-width: 170px;
-  height: 30px;
+  height: 100%;
   padding: 0 4px 0 8px;
   border: none;
   background: transparent;
@@ -674,9 +676,24 @@
 .fp-tools {
   display: flex;
   align-items: center;
-  gap: 6px;
+  align-self: center;
+  gap: 4px;
   flex: none;
-  padding-bottom: 6px;
+}
+.fp-tools .seg button {
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+}
+.fp-tools .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.fp-md-seg {
+  flex: none;
+}
+.fp-md-seg button {
+  padding: 2px 8px;
+  font-size: var(--text-2xs);
 }
 .fp-meta {
   display: flex;
@@ -689,6 +706,8 @@
   box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
 }
 .fp-meta .fp-full {
+  flex: 1 1 0;
+  min-width: 0;
   font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -794,11 +813,15 @@
 }
 
 .session-right-guide {
+  box-sizing: border-box;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
   padding: 20px 18px;
+  background: var(--rail-bg);
+  box-shadow: inset 1px 0 0 var(--line);
   color: var(--text);
 }
 

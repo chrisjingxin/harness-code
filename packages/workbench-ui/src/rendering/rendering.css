@@ -13,7 +13,21 @@
 .markdown li > p { margin: 0; }
 .markdown li > p + p { margin-top: 6px; }
 .markdown blockquote { margin: 10px 0; padding: 8px 12px; border: 0; border-radius: var(--radius-sm, 6px); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border, var(--line)); color: var(--fg-2, var(--muted)); }
-.markdown code { padding: 1px 5px; border-radius: var(--radius-control); background: var(--code-bg); color: var(--inline-code-text); font-size: .86em; }
+.markdown hr { margin: 14px 0; border: 0; border-top: 1px solid var(--line); }
+.markdown code { padding: 1px 5px; border-radius: var(--radius-control); background: var(--code-bg); color: var(--inline-code-text); font-family: var(--font-mono); font-size: .86em; }
+.markdown-file-reference {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 5px;
+  border: 0; border-radius: var(--radius-control); background: var(--surface-2); color: var(--text);
+  font: 600 .94em/1.35 var(--font-display); vertical-align: middle; transform: translateY(-0.5px);
+}
+.markdown-file-reference svg.wb-file-type-icon { width: 12px; height: 12px; }
+button.markdown-file-reference { cursor: pointer; }
+button.markdown-file-reference:hover { background: var(--selected); text-decoration: underline; text-underline-offset: 2px; }
+button.markdown-file-reference:focus-visible, .markdown-file-options button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.markdown-file-reference code { padding: 0; background: transparent; color: inherit; font: inherit; }
+.markdown-file-options { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; margin-left: 4px; color: var(--muted); font-size: var(--text-xs); }
+.markdown-file-options button { max-width: 100%; padding: 2px 5px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--link-text); font: inherit; overflow-wrap: anywhere; cursor: pointer; }
+.markdown-file-error { margin-left: 4px; color: var(--danger-text); font-size: var(--text-xs); }
 .markdown a { color: var(--link-text); text-decoration: underline; text-underline-offset: 2px; }
 .markdown a:hover { color: var(--link-text-hover); }
 .markdown-raw, .markdown-unsafe-link, .markdown-image-alt { color: var(--muted); white-space: pre-wrap; }
@@ -54,7 +68,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 2px 6px 0 10px;
+  padding: 4px 6px 0 12px;
   font-size: var(--text-2xs);
   color: var(--subtle);
 }
@@ -98,8 +112,9 @@
 .code-block-pre {
   margin: 0;
   white-space: pre;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
-  line-height: 1.55;
+  line-height: 1.65;
 }
 .code-block-pre code {
   padding: 0;
@@ -111,8 +126,8 @@
 .diff-code-line {
   display: block;
   min-width: max-content;
-  padding-inline: 10px;
-  margin-inline: -10px;
+  padding-inline: 12px;
+  margin-inline: -12px;
 }
 .diff-code-add { background: var(--diff-add-bg); }
 .diff-code-remove { background: var(--diff-remove-bg); }
@@ -124,5 +139,23 @@
 .code-block-error, .markdown-link-error { color: var(--danger-text); }
 .code-block-error { display: block; padding: 0 12px 8px; }
 .code-block-copy:disabled { opacity: .45; cursor: not-allowed; }
-.markdown-task { list-style: none; }
-.markdown-task > input { margin-inline-end: 6px; }
+.markdown-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  list-style: none;
+  margin-left: -22px;
+}
+.markdown-task > input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 5px 0 0;
+  accent-color: var(--accent);
+}
+.markdown-task > span {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.markdown-task > span > p:first-child { margin-top: 0; }
+.markdown-task > span > p:last-child { margin-bottom: 0; }

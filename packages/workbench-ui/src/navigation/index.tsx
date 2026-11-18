@@ -331,10 +331,11 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
         className="switch-btn pnav-project-switch"
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={!view.workspaceName}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="switch-txt">
-          <span className="switch-name od-truncate">{label}</span>
+          <span className="switch-name od-truncate" data-placeholder={!current || undefined}>{label}</span>
           {subParts.length > 0 && (
             <span className="switch-sub">
               <span className="od-truncate">{subParts.join(" · ")}</span>
@@ -429,6 +430,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           className="pnav-nav-item"
           data-active={knowActive}
           aria-current={knowActive ? "page" : undefined}
+          disabled={!view.workspaceName}
           title="Workspace 团队知识库"
           onClick={() => actions.openPage("knowledge")}
         >

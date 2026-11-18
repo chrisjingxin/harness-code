@@ -135,7 +135,7 @@ function TaskForm({ scope, members, materials, initialAssigneeId, sources, readM
           </label>
           <section className="project-task-attachments" aria-label="附带材料">
             <h3>附带材料</h3>
-            {readMaterial && Boolean(sources?.length) && <div>
+            {readMaterial && Boolean(sources?.length) && <div className="project-task-source-picker">
               <label>来源会话
                 <select value={sourceId} onChange={event => setSourceId(event.currentTarget.value)}>
                   {sources?.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}

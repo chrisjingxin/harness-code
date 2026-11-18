@@ -187,17 +187,19 @@ function KnowledgePage({ scope, teamName, items, actions, rendering, controls, i
           {selected && <>
             <div className="team-knowledge-content-heading">
               <h2>{selected.title}</h2>
-              {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>编辑条目</button>}
-              <button type="button" className="wb-button wb-button-secondary wb-button-small"
-                disabled={!historyAvailable || history.status === "loading"}
-                title={historyAvailable ? undefined : "版本历史暂不可用"}
-                aria-expanded={history.status !== "closed"}
-                onClick={() => {
-                  if (history.status === "ready") setHistory({ status: "closed" })
-                  else void loadHistory(selected.id)
-                }}>
-                {history.status === "closed" ? "查看版本历史" : history.status === "loading" ? "正在读取历史…" : history.status === "ready" ? "收起版本历史" : "重试版本历史"}
-              </button>
+              <div className="team-knowledge-content-actions">
+                {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>编辑条目</button>}
+                <button type="button" className="wb-button wb-button-secondary wb-button-small"
+                  disabled={!historyAvailable || history.status === "loading"}
+                  title={historyAvailable ? undefined : "版本历史暂不可用"}
+                  aria-expanded={history.status !== "closed"}
+                  onClick={() => {
+                    if (history.status === "ready") setHistory({ status: "closed" })
+                    else void loadHistory(selected.id)
+                  }}>
+                  {history.status === "closed" ? "查看版本历史" : history.status === "loading" ? "正在读取历史…" : history.status === "ready" ? "收起版本历史" : "重试版本历史"}
+                </button>
+              </div>
             </div>
             {history.status === "loading" && <p className="team-knowledge-message" role="status">正在读取版本历史…</p>}
             {(history.status === "error" || history.status === "unavailable") &&

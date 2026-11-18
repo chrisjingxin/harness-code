@@ -5,8 +5,9 @@
 import { Clock, Folder, GitBranch, Lock, X } from "lucide-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, RefObject } from "react"
+import { FileTypeIcon } from "../common/file-type-icon.js"
 import { ProjectFileExplorer } from "./file-tree.js"
-import { ProjectFileContentView, ProjectFileHeader } from "./file-view.js"
+import { ProjectFileReader } from "./file-view.js"
 import { ProjectGitPanel } from "./git-panel.js"
 import type { ProjectDockProps, ProjectScope } from "./types.js"
 
@@ -39,7 +40,14 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
     const up = () => { dragRef.current = null; setDragging(false) }
     window.addEventListener("pointermove", move)
     window.addEventListener("pointerup", up)
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up) }
+    window.addEventListener("pointercancel", up)
+    window.addEventListener("blur", up)
+    return () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+      window.removeEventListener("blur", up)
+    }
   }, [actions, dragging, scope])
 
   const resizeStart = (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -162,7 +170,7 @@ function ProjectDockFiles({ scope, files, gates, personal, actions, treeRef, uid
           <button ref={element => { if (element) buttonRefs.current.set(tab.path, element); else buttonRefs.current.delete(tab.path) }}
             type="button" role="tab" id={`${id}-tab`} aria-controls={`${id}-panel`} aria-selected={selected}
             tabIndex={selected ? 0 : -1} className="project-file-tab-select" data-path={tab.path} title={tab.path}
-            onClick={() => actions.selectFileTab(scope, tab.path)}><span className="project-file-tab-name">{tab.name}</span></button>
+            onClick={() => actions.selectFileTab(scope, tab.path)}><FileTypeIcon name={tab.name} /><span className="project-file-tab-name">{tab.name}</span></button>
           <button type="button" className="project-file-tab-close" aria-label={`关闭右侧文件 ${tab.path}`} title="关闭"
             onClick={() => close(tab.path)}><X size={12} aria-hidden="true" /></button>
         </div>
@@ -173,9 +181,8 @@ function ProjectDockFiles({ scope, files, gates, personal, actions, treeRef, uid
       const id = `${uid}-file-${encodeURIComponent(tab.path)}`
       return <div key={tab.path} id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab`}
         className="project-dock-file-panel" hidden={!active} inert={!active}>
-        <ProjectFileHeader scope={scope} path={tab.path} view={files[tab.path]} refresh={gates.refreshFile}
+        <ProjectFileReader scope={scope} path={tab.path} view={files[tab.path]} refresh={gates.refreshFile}
           onRefresh={actions.refreshFile} openCentral={gates.openCentral} onOpenCentral={actions.openCentralFile} />
-        <ProjectFileContentView path={tab.path} view={files[tab.path]} />
       </div>
     })}
   </div>

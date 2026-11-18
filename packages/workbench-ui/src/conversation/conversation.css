@@ -1,21 +1,24 @@
 /* 对话区样式：只引用公共主题变量；文件、导航和整体三栏布局由其他区域负责。 */
 /* 时间线先让出待处理表单的自然高度，再独立滚动，避免长历史把表单挤成一条缝。 */
 /* 锚定刻度列以会话容器定位为参照，容器查询按会话宽度而不是窗口宽度决定显隐。 */
-.wb-conversation { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 48px; container-type: inline-size; }
+/* 外拓 6px 给工作日志悬停胶囊留出左边距，同时保持内部正文与页头/输入框在同一直线上。 */
+.wb-conversation { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 48px; margin-inline: -6px; container-type: inline-size; }
 .wb-conversation[hidden] { display: none; }
 .wb-conversation-scroll {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 740px;
+  max-width: 752px;
   min-width: 0;
   min-height: 0;
   margin-inline: auto;
+  padding-inline: 6px;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
 .wb-conversation-scroll::-webkit-scrollbar { display: none; }
-.wb-conversation-timeline { display: flex; flex-direction: column; min-height: 100%; padding: 0 0 14px; }
+.wb-conversation-timeline { display: flex; flex-direction: column; min-height: 100%; padding: 12px 0 14px; }
 .wb-conversation-empty { margin: auto; max-width: 520px; color: var(--subtle); text-align: center; transform: translateY(48px); }
 
 /* 消息版面：用户靠右成气泡、Agent 靠左通栏；不再渲染头像，只保留“名称 · 时间”一行小字。 */
@@ -45,12 +48,26 @@
 .wb-conversation-agent-group { width: 100%; margin: 0 0 14px; }
 .wb-conversation-agent-group > .wb-conversation-message { margin: 0; }
 .wb-conversation-agent-group > .wb-conversation-message-meta { margin: 0 0 4px; }
-.wb-conversation-streaming-cursor { display: inline-block; width: 2px; height: 1.1em; margin-left: 3px; vertical-align: -.15em; background: var(--accent); animation: wb-conversation-blink 1s ease-in-out infinite; }
+.wb-conversation-streaming-cursor,
+.wb-conversation-message-content[data-streaming="true"] .markdown > :is(p, h2, h3, h4, h5, h6):last-child::after,
+.wb-conversation-message-content[data-streaming="true"] .markdown > :is(ul, ol):last-child > li:last-child > p:last-child::after,
+.wb-conversation-message-content[data-streaming="true"] .markdown > :is(ul, ol):last-child > li.markdown-task:last-child > span > p:last-child::after,
+.wb-conversation-message-content[data-streaming="true"] .markdown > blockquote:last-child > p:last-child::after,
+.wb-conversation-message-content[data-streaming="true"] .markdown:has(> :is(.code-block, .markdown-table-wrap, hr):last-child)::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin-left: 3px;
+  vertical-align: -.15em;
+  background: var(--accent);
+  animation: wb-conversation-blink 1s ease-in-out infinite;
+}
 @keyframes wb-conversation-blink { 50% { opacity: 0; } }
 
-/* 回复底栏：默认收起存在感，悬停该组或组内聚焦时淡入；触屏下一直显示。 */
-.wb-conversation-reply-actions { display: flex; align-items: center; gap: 6px; min-height: 28px; }
-.wb-conversation-reply-copy { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard); }
+/* 回复底栏：紧凑排布、图标与正文左边缘齐平，悬停该组或聚焦时淡入；触屏下一直显示。 */
+.wb-conversation-reply-actions { display: flex; align-items: center; gap: 6px; min-height: 22px; margin-top: 2px; }
+.wb-conversation-reply-copy { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -5px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard); }
 .wb-conversation-agent-group:hover .wb-conversation-reply-copy,
 .wb-conversation-agent-group:focus-within .wb-conversation-reply-copy,
 .wb-conversation-message-assistant:hover .wb-conversation-reply-copy,
@@ -87,12 +104,12 @@
 .wb-disclosure[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
 .wb-disclosure-inner { min-height: 0; overflow: hidden; }
 
-/* 思考过程：一行可折叠工作日志；进行中标题带扫光。 */
-.wb-conversation-reasoning-header { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; cursor: pointer; }
+/* 顶层工作日志行负外边距抵消 6px 悬停内边距，使图标左缘与“Agent · 时间”及正文完全齐平。 */
+.wb-conversation-reasoning-header { display: flex; align-items: center; gap: 7px; width: calc(100% + 12px); margin-inline: -6px; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; cursor: pointer; }
 .wb-conversation-reasoning-header:hover { background: var(--hover); }
 .wb-conversation-reasoning-label { color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
 .wb-conversation-reasoning-header .wb-conversation-chevron { margin-left: auto; }
-.wb-conversation-reasoning-body { margin: 0 0 4px 13px; padding: 2px 0 2px 9px; border-left: 1px solid var(--border); }
+.wb-conversation-reasoning-body { margin: 0 0 4px 6.5px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); }
 .wb-conversation-reasoning-text { color: var(--text-soft); font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* 文字扫光：仅在元素可见且页面在前台时运行（行内 data-paused 暂停）。 */
@@ -108,6 +125,7 @@
 
 .wb-conversation-tool-row { border-radius: var(--radius-control); }
 .wb-conversation-tool-header { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
+.wb-conversation-tool > .wb-conversation-tool-row > .wb-conversation-tool-header { width: calc(100% + 12px); margin-inline: -6px; }
 button.wb-conversation-tool-header { cursor: pointer; }
 button.wb-conversation-tool-header:hover { background: var(--hover); }
 .wb-conversation-tool-icon { flex: 0 0 auto; width: 14px; height: 14px; color: var(--subtle); }
@@ -122,12 +140,13 @@ button.wb-conversation-tool-header:hover { background: var(--hover); }
 .wb-conversation-tool-failed-badge { padding: 1px 6px; border-radius: var(--radius-control); background: var(--danger-tint); color: var(--danger-text); font-family: var(--font-mono); font-size: var(--text-2xs); }
 .wb-conversation-chevron { flex: 0 0 auto; width: 14px; height: 14px; color: var(--subtle); transition: transform var(--motion-fast) ease; }
 .wb-conversation-chevron.is-expanded { transform: rotate(90deg); }
-.wb-conversation-tool-details { display: grid; gap: 8px; margin: 4px 0 6px 13px; padding: 0 4px 8px 9px; border-left: 1.5px solid var(--border); }
+.wb-conversation-tool-details { display: grid; gap: 8px; margin: 4px 0 6px 12.25px; padding: 0 4px 8px 10px; border-left: 1.5px solid var(--border); }
+.wb-conversation-tool > .wb-conversation-tool-row .wb-conversation-tool-details { margin-left: 6.25px; }
 .wb-conversation-tool-details-disclosure[data-open="true"] { animation: wb-conversation-tool-detail-in 180ms ease; }
 @keyframes wb-conversation-tool-detail-in { from { opacity: 0; transform: translateY(2px); } }
 
 /* 工具组：组头与单行同款；组体带左侧竖线、限高内滚动与上下渐隐。 */
-.wb-conversation-tool-group-header { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
+.wb-conversation-tool-group-header { display: flex; align-items: center; gap: 7px; width: calc(100% + 12px); margin-inline: -6px; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
 button.wb-conversation-tool-group-header { cursor: pointer; }
 button.wb-conversation-tool-group-header:hover { background: var(--hover); }
 button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default; }
@@ -135,7 +154,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-tool-group-progress { color: var(--muted); }
 .wb-conversation-tool-group-failures { color: var(--danger-text); }
 .wb-conversation-tool-group-header .wb-conversation-chevron { margin-left: auto; }
-.wb-conversation-tool-group-body { margin: 0 0 4px 13px; padding: 2px 0 2px 6px; border-left: 1.5px solid var(--border); max-height: min(18rem, 50vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.wb-conversation-tool-group-body { margin: 0 0 4px 6.25px; padding: 2px 0 2px 8px; border-left: 1.5px solid var(--border); max-height: min(18rem, 50vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .wb-conversation-tool-group-body[data-fade-top="true"][data-fade-bottom="true"] { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
 .wb-conversation-tool-group-body[data-fade-top="true"]:not([data-fade-bottom="true"]) { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px); mask-image: linear-gradient(to bottom, transparent, #000 16px); }
 .wb-conversation-tool-group-body[data-fade-bottom="true"]:not([data-fade-top="true"]) { -webkit-mask-image: linear-gradient(to top, transparent, #000 16px); mask-image: linear-gradient(to top, transparent, #000 16px); }
@@ -166,7 +185,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-copy-feedback:empty { height: 0; padding: 0; overflow: hidden; }
 
 /* 已处理交互：一行“图标 · 标题 · 状态文字”；状态只有文字，统一用弱色。 */
-.wb-conversation-interaction-history { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 6px; border-radius: var(--radius-control); color: var(--muted); font-size: var(--text-xs); }
+.wb-conversation-interaction-history { display: flex; align-items: center; gap: 7px; width: calc(100% + 12px); margin-inline: -6px; min-height: 28px; padding: 0 6px; border-radius: var(--radius-control); color: var(--muted); font-size: var(--text-xs); }
 .wb-conversation-interaction-history-title { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fg-2); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .wb-conversation-interaction-history-status { flex: 0 0 auto; }
 .wb-conversation-interaction-history-desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -180,16 +199,16 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 @keyframes wb-conversation-spin { to { transform: rotate(360deg); } }
 .wb-conversation-anchor-notice { margin: 8px 0 0; color: var(--muted); font-size: var(--text-xs); }
 
-/* 悬浮“回到底部”药丸：进入时上移淡入；有新输出时用强调色描边和圆点。 */
-.wb-conversation-to-bottom { position: sticky; bottom: 12px; display: flex; align-items: center; gap: 6px; width: fit-content; margin: 10px auto 0; padding: 6px 13px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); box-shadow: var(--elev-raised); color: var(--text-soft); font-size: var(--text-xs); cursor: pointer; animation: wb-conversation-pill-in 200ms var(--ease-out-expo); }
-.wb-conversation-to-bottom svg { width: 13px; height: 13px; }
+/* 有新输出时用描边和圆点提示，文字说明保留给屏幕阅读器。 */
+.wb-conversation-to-bottom { position: sticky; bottom: 12px; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin: 10px auto 0; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); box-shadow: var(--elev-raised); color: var(--text-soft); cursor: pointer; animation: wb-conversation-pill-in 200ms var(--ease-out-expo); }
+.wb-conversation-to-bottom svg { width: 16px; height: 16px; }
 .wb-conversation-to-bottom:hover { color: var(--fg-2); }
 .wb-conversation-to-bottom[data-new="true"] { border-color: var(--accent); color: var(--accent-hover); }
-.wb-conversation-to-bottom-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.wb-conversation-to-bottom-dot { position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 @keyframes wb-conversation-pill-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* 锚定刻度：细横线贴在会话列左侧，悬停或聚焦放大并浮出提问预览；窄容器与触屏下整条隐藏。 */
-.wb-conversation-minimap { position: absolute; left: 12px; top: 50%; z-index: 3; display: none; max-height: 60%; transform: translateY(-50%); }
+.wb-conversation-minimap { position: absolute; left: 18px; top: 50%; z-index: 3; display: none; max-height: 60%; transform: translateY(-50%); }
 .wb-conversation-minimap-track { display: flex; flex-direction: column; width: 24px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .wb-conversation-minimap-tick { display: flex; align-items: center; justify-content: flex-end; width: 24px; height: 14px; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .wb-conversation-minimap-tick::after { content: ""; display: block; width: 12px; height: 2.5px; border-radius: 2px; background: var(--meta); opacity: .55; transition: width var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard); }
@@ -209,15 +228,18 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
   }
 }
 
-/* 锚点跳转命中后的高亮环：1.4 秒内从强调色淡出，提示刚定位到的提问气泡。 */
+/* 锚点跳转命中后的高亮环：1.4 秒内从强调色淡出，同时保持用户气泡原本的 1px 内描边。 */
 .wb-conversation-message-user[data-anchor-flash] .wb-conversation-message-content { animation: wb-conversation-anchor-flash 1400ms var(--ease-standard); }
 @keyframes wb-conversation-anchor-flash {
-  from { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft-2); }
-  to { box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent; }
+  from { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft-2); }
+  to { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 0 transparent, 0 0 0 0 transparent; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wb-conversation-spin, .wb-conversation-streaming-cursor { animation: none; }
+  .wb-conversation-spin,
+  .wb-conversation-streaming-cursor,
+  .wb-conversation-message-content[data-streaming="true"] .markdown ::after,
+  .wb-conversation-message-content[data-streaming="true"] .markdown::after { animation: none; }
   /* 减少动态效果时进场只保留 ≤120ms 的透明度淡入，去掉位移。 */
   .wb-conversation-timeline [data-enter="true"] { animation-name: wb-conversation-enter-fade !important; animation-duration: 120ms !important; }
   /* 折叠容器不做高度过渡、文字不扫光、详情不位移动画。 */
@@ -229,7 +251,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
   /* 锚定列：预览只淡入不平移，高亮环改为静态描边。 */
   .wb-conversation-minimap-popover { animation-name: wb-conversation-enter-fade; }
   .wb-conversation-minimap-tick::after { transition: none; }
-  .wb-conversation-message-user[data-anchor-flash] .wb-conversation-message-content { animation: none; box-shadow: 0 0 0 2px var(--accent-border-strong); }
+  .wb-conversation-message-user[data-anchor-flash] .wb-conversation-message-content { animation: none; box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--accent-border-strong); }
 }
 
 /* 输入区 1:1 还原原型稿 .composer 悬浮圆角卡片、@ 快捷按钮与 30px 圆形发送键。 */
@@ -266,14 +288,15 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
-.wb-composer-textarea::placeholder { color: var(--meta, var(--subtle)); }
+.wb-composer-textarea::placeholder { color: var(--meta, var(--subtle)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-composer-textarea:focus-visible { outline: 0; }
-.wb-composer-rail { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
+.wb-composer-rail { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding-top: 6px; }
 .wb-composer-rail-left { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .wb-composer-rail-right { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; }
 .wb-composer-tool {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 5px;
   height: 26px;
   padding: 0 8px;
@@ -283,6 +306,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
   color: var(--fg-2, var(--text-soft));
   font: inherit;
   font-size: var(--text-xs, 12px);
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease;
 }
@@ -326,7 +350,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-composer-cancel svg { width: 14px; height: 14px; }
 .wb-composer-send:disabled, .wb-composer-cancel:disabled { opacity: .45; cursor: not-allowed; }
 .wb-composer-status { display: flex; align-items: center; gap: 5px; margin: 6px 2px 0; color: var(--meta, var(--muted)); font-size: var(--text-xs, 12px); }
-.wb-composer-status svg { width: 13px; height: 13px; color: var(--warning); }
+.wb-composer-status svg { flex: none; width: 13px; height: 13px; color: var(--warning); }
 
 .wb-command-menu, .wb-mention-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 8px); z-index: 20; margin: 0; padding: 6px; border: 0; border-radius: var(--radius-lg, 10px); background: var(--surface); box-shadow: var(--elev-pop); }
 .wb-command-menu { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -340,7 +364,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-mention-item:hover, .wb-mention-item[data-selected="true"] { background: var(--selected); color: var(--fg, var(--text)); }
 .wb-mention-path { display: block; overflow: hidden; font-family: var(--font-mono); font-size: var(--text-xs, 12px); text-overflow: ellipsis; white-space: nowrap; }
 .wb-mention-path mark { padding: 0; background: transparent; color: var(--accent); font-weight: 600; }
-.wb-mention-open { display: flex; flex; flex: 0 0 auto; gap: 3px; }
+.wb-mention-open { display: flex; flex: 0 0 auto; gap: 3px; }
 .wb-mention-open button, .wb-composer-reference button { padding: 2px 5px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: var(--text-2xs, 11px); cursor: pointer; }
 .wb-mention-open button:hover:not(:disabled), .wb-composer-reference button:hover:not(:disabled) { background: var(--hover); color: var(--fg, var(--text)); }
 .wb-mention-open button:disabled, .wb-composer-reference button:disabled { opacity: .5; cursor: not-allowed; }
@@ -386,10 +410,10 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-diff-remove > span:first-child { color: var(--diff-remove-sign); }
 .wb-conversation-terminal-command { padding: 3px 10px; color: var(--text); overflow-wrap: anywhere; }
 
-/* 沿用旧审批区的紧凑按钮和问题组；长表单单独滚动，输入框始终可见。 */
-.wb-interaction-dock { flex: 0 1 auto; width: 100%; max-width: 740px; max-height: calc(100% - var(--control-field) - 32px); min-width: 0; min-height: 0; margin-inline: auto; padding-bottom: 8px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-/* 待处理请求：1px 提醒色细边加图标；出现时上移淡入。 */
-.wb-interaction-form { display: grid; align-content: start; gap: 11px; padding: 15px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: var(--radius-surface); background: var(--surface); animation: wb-interaction-form-in 240ms var(--ease-out-expo); }
+/* 沿用旧审批区的紧凑按钮和问题组；外层不抢高度，长表单在圆角描边卡片内部滚动，输入框始终可见。 */
+.wb-interaction-dock { flex: 0 0 auto; width: 100%; max-width: 740px; min-width: 0; margin-inline: auto; padding-bottom: 8px; }
+/* 待处理请求：1px 提醒色细边加图标；出现时上移淡入，内容过长时仅卡片内部滚动。 */
+.wb-interaction-form { display: grid; align-content: start; gap: 11px; max-height: min(46vh, 380px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 15px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: var(--radius-surface); background: var(--surface); animation: wb-interaction-form-in 240ms var(--ease-out-expo); }
 @keyframes wb-interaction-form-in { from { opacity: 0; transform: translateY(8px); } }
 .wb-interaction-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .wb-interaction-heading h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: var(--text-sm); }

@@ -47,6 +47,7 @@
 .switch-name { font-size: var(--text-md); font-weight: 600; color: var(--text); line-height: 1.3; }
 .switch-sub { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--muted); line-height: 1.3; }
 .pnav-project .switch-name { font-size: var(--text-base); }
+.pnav-project .switch-name[data-placeholder="true"] { font-weight: 500; color: var(--muted); }
 
 .pnav-icon-button {
   flex: none; display: inline-grid; place-items: center;

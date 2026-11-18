@@ -63,7 +63,7 @@
 :root[data-density="standard"] { --pad-stage: 24px; --gap-list: 4px; }
 :root[data-density="wide"] { --pad-stage: 32px; --gap-list: 6px; }
 
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 body { margin: 0; }
 h1, h2, h3, h4 { margin: 0; font-family: var(--font-display); line-height: var(--leading-tight); font-weight: 600; letter-spacing: 0; text-wrap: balance; }
 p { margin: 0; text-wrap: pretty; }
@@ -248,7 +248,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .member-pick .mp-name { font-size: var(--text-base); flex: 1 1 0; }
 .member-pick .mp-role { font-size: var(--text-xs); color: var(--muted); }
 
+/* 减少动态效果：禁用位移、旋转、扫光与平滑滚动，保留不超过 120ms 的透明度与颜色反馈。 */
 @media (prefers-reduced-motion: reduce) {
-  :root { --motion-fast: 0ms; --motion-base: 0ms; }
-  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+  :root { --motion-fast: 120ms; --motion-base: 120ms; --motion-slow: 0ms; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+  .tcard:hover,
+  .btn-primary:active:not(:disabled),
+  .wb-button:active:not(:disabled),
+  .wb-icon-button:active:not(:disabled) { transform: none; }
 }
