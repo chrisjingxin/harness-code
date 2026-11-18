@@ -1,6 +1,7 @@
 /** HC-218 会话模块出口：状态模型、三种会话页面、页签/壳层提供者、真实数据协调器与外部协作用契约。 */
 export * from "./contracts.js"
 export * from "./session-model.js"
+export * from "./elicitation-form.js"
 export { NewSessionPage } from "./new-session-page.js"
 export type { NewSessionPageProps } from "./new-session-page.js"
 export { LocalSessionPage } from "./local-session-page.js"

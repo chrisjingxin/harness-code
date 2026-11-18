@@ -112,6 +112,7 @@ export type SessionPageController = {
   readonly canCreateConversation: boolean
   readonly createBlockedReason?: string
   readonly newSessionError?: string | null
+  readonly newProviderId?: string | null
   readonly execution: LocalSessionExecutionPort
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
@@ -119,6 +120,7 @@ export type SessionPageController = {
   resolveOwner?(userId: string): Pick<UserSummary, "userNo" | "userName" | "photo"> | undefined
   resolveOwnerName(userId: string): string
   onChooseNewDirectory(): void
+  onSelectNewProvider?(providerId: string): void
   onNewDraftChange(text: string): void
   onStartNewSession(): void
   onChooseSessionDirectory(conversationId: string): void
@@ -144,6 +146,19 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
     render({ scope, page, navigator, visible }): ReactElement | null {
       if (page.kind === "new") {
         const avail = controller.execution.getAvailability("__new__")
+        const providerList = controller.execution.getProviders?.()
+        const selectedProviderId = controller.newProviderId ?? providerList?.defaultProviderId ?? undefined
+        const selectedProvider = providerList?.providers.find(item => item.id === selectedProviderId)
+        const agentAvailable = selectedProvider ? selectedProvider.available : avail.available
+        const agentLabel = selectedProvider
+          ? (selectedProvider.available
+              ? `${selectedProvider.label} · 本机可用`
+              : `${selectedProvider.label} · ${selectedProvider.reason ?? "暂不可用"}`)
+          : avail.available
+            ? "Harness · 本机可用"
+            : controller.execution.textOnly
+              ? avail.reason ?? "创建后确认本机 Agent"
+              : "Agent 暂不可用 · 仅支持草稿"
         return (
           <NewSessionPage
             projectName={controller.projectName}
@@ -151,10 +166,13 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             busy={controller.newSessionBusy}
             canCreateConversation={controller.canCreateConversation}
             createBlockedReason={controller.createBlockedReason}
-            agentLabel={avail.available ? "Harness · 本机可用" : controller.execution.textOnly ? avail.reason ?? "创建后确认本机 Agent" : "Agent 暂不可用 · 仅支持草稿"}
-            agentAvailable={avail.available}
+            agentLabel={agentLabel}
+            agentAvailable={agentAvailable}
+            providers={providerList?.providers}
+            selectedProviderId={selectedProviderId}
             errorMessage={controller.newSessionError}
             onChooseDirectory={controller.onChooseNewDirectory}
+            onSelectProvider={controller.onSelectNewProvider}
             onDraftChange={controller.onNewDraftChange}
             onStartSession={controller.onStartNewSession}
           />
@@ -288,13 +306,13 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       }
 
       const kind = classify(conversation)
-      const title = conversation.title || "未命名会话"
       const isLocal = kind === "local"
+      const activeExecution = isLocal ? controller.execution.getView?.(conversation.conversationId) : undefined
+      const title = conversation.title || activeExecution?.sessionState?.sessionTitle || "未命名会话"
 
       if (isLocal) {
         const directoryPath = controller.directories[conversation.conversationId] ?? null
         const folderName = directoryBasename(directoryPath)
-        const activeExecution = controller.execution.getView?.(conversation.conversationId)
         const isRunning = Boolean(activeExecution?.activeTurnId)
         return (
           <>

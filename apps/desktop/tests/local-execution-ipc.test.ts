@@ -11,7 +11,8 @@ import { test } from "node:test"
 import type { ConversationSyncRequest } from "@workbench/contracts"
 import type { CollaborationState as CollaborationStateType } from "../src/main/collaboration-state.ts"
 import type { ConversationUploads as ConversationUploadsType } from "../src/main/conversation-uploads.ts"
-import type { createLocalExecutionIpc as createLocalExecutionIpcFn } from "../src/main/local-execution-ipc.ts"
+import type { LocalExecutionNotice } from "../src/local-execution-host.ts"
+import type { bindLocalExecutionIpc as bindLocalExecutionIpcFn, createLocalExecutionIpc as createLocalExecutionIpcFn, LocalExecutionRuntime } from "../src/main/local-execution-ipc.ts"
 
 if (!("bun" in process.versions)) {
   const resolveTsHook = `
@@ -39,7 +40,8 @@ const { ConversationUploads, syncPayloadLimit } = await import("../src/main/conv
   ConversationUploads: typeof ConversationUploadsType
   syncPayloadLimit: number
 }
-const { createLocalExecutionIpc } = await import("../src/main/local-execution-ipc.ts") as {
+const { bindLocalExecutionIpc, createLocalExecutionIpc } = await import("../src/main/local-execution-ipc.ts") as {
+  bindLocalExecutionIpc: typeof bindLocalExecutionIpcFn
   createLocalExecutionIpc: typeof createLocalExecutionIpcFn
 }
 
@@ -419,6 +421,300 @@ test("重启后从 grantsDir 恢复已选目录授权，未选目录/跨账号/�
     if (!crossAccount.ok) assert.equal(crossAccount.error.code, "PROJECT_PATH_INVALID")
 
     await Promise.all([ipc2.dispose(), ipcB.dispose()])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("多代理切换、会话级能力透传（session-state/elicitation/mode/configOption）与工作区附件沙箱校验", async () => {
+  const { writeFile } = await import("node:fs/promises")
+  const { pathToFileURL } = await import("node:url")
+  const root = await mkdtemp(join(tmpdir(), "hc229-ipc-full-"))
+  try {
+    const workdir = join(root, "ws")
+    const outsideDir = join(root, "outside")
+    await Promise.all([mkdir(join(workdir, "src"), { recursive: true }), mkdir(outsideDir, { recursive: true })])
+    const insideFile = join(workdir, "src", "app file.ts")
+    const outsideFile = join(outsideDir, "secret.txt")
+    const escapeSymlink = join(workdir, "escape-link.txt")
+    await Promise.all([
+      writeFile(insideFile, "export const x = 1\n", "utf8"),
+      writeFile(outsideFile, "TOP_SECRET\n", "utf8"),
+    ])
+    await symlink(outsideFile, escapeSymlink)
+
+    const identity = await createSignedInState(USER_A)
+    const { window, notices } = createFakeWindow()
+
+    type SessionUpdateListener = (ev: unknown) => void
+    const closedProviders: string[] = []
+    const sentPrompts: Array<{ provider: string; blocks: unknown }> = []
+    const modeCalls: string[] = []
+    const configCalls: Array<{ configId: string; value: string | boolean }> = []
+    const elicitationAnswers: Array<{ requestId: string; answer: unknown }> = []
+
+    const makeRichSession = (providerId: string) => {
+      const turnListeners = new Set<AcpListener>()
+      const sessionListeners = new Set<SessionUpdateListener>()
+      let state = {
+        connected: false,
+        sessionId: `native-${providerId}`,
+        authMethods: [],
+        modes: {
+          currentModeId: "default",
+          availableModes: [{ id: "default", name: "默认" }, { id: "plan", name: "计划" }],
+        },
+        currentModeId: "default",
+        models: { currentModelId: "m-1", availableModels: [{ modelId: "m-1", name: "Model 1" }] },
+        configOptions: [
+          {
+            id: "workflow",
+            name: "工作流",
+            type: "select" as const,
+            currentValue: "build",
+            options: [{ value: "build", name: "直接执行" }, { value: "compose", name: "分阶段协作" }],
+          },
+        ],
+        availableCommands: [{ name: "compact", description: "压缩上下文" }],
+        plans: [{ kind: "entries" as const, entries: [{ content: "检查代码", priority: "high" as const, status: "in_progress" as const }] }],
+        sessionInfo: { title: `${providerId} 会话标题` },
+        usage: { used: 120, size: 1000 },
+        restoreStatus: { kind: "new" as const, sessionId: `native-${providerId}` },
+      }
+      const session = {
+        getAvailability: () => ({ available: true as const }),
+        getState: () => structuredClone(state),
+        connect: async () => {
+          state = { ...state, connected: true }
+          for (const listener of sessionListeners) listener({ type: "session-opened", state: structuredClone(state) })
+          return structuredClone(state)
+        },
+        send: () => ({ status: "accepted" as const, turnId: `turn-${providerId}` }),
+        sendPrompt: (blocks: unknown) => {
+          sentPrompts.push({ provider: providerId, blocks })
+          return { status: "accepted" as const, turnId: `turn-${providerId}` }
+        },
+        cancel: () => true,
+        answerPermission: () => true,
+        answerElicitation: (requestId: string, answer: unknown) => {
+          elicitationAnswers.push({ requestId, answer })
+          for (const listener of sessionListeners) listener({ type: "elicitation", request: null })
+          return true
+        },
+        setMode: async (modeId: string) => {
+          modeCalls.push(modeId)
+          state = { ...state, currentModeId: modeId, modes: { ...state.modes, currentModeId: modeId } }
+          for (const listener of sessionListeners) listener({ type: "current-mode", currentModeId: modeId })
+        },
+        setConfigOption: async (configId: string, value: string | boolean) => {
+          configCalls.push({ configId, value })
+          state = {
+            ...state,
+            configOptions: state.configOptions.map(c => c.id === configId && c.type === "select" ? { ...c, currentValue: String(value) } : c),
+          }
+          for (const listener of sessionListeners) listener({ type: "config-options", configOptions: state.configOptions })
+        },
+        subscribe: (listener: AcpListener) => {
+          turnListeners.add(listener)
+          return () => { turnListeners.delete(listener) }
+        },
+        subscribeSession: (listener: SessionUpdateListener) => {
+          sessionListeners.add(listener)
+          return () => { sessionListeners.delete(listener) }
+        },
+        close: async () => {
+          closedProviders.push(providerId)
+          turnListeners.clear()
+          sessionListeners.clear()
+        },
+        emitElicitation: (req: unknown) => {
+          for (const listener of sessionListeners) listener({ type: "elicitation", request: req })
+        },
+      }
+      return session
+    }
+
+    const activeSessions = new Map<string, ReturnType<typeof makeRichSession>>()
+    const runtime: LocalExecutionRuntime = {
+      registry: {
+        listProviders: () => ({
+          providers: [
+            { id: "harness", label: "Harness Code", available: true },
+            { id: "qwen", label: "Qwen Code", available: true },
+          ],
+          defaultProviderId: "harness",
+        }),
+        hasProvider: (id: string) => id === "harness" || id === "qwen",
+        getHost: (providerId?: string) => {
+          const targetId = providerId ?? "harness"
+          return {
+            providerId: targetId,
+            available: true,
+            host: {
+              bind: async () => {
+                const s = makeRichSession(targetId)
+                activeSessions.set(targetId, s)
+                return s
+              },
+              subscribeDiagnostics: () => () => {},
+              close: async () => {},
+            } as unknown as Extract<LocalExecutionRuntime, { host: unknown }>["host"],
+          }
+        },
+        close: async () => {},
+      },
+    }
+
+    const ipc = createLocalExecutionIpc(window, identity, null, runtime)
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+
+    const providers = await ipc.listProviders()
+    assert.equal(providers.ok, true)
+    if (providers.ok) {
+      assert.equal(providers.value.defaultProviderId, "harness")
+      assert.deepEqual(providers.value.providers.map(p => p.id), ["harness", "qwen"])
+    }
+
+    await ipc.captureDirectorySelection()(workdir)
+    const prep1 = await ipc.prepare(scope, workdir)
+    assert.equal(prep1.ok, true)
+    if (!prep1.ok) return
+    assert.equal(prep1.value.providerId, "harness")
+
+    const typedNotices = notices as LocalExecutionNotice[]
+    const initialSessionNotice = typedNotices.find(n => n.kind === "session-state" && n.bindingId === prep1.value.bindingId)
+    assert.ok(initialSessionNotice && initialSessionNotice.kind === "session-state")
+    assert.equal(initialSessionNotice.state.providerId, "harness")
+    assert.equal(initialSessionNotice.state.modes?.currentModeId, "default")
+    assert.equal(initialSessionNotice.state.availableCommands[0]?.name, "compact")
+    assert.equal(initialSessionNotice.state.sessionTitle, "harness 会话标题")
+
+    // 切换模式、配置项与表单应答
+    const modeRes = await ipc.setMode(scope, prep1.value.bindingId, "plan")
+    assert.equal(modeRes.ok, true)
+    assert.deepEqual(modeCalls, ["plan"])
+
+    const cfgRes = await ipc.setConfigOption(scope, prep1.value.bindingId, "workflow", "compose")
+    assert.equal(cfgRes.ok, true)
+    assert.deepEqual(configCalls, [{ configId: "workflow", value: "compose" }])
+
+    activeSessions.get("harness")?.emitElicitation({
+      id: "el-1",
+      message: "确认计划",
+      requestedSchema: { type: "object", properties: { decision: { type: "string" } } },
+    })
+    assert.ok(typedNotices.some(n => n.kind === "elicitation" && n.request?.id === "el-1"))
+
+    const elRes = await ipc.answerElicitation(scope, prep1.value.bindingId, "el-1", { action: "accept", content: { decision: "approved" } })
+    assert.equal(elRes.ok, true)
+    assert.equal(elicitationAnswers.length, 1)
+
+    // 切换 Provider 到 qwen：关闭旧绑定并重绑新会话
+    const prep2 = await ipc.prepare(scope, workdir, "qwen")
+    assert.equal(prep2.ok, true)
+    if (!prep2.ok) return
+    assert.equal(prep2.value.providerId, "qwen")
+    assert.notEqual(prep2.value.bindingId, prep1.value.bindingId)
+    assert.deepEqual(closedProviders, ["harness"])
+
+    // 工作区内合法附件转 resource_link
+    const validAttach = await ipc.send(scope, prep2.value.bindingId, REQ_ID, "请看文件", [], ["src/app file.ts"])
+    assert.equal(validAttach.ok, true)
+    assert.equal(sentPrompts.length, 1)
+    assert.equal(sentPrompts[0]?.provider, "qwen")
+    assert.deepEqual(sentPrompts[0]?.blocks, [
+      { type: "text", text: "请看文件" },
+      {
+        type: "resource_link",
+        uri: pathToFileURL(await import("node:fs/promises").then(fs => fs.realpath(insideFile))).href,
+        name: "src/app file.ts",
+        title: "app file.ts",
+        size: Buffer.byteLength("export const x = 1\n"),
+      },
+    ])
+
+    // 越界路径（.. / 绝对路径 / 软链逃逸）必须被严格拒绝
+    const traversal = await ipc.send(scope, prep2.value.bindingId, REQ_ID, "越界", [], ["../outside/secret.txt"])
+    assert.equal(traversal.ok, false)
+    const absPath = await ipc.send(scope, prep2.value.bindingId, REQ_ID, "绝对", [], [outsideFile])
+    assert.equal(absPath.ok, false)
+    const symlinkEscape = await ipc.send(scope, prep2.value.bindingId, REQ_ID, "软链逃逸", [], ["escape-link.txt"])
+    assert.equal(symlinkEscape.ok, false)
+    assert.equal(sentPrompts.length, 1)
+
+    // bindLocalExecutionIpc 参数校验与频道注册/解绑
+    const registered = new Map<string, (...args: unknown[]) => Promise<unknown>>()
+    const fakeIpc = {
+      handle: (channel: string, handler: (...args: unknown[]) => Promise<unknown>) => { registered.set(channel, handler) },
+      removeHandler: (channel: string) => { registered.delete(channel) },
+    }
+    const trustedWindow = {
+      ...window,
+      webContents: { ...window.webContents, mainFrame: { url: `${ORIGIN}/index.html` } },
+    } as unknown as IpcWindow
+    const unbind = bindLocalExecutionIpc(trustedWindow, `${ORIGIN}/index.html`, ipc, fakeIpc as never)
+    assert.equal(registered.has("workbench:local-execution:list-providers"), true)
+    assert.equal(registered.has("workbench:local-execution:set-mode"), true)
+    assert.equal(registered.has("workbench:local-execution:set-config-option"), true)
+    assert.equal(registered.has("workbench:local-execution:answer-elicitation"), true)
+
+    const senderEvent = { sender: trustedWindow.webContents, senderFrame: trustedWindow.webContents.mainFrame }
+    const listFromIpc = await registered.get("workbench:local-execution:list-providers")!(senderEvent)
+    assert.equal((listFromIpc as { ok: boolean }).ok, true)
+    const untrustedList = await registered.get("workbench:local-execution:list-providers")!({
+      sender: trustedWindow.webContents,
+      senderFrame: { url: "https://evil.example/index.html" },
+    })
+    assert.equal((untrustedList as { ok: boolean }).ok, false)
+    const badAttachIpc = await registered.get("workbench:local-execution:send")!(
+      senderEvent, scope, prep2.value.bindingId, REQ_ID, "hi", [], ["bad\0file"],
+    )
+    assert.equal((badAttachIpc as { ok: boolean }).ok, false)
+
+    // 校验 2 参 prepare（会切回默认 harness 绑定）、5 参 send、set-mode、set-config-option 与 answer-elicitation 通道
+    const prepLegacyIpc = await registered.get("workbench:local-execution:prepare")!(senderEvent, scope, workdir) as {
+      ok: boolean
+      value?: { bindingId: string; providerId?: string }
+    }
+    assert.equal(prepLegacyIpc.ok, true)
+    const ipcBindingId = prepLegacyIpc.value!.bindingId
+    assert.equal(prepLegacyIpc.value?.providerId, "harness")
+    const modeIpc = await registered.get("workbench:local-execution:set-mode")!(senderEvent, scope, ipcBindingId, "plan")
+    assert.equal((modeIpc as { ok: boolean }).ok, true)
+    const cfgIpc = await registered.get("workbench:local-execution:set-config-option")!(senderEvent, scope, ipcBindingId, "workflow", "build")
+    assert.equal((cfgIpc as { ok: boolean }).ok, true)
+    const badCfgIpc = await registered.get("workbench:local-execution:set-config-option")!(senderEvent, scope, ipcBindingId, "workflow", "")
+    assert.equal((badCfgIpc as { ok: boolean }).ok, false)
+    activeSessions.get("harness")?.emitElicitation({
+      id: "el-ipc",
+      message: "请确认",
+      requestedSchema: { type: "object", properties: { ok: { type: "boolean" } } },
+    })
+    const elIpc = await registered.get("workbench:local-execution:answer-elicitation")!(
+      senderEvent, scope, ipcBindingId, "el-ipc", { action: "accept", content: { ok: true } },
+    )
+    assert.equal((elIpc as { ok: boolean }).ok, true)
+    const sendLegacyIpc = await registered.get("workbench:local-execution:send")!(
+      senderEvent, scope, ipcBindingId, REQ_ID, "五参调用", [],
+    )
+    assert.equal((sendLegacyIpc as { ok: boolean }).ok, true)
+
+    unbind()
+    assert.equal(registered.size, 0)
+    await ipc.dispose()
+
+    // 验证缺少 sendPrompt 的极简 Mock 会话也能优雅降级到 session.send(prompt)
+    const { runtime: minimalRuntime } = createMockRuntime()
+    const minimalIpc = createLocalExecutionIpc(window, identity, null, minimalRuntime)
+    await minimalIpc.captureDirectorySelection()(workdir)
+    const minPrep = await minimalIpc.prepare(scope, workdir)
+    assert.equal(minPrep.ok, true)
+    if (minPrep.ok) {
+      const fallbackSend = await minimalIpc.send(scope, minPrep.value.bindingId, REQ_ID, "带附件回退", [], ["src/app file.ts"])
+      assert.equal(fallbackSend.ok, true)
+      if (fallbackSend.ok) assert.equal(fallbackSend.value.status, "accepted")
+    }
+    await minimalIpc.dispose()
   } finally {
     await rm(root, { recursive: true, force: true })
   }
