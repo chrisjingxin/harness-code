@@ -2,7 +2,7 @@
  * 通用待处理交互：展示调用方提供的审批选项、问题和扩展节点。
  * 选择与反馈只写入当前 scope 的个人草稿，提交只上报意图，不推断真实处理结果。
  */
-import { IconAlertTriangle } from "@tabler/icons-react"
+import { IconAlertTriangle, IconHelpCircle } from "@tabler/icons-react"
 import { useEffect, useId, useState } from "react"
 import type { ReactElement } from "react"
 import type { ConversationActions, ConversationInteractionAnswer, ConversationInteractionView, ConversationPersonalState, ConversationScope } from "./types.js"
@@ -42,12 +42,24 @@ export function ConversationInteraction({ scope, interaction, personal, actions,
     onSubmit(answer)
   }
 
+  const singleQuestion = interaction.kind === "question" && interaction.questions.length === 1
+    ? interaction.questions[0]!
+    : null
+  const HeadingIcon = interaction.kind === "approval" ? IconAlertTriangle : IconHelpCircle
+
   return (
     <section className="wb-interaction-dock" aria-label="待处理请求">
-      <div className="wb-interaction-form">
+      <div className="wb-interaction-form" data-kind={interaction.kind}>
         <header className="wb-interaction-heading">
-          <h3><IconAlertTriangle aria-hidden="true" className="wb-interaction-heading-icon" />{interaction.title}</h3>
-          {deadline !== undefined ? <span className={expired ? "wb-interaction-deadline is-expired" : "wb-interaction-deadline"}>{expired ? "已过期" : `剩余 ${formatRemaining(deadline - now)}`}</span> : null}
+          <h3><HeadingIcon aria-hidden="true" className="wb-interaction-heading-icon" />{interaction.title}</h3>
+          <div className="wb-interaction-heading-meta">
+            {singleQuestion ? (
+              <span className="wb-interaction-req-pill" data-required={singleQuestion.required}>
+                {singleQuestion.required ? "必答" : "可选"}
+              </span>
+            ) : null}
+            {deadline !== undefined ? <span className={expired ? "wb-interaction-deadline is-expired" : "wb-interaction-deadline"}>{expired ? "已过期" : `剩余 ${formatRemaining(deadline - now)}`}</span> : null}
+          </div>
         </header>
         {interaction.description ? <p className="wb-interaction-description">{interaction.description}</p> : null}
         {interaction.preview != null ? <div className="wb-interaction-preview">{interaction.preview}</div> : null}
@@ -73,28 +85,43 @@ export function ConversationInteraction({ scope, interaction, personal, actions,
           const current = (questionId: string): QuestionAnswer => answers.find(item => item.questionId === questionId) ?? { questionId, selectedOptionIds: [] }
           const update = (next: QuestionAnswer): void => save({ kind: "question", answers: [...answers.filter(item => item.questionId !== next.questionId), next] })
           const valid = interaction.questions.every(question => validQuestion(question, current(question.id)))
+          const isSingle = interaction.questions.length === 1
+          const renderQuestionBody = (question: Question, index: number) => {
+            const answer = current(question.id)
+            const otherSelected = answer.otherText !== undefined
+            return <>
+              {question.options.map(option => {
+                const checked = answer.selectedOptionIds.includes(option.id)
+                return <label key={option.id} className="wb-interaction-question-option" data-checked={checked} title={!option.availability.enabled ? option.availability.reason ?? "当前选项不可用" : undefined}>
+                  <input type={question.multiple ? "checkbox" : "radio"} name={`${radioGroup}-${index}`} checked={checked} disabled={!editable || !option.availability.enabled} onChange={event => {
+                    const selectedOptionIds = question.multiple ? event.currentTarget.checked ? [...answer.selectedOptionIds, option.id] : answer.selectedOptionIds.filter(id => id !== option.id) : [option.id]
+                    update({ questionId: question.id, selectedOptionIds, ...(question.multiple && otherSelected ? { otherText: answer.otherText } : {}) })
+                  }} />
+                  <span>{option.label}</span>{option.description ? <span className="wb-interaction-option-description">{option.description}</span> : null}{!option.availability.enabled && option.availability.reason ? <span className="wb-interaction-option-description">{option.availability.reason}</span> : null}
+                </label>
+              })}
+              {question.allowOther ? <div className="wb-interaction-question-option wb-interaction-other" data-checked={otherSelected}>
+                <label><input type={question.multiple ? "checkbox" : "radio"} name={`${radioGroup}-${index}`} checked={otherSelected} disabled={!editable} onChange={event => update({ questionId: question.id, selectedOptionIds: question.multiple ? answer.selectedOptionIds : [], ...(event.currentTarget.checked ? { otherText: answer.otherText ?? "" } : {}) })} /><span>其他</span></label>
+                <input type="text" placeholder="输入自定义内容…" aria-label={`${question.text} · 其他`} value={answer.otherText ?? ""} disabled={!editable || !otherSelected} onChange={event => update({ ...answer, otherText: event.currentTarget.value })} />
+              </div> : null}
+            </>
+          }
           return <>
-            <div className="wb-interaction-questions">{interaction.questions.map((question, index) => {
-              const answer = current(question.id)
-              const otherSelected = answer.otherText !== undefined
-              return <fieldset key={question.id} className="wb-interaction-question" disabled={!editable}>
-                <legend>{question.text}{question.required ? "（必答）" : "（可选）"}</legend>
-                {question.options.map(option => {
-                  const checked = answer.selectedOptionIds.includes(option.id)
-                  return <label key={option.id} className="wb-interaction-question-option" data-checked={checked} title={!option.availability.enabled ? option.availability.reason ?? "当前选项不可用" : undefined}>
-                    <input type={question.multiple ? "checkbox" : "radio"} name={`${radioGroup}-${index}`} checked={checked} disabled={!option.availability.enabled} onChange={event => {
-                      const selectedOptionIds = question.multiple ? event.currentTarget.checked ? [...answer.selectedOptionIds, option.id] : answer.selectedOptionIds.filter(id => id !== option.id) : [option.id]
-                      update({ questionId: question.id, selectedOptionIds, ...(question.multiple && otherSelected ? { otherText: answer.otherText } : {}) })
-                    }} />
-                    <span>{option.label}</span>{option.description ? <span className="wb-interaction-option-description">{option.description}</span> : null}{!option.availability.enabled && option.availability.reason ? <span className="wb-interaction-option-description">{option.availability.reason}</span> : null}
-                  </label>
-                })}
-                {question.allowOther ? <div className="wb-interaction-question-option wb-interaction-other" data-checked={otherSelected}>
-                  <label><input type={question.multiple ? "checkbox" : "radio"} name={`${radioGroup}-${index}`} checked={otherSelected} onChange={event => update({ questionId: question.id, selectedOptionIds: question.multiple ? answer.selectedOptionIds : [], ...(event.currentTarget.checked ? { otherText: answer.otherText ?? "" } : {}) })} /><span>其他</span></label>
-                  <input type="text" aria-label={`${question.text} · 其他`} value={answer.otherText ?? ""} disabled={!editable || !otherSelected} onChange={event => update({ ...answer, otherText: event.currentTarget.value })} />
-                </div> : null}
-              </fieldset>
-            })}</div>
+            <div className="wb-interaction-questions">
+              {isSingle ? (() => {
+                const only = interaction.questions[0]!
+                const showPrompt = only.text.trim() !== interaction.title.trim() && only.text.trim() !== (interaction.description ?? "").trim()
+                return <div className="wb-interaction-single-question" role="group" aria-label={only.text}>
+                  {showPrompt ? <p className="wb-interaction-question-prompt">{only.text}</p> : null}
+                  {renderQuestionBody(only, 0)}
+                </div>
+              })() : interaction.questions.map((question, index) => (
+                <fieldset key={question.id} className="wb-interaction-question" disabled={!editable}>
+                  <legend>{question.text}{question.required ? "（必答）" : "（可选）"}</legend>
+                  {renderQuestionBody(question, index)}
+                </fieldset>
+              ))}
+            </div>
             <div className="wb-interaction-actions"><button type="button" className="wb-interaction-submit" disabled={!editable || !valid} title={reason} onClick={() => { if (valid) submit({ kind: "question", answers: interaction.questions.map(question => current(question.id)) }) }}>提交</button></div>
           </>
         })() : null}

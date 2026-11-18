@@ -793,11 +793,14 @@ export function buildComposerCapabilities(input: {
   }
 
   let tabCycle: ConversationComposerView["tabCycle"] | undefined
-  const workflowOpt = sessionState?.configOptions.find(opt => opt.type === "select" && opt.options.length >= 2 && isWorkflowOption(opt))
-  if (workflowOpt && workflowOpt.type === "select") {
-    tabCycle = { controlId: `config:${workflowOpt.id}`, itemIds: workflowOpt.options.map(o => o.value) }
-  } else if (sessionState?.modes && sessionState.modes.availableModes.length >= 2) {
+  // 优先用 Tab / Shift+Tab 轮转模式（如 自动判断 / 先出计划）；仅在代理未提供多模式时回退到工作流选项。
+  if (sessionState?.modes && sessionState.modes.availableModes.length >= 2) {
     tabCycle = { controlId: "mode", itemIds: sessionState.modes.availableModes.map(m => m.id) }
+  } else {
+    const workflowOpt = sessionState?.configOptions.find(opt => opt.type === "select" && opt.options.length >= 2 && isWorkflowOption(opt))
+    if (workflowOpt && workflowOpt.type === "select") {
+      tabCycle = { controlId: `config:${workflowOpt.id}`, itemIds: workflowOpt.options.map(o => o.value) }
+    }
   }
 
   let usageBadge: string | undefined

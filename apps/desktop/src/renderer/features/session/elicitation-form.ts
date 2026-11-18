@@ -327,8 +327,7 @@ export function toConversationInteraction(
       interaction: {
         ...base,
         kind: "question",
-        title: "请说明原因",
-        description: form.message || undefined,
+        title: "请补充说明",
         questions: [{
           id: "feedback",
           text: form.message || "请说明拒绝原因",
@@ -343,25 +342,37 @@ export function toConversationInteraction(
 
   if (form.kind === "question") {
     if (form.questions.length === 0) return null
+    const mappedQuestions = form.questions.map(q => ({
+      id: q.id,
+      text: q.description ? `${q.text}（${q.description}）` : q.text,
+      multiple: q.multiple,
+      required: q.required,
+      allowOther: q.allowOther,
+      options: q.options.map(opt => ({
+        id: opt.id,
+        label: opt.label,
+        availability: { enabled: true },
+      })),
+    }))
+    let singleTitle = "Agent 提问"
+    if (form.questions.length === 1) {
+      const only = form.questions[0]!
+      const onlyRenderedText = mappedQuestions[0]!.text
+      const rawHeader = only.header.trim()
+      // 单题提问时，Agent 常把同一句完整问题同时写入 request.message 和 prop.title；
+      // 若 header 与问题正文相同或为兜底占位“请回答”，改用简短眉题“请确认细节”，避免卡片内连续显示两遍同一问题。
+      singleTitle = !rawHeader || rawHeader === "请回答" || rawHeader === only.text.trim() || rawHeader === onlyRenderedText.trim()
+        ? "请确认细节"
+        : rawHeader
+    }
     return {
       form,
       interaction: {
         ...base,
         kind: "question",
-        title: form.questions.length === 1 ? form.questions[0]!.header || "Agent 提问" : "Agent 提问",
+        title: singleTitle,
         ...(request.message && form.questions.length > 1 ? { description: request.message } : {}),
-        questions: form.questions.map(q => ({
-          id: q.id,
-          text: q.description ? `${q.text}（${q.description}）` : q.text,
-          multiple: q.multiple,
-          required: q.required,
-          allowOther: q.allowOther,
-          options: q.options.map(opt => ({
-            id: opt.id,
-            label: opt.label,
-            availability: { enabled: true },
-          })),
-        })),
+        questions: mappedQuestions,
       },
     }
   }

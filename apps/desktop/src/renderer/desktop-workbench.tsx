@@ -335,6 +335,7 @@ function WorkspaceProjectWorkbench(props: {
     host: props.collaborationApps,
     members: taskMembers,
     tasks: taskRows.status === "ready" ? taskRows.tasks : undefined,
+    knowledge: knowledgeRows.status === "ready" ? knowledgeRows.items : undefined,
     onChooseMember: canPublish ? assigneeId => setPublishing({ scope: shell.scope, page: currentPage, assigneeId }) : undefined,
     onOpenTask: taskContext ? openTask : undefined,
     chooseDirectory,

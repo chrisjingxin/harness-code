@@ -391,16 +391,59 @@ export function useLocalExecution(
       const screen = source && screens.current.get(source.key)
       if (!source || source.scope.conversationId !== id || !screen?.binding) throw new Error("会话尚未准备就绪。")
       if (!host.setMode) throw new Error("当前运行宿主不支持切换模式。")
+      // 乐观更新本地状态，保证连续按 Tab / Shift+Tab 或菜单点击能即时轮转；失败时自动回滚。
+      const prevState = screen.timeline.sessionState
+      if (prevState) {
+        screen.timeline = {
+          ...screen.timeline,
+          failure: null,
+          sessionState: {
+            ...prevState,
+            currentModeId: modeId,
+            ...(prevState.modes ? { modes: { ...prevState.modes, currentModeId: modeId } } : {}),
+          },
+        }
+        refresh()
+      }
       const result = await host.setMode(source.scope, screen.binding.bindingId, modeId)
-      if (!result.ok) throw new Error(result.error.message)
+      if (!result.ok) {
+        if (mounted.current && screens.current.get(source.key) === screen && prevState) {
+          screen.timeline = { ...screen.timeline, sessionState: prevState, failure: result.error.message }
+          refresh()
+        }
+        throw new Error(result.error.message)
+      }
     },
     async setConfigOption(id, configId, value) {
       const source = current.current.target
       const screen = source && screens.current.get(source.key)
       if (!source || source.scope.conversationId !== id || !screen?.binding) throw new Error("会话尚未准备就绪。")
       if (!host.setConfigOption) throw new Error("当前运行宿主不支持修改配置项。")
+      const prevState = screen.timeline.sessionState
+      if (prevState) {
+        screen.timeline = {
+          ...screen.timeline,
+          failure: null,
+          sessionState: {
+            ...prevState,
+            configOptions: prevState.configOptions.map(opt => {
+              if (opt.id !== configId) return opt
+              if (opt.type === "boolean") return { ...opt, currentValue: typeof value === "boolean" ? value : value === "true" }
+              if (opt.type === "select" && typeof value === "string") return { ...opt, currentValue: value }
+              return opt
+            }),
+          },
+        }
+        refresh()
+      }
       const result = await host.setConfigOption(source.scope, screen.binding.bindingId, configId, value)
-      if (!result.ok) throw new Error(result.error.message)
+      if (!result.ok) {
+        if (mounted.current && screens.current.get(source.key) === screen && prevState) {
+          screen.timeline = { ...screen.timeline, sessionState: prevState, failure: result.error.message }
+          refresh()
+        }
+        throw new Error(result.error.message)
+      }
     },
     async answerElicitation(id, requestId, answer) {
       const source = current.current.target

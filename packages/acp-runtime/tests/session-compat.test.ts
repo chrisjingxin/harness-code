@@ -708,3 +708,28 @@ test("enableElicitation 默认关闭；开启后声明能力、派发表单、�
     await rm(workspace, { recursive: true, force: true })
   }
 })
+
+test("带磁盘 bindingDirectory（nativeBinding.write 异步落盘）新建会话时，期间到达的 available_commands_update 不丢失", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "hc-compat-cmd-race-"))
+  const bindingDirectory = await mkdtemp(join(tmpdir(), "hc-compat-cmd-bind-"))
+  const host = new LocalAcpHost({
+    executable: process.execPath,
+    args: ["--input-type=module", "-e", richAgentScript],
+    env: { ...process.env, MOCK_MODE: "no-load" },
+  }, { bindingDirectory })
+
+  try {
+    const session = await host.bind({ namespace: "t", accountId: "a1", workspaceId: "w1", projectId: "p1", conversationId: "c-cmd-race" }, workspace)
+    const connectedState = await session.connect()
+    await new Promise(r => setTimeout(r, 40))
+    const state = session.getState()
+    assert.equal(connectedState.connected, true)
+    assert.equal(state.connected, true)
+    assert.deepEqual(state.availableCommands.map(c => c.name), ["compact", "plan"])
+    assert.equal(state.sessionInfo?.title, "初始标题")
+  } finally {
+    await host.close()
+    await rm(workspace, { recursive: true, force: true })
+    await rm(bindingDirectory, { recursive: true, force: true })
+  }
+})

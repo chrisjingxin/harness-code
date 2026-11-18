@@ -31,7 +31,6 @@ import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 const MAX_DOCK_TABS = 12
 const MAX_CENTRAL_TABS = 12
 const GIT_WRITE_DISABLED_REASON = "Git 写操作已暂缓，当前仅支持只读查看。"
-const NON_GIT_MESSAGE = "当前目录不是 Git 仓库，仅提供本地文件浏览；Git 写操作已暂缓。"
 
 type ScrollArea = "central" | "dock" | "tree"
 
@@ -466,13 +465,15 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     }
 
     const value = res.value.value
-    if (value.blockedReason && value.files.length === 0) {
+    const isNonGit = Boolean(value.blockedReason?.includes("不是 Git 仓库")) && !value.snapshot && !value.branch && value.files.length === 0
+    if (isNonGit || (value.blockedReason && value.files.length === 0)) {
       mutateRuntime(targetScope, conversationId, prev => ({
         ...prev,
+        directory: { ...prev.directory, isGitRepository: !isNonGit && Boolean(value.snapshot || value.branch) },
         changes: {
           status: "ready",
           busy: false,
-          message: value.blockedReason ?? NON_GIT_MESSAGE,
+          message: isNonGit ? undefined : (value.blockedReason ?? undefined),
         },
       }))
       return
@@ -480,6 +481,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
 
     mutateRuntime(targetScope, conversationId, prev => ({
       ...prev,
+      directory: { ...prev.directory, isGitRepository: true },
       changes: {
         status: "ready",
         busy: false,
@@ -602,7 +604,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
         },
         changes: bindRes.value.isGitRepository
           ? { status: "loading", busy: false }
-          : { status: "ready", busy: false, message: NON_GIT_MESSAGE },
+          : { status: "ready", busy: false },
       }))
 
       const latest = runtimesRef.current[key]
@@ -882,7 +884,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
         : { enabled: false, reason: runtime.directory.error || "正在准备本机工作目录" },
       readDiff: runtime.directory.isGitRepository
         ? enabledGate
-        : { enabled: false, reason: NON_GIT_MESSAGE },
+        : { enabled: false, reason: "当前文件夹未启用 Git" },
       commit: { enabled: false, reason: GIT_WRITE_DISABLED_REASON },
       push: { enabled: false, reason: GIT_WRITE_DISABLED_REASON },
     }
