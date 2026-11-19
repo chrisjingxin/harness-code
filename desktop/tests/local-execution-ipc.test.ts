@@ -126,6 +126,7 @@ function createFakeWindow() {
 
 function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState"]>["agentCapabilities"]) {
   const listeners = new Set<AcpListener>()
+  const sent: string[] = []
   let turnCounter = 0
   const session: BoundSession = {
     ...(agentCapabilities ? { getState: () => ({
@@ -133,7 +134,10 @@ function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState
       restoreStatus: { kind: "none" as const }, agentCapabilities,
     }) } : {}),
     getAvailability: () => ({ available: true }),
-    send: () => ({ status: "accepted", turnId: `turn-${++turnCounter}` }),
+    send: text => {
+      sent.push(text)
+      return { status: "accepted", turnId: `turn-${++turnCounter}` }
+    },
     cancel: () => true,
     answerPermission: () => true,
     subscribe: listener => {
@@ -152,7 +156,7 @@ function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState
   const emit = (event: AcpEvent) => {
     for (const listener of listeners) listener(event)
   }
-  return { runtime, emit }
+  return { runtime, emit, sent }
 }
 
 // ConversationUploads 成功上传一批后会进入 2,000ms 冷却定时器，需预留充足等待窗口。
@@ -687,6 +691,11 @@ test("多代理切换、会话级能力透传（session-state/elicitation/mode/c
       senderEvent, scope, prep2.value.bindingId, REQ_ID, "hi", [], ["bad\0file"],
     )
     assert.equal((badAttachIpc as { ok: boolean }).ok, false)
+    const badQueueItem = await registered.get("workbench:local-execution:prompt-queue")!(senderEvent, scope, {
+      kind: "add", bindingId: prep2.value.bindingId,
+      item: { requestId: REQ_ID, text: "hi", referenceIds: [], attachments: ["bad\0file"] },
+    })
+    assert.equal((badQueueItem as { ok: boolean }).ok, false)
 
     // 校验 2 参 prepare（会切回默认 harness 绑定）、5 参 send、set-mode、set-config-option 与 answer-elicitation 通道
     const prepLegacyIpc = await registered.get("workbench:local-execution:prepare")!(senderEvent, scope, workdir) as {
@@ -924,6 +933,98 @@ test("仅已协商的 Harness 旁路跳过上传，标准 Agent 的定稿照常�
     emit({ type: "completed", turnId: next.value.turnId, sequence: 2, shareable: true })
     await waitFor(() => batches.length > 0)
     assert.deepEqual(batches.flatMap(batch => batch.messages.map(message => JSON.parse(message.payload).text)), ["standard text", "shared"])
+  } finally {
+    await coordinator.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("待发项可编辑和移除，正常终态兑现 FIFO，停止后须显式继续", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc235-fifo-"))
+  const identity = await createSignedInState(USER_A)
+  const { window, notices } = createFakeWindow()
+  const { runtime, sent, emit } = createMockRuntime()
+  const coordinator = createLocalExecutionCoordinator(window, identity, null, runtime, { personal: new PersonalStore(identity, ORIGIN, root) })
+  try {
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    await coordinator.captureDirectorySelection()(root)
+    const ready = await coordinator.prepare(scope, root)
+    assert.ok(ready.ok)
+    const { bindingId } = ready.value
+    await coordinator.send(scope, bindingId, REQ_ID, "首轮", [])
+    const add = (tail: string, text: string) => coordinator.promptQueue(scope, {
+      kind: "add", bindingId,
+      item: { requestId: `00000000-0000-4000-8000-00000000000${tail}`, text, referenceIds: [], attachments: [] },
+    })
+    const first = await add("1", "原第二轮")
+    const middle = await add("2", "不发送")
+    const last = await add("3", "第三轮")
+    assert.ok(first.ok && middle.ok && last.ok)
+    const requestId = first.value.items[0].requestId
+    assert.ok((await coordinator.promptQueue(scope, { kind: "edit", requestId, text: "修订第二轮" })).ok)
+    assert.ok((await coordinator.promptQueue(scope, { kind: "remove", requestId: middle.value.items[1].requestId })).ok)
+    assert.deepEqual(sent, ["首轮"])
+    emit({ type: "completed", turnId: "turn-1", sequence: 1, shareable: true })
+    await coordinator.promptQueue(scope, { kind: "read" })
+    assert.deepEqual(sent, ["首轮", "修订第二轮"])
+    assert.ok((notices as LocalExecutionNotice[]).some(event => event.kind === "accepted" && event.queued && event.requestId === requestId))
+
+    const stop = coordinator.cancel(scope, bindingId, "turn-2")
+    // Agent 在停止请求通过权限核对之前正常结束。仍须保留待发项，直到用户恢复。
+    emit({ type: "completed", turnId: "turn-2", sequence: 1, shareable: true })
+    await stop
+    const held = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(held.ok && held.value.paused && !held.value.pausedReason && held.value.items[0].text === "第三轮")
+    assert.deepEqual(sent, ["首轮", "修订第二轮"])
+    const resumed = await coordinator.promptQueue(scope, { kind: "resume", bindingId })
+    assert.ok(resumed.ok && resumed.value.items.length === 0)
+    assert.deepEqual(sent, ["首轮", "修订第二轮", "第三轮"])
+  } finally {
+    await coordinator.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("待发项在换绑定及重启后暂停，提交结果不确定时禁止重发，跨账号不可读", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc235-restart-"))
+  const identity = await createSignedInState(USER_A)
+  const other = await createSignedInState(USER_B)
+  const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+  const { window } = createFakeWindow()
+  const { runtime, emit, sent } = createMockRuntime()
+  const otherDir = join(root, "other")
+  await mkdir(otherDir)
+  let personal = new PersonalStore(identity, ORIGIN, root)
+  let coordinator = createLocalExecutionCoordinator(window, identity, null, runtime, { personal })
+  try {
+    await coordinator.captureDirectorySelection()(root)
+    await coordinator.captureDirectorySelection()(otherDir)
+    const ready = await coordinator.prepare(scope, root, "one")
+    assert.ok(ready.ok)
+    await coordinator.send(scope, ready.value.bindingId, REQ_ID, "首轮", [])
+    const item = { requestId: REQ_ID, text: "重启保留", referenceIds: [], attachments: [] }
+    assert.ok((await coordinator.promptQueue(scope, { kind: "add", bindingId: ready.value.bindingId, item })).ok)
+    assert.ok((await coordinator.prepare(scope, otherDir, "two")).ok)
+    const held = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(held.ok && held.value.paused && held.value.items[0].text === item.text)
+    emit({ type: "completed", turnId: "turn-1", sequence: 1, shareable: true })
+    assert.deepEqual(sent, ["首轮"])
+    await coordinator.dispose()
+    personal = new PersonalStore(identity, ORIGIN, root)
+    coordinator = createLocalExecutionCoordinator(window, identity, null, runtime, { personal })
+    const restarted = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(restarted.ok && restarted.value.paused && !restarted.value.pausedReason && restarted.value.items[0].text === item.text)
+    assert.equal((await new PersonalStore(other, ORIGIN, root).conversationPromptQueue(scope)).ok, false)
+    await personal.conversationPromptQueue(scope, { items: [item], starting: item.requestId })
+    await coordinator.captureDirectorySelection()(otherDir)
+    const rebound = await coordinator.prepare(scope, otherDir)
+    assert.ok(rebound.ok)
+    const unknown = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(unknown.ok && unknown.value.starting === item.requestId)
+    assert.equal((await coordinator.promptQueue(scope, { kind: "resume", bindingId: rebound.value.bindingId })).ok, false)
+    assert.deepEqual(sent, ["首轮"])
+    const removed = await coordinator.promptQueue(scope, { kind: "remove", requestId: item.requestId })
+    assert.ok(removed.ok && !removed.value.starting && removed.value.items.length === 0)
   } finally {
     await coordinator.dispose()
     await rm(root, { recursive: true, force: true })

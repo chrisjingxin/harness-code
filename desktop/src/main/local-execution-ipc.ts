@@ -7,7 +7,7 @@
  */
 import type { BrowserWindow } from "electron"
 import type { LocalAcpElicitationAnswer } from "@workbench/acp-runtime"
-import { parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope } from "../shared/index.js"
+import { parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope, type PromptQueueAction, type QueuedPrompt } from "../shared/index.js"
 import {
   createCollaborationIpcRegistrar,
   formatIpcError,
@@ -50,6 +50,34 @@ function isValidAttachments(value: unknown): value is string[] | undefined {
   return Array.isArray(value)
     && value.length <= MAX_ATTACHMENTS
     && value.every(item => typeof item === "string" && item.length > 0 && item.length <= 1024 && hasNoControlChars(item))
+}
+
+function isPromptText(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 16_384 && Buffer.byteLength(value, "utf8") <= 32_768
+}
+
+function isPromptContent(text: unknown, referenceIds: unknown, attachments: unknown): boolean {
+  return isPromptText(text) && Array.isArray(referenceIds) && referenceIds.length <= 2000
+    && referenceIds.every(id => parseFixedReference(id) !== null) && isValidAttachments(attachments)
+    && Boolean(text.trim() || referenceIds.length || attachments?.length)
+}
+
+function isQueuedPrompt(item: unknown): item is QueuedPrompt {
+  return isPlainObject(item) && Object.keys(item).sort().join(",") === "attachments,referenceIds,requestId,text"
+    && isUuid(item.requestId) && Array.isArray(item.attachments) && isPromptContent(item.text, item.referenceIds, item.attachments)
+}
+
+function isPromptQueueAction(value: unknown): value is PromptQueueAction {
+  if (!isPlainObject(value)) return false
+  const keys = Object.keys(value).sort().join(",")
+  switch (value.kind) {
+    case "read": return keys === "kind"
+    case "add": return keys === "bindingId,item,kind" && isUuid(value.bindingId) && isQueuedPrompt(value.item)
+    case "resume": return keys === "bindingId,kind" && isUuid(value.bindingId)
+    case "remove": return keys === "kind,requestId" && isUuid(value.requestId)
+    case "edit": return keys === "kind,requestId,text" && isUuid(value.requestId) && isPromptText(value.text)
+    default: return false
+  }
 }
 
 function isValidElicitationValue(value: unknown): boolean {
@@ -95,6 +123,10 @@ export function bindLocalExecutionIpc(
   })
 
   ipc.handle("workbench:local-execution:list-providers", 0, () => execution.listProviders())
+  ipc.handle("workbench:local-execution:prompt-queue", 2, (scope, action) =>
+    isLocalExecutionScope(scope) && isPromptQueueAction(action)
+      ? execution.promptQueue(scope, action)
+      : formatIpcError("INVALID_REQUEST", "待发消息或队列操作无效。"))
   ipc.handle("workbench:local-execution:prepare", [2, 3], (scope, directory, providerId) =>
     isLocalExecutionScope(scope) && isNonControlString(directory, 4096)
     && (providerId === undefined || providerId === null || (typeof providerId === "string" && PROVIDER_ID_PATTERN.test(providerId)))
@@ -106,12 +138,8 @@ export function bindLocalExecutionIpc(
       : formatIpcError("INVALID_REQUEST", "本机会话参数无效。"))
   ipc.handle("workbench:local-execution:send", [5, 6], (scope, bindingId, requestId, text, referenceIds, attachments) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(requestId)
-      && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768
-      && Array.isArray(referenceIds) && referenceIds.length <= 2000
-      && referenceIds.every(id => parseFixedReference(id) !== null)
-      && isValidAttachments(attachments)
-      && (text.trim() || referenceIds.length || (Array.isArray(attachments) && attachments.length > 0))
-      ? execution.send(scope, bindingId, requestId, text, referenceIds as string[], (attachments as string[] | undefined) ?? [])
+      && isPromptContent(text, referenceIds, attachments)
+      ? execution.send(scope, bindingId, requestId, text as string, referenceIds as string[], (attachments as string[] | undefined) ?? [])
       : formatIpcError("INVALID_REQUEST", "请输入有效的文本消息、固定引用或工作区文件附件。文字最长 16,384 字符且不超过 32 KiB。"))
   ipc.handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(turnId)

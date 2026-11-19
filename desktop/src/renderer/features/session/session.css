@@ -1074,6 +1074,74 @@
   font-family: var(--font-mono);
 }
 
+/* 待发区与输入框对齐，折叠后只保留标题栏。 */
+.session-prompt-queue {
+  margin-bottom: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--border, var(--line));
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-size: 12px;
+}
+.session-queue-header, .session-queue-heading, .session-queue-item, .session-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-queue-header { min-height: 26px; justify-content: space-between; }
+.session-queue-title { font-weight: 600; }
+.session-queue-count {
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--muted);
+  text-align: center;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.session-queue-actions button[aria-expanded="false"] .session-queue-chevron { transform: rotate(-90deg); }
+.session-prompt-queue p { margin: 4px 0; color: var(--muted); }
+.session-prompt-queue p[role="alert"] { color: var(--danger-vivid); }
+.session-prompt-queue ol { margin: 1px 0 0; padding: 0; list-style: none; max-height: min(124px, 20vh); overflow: auto; }
+.session-queue-item { min-width: 0; min-height: 26px; }
+.session-queue-item + .session-queue-item { border-top: 1px solid var(--border-soft, var(--line-soft)); }
+.session-prompt-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-prompt-queue-text small { color: var(--muted); }
+.session-prompt-queue textarea {
+  flex: 1;
+  min-width: 0;
+  margin-block: 3px;
+  padding: 4px 6px;
+  border: 1px solid var(--border, var(--line));
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+.session-queue-actions { flex: none; gap: 2px; }
+.session-queue-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.session-queue-actions .session-queue-resume { color: var(--accent); }
+.session-queue-actions button:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--fg, var(--text));
+}
+.session-queue-actions button:disabled { opacity: .5; cursor: not-allowed; }
+
 .session-composer-extra {
   display: flex;
   align-items: center;

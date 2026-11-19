@@ -920,8 +920,8 @@ export function projectLocalExecution(
     activity: running ? { active: true, label: "Agent 正在回复" } : null,
     composer: {
       ...base.composer,
-      send: running ? { enabled: false, reason: "等待当前回复完成" } : base.composer.send,
-      primaryActions: running && canCancel ? "cancel" : base.composer.primaryActions,
+      send: running && !base.composer.sendLabel ? { enabled: false, reason: "等待当前回复完成" } : base.composer.send,
+      primaryActions: running && canCancel && !base.composer.sendLabel ? "cancel" : base.composer.primaryActions,
       statusText: execution.failure ?? execution.uploadFailures?.values().next().value ?? base.composer.statusText,
     },
   }

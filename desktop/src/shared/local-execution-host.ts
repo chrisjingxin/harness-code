@@ -59,6 +59,27 @@ export type LocalExecutionReceipt =
   | { readonly status: "accepted"; readonly turnId: string }
   | { readonly status: "rejected"; readonly reason: string; readonly unavailableReferenceId?: string }
 
+/** 待发项保存用户原文及引用标识，实际发送时重新解析材料。 */
+export type QueuedPrompt = {
+  readonly requestId: string
+  readonly text: string
+  readonly referenceIds: readonly string[]
+  readonly attachments: readonly string[]
+}
+
+/** starting 表示已经开始提交，进程中断后需由用户核对，禁止自动重发。 */
+export type PromptQueueRecord = { readonly items: readonly QueuedPrompt[]; readonly starting?: string }
+export type PromptQueueView = PromptQueueRecord & { readonly revision: number; readonly paused: boolean; readonly pausedReason?: string }
+export type PromptQueueAction =
+  | { readonly kind: "read" }
+  | { readonly kind: "add"; readonly bindingId: string; readonly item: QueuedPrompt }
+  | { readonly kind: "edit"; readonly requestId: string; readonly text: string }
+  | { readonly kind: "remove"; readonly requestId: string }
+  | { readonly kind: "resume"; readonly bindingId: string }
+
+export const MAX_QUEUED_PROMPTS = 20
+export const MAX_PROMPT_QUEUE_BYTES = 256 * 1024
+
 /** 共享结果独立于执行终态。重试成功只清除同一轮的上传失败。 */
 export type LocalExecutionUploadNotice = {
   readonly scope: LocalExecutionScope
@@ -97,12 +118,13 @@ export type LocalExecutionNotice =
   | LocalExecutionUploadNotice
   | LocalExecutionSessionStateNotice
   | LocalExecutionElicitationNotice
+  | { readonly scope: LocalExecutionScope; readonly kind: "prompt-queue"; readonly queue: PromptQueueView }
   | ({
       readonly scope: LocalExecutionScope
       readonly bindingId: string
       readonly turnId: string
     } & (
-      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string }
+      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly referenceIds?: readonly string[] }
       | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
       | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
@@ -136,6 +158,7 @@ export type CodeCheckpointReply =
 
 export interface DesktopLocalExecutionHost {
   listProviders(): Promise<CollaborationResult<AcpAgentList>>
+  promptQueue(scope: LocalExecutionScope, action: PromptQueueAction): Promise<CollaborationResult<PromptQueueView>>
   prepare(scope: LocalExecutionScope, directory: string, providerId?: string): Promise<LocalExecutionPreparation>
   /** 从该会话的本机个人记录取路径，经原生确认窗口记住旧目录。 */
   confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>>

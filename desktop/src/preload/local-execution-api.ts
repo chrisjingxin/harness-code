@@ -5,6 +5,7 @@ import type { DesktopLocalExecutionHost, LocalExecutionNotice } from "../shared/
 export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutionHost {
   return {
     listProviders: () => ipc.invoke("workbench:local-execution:list-providers"),
+    promptQueue: (scope, action) => ipc.invoke("workbench:local-execution:prompt-queue", scope, action),
     prepare: (scope, directory, providerId) =>
       providerId === undefined
         ? ipc.invoke("workbench:local-execution:prepare", scope, directory)

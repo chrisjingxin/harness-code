@@ -40,6 +40,7 @@ import {
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
 import { CodeCheckpointPanel } from "./code-checkpoint-panel.js"
+import { PromptQueuePanel } from "./prompt-queue-panel.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -162,6 +163,9 @@ export function LocalSessionPage({
   const providers = execution.getProviders?.()
   const selectedProviderId = execution.getSelectedProviderId?.(conversation.conversationId)
   const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
+  const queue = execution.getPromptQueue?.(conversation.conversationId)
+  const queueMode = Boolean(execution.promptQueue && (canCancel || queue?.items.length))
+  const canEnqueue = queueMode && (canCancel || availability.available) && !directoryNeedsAction
   const capabilities = buildComposerCapabilities({
     providers,
     selectedProviderId,
@@ -175,13 +179,14 @@ export function LocalSessionPage({
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
       ? { enabled: false, reason: attachmentUnavailableReason }
-      : availability.available
+      : canEnqueue || availability.available
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
     cancel: canCancel
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
-    primaryActions: canCancel ? "cancel" : "send",
+    ...(queueMode ? { sendLabel: "加入队列" } : {}),
+    primaryActions: canCancel ? (queueMode ? "both" : "cancel") : "send",
     statusText: hasUnsupportedMaterial ? attachmentUnavailableReason
       : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: capabilities.commands,
@@ -439,9 +444,14 @@ export function LocalSessionPage({
     </div>
   ) : undefined
 
-  const slots = aboveTimelineSlot || composerSlot
+  const queueSlot = queue?.items.length && execution.promptQueue
+    ? <PromptQueuePanel key={scope.conversationId} queue={queue} canResume={availability.available && !canCancel}
+        onAction={action => execution.promptQueue!(conversation.conversationId, action)} />
+    : undefined
+  const slots = aboveTimelineSlot || queueSlot || composerSlot
     ? {
         ...(aboveTimelineSlot ? { aboveTimeline: aboveTimelineSlot } : {}),
+        ...(queueSlot ? { aboveComposer: queueSlot } : {}),
         ...(composerSlot ? { composer: composerSlot } : {}),
       }
     : undefined
@@ -478,6 +488,7 @@ export function LocalSessionPage({
                           text,
                           referenceIds,
                           attachmentIds,
+                          queue: queueMode,
                         }),
                     }
                   : {}),

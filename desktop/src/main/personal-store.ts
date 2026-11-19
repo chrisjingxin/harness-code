@@ -7,11 +7,15 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import { isAbsolute, join } from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import { EMPTY_CONVERSATION_PERSONAL } from "../shared/personal.js"
-import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "../shared/index.js"
+import {
+  MAX_PROMPT_QUEUE_BYTES, MAX_QUEUED_PROMPTS,
+  type ConversationPersonal, type LocalExecutionScope, type PersonalKey, type PersonalRead, type PersonalResult, type PersonalValue,
+  type PromptQueueRecord,
+} from "../shared/index.js"
 import type { CollaborationState } from "@workbench/collaboration-client"
 
 type Identity = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
-type Entry = { revision: number; flushed: number; data: PersonalValue | null; writing: Promise<void> | null }
+type Entry = { revision: number; flushed: number; data: PersonalValue | PromptQueueRecord | null; writing: Promise<void> | null }
 type Authorized = { identity: Identity; name: string; ownsConversation: boolean }
 type CachedPermission = Authorized & { expiresAtMs: number }
 const PERMISSION_TTL_MS = 60_000
@@ -147,6 +151,15 @@ const validators = {
   conversation: ajv.compile(schemas.conversation),
   sessionWorkspace: ajv.compile(schemas.sessionWorkspace),
 }
+const validatePromptQueue = ajv.compile<PromptQueueRecord>(object(["items"], {
+  items: { type: "array", maxItems: MAX_QUEUED_PROMPTS, items: object(["requestId", "text", "referenceIds", "attachments"], {
+    requestId: id,
+    text: { type: "string", maxLength: 16_384 },
+    referenceIds: strings,
+    attachments: strings,
+  }) },
+  starting: id,
+}))
 const keyValidators = {
   account: ajv.compile(object(["kind"], { kind: { const: "account" } })),
   workspace: ajv.compile(object(["kind", "workspaceId"], { kind: { const: "workspace" }, workspaceId: id })),
@@ -309,7 +322,7 @@ export class PersonalStore {
     return request
   }
 
-  #entry(name: string, kind: PersonalKey["kind"]): Promise<Entry> {
+  #entry(name: string, kind: PersonalKey["kind"] | "promptQueue"): Promise<Entry> {
     let promise = this.#entries.get(name)
     if (promise) return promise
     promise = (async () => {
@@ -319,13 +332,14 @@ export class PersonalStore {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return { revision: 0, flushed: 0, data: null, writing: null }
         throw error
       }
-      if (bytes.length > 1_048_576) throw new Error("个人记录过大")
+      if (bytes.length > (kind === "promptQueue" ? MAX_PROMPT_QUEUE_BYTES + 128 : 1_048_576)) throw new Error("个人记录过大")
       const record: unknown = JSON.parse(bytes.toString("utf8"))
       if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("个人记录格式无效")
       const value = record as Record<string, unknown>
       if (Object.keys(value).sort().join(",") !== "data,revision,version" || value.version !== 1 || !Number.isSafeInteger(value.revision)
-        || (value.revision as number) < 0 || !validators[kind](value.data)) throw new Error("个人记录格式无效")
-      return { revision: value.revision as number, flushed: value.revision as number, data: value.data as PersonalValue, writing: null }
+        || (value.revision as number) < 0
+        || !(kind === "promptQueue" ? validatePromptQueue : validators[kind])(value.data)) throw new Error("个人记录格式无效")
+      return { revision: value.revision as number, flushed: value.revision as number, data: value.data as Entry["data"], writing: null }
     })()
     this.#entries.set(name, promise)
     // 读取失败不能变成空记录，否则随后的保存会覆盖原数据；允许用户重试。
@@ -340,7 +354,7 @@ export class PersonalStore {
     try {
       const entry = await this.#entry(authorized.value.name, key.kind)
       if (!this.#current(authorized.value.identity)) return fail("账号已变化，请重新登录。")
-      return ok({ revision: entry.revision, data: structuredClone(entry.data) })
+      return ok({ revision: entry.revision, data: structuredClone(entry.data as PersonalValue | null) })
     } catch { return fail("无法读取个人视图，请检查应用数据目录后重试。") }
   }
 
@@ -416,11 +430,37 @@ export class PersonalStore {
     } catch { return fail("会话标题保存失败，请重试。") }
   }
 
-  async #writeRecord(name: string, revision: number, data: PersonalValue | null): Promise<void> {
+  /** 仅供主进程串行读写本人待发消息，复用原子落盘，独立于页面草稿修订。 */
+  async conversationPromptQueue(scope: LocalExecutionScope, next?: PromptQueueRecord): Promise<PersonalResult<PromptQueueRecord>> {
+    const key = { kind: "conversation" as const, workspaceId: scope.workspaceId, projectId: scope.projectId, conversationId: scope.conversationId }
+    if (!validKey(key)) return fail("待发队列范围无效。")
+    const result = await this.#authorize(key)
+    if (!result.ok) return result
+    const { identity, ownsConversation } = result.value
+    if (!ownsConversation || identity.accountId !== scope.accountId) return fail("只能访问自己会话的待发队列。")
+    const name = "prompt-queue-" + result.value.name
+    try {
+      const entry = await this.#entry(name, "promptQueue")
+      if (!this.#current(identity)) return fail("账号已变化，请重新登录。")
+      if (next === undefined) return ok(structuredClone((entry.data as PromptQueueRecord | null) ?? { items: [] }))
+      if (!validatePromptQueue(next) || Buffer.byteLength(JSON.stringify(next)) > MAX_PROMPT_QUEUE_BYTES) {
+        return fail("待发队列超出容量，请移除部分消息或附件。")
+      }
+      const revision = entry.revision + 1
+      await this.#writeRecord(name, revision, next)
+      entry.data = structuredClone(next)
+      entry.revision = entry.flushed = revision
+      return this.#current(identity) ? ok(next) : fail("账号已变化，请重新登录。")
+    } catch { return fail("无法读写待发队列，请检查应用数据目录。") }
+  }
+
+  async #writeRecord(name: string, revision: number, data: Entry["data"]): Promise<void> {
     await mkdir(this.#root, { recursive: true, mode: 0o700 })
     const target = join(this.#root, `${name}.json`), temporary = `${target}.${randomUUID()}.tmp`
     try {
-      await writeFile(temporary, JSON.stringify({ version: 1, revision, data }), { encoding: "utf8", mode: 0o600, flag: "wx" })
+      await writeFile(temporary, JSON.stringify({ version: 1, revision, data }), {
+        encoding: "utf8", mode: 0o600, flag: "wx", flush: name.startsWith("prompt-queue-"),
+      })
       await rename(temporary, target)
     } finally { await rm(temporary, { force: true }).catch(() => {}) }
   }

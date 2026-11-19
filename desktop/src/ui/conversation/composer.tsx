@@ -6,6 +6,7 @@
 import {
   IconAlertTriangle,
   IconArrowUp,
+  IconPlaylistAdd,
   IconBook,
   IconCheck,
   IconChecklist,
@@ -78,6 +79,7 @@ interface ComposerProps {
   /** 新建准备页使用 Enter 换行，提交仍由该页的明确开始动作处理。 */
   readonly submitOnEnter?: boolean
   readonly children?: ReactNode
+  readonly aboveComposer?: ReactNode
 }
 
 /** 不持有唯一草稿副本；卸载后由调用方重新传入文字、选择范围及修订。 */
@@ -620,7 +622,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             </div>
           </div>
         ) : null}
-        <div className="wb-composer-box">
+        {props.aboveComposer}
+        <div className="wb-composer-box" data-queue-mode={model.sendLabel ? "" : undefined}>
           {draft.referenceIds.length ? <div className="wb-composer-references" aria-label="引用材料">{draft.referenceIds.map(id => {
             const reference = model.references.find(item => item.id === id)
             if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
@@ -666,7 +669,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               rows={1}
               value={draft.text}
               disabled={!canEdit}
-              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "描述任务，@ 引用文件/知识/会话，/ 唤起命令…") : "当前无法编辑草稿"}
+              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息…") : "当前无法编辑草稿"}
               aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
               onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
               onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
@@ -724,9 +727,16 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               {children}
             </div>
             <div className="wb-composer-rail-right">
-              <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "⏎ 发送"}</span>
+              {model.sendLabel ? null : (
+                <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "⏎ 发送"}</span>
+              )}
               {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
-              {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><IconArrowUp aria-hidden="true" /></button> : null}
+              {showSend ? (
+                <button type="submit" className="wb-composer-send" aria-label={model.sendLabel ?? "发送消息"}
+                  disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : model.sendLabel ?? "发送消息")}>
+                  {model.sendLabel ? <IconPlaylistAdd aria-hidden="true" /> : <IconArrowUp aria-hidden="true" />}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

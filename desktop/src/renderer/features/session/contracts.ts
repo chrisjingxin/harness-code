@@ -15,7 +15,7 @@ import type {
   HistoryMessage,
 } from "@workbench/collaboration-client/types"
 import type { AcpAgentList, LocalAcpElicitationAnswer } from "@workbench/acp-runtime/types"
-import type { CodeCheckpointAction, CodeCheckpointReply, LocalExecutionAvailability } from "../../../shared/index.js"
+import type { CodeCheckpointAction, CodeCheckpointReply, LocalExecutionAvailability, PromptQueueAction, PromptQueueView } from "../../../shared/index.js"
 import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationTimelineEntry } from "../../../ui/index.js"
 import type { LocalExecutionView } from "./local-execution-view.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
@@ -84,6 +84,8 @@ export interface LocalSessionExecutionPort {
   readonly textOnly?: boolean
   readonly commitsAcceptedDraft?: boolean
   getView?(conversationId: string): LocalExecutionView | undefined
+  getPromptQueue?(conversationId: string): PromptQueueView | undefined
+  promptQueue?(conversationId: string, action: Exclude<PromptQueueAction, { kind: "add" | "resume" }> | { kind: "resume" }): Promise<void>
   getProviders?(): AcpAgentList | undefined
   getSelectedProviderId?(conversationId: string): string | undefined
   selectProvider?(conversationId: string, providerId: string): Promise<void>
@@ -98,6 +100,7 @@ export interface LocalSessionExecutionPort {
     readonly text: string
     readonly referenceIds: readonly string[]
     readonly attachmentIds: readonly string[]
+    readonly queue?: boolean
   }): Promise<{ readonly status: "accepted" } | { readonly status: "rejected" | "unknown"; readonly message: string }>
   cancel?(scope: ProjectNavigationScope, conversationId: string): Promise<void>
   answerPermission?(conversationId: string, id: string, optionId: string): Promise<void>

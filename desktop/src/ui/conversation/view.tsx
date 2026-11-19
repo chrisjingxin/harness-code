@@ -173,6 +173,7 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
         sendBlocked={currentSend?.phase === "sending" || currentSend?.phase === "unknown" || sending.current.has(key)}
         cancelBlocked={Boolean(currentCancel) || cancelling.current.has(key)}
         localStatus={currentSend?.message ?? currentCancel?.message}
+        aboveComposer={slots?.aboveComposer}
         onSend={() => { void send() }}
         onCancel={() => { void cancel() }}
       >{slots?.composer}</ConversationComposer>

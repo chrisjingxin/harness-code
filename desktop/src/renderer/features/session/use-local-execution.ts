@@ -23,6 +23,7 @@ import {
   type LocalExecutionNotice,
   type LocalExecutionScope,
   type LocalExecutionSessionState,
+  type PromptQueueView,
 } from "../../../shared/index.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
@@ -45,6 +46,7 @@ const readyOnOpen: LocalExecutionAvailability = { available: false, reason: "创
 
 type Target = {
   readonly scope: LocalExecutionScope
+  readonly namespace: string
   readonly key: string
   readonly directory: string | null
   readonly selectionRevision: number
@@ -53,7 +55,7 @@ type Target = {
 type Flight = {
   readonly scope: ProjectNavigationScope
   readonly bindingId: string
-  readonly draftRevision: number
+  readonly draftRevision?: number
   readonly referenceIds: readonly string[]
   readonly requestId: string
   turnId?: string
@@ -68,6 +70,7 @@ type BufferedBindingNotices = {
 
 type Screen = {
   timeline: LocalExecutionView
+  queue?: PromptQueueView
   preparedFor?: Target
   preparedForProvider?: string
   prepareToken?: number
@@ -127,13 +130,14 @@ export function useLocalExecution(
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
   const projectId = project?.projectId
+  const namespace = project?.namespace
   const [confirmationRevision, retryPreparation] = useReducer(revision => revision + 1, 0)
   const confirming = useRef(false)
   const target = useMemo<Target | null>(() => {
-    if (!accountId || !workspaceId || !projectId || !conversationId) return null
+    if (!accountId || !workspaceId || !projectId || !conversationId || namespace === undefined) return null
     const scope = { accountId, workspaceId, projectId, conversationId }
-    return { scope, key: localExecutionKey(scope), directory, selectionRevision: selectionRevision + confirmationRevision }
-  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision, confirmationRevision])
+    return { scope, namespace, key: localExecutionKey(scope), directory, selectionRevision: selectionRevision + confirmationRevision }
+  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision, confirmationRevision, namespace])
 
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
@@ -195,7 +199,13 @@ export function useLocalExecution(
       referenceIds: flight.referenceIds,
       author: { id: flight.scope.accountId, displayName: current.current.ownerName },
     })
-    current.current.onAccepted(flight.scope, conversationId, flight.draftRevision)
+    if (flight.draftRevision !== undefined) current.current.onAccepted(flight.scope, conversationId, flight.draftRevision)
+    refresh()
+  }
+
+  function applyQueue(screen: Screen, queue: PromptQueueView): void {
+    if (!mounted.current || (screen.queue && screen.queue.revision >= queue.revision)) return
+    screen.queue = queue
     refresh()
   }
 
@@ -220,6 +230,10 @@ export function useLocalExecution(
         return
       }
       if (!screen) return
+      if (notice.kind === "prompt-queue") {
+        applyQueue(screen, notice.queue)
+        return
+      }
 
       if (notice.kind === "session-state") {
         if (screen.binding?.bindingId === notice.bindingId) {
@@ -246,7 +260,18 @@ export function useLocalExecution(
         return
       }
 
-      const flight = screen?.flight
+      if (notice.kind === "accepted" && notice.queued && screen.binding?.bindingId === notice.bindingId
+        && screen.preparedFor && !screen.flight) {
+        const flight: Flight = {
+          scope: { ...notice.scope, namespace: screen.preparedFor.namespace },
+          bindingId: notice.bindingId, requestId: notice.requestId, referenceIds: notice.referenceIds ?? [],
+          lastSequence: 0, unknown: false,
+        }
+        screen.flight = flight
+        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text)
+        return
+      }
+      const flight = screen.flight
       if (!flight) {
         // 窗口页面重载时可能只恢复了当前绑定。旧轮正文不回放，但终态仍可解除忙状态。
         if (notice.kind === "finished" && screen.preparedFor) {
@@ -314,10 +339,14 @@ export function useLocalExecution(
   const selectedPreferredProvider = target ? preferredProviders?.[target.scope.conversationId] : undefined
 
   useEffect(() => {
-    if (!host || !target?.directory) return
-    const desiredProvider = resolveDesiredProviderId(target)
+    if (!host || !target) return
     const screen = screens.current.get(target.key) ?? { timeline: emptyLocalExecutionView }
     screens.current.set(target.key, screen)
+    if (!target.directory) {
+      void host.promptQueue(target.scope, { kind: "read" }).catch(() => {})
+      return
+    }
+    const desiredProvider = resolveDesiredProviderId(target)
     if (
       screen.preparedFor?.directory === target.directory
       && screen.preparedFor.selectionRevision === target.selectionRevision
@@ -361,6 +390,8 @@ export function useLocalExecution(
       screen.availability = { available: false, reason: "无法确认本机执行能力，请重新选择工作目录。" }
       screen.directoryStatus = "unavailable"
       refresh()
+    }).finally(() => {
+      if (active) void host.promptQueue(target.scope, { kind: "read" }).catch(() => {})
     })
     return () => { active = false }
   }, [host, target, selectedPreferredProvider])
@@ -437,6 +468,17 @@ export function useLocalExecution(
       } finally { confirming.current = false }
     },
     getView: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.timeline : undefined,
+    getPromptQueue: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.queue : undefined,
+    async promptQueue(id, action) {
+      const source = current.current.target
+      const screen = source && screens.current.get(source.key)
+      if (!source || !screen || source.scope.conversationId !== id) throw new Error("会话目标已变更。")
+      const bindingId = screen.binding?.bindingId
+      if (action.kind === "resume" && !bindingId) throw new Error("请先确认 Agent 和工作目录。")
+      const result = await host.promptQueue(source.scope, action.kind === "resume" ? { ...action, bindingId: bindingId! } : action)
+      if (!result.ok) throw new Error(result.error.message)
+      applyQueue(screen, result.value)
+    },
     getProviders: () => providersRef.current,
     getSelectedProviderId: id => {
       if (!target || target.scope.conversationId !== id) return providersRef.current?.defaultProviderId ?? undefined
@@ -493,6 +535,8 @@ export function useLocalExecution(
           refresh()
         }
         throw error
+      } finally {
+        if (mounted.current && screen.prepareToken === token) void host.promptQueue(source.scope, { kind: "read" }).catch(() => {})
       }
     },
     async setMode(id, modeId) {
@@ -637,7 +681,21 @@ export function useLocalExecution(
       }
       const screen = screens.current.get(source.key)
       const status = readAvailability(source, input.conversationId)
-      if (!screen?.binding || !status.available) return { status: "rejected", message: status.reason ?? "当前无法发送。" }
+      if (!screen?.binding) return { status: "rejected", message: status.reason ?? "当前无法发送。" }
+      if (input.queue) {
+        try {
+          const result = await host.promptQueue(scope, { kind: "add", bindingId: screen.binding.bindingId, item: {
+            requestId: crypto.randomUUID(), text: input.text, referenceIds: [...input.referenceIds], attachments,
+          } })
+          if (!result.ok) return { status: "rejected", message: result.error.message }
+          applyQueue(screen, result.value)
+          if (mounted.current) current.current.onAccepted(input.scope, input.conversationId, input.draftRevision)
+          return { status: "accepted" }
+        } catch {
+          return { status: "unknown", message: "加入队列的结果待确认，请核对待发列表。" }
+        }
+      }
+      if (!status.available) return { status: "rejected", message: status.reason ?? "当前无法发送。" }
 
       const flight: Flight = {
         scope: input.scope,

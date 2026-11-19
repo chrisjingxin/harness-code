@@ -411,6 +411,9 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger-vivid) 35%, transparent);
 }
 .wb-composer-cancel:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-vivid) 14%, transparent); }
+.wb-composer-box[data-queue-mode] .wb-composer-cancel { background: var(--surface-2); color: var(--fg, var(--text)); box-shadow: inset 0 0 0 1px var(--border, var(--line)); }
+.wb-composer-box[data-queue-mode] .wb-composer-cancel:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger-vivid); }
+.wb-composer-box[data-queue-mode] .wb-composer-tab-badge { display: none; }
 .wb-composer-send svg { width: 14px; height: 14px; }
 .wb-composer-cancel svg { width: 13px; height: 13px; }
 .wb-composer-send:disabled, .wb-composer-cancel:disabled { opacity: .45; cursor: not-allowed; }

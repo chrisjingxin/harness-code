@@ -191,6 +191,7 @@ export interface ConversationReferenceView {
 /** 输入区只展示调用方明确提供的命令、能力和状态，不解释 Agent 类型。 */
 export interface ConversationComposerView {
   readonly send: ConversationAvailability
+  readonly sendLabel?: string
   readonly cancel: ConversationAvailability
   readonly primaryActions: "send" | "cancel" | "both" | "none"
   readonly statusText?: string
@@ -324,5 +325,5 @@ export interface ConversationViewProps {
   readonly interaction: ConversationInteractionView | null
   readonly personal: ConversationPersonalState
   readonly actions: ConversationActions
-  readonly slots?: { readonly aboveTimeline?: ReactNode; readonly composer?: ReactNode }
+  readonly slots?: { readonly aboveTimeline?: ReactNode; readonly aboveComposer?: ReactNode; readonly composer?: ReactNode }
 }
