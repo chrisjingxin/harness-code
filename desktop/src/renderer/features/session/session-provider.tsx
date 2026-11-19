@@ -122,7 +122,7 @@ export type SessionPageController = {
   resolveOwnerName(userId: string): string
   onChooseNewDirectory(): void
   onSelectNewProvider?(providerId: string): void
-  onNewDraftChange(text: string): void
+  onNewDraftChange(text: string, selectionStart?: number, selectionEnd?: number): void
   onStartNewSession(): void
   onChooseSessionDirectory(conversationId: string): void
   onSyncConversation(conversationId: string): void
@@ -162,6 +162,9 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
               : "Agent 暂不可用 · 仅支持草稿"
         return (
           <NewSessionPage
+            scope={scope}
+            visible={visible}
+            hooks={controller.hooks}
             projectName={controller.projectName}
             draft={controller.newDraft}
             busy={controller.newSessionBusy}
@@ -238,6 +241,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             rendering={controller.rendering}
             hooks={controller.hooks}
             centralFiles={controller.getCentralFiles?.({ scope, conversation })}
+            onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             onPersonalChange={controller.onPersonalChange}
             onCapabilitySelect={controller.onCapabilitySelect}
             onRequestFileCandidates={controller.onRequestFileCandidates}
@@ -314,6 +318,14 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       if (isLocal) {
         const directoryPath = controller.directories[conversation.conversationId] ?? null
         const folderName = directoryBasename(directoryPath)
+        const availability = controller.execution.getAvailability(conversation.conversationId)
+        const directoryStatus = availability.directoryStatus
+        const directoryStatusLabel = directoryPath
+          ? (directoryStatus === "checking" ? "检查中"
+            : directoryStatus === "confirmation-required" ? "待确认"
+              : directoryStatus === "invalid" ? "已失效"
+                : directoryStatus === "unavailable" ? "待检查" : "")
+          : ""
         const isRunning = Boolean(activeExecution?.activeTurnId)
         return (
           <>
@@ -322,11 +334,11 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             <button
               type="button"
               className="tb-dir session-directory-button"
-              title={directoryPath ? `本机工作目录：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
+              title={directoryPath ? [directoryPath, directoryStatusLabel ? availability.reason : undefined].filter(Boolean).join("\n") : "选择一个本机文件夹（支持普通非 Git 目录）"}
               onClick={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             >
               <IconFolder size={12} aria-hidden="true" />
-              <span className="d">{folderName || "选择工作目录"}</span>
+              <span className="d">{folderName ? `${folderName}${directoryStatusLabel ? ` · ${directoryStatusLabel}` : ""}` : "选择工作目录"}</span>
               <span className="chev" aria-hidden="true"><IconChevronDown size={11} aria-hidden="true" /></span>
             </button>
             {isRunning ? (

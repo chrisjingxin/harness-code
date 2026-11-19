@@ -379,29 +379,62 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), 0 4px 14px -6px rgba(15, 23, 42, 0.1);
 }
 
-.session-new-card textarea {
+.session-new-composer {
+  width: 100%;
+}
+
+.session-new-composer .wb-composer-inner {
+  max-width: none;
+  padding: 0;
+}
+
+.session-new-composer .wb-composer-box,
+.session-new-composer .wb-composer-box:focus-within {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.session-new-composer .wb-composer-tabs,
+.session-new-composer .wb-composer-rail:has(.wb-composer-rail-left:empty) {
+  display: none;
+}
+
+.session-new-composer .wb-composer-rail {
+  margin-bottom: 6px;
+  padding-top: 4px;
+  box-shadow: none;
+}
+
+.session-new-composer .wb-composer-backdrop,
+.session-new-composer .wb-composer-textarea {
   box-sizing: border-box;
   display: block;
   width: 100%;
   min-height: 92px;
   max-height: 220px;
-  resize: vertical;
-  border: 0;
-  background: transparent;
-  color: var(--fg, var(--text));
   padding: 2px 2px 8px;
   font: inherit;
   font-size: var(--text-md, 14px);
   line-height: 1.7;
+}
+
+.session-new-composer .wb-composer-textarea {
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: var(--fg, var(--text));
   outline: none;
 }
 
-.session-new-card textarea::placeholder {
+.session-new-composer .wb-composer-textarea::placeholder {
   color: var(--meta, var(--subtle));
 }
 
-.session-new-card textarea:focus,
-.session-new-card textarea:focus-visible {
+.session-new-composer .wb-composer-textarea:focus,
+.session-new-composer .wb-composer-textarea:focus-visible {
   outline: none;
 }
 
@@ -1374,4 +1407,11 @@
   margin: 0;
   font-size: var(--text-xs, 12px);
   color: var(--danger-fg, var(--danger));
+}
+
+.session-directory-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }

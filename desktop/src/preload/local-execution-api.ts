@@ -9,6 +9,7 @@ export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutio
       providerId === undefined
         ? ipc.invoke("workbench:local-execution:prepare", scope, directory)
         : ipc.invoke("workbench:local-execution:prepare", scope, directory, providerId),
+    confirmDirectory: scope => ipc.invoke("workbench:local-execution:confirm-directory", scope),
     send: (scope, bindingId, requestId, text, referenceIds = [], attachments = []) =>
       attachments.length === 0
         ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds)

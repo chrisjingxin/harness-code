@@ -18,11 +18,25 @@ import { CONTROL_CHAR_PATTERN } from "./ipc-guard.js"
 
 export const MAX_PERSISTED_GRANTS = 200
 export const MAX_ATTACHMENTS = 200
+const MAX_GRANT_FILE_BYTES = 1_048_576
 
 export type DirectoryGrant = {
   readonly path: string
   readonly dev: bigint
   readonly ino: bigint
+}
+
+/** 读取当前目录的真实身份；原始路径的符号链接变化也会在恢复核对中被识别。 */
+export async function inspectDirectory(path: string): Promise<DirectoryGrant> {
+  if (!isAbsolute(path) || path.includes("\0")) throw new Error("目录路径无效。")
+  const canonical = await realpath(path)
+  const info = await stat(canonical, { bigint: true })
+  if (!info.isDirectory()) throw new Error("目录不存在。")
+  return { path: canonical, dev: info.dev, ino: info.ino }
+}
+
+export function sameDirectory(left: DirectoryGrant, right: DirectoryGrant): boolean {
+  return left.path === right.path && left.dev === right.dev && left.ino === right.ino
 }
 
 export type GrantLoginContext = {
@@ -53,28 +67,58 @@ function isSafeRelativeWorkspacePath(rawPath: string): boolean {
   return segments.every(seg => seg.length > 0 && seg !== "." && seg !== ".." && seg.toLowerCase() !== ".git")
 }
 
-async function readPersistedGrantMap(filePath: string): Promise<Record<string, PersistedGrantEntry>> {
+function parseGrantEntry(value: unknown): PersistedGrantEntry | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (typeof record.path !== "string" || !isAbsolute(record.path)
+    || typeof record.dev !== "string" || !/^\d+$/.test(record.dev)
+    || typeof record.ino !== "string" || !/^\d+$/.test(record.ino)) {
+    return null
+  }
+  return { path: record.path, dev: record.dev, ino: record.ino }
+}
+
+async function readPersistedGrantMap(filePath: string, strict = false): Promise<Record<string, PersistedGrantEntry>> {
   const clean = Object.create(null) as Record<string, PersistedGrantEntry>
+  let bytes: Buffer
   try {
-    const raw = JSON.parse(await readFile(filePath, "utf8")) as unknown
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return clean
-    for (const [key, value] of Object.entries(raw)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue
-      const record = value as Record<string, unknown>
-      if (typeof record.path === "string" && typeof record.dev === "string" && typeof record.ino === "string") {
-        clean[key] = { path: record.path, dev: record.dev, ino: record.ino }
-      }
+    bytes = await readFile(filePath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return clean
+    if (strict) throw error
+    return clean
+  }
+  if (bytes.length > MAX_GRANT_FILE_BYTES) {
+    if (strict) throw new Error("目录确认记录过大。")
+    return clean
+  }
+  let raw: unknown
+  try {
+    raw = JSON.parse(bytes.toString("utf8"))
+  } catch (error) {
+    if (strict) throw error
+    return clean
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    if (strict) throw new Error("目录确认记录格式无效。")
+    return clean
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    const parsed = parseGrantEntry(value)
+    if (!parsed) {
+      if (strict) throw new Error("目录确认记录无效。")
+      continue
     }
-  } catch {
-    // 文件缺失或损坏时视作无历史授权，确保回退到人工目录选择。
+    clean[key] = parsed
   }
   return clean
 }
 
-/** 创建按账号隔离的工作目录授权内存与磁盘存储。 */
+/** 创建按服务来源和账号共同隔离的工作目录授权内存与磁盘存储。 */
 export function createLocalDirectoryGrantStore(
   grantsDir: string | undefined,
   isCurrent: (login: GrantLoginContext) => boolean,
+  origin = "",
 ) {
   const grants = new Map<string, DirectoryGrant>()
   let grantIo: Promise<void> = Promise.resolve()
@@ -87,7 +131,7 @@ export function createLocalDirectoryGrantStore(
 
   function grantFileForAccount(accountId: string): string | null {
     if (!grantsDir) return null
-    const hash = createHash("sha256").update(accountId).digest("hex")
+    const hash = createHash("sha256").update(JSON.stringify([origin, accountId])).digest("hex")
     return join(grantsDir, `${hash}.json`)
   }
 
@@ -96,7 +140,7 @@ export function createLocalDirectoryGrantStore(
     if (!filePath || !grantsDir) return
     await enqueueGrantIo(async () => {
       if (!isCurrent(login)) return
-      const existing = await readPersistedGrantMap(filePath)
+      const existing = await readPersistedGrantMap(filePath, false)
       delete existing[selectedPath]
       const entries = Object.entries(existing)
       const trimmed = entries.length >= MAX_PERSISTED_GRANTS
@@ -116,29 +160,21 @@ export function createLocalDirectoryGrantStore(
     })
   }
 
-  async function restore(login: GrantLoginContext, selectedPath: string): Promise<DirectoryGrant | undefined> {
+  async function rememberConfirmed(login: GrantLoginContext, path: string, grant: DirectoryGrant): Promise<void> {
+    if (!isCurrent(login)) return
+    if (grantsDir) await persist(login, path, grant)
+    if (isCurrent(login)) grants.set(path, grant)
+  }
+
+  async function readPersisted(login: GrantLoginContext, selectedPath: string): Promise<DirectoryGrant | undefined> {
     const filePath = grantFileForAccount(login.accountId)
     if (!filePath) return undefined
     return enqueueGrantIo(async () => {
       if (!isCurrent(login)) return undefined
-      const existing = await readPersistedGrantMap(filePath)
+      const existing = await readPersistedGrantMap(filePath, true)
       if (!Object.hasOwn(existing, selectedPath)) return undefined
       const entry = existing[selectedPath]!
-      try {
-        const expectedDev = BigInt(entry.dev)
-        const expectedIno = BigInt(entry.ino)
-        const canonical = await realpath(selectedPath)
-        const info = await stat(canonical, { bigint: true })
-        // 仅当实时路径、设备号与 inode 与原生选择时完全一致才恢复授权，防止重启后目录被替换或软链劫持。
-        if (!info.isDirectory() || canonical !== entry.path || info.dev !== expectedDev || info.ino !== expectedIno) {
-          return undefined
-        }
-        const restored: DirectoryGrant = { path: canonical, dev: info.dev, ino: info.ino }
-        grants.set(selectedPath, restored)
-        return restored
-      } catch {
-        return undefined
-      }
+      return { path: entry.path, dev: BigInt(entry.dev), ino: BigInt(entry.ino) }
     })
   }
 
@@ -146,21 +182,16 @@ export function createLocalDirectoryGrantStore(
     clearMemory(): void {
       grants.clear()
     },
+    getMemory(path: string): DirectoryGrant | undefined {
+      return grants.get(path)
+    },
+    rememberConfirmed,
+    readPersisted,
     async captureSelection(login: GrantLoginContext | null, path: string): Promise<void> {
       if (!login || !isCurrent(login)) return
-      try {
-        const canonical = await realpath(path)
-        const info = await stat(canonical, { bigint: true })
-        if (!info.isDirectory() || !isCurrent(login)) return
-        const grant: DirectoryGrant = { path: canonical, dev: info.dev, ino: info.ino }
-        grants.set(path, grant)
-        if (grantsDir) await persist(login, path, grant)
-      } catch {
-        // 目录已失效，准备执行时会要求重新确认。
-      }
-    },
-    async resolve(login: GrantLoginContext, path: string): Promise<DirectoryGrant | undefined> {
-      return grants.get(path) ?? (grantsDir ? await restore(login, path) : undefined)
+      const grant = await inspectDirectory(path)
+      if (!isCurrent(login)) return
+      await rememberConfirmed(login, path, grant)
     },
   }
 }

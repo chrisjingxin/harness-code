@@ -13,6 +13,7 @@ import type { CollaborationState as CollaborationStateType, ConversationUploads 
 import type { LocalExecutionNotice } from "../src/shared/index.ts"
 import type { LocalExecutionCoordinator, LocalExecutionRuntime, createLocalExecutionCoordinator as createCoordinatorFn } from "../src/main/local-execution-coordinator.ts"
 import type { bindLocalExecutionIpc as bindLocalExecutionIpcFn } from "../src/main/local-execution-ipc.ts"
+import type { PersonalStore as PersonalStoreType } from "../src/main/personal-store.ts"
 
 if (!("bun" in process.versions)) {
   const resolveTsHook = `
@@ -43,6 +44,9 @@ const { createLocalExecutionCoordinator } = await import("../src/main/local-exec
 }
 const { bindLocalExecutionIpc } = await import("../src/main/local-execution-ipc.ts") as {
   bindLocalExecutionIpc: typeof bindLocalExecutionIpcFn
+}
+const { PersonalStore } = await import("../src/main/personal-store.ts") as {
+  PersonalStore: typeof PersonalStoreType
 }
 
 const ORIGIN = "http://127.0.0.1:9999"
@@ -366,10 +370,11 @@ test("重启后从 grantsDir 恢复已选目录授权，未选目录/跨账号/�
 
     // 首次会话：只挑选 selectedDir、swappedDir 与 selectedSymlink（从未挑选 unselectedDir / symlinkDir）
     const identityA1 = await createSignedInState(USER_A)
-    const ipc1 = createLocalExecutionCoordinator(window, identityA1, null, runtime, grantsDir)
+    const ipc1 = createLocalExecutionCoordinator(window, identityA1, null, runtime, { grantsDir, origin: ORIGIN })
 
     const unselectedBefore = await ipc1.prepare(scopeA, unselectedDir)
     assert.equal(unselectedBefore.ok, false)
+    assert.equal(unselectedBefore.directoryStatus, "confirmation-required")
     if (!unselectedBefore.ok) assert.equal(unselectedBefore.error.code, "PROJECT_PATH_INVALID")
 
     await ipc1.captureDirectorySelection()(selectedDir)
@@ -377,9 +382,10 @@ test("重启后从 grantsDir 恢复已选目录授权，未选目录/跨账号/�
     await ipc1.captureDirectorySelection()(selectedSymlink)
     const firstPrepare = await ipc1.prepare(scopeA, selectedDir)
     assert.equal(firstPrepare.ok, true)
+    assert.equal(firstPrepare.directoryStatus, "ready")
 
-    // 核对授权文件按 sha256(accountId).json 落盘且权限为 0o600
-    const grantFile = join(grantsDir, `${createHash("sha256").update(USER_A).digest("hex")}.json`)
+    // 核对授权文件按 sha256(JSON.stringify([origin, accountId])).json 落盘且权限为 0o600
+    const grantFile = join(grantsDir, `${createHash("sha256").update(JSON.stringify([ORIGIN, USER_A])).digest("hex")}.json`)
     const fileStat = await stat(grantFile)
     assert.equal(fileStat.mode & 0o777, 0o600)
     await ipc1.dispose()
@@ -392,32 +398,38 @@ test("重启后从 grantsDir 恢复已选目录授权，未选目录/跨账号/�
 
     // 模拟重启：全新 IPC 实例，内存 grants 为空
     const identityA2 = await createSignedInState(USER_A)
-    const ipc2 = createLocalExecutionCoordinator(window, identityA2, null, runtime, grantsDir)
+    const ipc2 = createLocalExecutionCoordinator(window, identityA2, null, runtime, { grantsDir, origin: ORIGIN })
 
     const restored = await ipc2.prepare(scopeA, selectedDir)
     assert.equal(restored.ok, true)
+    assert.equal(restored.directoryStatus, "ready")
 
     const unselectedAfter = await ipc2.prepare(scopeA, unselectedDir)
     assert.equal(unselectedAfter.ok, false)
+    assert.equal(unselectedAfter.directoryStatus, "confirmation-required")
     if (!unselectedAfter.ok) assert.equal(unselectedAfter.error.code, "PROJECT_PATH_INVALID")
 
     const symlinkAfter = await ipc2.prepare(scopeA, symlinkDir)
     assert.equal(symlinkAfter.ok, false)
+    assert.equal(symlinkAfter.directoryStatus, "confirmation-required")
     if (!symlinkAfter.ok) assert.equal(symlinkAfter.error.code, "PROJECT_PATH_INVALID")
 
     const swappedAfter = await ipc2.prepare(scopeA, swappedDir)
     assert.equal(swappedAfter.ok, false)
-    if (!swappedAfter.ok) assert.equal(swappedAfter.error.code, "PROJECT_PATH_INVALID")
+    assert.equal(swappedAfter.directoryStatus, "invalid")
+    if (!swappedAfter.ok) assert.equal(swappedAfter.error.code, "PROJECT_ROOT_CHANGED")
 
     const repointedAfter = await ipc2.prepare(scopeA, selectedSymlink)
     assert.equal(repointedAfter.ok, false)
-    if (!repointedAfter.ok) assert.equal(repointedAfter.error.code, "PROJECT_PATH_INVALID")
+    assert.equal(repointedAfter.directoryStatus, "invalid")
+    if (!repointedAfter.ok) assert.equal(repointedAfter.error.code, "PROJECT_ROOT_CHANGED")
 
     // 跨账号不能恢复账号 A 的授权目录
     const identityB = await createSignedInState(USER_B)
-    const ipcB = createLocalExecutionCoordinator(window, identityB, null, runtime, grantsDir)
+    const ipcB = createLocalExecutionCoordinator(window, identityB, null, runtime, { grantsDir, origin: ORIGIN })
     const crossAccount = await ipcB.prepare(scopeB, selectedDir)
     assert.equal(crossAccount.ok, false)
+    assert.equal(crossAccount.directoryStatus, "confirmation-required")
     if (!crossAccount.ok) assert.equal(crossAccount.error.code, "PROJECT_PATH_INVALID")
 
     await Promise.all([ipc2.dispose(), ipcB.dispose()])
@@ -654,6 +666,7 @@ test("多代理切换、会话级能力透传（session-state/elicitation/mode/c
     } as unknown as IpcWindow
     const unbind = bindLocalExecutionIpc(trustedWindow, `${ORIGIN}/index.html`, ipc, fakeIpc as never)
     assert.equal(registered.has("workbench:local-execution:list-providers"), true)
+    assert.equal(registered.has("workbench:local-execution:confirm-directory"), true)
     assert.equal(registered.has("workbench:local-execution:set-mode"), true)
     assert.equal(registered.has("workbench:local-execution:set-config-option"), true)
     assert.equal(registered.has("workbench:local-execution:answer-elicitation"), true)
@@ -772,6 +785,96 @@ test("prepare 未指定 providerId 时优先使用已绑定的历史 Agent，明
     }
 
     await ipc.dispose()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("不同服务 origin 隔离目录确认记录，旧个人记录路径经 confirmDirectory 原生确认后可恢复", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc218-ipc-confirm-"))
+  try {
+    const legacyDir = join(root, "legacy-workdir")
+    const grantsDir = join(root, "grants")
+    const userDataDir = join(root, "user-data")
+    await mkdir(legacyDir, { recursive: true })
+
+    const { window } = createFakeWindow()
+    const { runtime } = createMockRuntime()
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+
+    // 1. 同一账号在不同服务 origin 下不得共享磁盘目录确认
+    const identityA = await createSignedInState(USER_A)
+    const ipcOriginA = createLocalExecutionCoordinator(window, identityA, null, runtime, { grantsDir, origin: ORIGIN })
+    await ipcOriginA.captureDirectorySelection()(legacyDir)
+    assert.equal((await ipcOriginA.prepare(scope, legacyDir)).directoryStatus, "ready")
+    await ipcOriginA.dispose()
+
+    const ipcOriginOther = createLocalExecutionCoordinator(window, identityA, null, runtime, {
+      grantsDir,
+      origin: "http://127.0.0.1:8888",
+    })
+    const crossOrigin = await ipcOriginOther.prepare(scope, legacyDir)
+    assert.equal(crossOrigin.ok, false)
+    assert.equal(crossOrigin.directoryStatus, "confirmation-required")
+    await ipcOriginOther.dispose()
+
+    // 2. 仅有个人记录旧路径（无 confirm 记录）时，取消/确认 confirmDirectory 闭环
+    const legacyGrantsDir = join(root, "legacy-grants")
+    const personal = new PersonalStore(identityA, ORIGIN, userDataDir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    assert.equal((await personal.load(convKey)).ok, true)
+    assert.equal((await personal.save(convKey, 1, {
+      scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
+      expandedTools: [],
+      expandedOutputs: [],
+      draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: 0, referenceIds: [], attachmentIds: [] },
+      localDirectoryPath: legacyDir,
+      syncCache: null,
+    })).ok, true)
+
+    let confirmAnswer = false
+    const promptedPaths: string[] = []
+    const ipcLegacy = createLocalExecutionCoordinator(window, identityA, null, runtime, {
+      grantsDir: legacyGrantsDir,
+      origin: ORIGIN,
+      personal,
+      confirmDirectoryPrompt: async path => {
+        promptedPaths.push(path)
+        return confirmAnswer
+      },
+    })
+
+    const unconfirmed = await ipcLegacy.prepare(scope, legacyDir)
+    assert.equal(unconfirmed.ok, false)
+    assert.equal(unconfirmed.directoryStatus, "confirmation-required")
+    if (!unconfirmed.ok) assert.equal(unconfirmed.error.code, "PROJECT_PATH_INVALID")
+
+    const rejectedConfirm = await ipcLegacy.confirmDirectory(scope)
+    assert.deepEqual(rejectedConfirm, { ok: true, value: false })
+    assert.deepEqual(promptedPaths, [legacyDir])
+    assert.equal((await ipcLegacy.prepare(scope, legacyDir)).directoryStatus, "confirmation-required")
+
+    confirmAnswer = true
+    const acceptedConfirm = await ipcLegacy.confirmDirectory(scope)
+    assert.deepEqual(acceptedConfirm, { ok: true, value: true })
+    assert.deepEqual(promptedPaths, [legacyDir, legacyDir])
+
+    const readyNow = await ipcLegacy.prepare(scope, legacyDir)
+    assert.equal(readyNow.ok, true)
+    assert.equal(readyNow.directoryStatus, "ready")
+    await ipcLegacy.dispose()
+
+    // 模拟重启恢复
+    const ipcRestarted = createLocalExecutionCoordinator(window, identityA, null, runtime, {
+      grantsDir: legacyGrantsDir,
+      origin: ORIGIN,
+      personal,
+      confirmDirectoryPrompt: async () => false,
+    })
+    const readyAfterRestart = await ipcRestarted.prepare(scope, legacyDir)
+    assert.equal(readyAfterRestart.ok, true)
+    assert.equal(readyAfterRestart.directoryStatus, "ready")
+    await ipcRestarted.dispose()
   } finally {
     await rm(root, { recursive: true, force: true })
   }

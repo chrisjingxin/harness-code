@@ -1,7 +1,7 @@
 /**
  * 本机执行 IPC 通道注册表。
  *
- * 【功能定义】统一经 `ipc-guard.ts` 注册 `workbench:local-execution:*` 全部 8 条受保护通道，
+ * 【功能定义】统一经 `ipc-guard.ts` 注册 `workbench:local-execution:*` 全部 9 条受保护通道，
  * 对请求来源、参数个数、标识与结构化载体做白名单校验后转交 `LocalExecutionCoordinator`。
  * 【协作边界】不包含目录持久化与 ACP 状态机细节（分别位于 `local-directory-grants.ts` 与 `local-execution-coordinator.ts`）。
  */
@@ -86,6 +86,10 @@ export function bindLocalExecutionIpc(
     && (providerId === undefined || providerId === null || (typeof providerId === "string" && PROVIDER_ID_PATTERN.test(providerId)))
       ? execution.prepare(scope, directory, typeof providerId === "string" ? providerId : undefined)
       : formatIpcError("INVALID_REQUEST", "本机会话、目录或 Agent 类型参数无效。"))
+  ipc.handle("workbench:local-execution:confirm-directory", 1, scope =>
+    isLocalExecutionScope(scope)
+      ? execution.confirmDirectory(scope)
+      : formatIpcError("INVALID_REQUEST", "本机会话参数无效。"))
   ipc.handle("workbench:local-execution:send", [5, 6], (scope, bindingId, requestId, text, referenceIds, attachments) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(requestId)
       && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768

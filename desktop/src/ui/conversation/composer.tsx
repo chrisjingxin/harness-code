@@ -75,6 +75,8 @@ interface ComposerProps {
   readonly localStatus?: string
   readonly onSend: () => void
   readonly onCancel: () => void
+  /** 新建准备页使用 Enter 换行，提交仍由该页的明确开始动作处理。 */
+  readonly submitOnEnter?: boolean
   readonly children?: ReactNode
 }
 
@@ -137,8 +139,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     ...taskItems.map(item => ({ key: candidateKey(item), group: "task" as const, item })),
     ...memberItems.map(item => ({ key: candidateKey(item), group: "member" as const, item })),
   ]
-  const activeTab: MentionTab = showCollaboration && !directory ? mentionTab : "all"
-  const filteredEntries = activeTab === "all" ? allEntries : allEntries.filter(entry => entry.group === activeTab)
+  const hasFileMention = Boolean(actions.onRequestFileCandidates)
   const groupCounts: Record<MentionTab, number> = {
     all: allEntries.length,
     file: files.length,
@@ -147,9 +148,16 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     task: taskItems.length,
     member: memberItems.length,
   }
-  const availableTabs: readonly MentionTab[] = groupCounts.member > 0
-    ? ["all", "file", "knowledge", "conversation", "task", "member"]
-    : ["all", "file", "knowledge", "conversation", "task"]
+  const availableTabs: readonly MentionTab[] = [
+    "all",
+    ...(hasFileMention ? (["file"] as const) : []),
+    "knowledge",
+    "conversation",
+    "task",
+    ...(groupCounts.member > 0 ? (["member"] as const) : []),
+  ]
+  const activeTab: MentionTab = showCollaboration && !directory && availableTabs.includes(mentionTab) ? mentionTab : "all"
+  const filteredEntries = activeTab === "all" ? allEntries : allEntries.filter(entry => entry.group === activeTab)
 
   // 一组结果比另一组更早返回时，仍保留用户已选中的条目。
   const candidateIndex = Math.max(0, filteredEntries.findIndex(entry => entry.key === selected))
@@ -281,7 +289,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     if (text !== draft.text || start !== draft.selectionStart || end !== draft.selectionEnd) invalidateCandidates()
     setDismissed(null)
     setHint("")
-    const slash = isSlashQuery(text)
+    const slash = props.submitOnEnter !== false && isSlashQuery(text)
     setCommandOpen(slash)
     if (slash) setCommandIndex(0)
     actions.onPersonalChange(scope, { kind: "draft-text", text, selectionStart: start, selectionEnd: end })
@@ -382,7 +390,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         return
       }
     }
-    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); if (canSend) onSend(); return }
+    if (event.key === "Enter" && !event.shiftKey && props.submitOnEnter !== false) { event.preventDefault(); event.stopPropagation(); if (canSend) onSend(); return }
     if (event.key === "Escape" && (activity?.active || showCancel)) {
       event.preventDefault()
       event.stopPropagation()
@@ -650,8 +658,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               rows={1}
               value={draft.text}
               disabled={!canEdit}
-              placeholder={canEdit ? "描述任务，@ 引用文件/知识/会话，/ 唤起命令…" : "当前无法编辑草稿"}
-              aria-label="消息，Enter 发送，Shift+Enter 换行"
+              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "描述任务，@ 引用文件/知识/会话，/ 唤起命令…") : "当前无法编辑草稿"}
+              aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
               onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
               onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
               onScroll={event => {
@@ -675,25 +683,27 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                 type="button"
                 className="wb-composer-tool"
                 disabled={!canEdit || !visible}
-                title="输入 @ 引用工作区文件、团队知识或项目会话"
+                title={props.submitOnEnter === false ? "输入 @ 引用项目会话或团队知识" : "输入 @ 引用工作区文件、团队知识或项目会话"}
                 onMouseDown={event => event.preventDefault()}
                 onClick={insertMention}
               >
                 <span className="wb-composer-kbd" aria-hidden="true">@</span>
-                <span>引用</span>
+                <span>{props.submitOnEnter === false ? "引用会话" : "引用"}</span>
               </button>
-              <button
-                type="button"
-                className="wb-composer-tool"
-                disabled={!canEdit || !visible}
-                aria-expanded={commandOpen}
-                title="输入 / 或点击查看可用斜杠命令"
-                onMouseDown={event => event.preventDefault()}
-                onClick={toggleCommandMenu}
-              >
-                <span className="wb-composer-kbd" aria-hidden="true">/</span>
-                <span>命令</span>
-              </button>
+              {props.submitOnEnter !== false ? (
+                <button
+                  type="button"
+                  className="wb-composer-tool"
+                  disabled={!canEdit || !visible}
+                  aria-expanded={commandOpen}
+                  title="输入 / 或点击查看可用斜杠命令"
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={toggleCommandMenu}
+                >
+                  <span className="wb-composer-kbd" aria-hidden="true">/</span>
+                  <span>命令</span>
+                </button>
+              ) : null}
               {model.controls.map(control => (
                 <CapabilityMenu
                   key={control.id}
@@ -706,7 +716,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               {children}
             </div>
             <div className="wb-composer-rail-right">
-              <span className="wb-composer-hint">⏎ 发送</span>
+              <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "⏎ 发送"}</span>
               {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
               {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><IconArrowUp aria-hidden="true" /></button> : null}
             </div>

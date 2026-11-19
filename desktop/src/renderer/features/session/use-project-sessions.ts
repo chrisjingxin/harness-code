@@ -49,12 +49,15 @@ import {
 } from "./session-provider.js"
 import type { SessionPageController } from "./session-provider.js"
 import { useLocalDirectory } from "./use-local-directory.js"
+import { NEW_SESSION_DRAFT_ID } from "./contracts.js"
+import { newSessionConversationDraft, restoreNewSessionDraft } from "./new-session-draft.js"
+import { mergeReferenceDraft } from "./reference-draft.js"
 import { useLocalExecution } from "./use-local-execution.js"
 
 const HISTORY_PAGE_LIMIT = 200
 const MAX_HISTORY_PAGES = 50
 const EMPTY_CONVERSATIONS: ProjectConversationSummary[] = []
-const EMPTY_NEW_DRAFT: NewSessionDraft = { directoryPath: null, draftText: "" }
+const EMPTY_NEW_DRAFT = restoreNewSessionDraft(null)
 
 type ScopeListState = {
   readonly status: "loading" | "ready" | "failed"
@@ -240,13 +243,15 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     titleOverridesRef.current = next
     setTitleOverridesByKey(next)
   }, [])
-  const pendingRequestRef = useRef<{ signature: string; requestId: string } | null>(null)
+  const pendingRequestRef = useRef<{ signature: string; requestId: string; conversation?: ProjectConversationSummary } | null>(null)
   const pendingAutoSendRef = useRef<{
     readonly scope: ProjectNavigationScope
     readonly conversationId: string
     readonly directoryPath: string
     readonly draftRevision: number
     readonly text: string
+    readonly referenceIds: readonly string[]
+    readonly scopeKey: string
   } | null>(null)
   const creatingRef = useRef(false)
 
@@ -297,6 +302,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     if (draftsRef.current[currentScopeKey]?.loaded) return
     const targetScope = scope
     const targetKey = currentScopeKey
+    const beforeLoad = draftsRef.current[targetKey]
     void persistence.load({
       kind: "projectDraft",
       workspaceId: targetScope.workspaceId,
@@ -304,13 +310,23 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     }).then(result => {
       if (!stillActive(targetKey)) return
       const saved = result.ok ? result.value.data as ProjectDraftPersonal | null : null
-      setDraftsByScope(prev => ({
-        ...prev,
-        [targetKey]: {
-          loaded: result.ok,
-          value: saved ?? EMPTY_NEW_DRAFT,
-        },
-      }))
+      const edited = draftsRef.current[targetKey] !== beforeLoad ? draftsRef.current[targetKey]?.value : undefined
+      const restored = restoreNewSessionDraft(saved)
+      const before = beforeLoad?.value ?? EMPTY_NEW_DRAFT
+      // 恢复期间的输入保留，尚未改动的目录与引用仍采用磁盘记录。
+      const value = edited ? {
+        ...restored,
+        ...(edited.directoryPath !== before.directoryPath ? { directoryPath: edited.directoryPath } : {}),
+        ...(edited.draftText !== before.draftText ? { draftText: edited.draftText } : {}),
+        selectionStart: edited.selectionStart, selectionEnd: edited.selectionEnd,
+        revision: Math.max(restored.revision, edited.revision) + 1,
+      } : restored
+      const entry = { loaded: result.ok, value }
+      draftsRef.current = { ...draftsRef.current, [targetKey]: entry }
+      setDraftsByScope(prev => ({ ...prev, [targetKey]: entry }))
+      if (edited && result.ok) persistence.save({
+        kind: "projectDraft", workspaceId: targetScope.workspaceId, projectId: targetScope.projectId,
+      }, value)
     })
   }, [currentScopeKey, persistence, refreshMetadata])
 
@@ -628,19 +644,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     const targetKey = currentScopeKey
     void host.chooseDirectory().then(picked => {
       if (!picked || !stillActive(targetKey)) return
-      pendingRequestRef.current = null
       setNewSessionError(null)
       const currentDraft = draftsRef.current[targetKey]?.value ?? EMPTY_NEW_DRAFT
-      saveDraftValue(targetScope, targetKey, { ...currentDraft, directoryPath: picked })
+      if (picked !== currentDraft.directoryPath) pendingRequestRef.current = null
+      saveDraftValue(targetScope, targetKey, { ...currentDraft, directoryPath: picked, revision: currentDraft.revision + 1 })
     }).catch(() => {})
   }, [scope, currentScopeKey, host, saveDraftValue])
 
-  const onNewDraftChange = useCallback((text: string) => {
+  const onNewDraftChange = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
     if (!scope || !currentScopeKey) return
-    pendingRequestRef.current = null
     setNewSessionError(null)
     const currentDraft = draftsRef.current[currentScopeKey]?.value ?? EMPTY_NEW_DRAFT
-    saveDraftValue(scope, currentScopeKey, { ...currentDraft, draftText: text })
+    if (text !== currentDraft.draftText) pendingRequestRef.current = null
+    saveDraftValue(scope, currentScopeKey, {
+      ...currentDraft, draftText: text, selectionStart, selectionEnd, revision: currentDraft.revision + 1,
+    })
   }, [scope, currentScopeKey, saveDraftValue])
 
   /** 两条新建路径共用已有登记端口。调用方用同一个请求 ID 重试未确认的登记。 */
@@ -685,18 +703,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     const currentDraft = draftsRef.current[targetKey]?.value ?? EMPTY_NEW_DRAFT
     const chosenDir = currentDraft.directoryPath
     const trimmedPrompt = currentDraft.draftText.trim()
-    if (!chosenDir || !trimmedPrompt) return
+    if (!draftsRef.current[targetKey]?.loaded || !chosenDir || (!trimmedPrompt && !currentDraft.referenceIds.length)) return
 
-    const signature = `${targetKey}\0${chosenDir}\0${trimmedPrompt}`
+    // 光标修订不改变登记请求。首次内容与目录相同时，未知结果仍用原请求号重试。
+    const signature = JSON.stringify([targetKey, chosenDir, currentDraft.draftText, currentDraft.referenceIds])
     if (!pendingRequestRef.current || pendingRequestRef.current.signature !== signature) {
       pendingRequestRef.current = { signature, requestId: crypto.randomUUID() }
     }
-    const { requestId } = pendingRequestRef.current
+    const request = pendingRequestRef.current
 
     setNewSessionBusy(true)
     setNewSessionError(null)
     try {
-      const res = await registerLocalConversation(targetScope, deriveSessionTitle(trimmedPrompt), requestId)
+      const res = request.conversation ? { ok: true as const, conversation: request.conversation }
+        : await registerLocalConversation(targetScope, deriveSessionTitle(trimmedPrompt), request.requestId)
+      if (res.ok) request.conversation = res.conversation
       if (activeDraftContext.current !== draftContext) return
       if (!res.ok) {
         setNewSessionError(res.message)
@@ -704,11 +725,11 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       }
 
       const created = res.conversation
-      pendingRequestRef.current = null
       includeRegisteredConversation(targetKey, created)
 
-      await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
+      const restored = await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
       if (activeDraftContext.current !== draftContext) return
+      if (!restored) { setNewSessionError("会话已登记，无法恢复草稿。请重试继续准备。"); return }
       let nextDraftRevision = 1
       updateRecord(targetScope, targetKey, created.conversationId, prev => {
         nextDraftRevision = prev.personal.draft.revision + 1
@@ -722,8 +743,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
             draft: {
               ...prev.personal.draft,
               text: currentDraft.draftText,
-              selectionStart: currentDraft.draftText.length,
-              selectionEnd: currentDraft.draftText.length,
+              referenceIds: [...currentDraft.referenceIds],
+              selectionStart: currentDraft.selectionStart,
+              selectionEnd: currentDraft.selectionEnd,
               revision: nextDraftRevision,
             },
           },
@@ -736,8 +758,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         directoryPath: chosenDir,
         draftRevision: nextDraftRevision,
         text: currentDraft.draftText,
+        referenceIds: [...currentDraft.referenceIds],
+        scopeKey: targetKey,
       }
-      saveDraftValue(targetScope, targetKey, EMPTY_NEW_DRAFT)
+      if (draftsRef.current[targetKey]?.value === currentDraft) {
+        saveDraftValue(targetScope, targetKey, { ...EMPTY_NEW_DRAFT, revision: currentDraft.revision + 1 })
+      }
+      if (pendingRequestRef.current === request) pendingRequestRef.current = null
       onOpenConversation?.(created)
     } finally {
       if (mountedRef.current) setNewSessionBusy(false)
@@ -909,6 +936,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     : undefined
   useEffect(() => {
     const pending = pendingAutoSendRef.current
+    if (pending && pending.scopeKey !== currentScopeKey) { pendingAutoSendRef.current = null; return }
     if (!pending || pending.conversationId !== selectedConversationId || !selectedIsLocal) return
     if (!localExecutionPort?.send || !selectedAvailability?.available) return
     pendingAutoSendRef.current = null
@@ -918,10 +946,10 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       directoryPath: pending.directoryPath,
       draftRevision: pending.draftRevision,
       text: pending.text,
-      referenceIds: [],
+      referenceIds: pending.referenceIds,
       attachmentIds: [],
     })
-  }, [selectedConversationId, selectedIsLocal, localExecutionPort, selectedAvailability?.available])
+  }, [currentScopeKey, selectedConversationId, selectedIsLocal, localExecutionPort, selectedAvailability?.available])
 
   const localDir = useLocalDirectory({
     localDirectory,
@@ -949,8 +977,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [draftToReveal, scope, currentScopeKey, userId, selectedConversationId, selectedIsLocal, localDir])
 
   const currentDraft = (currentScopeKey ? draftsByScope[currentScopeKey]?.value : undefined) ?? EMPTY_NEW_DRAFT
-  const canCreateConversation = Boolean(scope)
-  const createBlockedReason = undefined
+  const canCreateConversation = Boolean(scope && draftsByScope[currentScopeKey]?.loaded)
+  const createBlockedReason = canCreateConversation ? undefined : "正在恢复新建草稿，请稍候。"
 
   const rendering: RenderingActions = useMemo(() => ({
     copyText: text => host.copyText(text),
@@ -1131,35 +1159,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     const record = recordsRef.current[makeRecordKey(targetKey, conversationId)]
     if (!record?.loaded) return failure(record?.loadError ?? "无法恢复目标草稿，请重试。")
     const previous = record.personal.draft
-    if (change.kind === "replace" && !previous.referenceIds.includes(change.referenceId)) {
-      return failure("原引用已移除，请重新选择。")
-    }
-    const referenceIds = change.kind === "add"
-      ? [...new Set([...previous.referenceIds, ...change.referenceIds])]
-      : change.kind === "replace"
-        ? [...new Set(previous.referenceIds.map(id => id === change.referenceId ? change.replacementId : id))]
-        : previous.referenceIds.filter(id => id !== change.referenceId)
-    const mention = change.kind === "add" ? change.mention : undefined
-    const removeToken = mention
-      && mention.conversationId === targetScope.conversationId && mention.conversationId === conversationId
-      && mention.draftRevision === previous.revision
-      && Number.isInteger(mention.tokenStart) && Number.isInteger(mention.tokenEnd)
-      && mention.tokenStart >= 0 && mention.tokenStart < mention.tokenEnd && mention.tokenEnd <= previous.text.length
-      && mention.tokenText.startsWith("@") && previous.text.slice(mention.tokenStart, mention.tokenEnd) === mention.tokenText
-    const textWithoutTrigger = removeToken ? previous.text.slice(0, mention.tokenStart) + previous.text.slice(mention.tokenEnd) : previous.text
+    const merged = mergeReferenceDraft(previous, change, conversationId === targetScope.conversationId ? conversationId : "")
+    if (!merged) return failure("原引用已移除，请重新选择。")
     const initialText = change.kind === "add" ? change.initialText : undefined
     const text = initialText
-      ? (textWithoutTrigger ? `${textWithoutTrigger}\n\n${initialText}` : initialText)
-      : textWithoutTrigger
+      ? (merged.text ? `${merged.text}\n\n${initialText}` : initialText)
+      : merged.text
     const draft = {
-      ...previous,
+      ...merged,
       text,
-      ...(initialText ? { selectionStart: text.length, selectionEnd: text.length } : removeToken ? {
-        selectionStart: mention.tokenStart,
-        selectionEnd: mention.tokenStart,
-      } : {}),
-      referenceIds,
-      revision: previous.revision + 1,
+      ...(initialText ? { selectionStart: text.length, selectionEnd: text.length } : {}),
     }
     updateRecord(targetScope, targetKey, conversationId, current => ({
       ...current,
@@ -1177,15 +1186,34 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     updateRecord,
   ])
 
+  const applyNewSessionReference = useCallback<SessionIntegrationApi["applyNewSessionReference"]>(async (origin, change) => {
+    const key = makeScopeKey(origin)
+    if (activeDraftContext.current !== draftContext || key !== currentScopeKey
+      || origin.accountId !== userId || origin.deviceId !== userId || origin.conversationId !== null) {
+      return { ok: false, message: "新建草稿范围已变化，请重新选择。" }
+    }
+    const entry = draftsRef.current[key]
+    if (!entry?.loaded) return { ok: false, message: "新建草稿尚未恢复，请稍后重试。" }
+    const draft = mergeReferenceDraft(newSessionConversationDraft(entry.value), change, NEW_SESSION_DRAFT_ID)
+    if (!draft) return { ok: false, message: "原引用已移除，请重新选择。" }
+    pendingRequestRef.current = null
+    saveDraftValue(origin, key, {
+      ...entry.value, draftText: draft.text, referenceIds: draft.referenceIds, revision: draft.revision,
+      selectionStart: draft.selectionStart, selectionEnd: draft.selectionEnd,
+    })
+    return { ok: true, value: { draftRevision: draft.revision } }
+  }, [draftContext, currentScopeKey, userId, saveDraftValue])
+
   const integration: SessionIntegrationApi = useMemo(() => ({
     refreshMetadata,
     listProjectConversations,
     listMyLocalConversations,
     applyReferenceDraft,
+    applyNewSessionReference,
     revealReferenceDraft: (targetScope, id) => {
       setDraftToReveal({ scopeKey: makeScopeKey(targetScope), deviceId: targetScope.deviceId, id })
     },
-  }), [refreshMetadata, listProjectConversations, listMyLocalConversations, applyReferenceDraft])
+  }), [refreshMetadata, listProjectConversations, listMyLocalConversations, applyReferenceDraft, applyNewSessionReference])
 
   return { navigationSource, pageController, integration }
 }

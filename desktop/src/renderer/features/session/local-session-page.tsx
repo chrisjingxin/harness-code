@@ -54,6 +54,7 @@ export type LocalSessionPageProps = {
   readonly rendering: RenderingActions
   readonly hooks?: SessionExternalHooks
   readonly centralFiles?: SessionCentralFilesState
+  readonly onChooseDirectory?: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
   readonly onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
@@ -79,6 +80,7 @@ export function LocalSessionPage({
   hooks,
   centralFiles,
   onPersonalChange,
+  onChooseDirectory,
   onCapabilitySelect,
   onRequestFileCandidates,
   onOpenFile,
@@ -88,6 +90,7 @@ export function LocalSessionPage({
   const [planCollapsed, setPlanCollapsed] = useState(false)
   const [dismissedRestoreKey, setDismissedRestoreKey] = useState<string | null>(null)
   const [capabilityError, setCapabilityError] = useState<string | null>(null)
+  const [confirmingDirectory, setConfirmingDirectory] = useState(false)
   const [expandedPlan, setExpandedPlan] = useState<{
     readonly title: string
     readonly subtitle?: string
@@ -116,6 +119,8 @@ export function LocalSessionPage({
   }, [expandedPlan])
 
   const availability = execution.getAvailability(conversation.conversationId)
+  const directoryStatus = availability.directoryStatus
+  const directoryNeedsAction = Boolean(directoryPath && (directoryStatus === "confirmation-required" || directoryStatus === "invalid" || directoryStatus === "unavailable"))
   const hasUnsupportedMaterial = Boolean(execution.textOnly && personal.draft.attachmentIds.length > 0)
   const referenceKey = JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId, conversation.projectId, directoryPath])
   const activeReference = useRef({ key: referenceKey, visible })
@@ -247,9 +252,13 @@ export function LocalSessionPage({
       })()
     : translatedElicitation?.interaction ?? null
 
-  const view = activeExecution
+  const projected = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
+  // 目录阻止发送时，旧执行/上传提示不能盖住当前目录失败原因。
+  const view = directoryNeedsAction
+    ? { ...projected, composer: { ...projected.composer, statusText: availability.reason } }
+    : projected
 
   const sendUndoCommand = async (command: string) => {
     if (!execution.send) {
@@ -433,7 +442,7 @@ export function LocalSessionPage({
     </div>
   ) : undefined
 
-  const composerSlot = capabilities.usageBadge || hooks?.composerExtra ? (
+  const composerSlot = capabilities.usageBadge || hooks?.composerExtra || directoryNeedsAction ? (
     <div className="session-composer-extra">
       {capabilities.usageBadge ? (
         <span className="session-usage-badge" title="当前上下文窗口 Token 占用">
@@ -441,6 +450,32 @@ export function LocalSessionPage({
         </span>
       ) : null}
       {hooks?.composerExtra}
+      {directoryNeedsAction ? (
+        <span className="session-directory-actions">
+          {directoryStatus === "confirmation-required" && execution.confirmDirectory ? (
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-small"
+              disabled={confirmingDirectory}
+              onClick={() => {
+                setConfirmingDirectory(true)
+                void execution.confirmDirectory!(conversation.conversationId).finally(() => setConfirmingDirectory(false))
+              }}
+            >
+              {confirmingDirectory ? "正在确认…" : "确认目录"}
+            </button>
+          ) : null}
+          {onChooseDirectory ? (
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-small"
+              onClick={onChooseDirectory}
+            >
+              选择目录
+            </button>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   ) : undefined
 

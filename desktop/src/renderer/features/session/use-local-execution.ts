@@ -17,6 +17,7 @@ import type {
 import {
   localExecutionKey,
   type DesktopLocalExecutionHost,
+  type LocalDirectoryStatus,
   type LocalExecutionAvailability,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
@@ -73,6 +74,7 @@ type Screen = {
   retiredBindingId?: string
   binding?: LocalExecutionBinding
   availability?: LocalExecutionAvailability
+  directoryStatus?: LocalDirectoryStatus
   terminal?: { readonly bindingId: string; readonly availability: LocalExecutionAvailability }
   flight?: Flight
   pendingBindingNotices?: Map<string, BufferedBindingNotices>
@@ -125,11 +127,13 @@ export function useLocalExecution(
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
   const projectId = project?.projectId
+  const [confirmationRevision, retryPreparation] = useReducer(revision => revision + 1, 0)
+  const confirming = useRef(false)
   const target = useMemo<Target | null>(() => {
     if (!accountId || !workspaceId || !projectId || !conversationId) return null
     const scope = { accountId, workspaceId, projectId, conversationId }
-    return { scope, key: localExecutionKey(scope), directory, selectionRevision }
-  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision])
+    return { scope, key: localExecutionKey(scope), directory, selectionRevision: selectionRevision + confirmationRevision }
+  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision, confirmationRevision])
 
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
@@ -251,6 +255,7 @@ export function useLocalExecution(
           screen.terminal = notice
           if (screen.binding?.bindingId === notice.bindingId) {
             screen.availability = notice.availability
+            screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
             refresh()
           }
         }
@@ -284,6 +289,7 @@ export function useLocalExecution(
         screen.flight = undefined
         screen.terminal = notice
         if (screen.binding?.bindingId === notice.bindingId) screen.availability = notice.availability
+        screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
         current.current.onWorkspaceRefresh?.(flight.scope, notice.scope.conversationId)
       }
       refresh()
@@ -330,11 +336,14 @@ export function useLocalExecution(
     screen.preparedForProvider = desiredProvider
     screen.binding = undefined
     screen.availability = preparing
+    screen.directoryStatus = "checking"
     const lastTerminal = screen.terminal
     refresh()
     void host.prepare(target.scope, target.directory, desiredProvider).then(result => {
       if (!active || screen.prepareToken !== token) return
+      screen.directoryStatus = result.directoryStatus
       screen.binding = result.ok ? result.value : undefined
+      if (result.ok) screen.timeline = { ...screen.timeline, failure: null }
       if (!result.ok) {
         screen.availability = { available: false, reason: result.error.message }
       } else {
@@ -351,6 +360,7 @@ export function useLocalExecution(
     }).catch(() => {
       if (!active || screen.prepareToken !== token) return
       screen.availability = { available: false, reason: "无法确认本机执行能力，请重新选择工作目录。" }
+      screen.directoryStatus = "unavailable"
       refresh()
     })
     return () => { active = false }
@@ -375,7 +385,48 @@ export function useLocalExecution(
   return {
     textOnly: false,
     commitsAcceptedDraft: true,
-    getAvailability: id => readAvailability(target, id),
+    getAvailability: id => {
+      const screen = target && screens.current.get(target.key)
+      const preparedForTarget = Boolean(
+        target?.directory
+        && screen?.preparedFor?.directory === target.directory
+        && screen?.preparedFor.selectionRevision === target.selectionRevision
+        && matchesPreparedProvider(screen, resolveDesiredProviderId(target)),
+      )
+      return {
+        ...readAvailability(target, id),
+        ...(target?.scope.conversationId === id ? {
+          directoryStatus: !target.directory
+            ? "confirmation-required"
+            : preparedForTarget ? screen?.directoryStatus ?? "checking" : "checking",
+        } : {}),
+      }
+    },
+    async confirmDirectory(id) {
+      const selected = current.current.target
+      if (!selected || selected.scope.conversationId !== id || confirming.current) return
+      confirming.current = true
+      try {
+        const result = await host.confirmDirectory(selected.scope)
+        if (!mounted.current || current.current.target !== selected) return
+        if (result.ok) {
+          if (result.value) retryPreparation()
+        } else {
+          const screen = screens.current.get(selected.key)
+          if (screen) {
+            screen.availability = { available: false, reason: result.error.message }
+            if (result.error.code === "PROJECT_ROOT_CHANGED") screen.directoryStatus = "invalid"
+            refresh()
+          }
+        }
+      } catch {
+        const screen = screens.current.get(selected.key)
+        if (mounted.current && current.current.target === selected && screen) {
+          screen.availability = { available: false, reason: "无法确认目录，请重试或重新选择。" }
+          refresh()
+        }
+      } finally { confirming.current = false }
+    },
     getView: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.timeline : undefined,
     getProviders: () => providersRef.current,
     getSelectedProviderId: id => {
@@ -404,24 +455,35 @@ export function useLocalExecution(
       screen.preparedForProvider = providerId
       screen.binding = undefined
       screen.availability = preparing
+      screen.directoryStatus = "checking"
       screen.timeline = { ...screen.timeline, sessionState: undefined, elicitation: null }
       refresh()
 
-      const result = await host.prepare(source.scope, source.directory, providerId)
-      if (!mounted.current || screens.current.get(source.key) !== screen || screen.prepareToken !== token) return
-      screen.binding = result.ok ? result.value : undefined
-      if (!result.ok) {
-        screen.availability = { available: false, reason: result.error.message }
+      try {
+        const result = await host.prepare(source.scope, source.directory, providerId)
+        if (!mounted.current || screens.current.get(source.key) !== screen || screen.prepareToken !== token) return
+        screen.directoryStatus = result.directoryStatus
+        screen.binding = result.ok ? result.value : undefined
+        if (!result.ok) {
+          screen.availability = { available: false, reason: result.error.message }
+          refresh()
+          throw new Error(result.error.message)
+        }
+        screen.timeline = { ...screen.timeline, failure: null }
+        screen.preparedForProvider = result.value.providerId
+        screen.availability = result.value
+        flushBufferedNotices(source.scope, result.value.bindingId, screen)
+        if (result.value.providerId) {
+          current.current.onProviderChange?.(source.scope, result.value.providerId)
+        }
         refresh()
-        throw new Error(result.error.message)
+      } catch (error) {
+        if (mounted.current && screens.current.get(source.key) === screen && screen.prepareToken === token && screen.directoryStatus === "checking") {
+          screen.directoryStatus = "unavailable"
+          refresh()
+        }
+        throw error
       }
-      screen.preparedForProvider = result.value.providerId
-      screen.availability = result.value
-      flushBufferedNotices(source.scope, result.value.bindingId, screen)
-      if (result.value.providerId) {
-        current.current.onProviderChange?.(source.scope, result.value.providerId)
-      }
-      refresh()
     },
     async setMode(id, modeId) {
       const source = current.current.target

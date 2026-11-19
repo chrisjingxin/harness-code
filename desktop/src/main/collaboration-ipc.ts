@@ -197,7 +197,23 @@ export function bindCollaborationIpc(
         },
       )
     : null
-  const execution = createLocalExecutionCoordinator(window, identity, uploads, runtime, join(app.getPath("userData"), "local-execution-grants"))
+  const execution = createLocalExecutionCoordinator(window, identity, uploads, runtime, {
+    grantsDir: join(app.getPath("userData"), "local-execution-grants"),
+    origin: origin ?? "",
+    personal,
+    confirmDirectoryPrompt: async path => {
+      const result = await dialog.showMessageBox(window, {
+        type: "question",
+        message: "确认此会话的工作目录",
+        detail: `允许本机会话在以下目录运行 Agent，并在下次登录时恢复此选择？\n\n${path}`,
+        buttons: ["确认目录", "取消"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      return result.response === 0
+    },
+  })
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")

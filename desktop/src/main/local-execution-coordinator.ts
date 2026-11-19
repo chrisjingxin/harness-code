@@ -9,7 +9,6 @@
  * 【协作边界】不直接向 Electron 注册 IPC 通道（由 `local-execution-ipc.ts` 负责），也不直接做目录磁盘授权管理（由 `local-directory-grants.ts` 负责）。
  */
 import { randomUUID } from "node:crypto"
-import { realpath, stat } from "node:fs/promises"
 import type { BrowserWindow } from "electron"
 import type {
   AcpAgentList,
@@ -34,17 +33,29 @@ import {
 import {
   localExecutionKey,
   parseFixedReference,
+  type ConversationPersonal,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
+  type LocalExecutionPreparation,
   type LocalExecutionReceipt,
   type LocalExecutionScope,
   type LocalExecutionSessionState,
 } from "../shared/index.js"
 import {
   createLocalDirectoryGrantStore,
+  inspectDirectory,
   resolveAttachmentBlocks,
+  sameDirectory,
   type DirectoryGrant,
 } from "./local-directory-grants.js"
+import type { PersonalStore } from "./personal-store.js"
+
+export type LocalExecutionCoordinatorOptions = {
+  readonly grantsDir?: string
+  readonly origin?: string
+  readonly personal?: PersonalStore
+  readonly confirmDirectoryPrompt?: (path: string) => Promise<boolean>
+}
 
 export type LocalExecutionProviderRegistryLike = {
   listProviders(): AcpAgentList
@@ -220,7 +231,7 @@ export function createLocalExecutionCoordinator(
   identity: CollaborationState,
   uploads: ConversationUploads | null,
   runtime: LocalExecutionRuntime,
-  grantsDir?: string,
+  options?: LocalExecutionCoordinatorOptions,
 ) {
   const bindings = new Map<string, Binding>()
   let tail: Promise<void> = Promise.resolve()
@@ -231,7 +242,7 @@ export function createLocalExecutionCoordinator(
     return !disposed && !window.isDestroyed() && current?.generation === login.generation && current.accountId === login.accountId
   }
 
-  const grantStore = createLocalDirectoryGrantStore(grantsDir, isCurrent)
+  const grantStore = createLocalDirectoryGrantStore(options?.grantsDir, isCurrent, options?.origin ?? "")
 
   function enqueue<T>(action: () => Promise<T>): Promise<T> {
     const result = tail.then(action)
@@ -280,6 +291,19 @@ export function createLocalExecutionCoordinator(
     return isCurrent(login) && session.ownerUserId === login.accountId
       && session.projectId === scope.projectId && session.conversationId === scope.conversationId
       ? ok(null) : forbidden()
+  }
+
+  async function savedDirectory(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<string | null>> {
+    if (!options?.personal) return ok(null)
+    const record = await options.personal.load({
+      kind: "conversation",
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      conversationId: scope.conversationId,
+    })
+    if (!isCurrent(login)) return forbidden()
+    if (!record.ok) return identityError("INTERNAL_ERROR", record.message)
+    return ok((record.value.data as ConversationPersonal | null)?.localDirectoryPath ?? null)
   }
 
   async function resolvePrompt(scope: LocalExecutionScope, login: Login, text: string, referenceIds: readonly string[]) {
@@ -404,37 +428,109 @@ export function createLocalExecutionCoordinator(
       })
     },
 
-    /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号；通过后按账号落盘供重启恢复。 */
+    /** 在弹出选择器前捕获登录身份，迟到结果不能授予后来登录的账号；通过后按服务来源与账号落盘供重启恢复。 */
     captureDirectorySelection() {
       const login = identity.personalIdentity()
       return (path: string) => grantStore.captureSelection(login, path)
     },
 
-    prepare(scope: LocalExecutionScope, path: string, providerId?: string): Promise<CollaborationResult<LocalExecutionBinding>> {
+    /** 旧记录只提供显示路径。用户在原生窗口确认后才建立可以恢复的本机依据。 */
+    async confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>> {
+      const login = identity.personalIdentity()
+      if (!login) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      if (!options?.personal || !options.confirmDirectoryPrompt) {
+        return identityError("INVALID_REQUEST", "当前环境不支持原生目录确认。")
+      }
+      const saved = await savedDirectory(scope, login)
+      if (!saved.ok) return saved
+      if (!saved.value) return identityError("PROJECT_PATH_INVALID", "该会话尚未保存工作目录，请选择目录。")
+      const path = saved.value
+      let directory: DirectoryGrant
+      try { directory = await inspectDirectory(path) }
+      catch { return identityError("PROJECT_ROOT_CHANGED", "工作目录不存在或不可访问，请重新选择。") }
+      if (!isCurrent(login)) return forbidden()
+      const confirmed = await options.confirmDirectoryPrompt(path)
+      if (!isCurrent(login)) return forbidden()
+      if (!confirmed) return ok(false)
+      return enqueue(async () => {
+        const checked = await authorize(scope, login)
+        if (!checked.ok) return checked
+        const latest = await savedDirectory(scope, login)
+        if (!latest.ok) return latest
+        if (latest.value !== path) return identityError("PROJECT_PATH_INVALID", "会话目录已变化，请确认当前目录。")
+        try {
+          if (!sameDirectory(directory, await inspectDirectory(path))) {
+            return identityError("PROJECT_ROOT_CHANGED", "工作目录已变化，请重新选择。")
+          }
+          if (!isCurrent(login)) return forbidden()
+          await grantStore.rememberConfirmed(login, path, directory)
+          if (!isCurrent(login)) return forbidden()
+          return ok(true)
+        } catch {
+          return identityError("INTERNAL_ERROR", "无法保存目录确认，请检查本机应用数据目录后重试。")
+        }
+      })
+    },
+
+    prepare(scope: LocalExecutionScope, path: string, providerId?: string): Promise<LocalExecutionPreparation> {
       const login = identity.personalIdentity()
       return enqueue(async () => {
-        if (!login || !isCurrent(login)) return forbidden()
-        if ("error" in runtime) return identityError("INVALID_REQUEST", runtime.error)
-
-        if ("registry" in runtime && providerId !== undefined && runtime.registry.hasProvider && !runtime.registry.hasProvider(providerId)) {
-          return identityError(
-            "INVALID_REQUEST",
-            `本会话上次使用的本机 Agent（${providerId}）当前未配置，请重新配置或在下方切换可用 Agent。`,
-          )
-        }
-
+        if (!login || !isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
         const key = localExecutionKey(scope)
-        const directory = await grantStore.resolve(login, path)
-        if (!directory) return identityError("PROJECT_PATH_INVALID", "请通过「工作目录」重新确认本次执行使用的文件夹。")
         const authorized = await authorize(scope, login)
-        if (!authorized.ok) return authorized
+        if (!authorized.ok) return { ...authorized, directoryStatus: "unavailable" }
+        let directory = grantStore.getMemory(path)
+        if (!directory) {
+          if (options?.personal) {
+            const saved = await savedDirectory(scope, login)
+            if (!saved.ok) return { ...saved, directoryStatus: "unavailable" }
+            if (saved.value !== path) {
+              return {
+                ...identityError("PROJECT_PATH_INVALID", "此会话的目录尚未确认，请确认已保存目录或重新选择。"),
+                directoryStatus: "confirmation-required",
+              }
+            }
+          }
+          try {
+            directory = await grantStore.readPersisted(login, path)
+          } catch {
+            return {
+              ...identityError("INTERNAL_ERROR", "无法读取目录确认记录，请确认目录以重新保存。"),
+              directoryStatus: "confirmation-required",
+            }
+          }
+        }
+        if (!directory) {
+          return {
+            ...identityError(
+              "PROJECT_PATH_INVALID",
+              options?.personal ? "此目录来自旧的个人记录，尚未确认用于执行。" : "请通过「工作目录」重新确认本次执行使用的文件夹。",
+            ),
+            directoryStatus: "confirmation-required",
+          }
+        }
+        try {
+          if (!sameDirectory(directory, await inspectDirectory(path))) {
+            return { ...identityError("PROJECT_ROOT_CHANGED", "工作目录已被移动或替换，请重新选择。"), directoryStatus: "invalid" }
+          }
+        } catch {
+          return { ...identityError("PROJECT_ROOT_CHANGED", "工作目录不存在或不可访问，请重新选择。"), directoryStatus: "invalid" }
+        }
+        if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
+        if ("error" in runtime) return { ...identityError("INVALID_REQUEST", runtime.error), directoryStatus: "ready" }
+        if ("registry" in runtime && providerId !== undefined && runtime.registry.hasProvider && !runtime.registry.hasProvider(providerId)) {
+          return {
+            ...identityError(
+              "INVALID_REQUEST",
+              `本会话上次使用的本机 Agent（${providerId}）当前未配置，请重新配置或在下方切换可用 Agent。`,
+            ),
+            directoryStatus: "ready",
+          }
+        }
         const existing = bindings.get(key)
         try {
-          const info = await stat(directory.path, { bigint: true })
-          if (!info.isDirectory() || info.dev !== directory.dev || info.ino !== directory.ino
-            || await realpath(directory.path) !== directory.path) {
-            return identityError("PROJECT_ROOT_CHANGED", "所选工作目录已变更，请重新选择。")
-          }
           let targetHost: LocalAcpHost
           let resolvedProviderId: string
           let providerReason: string | undefined
@@ -456,16 +552,19 @@ export function createLocalExecutionCoordinator(
               try { await existing.session.connect() } catch { /* 初始化失败时保留绑定等待下次重试。 */ }
             }
             publishSessionSnapshot(login, scope, existing)
-            return ok({
-              bindingId: existing.id,
-              providerId: existing.providerId,
-              ...availability(existing.session, existing.providerReason),
-            })
+            return {
+              ...ok({
+                bindingId: existing.id,
+                providerId: existing.providerId,
+                ...availability(existing.session, existing.providerReason),
+              }),
+              directoryStatus: "ready",
+            }
           }
           if (existing) await release(key, existing)
-          if (!isCurrent(login)) return forbidden()
+          if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
           const session = await targetHost.bind(scope, directory.path)
-          if (!isCurrent(login)) { await session.close(); return forbidden() }
+          if (!isCurrent(login)) { await session.close(); return { ...forbidden(), directoryStatus: "unavailable" } }
           const bindingId = randomUUID()
           const binding: Binding = {
             id: bindingId,
@@ -519,7 +618,9 @@ export function createLocalExecutionCoordinator(
               publish(login, {
                 ...source,
                 kind: "finished",
-                availability: availability(session, binding.providerReason),
+                availability: event.type === "failed" && event.reason === "directory-unavailable"
+                  ? { available: false, reason: failureMessages[event.reason], directoryStatus: "invalid" }
+                  : availability(session, binding.providerReason),
                 ...(event.type === "failed" ? {
                   failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
                 } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
@@ -570,17 +671,23 @@ export function createLocalExecutionCoordinator(
             }
             if (!isCurrent(login) || disposed) {
               await release(key, binding)
-              return forbidden()
+              return { ...forbidden(), directoryStatus: "unavailable" }
             }
           }
           publishSessionSnapshot(login, scope, binding)
-          return ok({
-            bindingId,
-            providerId: resolvedProviderId,
-            ...availability(session, providerReason),
-          })
+          return {
+            ...ok({
+              bindingId,
+              providerId: resolvedProviderId,
+              ...availability(session, providerReason),
+            }),
+            directoryStatus: "ready",
+          }
         } catch {
-          return identityError("PROJECT_ROOT_CHANGED", "无法确认本机工作目录或释放旧执行连接，请重新选择目录后重试。")
+          return {
+            ...identityError("PROJECT_ROOT_CHANGED", "无法绑定本机工作目录或释放旧执行连接，请重新选择目录后重试。"),
+            directoryStatus: "invalid",
+          }
         }
       })
     },

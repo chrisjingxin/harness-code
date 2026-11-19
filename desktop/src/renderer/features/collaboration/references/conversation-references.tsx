@@ -37,7 +37,7 @@ export type SnapshotRequest =
   | { readonly kind: "refresh"; readonly referenceId: string }
 
 export type ReferenceDraftChange =
-  | { readonly kind: "add"; readonly target: SessionDraftTarget; readonly snapshot: ConversationSnapshot; readonly mention?: ConversationMentionOrigin }
+  | { readonly kind: "add"; readonly target: SessionDraftTarget | { readonly kind: "pending" }; readonly snapshot: ConversationSnapshot; readonly mention?: ConversationMentionOrigin }
   | { readonly kind: "replace"; readonly referenceId: string; readonly snapshot: ConversationSnapshot }
   | { readonly kind: "remove"; readonly referenceId: string }
 
@@ -47,7 +47,9 @@ export type ReferenceResult<T> = { readonly ok: true; readonly value: T } | Fail
 export interface ReferenceActions {
   readSnapshot(scope: ReferenceScope, request: SnapshotRequest): Promise<ReferenceResult<ConversationSnapshot>>
   chooseDirectory(scope: ReferenceScope): Promise<ReferenceResult<string | null>>
-  applyDraft(scope: ReferenceScope, change: ReferenceDraftChange): Promise<SessionReferenceDraftResult | (Failure & { readonly materialUnavailable: true })>
+  applyDraft(scope: ReferenceScope, change: ReferenceDraftChange): Promise<SessionReferenceDraftResult
+    | { readonly ok: true; readonly value: { readonly conversationId: null; readonly draftRevision: number } }
+    | (Failure & { readonly materialUnavailable: true })>
   locateConversation(scope: ReferenceScope, conversationId: string): Promise<ReferenceResult<null>>
   openSource?(scope: ReferenceScope, referenceId: string): Promise<ReferenceResult<null>>
 }
@@ -70,7 +72,7 @@ type Flow = { readonly key: string; readonly request: SnapshotRequest; readonly 
 
 type Preview = Extract<Flow, { phase: "preview" }>
 
-function conversationKey(scope: ConversationScope | ReferenceScope): string {
+function conversationKey(scope: Pick<ReferenceScope, "namespace" | "accountId" | "workspaceId" | "conversationId">): string {
   return JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId])
 }
 
@@ -110,9 +112,10 @@ export function useConversationReferences(
   actions: ReferenceActions,
   supportsRange = false,
   preferredConversationId?: string | null,
+  pendingDraft = false,
 ) {
   const origin = scope ? conversationKey(scope) : ""
-  const key = scope ? JSON.stringify([origin, scope.projectId, scope.deviceId, scope.pageKey]) : ""
+  const key = scope ? JSON.stringify([origin, scope.projectId, scope.deviceId, scope.pageKey, pendingDraft]) : ""
   const [flow, setFlow] = useState<Flow | null>(null)
   const [notice, setNotice] = useState("")
   const active = useRef<Flow | null>(null)
@@ -185,7 +188,8 @@ export function useConversationReferences(
           })
       return
     }
-    await locate(request, applyResult.value.conversationId)
+    if (applyResult.value.conversationId === null) show(null)
+    else await locate(request, applyResult.value.conversationId)
   }
 
   async function chooseDirectory(current: Preview): Promise<void> {
@@ -221,6 +225,8 @@ export function useConversationReferences(
     let change: ReferenceDraftChange
     if (request.kind === "refresh") {
       change = { kind: "replace", referenceId: request.referenceId, snapshot }
+    } else if (pendingDraft) {
+      change = { kind: "add", target: { kind: "pending" }, snapshot, mention }
     } else if (selection?.kind === "existing") {
       if (!sessions.some(session => session.id === selection.conversationId)) {
         show({ ...current, message: "目标会话不可用，请重新选择。" })
@@ -251,7 +257,7 @@ export function useConversationReferences(
       }
       return
     }
-    if (request.kind === "refresh") show(null)
+    if (request.kind === "refresh" || result.value.conversationId === null) show(null)
     else await locate(request, result.value.conversationId)
   }
 
@@ -266,9 +272,10 @@ export function useConversationReferences(
   }
 
   const onReferenceAction: NonNullable<ConversationActions["onReferenceAction"]> = (source, id, action) => {
-    if (!scope || conversationKey(source) !== origin || active.current || cardAction.current) return
+    if (!scope || conversationKey({ ...source, conversationId: pendingDraft ? null : source.conversationId }) !== origin || active.current || cardAction.current) return
     if (action === "refresh") void load({ kind: "refresh", referenceId: id })
-    if (action === "remove") void runCardAction(() => actions.applyDraft(scope, { kind: "remove", referenceId: id }), "无法移除引用，请重试。")
+    if (action === "remove") void runCardAction<{ readonly conversationId: string | null; readonly draftRevision: number }>(
+      () => actions.applyDraft(scope, { kind: "remove", referenceId: id }), "无法移除引用，请重试。")
     if (action === "open" && actions.openSource) {
       const openSource = actions.openSource
       void runCardAction(() => openSource(scope, id), "无法打开引用来源。")
@@ -279,6 +286,7 @@ export function useConversationReferences(
     <ReferenceDialog
       flow={flow}
       sessions={sessions}
+      pendingDraft={pendingDraft}
       onRange={supportsRange ? range => {
         if (active.current === flow && flow.request.kind === "preview") void load({ ...flow.request, range }, flow.mention)
       } : undefined}
@@ -325,9 +333,10 @@ const ranges: readonly { id: string; label: string; range?: SnapshotRequestedRan
   { id: "brief", label: "已同步简报", range: { type: "brief" } },
 ]
 
-function ReferenceDialog({ flow, sessions, onRange, onClose, onRetry, onSelect, onChooseDirectory, onApply }: {
+function ReferenceDialog({ flow, sessions, pendingDraft, onRange, onClose, onRetry, onSelect, onChooseDirectory, onApply }: {
   flow: Flow
   sessions: readonly ReferenceSession[]
+  pendingDraft: boolean
   onRange?(range?: SnapshotRequestedRange): void
   onClose(): void
   onRetry(): void
@@ -348,7 +357,7 @@ function ReferenceDialog({ flow, sessions, onRange, onClose, onRetry, onSelect, 
   const refreshing = flow.request.kind === "refresh"
   const busy = flow.phase === "locating" || Boolean(preview?.busy)
   const selection = preview?.selection
-  const canApply = refreshing || (selection?.kind === "existing"
+  const canApply = refreshing || pendingDraft || (selection?.kind === "existing"
     ? sessions.some(session => session.id === selection.conversationId)
     : Boolean(selection?.directory))
   const retry = flow.phase === "read-error" || flow.phase === "location-error"
@@ -380,7 +389,8 @@ function ReferenceDialog({ flow, sessions, onRange, onClose, onRetry, onSelect, 
           </dl>
           <div className="conversation-reference-text" aria-label="快照正文" role="region" tabIndex={0}>{preview.snapshot.text}</div>
         </div>
-        {!refreshing && <fieldset className="conversation-reference-targets" disabled={busy}>
+        {pendingDraft && !refreshing && <p>确认后加入当前新建草稿。</p>}
+        {!refreshing && !pendingDraft && <fieldset className="conversation-reference-targets" disabled={busy}>
           <legend>加入我的会话</legend>
           {sessions.map(session => (
             <label key={session.id}>

@@ -23,10 +23,18 @@ export type LocalExecutionScope = {
   readonly conversationId: string
 }
 
-export type LocalExecutionAvailability = { readonly available: boolean; readonly reason?: string }
+export type LocalDirectoryStatus = "checking" | "ready" | "confirmation-required" | "invalid" | "unavailable"
+export type LocalExecutionAvailability = {
+  readonly available: boolean
+  readonly reason?: string
+  readonly directoryStatus?: LocalDirectoryStatus
+}
 export type LocalExecutionBinding = LocalExecutionAvailability & {
   readonly bindingId: string
   readonly providerId?: string
+}
+export type LocalExecutionPreparation = CollaborationResult<LocalExecutionBinding> & {
+  readonly directoryStatus: LocalDirectoryStatus
 }
 
 /** 经桌面 IPC 传递的会话能力快照：仅保留可序列化的展示字段并补充所选 Provider 与会话标题。 */
@@ -94,7 +102,9 @@ export type LocalExecutionNotice =
 
 export interface DesktopLocalExecutionHost {
   listProviders(): Promise<CollaborationResult<AcpAgentList>>
-  prepare(scope: LocalExecutionScope, directory: string, providerId?: string): Promise<CollaborationResult<LocalExecutionBinding>>
+  prepare(scope: LocalExecutionScope, directory: string, providerId?: string): Promise<LocalExecutionPreparation>
+  /** 从该会话的本机个人记录取路径，经原生确认窗口记住旧目录。 */
+  confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>>
   /** 主进程按固定 ID 读取引用材料，并按工作区沙箱路径生成 resource_link。发送端始终传用户原文。 */
   send(
     scope: LocalExecutionScope,
