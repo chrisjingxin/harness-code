@@ -9,6 +9,40 @@ export type NativeBinding = {
   clear(): Promise<void>
 }
 
+/** 计算与 `LocalAcpHost.bind` 一致的原生绑定标识数组。 */
+export function buildNativeBindingIdentity(
+  bindingNamespace: string | undefined,
+  scope: {
+    readonly accountId: string
+    readonly workspaceId: string
+    readonly projectId: string
+    readonly conversationId: string
+  },
+  root: string,
+  dev: bigint,
+  ino: bigint,
+  command?: {
+    readonly executable: string
+    readonly args?: readonly string[]
+    readonly env?: Readonly<Record<string, string | undefined>>
+  },
+): string[] {
+  const env = command ? (command.env ?? process.env) : undefined
+  return [
+    bindingNamespace ?? "",
+    scope.accountId,
+    scope.workspaceId,
+    scope.projectId,
+    scope.conversationId,
+    root,
+    String(dev),
+    String(ino),
+    command?.executable ?? "",
+    JSON.stringify(command?.args ?? []),
+    env?.HOME ?? env?.USERPROFILE ?? "",
+  ]
+}
+
 export function nativeBinding(base: string | undefined, identity: readonly string[]): NativeBinding {
   let nativeId: string | undefined
   if (!base) {

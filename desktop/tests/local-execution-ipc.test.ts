@@ -719,3 +719,60 @@ test("多代理切换、会话级能力透传（session-state/elicitation/mode/c
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test("prepare 未指定 providerId 时优先使用已绑定的历史 Agent，明确指定未配置 Agent 返回清晰提示", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc231-ipc-provider-persist-"))
+  try {
+    const workdir = join(root, "work")
+    await mkdir(workdir, { recursive: true })
+    const identity = await createSignedInState(USER_A)
+    const { window } = createFakeWindow()
+    const { runtime: baseRuntime } = createMockRuntime()
+    const boundCalls: string[] = []
+
+    const runtime: LocalExecutionRuntime = {
+      registry: {
+        listProviders: () => ({
+          providers: [
+            { id: "harness", label: "Harness Code", available: true },
+            { id: "custom", label: "自定义 Agent", available: true },
+          ],
+          defaultProviderId: "custom",
+        }),
+        hasProvider: id => id === "harness" || id === "custom",
+        findBoundProvider: async (s, dir) => {
+          boundCalls.push(`${s.conversationId}:${dir}`)
+          return "harness"
+        },
+        getHost: providerId => ({
+          providerId: providerId ?? "custom",
+          available: true,
+          host: baseRuntime.host,
+        }),
+        close: async () => {},
+      },
+    }
+
+    const ipc = createLocalExecutionCoordinator(window, identity, null, runtime)
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    await ipc.captureDirectorySelection()(workdir)
+
+    // 未传 providerId 且 registry 命中历史绑定时，不得被默认项 custom 覆盖
+    const restored = await ipc.prepare(scope, workdir)
+    assert.equal(restored.ok, true)
+    if (restored.ok) assert.equal(restored.value.providerId, "harness")
+    assert.equal(boundCalls.length, 1)
+
+    // 显式传已保存但当前环境已移除的 providerId，给出清晰中文提示而非默默切到其他 Agent
+    const missing = await ipc.prepare(scope, workdir, "removed-agent")
+    assert.equal(missing.ok, false)
+    if (!missing.ok) {
+      assert.match(missing.error.message, /removed-agent/)
+      assert.match(missing.error.message, /未配置/)
+    }
+
+    await ipc.dispose()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -340,3 +340,34 @@ test("PersonalStore 在 60 秒 TTL 到期后并发调用 save 复用单次重验
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("PersonalStore 兼容未含 providerId 的历史会话记录并校验与持久化 providerId", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc231-personal-provider-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+
+    assert.equal((await store.load(convKey)).ok, true)
+    // 未传 providerId 的历史结构仍可保存与读取
+    assert.equal((await store.save(convKey, 1, sampleConversation)).ok, true)
+
+    // 带 providerId 保存后，新实例重登读取必须保留原选择
+    const withProvider: ConversationPersonal = { ...sampleConversation, providerId: "harness" }
+    assert.equal((await store.save(convKey, 2, withProvider)).ok, true)
+
+    const reloadedStore = new PersonalStore(mock.state, ORIGIN, dir)
+    const reloaded = await reloadedStore.load(convKey)
+    assert.equal(reloaded.ok, true)
+    if (reloaded.ok) {
+      assert.equal(reloaded.value.revision, 2)
+      assert.equal((reloaded.value.data as ConversationPersonal | null)?.providerId, "harness")
+    }
+
+    // 非法 providerId（空串或非字符串）必须被拒绝
+    assert.equal((await store.save(convKey, 3, { ...sampleConversation, providerId: "" })).ok, false)
+    assert.equal((await store.save(convKey, 3, { ...sampleConversation, providerId: 123 as unknown as string })).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

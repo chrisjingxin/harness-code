@@ -120,6 +120,7 @@ export function useLocalExecution(
   onWorkspaceRefresh?: (scope: ProjectNavigationScope, conversationId: string) => void,
   preferredProviders?: Readonly<Record<string, string>>,
   onSessionTitleChange?: (scope: LocalExecutionScope, title: string) => void,
+  onProviderChange?: (scope: LocalExecutionScope, providerId: string) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
@@ -133,13 +134,13 @@ export function useLocalExecution(
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
   const providerOverrides = useRef(new Map<string, string>())
-  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange })
+  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange })
   const mounted = useRef(false)
   const [, refresh] = useReducer(revision => revision + 1, 0)
 
   useLayoutEffect(() => {
-    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange }
-  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange])
+    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange }
+  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange])
 
   function applySessionStateNotice(
     scope: LocalExecutionScope,
@@ -296,8 +297,17 @@ export function useLocalExecution(
 
   function resolveDesiredProviderId(targetInfo: Target | null): string | undefined {
     if (!targetInfo) return undefined
-    return providerOverrides.current.get(targetInfo.key) ?? current.current.preferredProviders?.[targetInfo.scope.conversationId]
+    return providerOverrides.current.get(targetInfo.key) ?? preferredProviders?.[targetInfo.scope.conversationId]
   }
+
+  function matchesPreparedProvider(screen: Screen | undefined, desiredProvider: string | undefined): boolean {
+    if (!screen) return false
+    return desiredProvider === undefined
+      ? screen.preparedForProvider === undefined || screen.binding?.providerId === screen.preparedForProvider
+      : screen.preparedForProvider === desiredProvider
+  }
+
+  const selectedPreferredProvider = target ? preferredProviders?.[target.scope.conversationId] : undefined
 
   useEffect(() => {
     if (!host || !target?.directory) return
@@ -307,7 +317,7 @@ export function useLocalExecution(
     if (
       screen.preparedFor?.directory === target.directory
       && screen.preparedFor.selectionRevision === target.selectionRevision
-      && screen.preparedForProvider === desiredProvider
+      && matchesPreparedProvider(screen, desiredProvider)
       && screen.binding
     ) {
       return
@@ -328,10 +338,14 @@ export function useLocalExecution(
       if (!result.ok) {
         screen.availability = { available: false, reason: result.error.message }
       } else {
+        screen.preparedForProvider = result.value.providerId
         screen.availability = screen.terminal !== lastTerminal && screen.terminal?.bindingId === result.value.bindingId
           ? screen.terminal.availability
           : result.value
         flushBufferedNotices(target.scope, result.value.bindingId, screen)
+        if (!desiredProvider && result.value.available && result.value.providerId) {
+          current.current.onProviderChange?.(target.scope, result.value.providerId)
+        }
       }
       refresh()
     }).catch(() => {
@@ -340,7 +354,7 @@ export function useLocalExecution(
       refresh()
     })
     return () => { active = false }
-  }, [host, target, preferredProviders])
+  }, [host, target, selectedPreferredProvider])
 
   function readAvailability(selected: Target | null, id: string): LocalExecutionAvailability {
     if (id === "__new__") return readyOnOpen
@@ -353,7 +367,7 @@ export function useLocalExecution(
     const desiredProvider = resolveDesiredProviderId(selected)
     return screen?.preparedFor?.directory === selected.directory
       && screen.preparedFor.selectionRevision === selected.selectionRevision
-      && screen.preparedForProvider === desiredProvider
+      && matchesPreparedProvider(screen, desiredProvider)
       ? screen.availability ?? preparing : preparing
   }
 
@@ -370,7 +384,7 @@ export function useLocalExecution(
       return screen?.timeline.sessionState?.providerId
         ?? screen?.binding?.providerId
         ?? providerOverrides.current.get(target.key)
-        ?? current.current.preferredProviders?.[id]
+        ?? preferredProviders?.[id]
         ?? providersRef.current?.defaultProviderId
         ?? undefined
     },
@@ -401,8 +415,12 @@ export function useLocalExecution(
         refresh()
         throw new Error(result.error.message)
       }
+      screen.preparedForProvider = result.value.providerId
       screen.availability = result.value
       flushBufferedNotices(source.scope, result.value.bindingId, screen)
+      if (result.value.providerId) {
+        current.current.onProviderChange?.(source.scope, result.value.providerId)
+      }
       refresh()
     },
     async setMode(id, modeId) {

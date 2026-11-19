@@ -5,6 +5,7 @@
  * 3. 通过 `AcpAgentRegistry` 管理调用方注入的描述符可用性探测、默认选择与 `LocalAcpHost` 生命周期回收。
  * 【协作边界】严禁硬编码或静态导入任何具体 Agent 实现包。
  */
+import { realpath, stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import type {
   AcpAgentDescriptor,
@@ -15,7 +16,8 @@ import type {
 } from "./descriptor.js"
 import { buildAugmentedGuiPath, findInPath, isExecutableFile } from "./discovery.js"
 import { LocalAcpHost } from "./index.js"
-import type { AgentCommand, LocalAcpHostOptions } from "./types.js"
+import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
+import type { AgentCommand, LocalAcpHostOptions, LocalAcpScope } from "./types.js"
 
 const DEFAULT_HOST_HINTS: AcpAgentHostHints = {
   enableElicitation: true,
@@ -167,6 +169,44 @@ export class AcpAgentRegistry {
 
   hasProvider(providerId: string): boolean {
     return this.#descriptors.has(providerId)
+  }
+
+  /**
+   * 探测给定会话与本机目录是否已有唯一命中的磁盘原生绑定：
+   * 用于历史未持久记录 `providerId` 的会话在新增默认代理后仍回到先前使用的 Agent。
+   */
+  async findBoundProvider(scope: LocalAcpScope, cwd: string): Promise<string | undefined> {
+    if (!this.#bindingDirectory || !isAbsolute(cwd)) return undefined
+    if ([scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId].some(id => !id.trim())) {
+      return undefined
+    }
+    let root: string
+    let info: Awaited<ReturnType<typeof stat>>
+    try {
+      root = await realpath(cwd)
+      info = await stat(root, { bigint: true })
+    } catch {
+      return undefined
+    }
+    if (!info.isDirectory()) return undefined
+
+    const origin = this.#env.WORKBENCH_SERVICE_ORIGIN ?? ""
+    const matched: string[] = []
+    for (const descriptor of this.#descriptors.values()) {
+      const resolution = descriptor.resolveCommand(this.#env, this.#discoveryOptions)
+      if (!resolution.available) continue
+      const bindingNamespace = origin ? `${origin}:${descriptor.id}` : descriptor.id
+      const identity = buildNativeBindingIdentity(
+        bindingNamespace, scope, root, info.dev, info.ino, resolution.command,
+      )
+      try {
+        const stored = await nativeBinding(this.#bindingDirectory, identity).read()
+        if (stored) matched.push(descriptor.id)
+      } catch {
+        // 单条历史绑定文件异常时忽略，继续排查其他描述符。
+      }
+    }
+    return matched.length === 1 ? matched[0] : undefined
   }
 
   /** 列举已注册 Agent 及当前默认选中 ID（`custom` 优先，其次按注册顺序取首个可用）。 */

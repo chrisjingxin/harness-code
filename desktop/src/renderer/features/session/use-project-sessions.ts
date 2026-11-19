@@ -72,6 +72,7 @@ type ConversationRecordState = {
   readonly loadError: string | null
   readonly personal: ConversationPersonalState
   readonly directoryPath: string | null
+  readonly providerId: string | null
   readonly syncState: SessionSyncState
 }
 
@@ -80,6 +81,7 @@ const DEFAULT_RECORD: ConversationRecordState = {
   loadError: null,
   personal: EMPTY_PERSONAL_STATE,
   directoryPath: null,
+  providerId: null,
   syncState: emptySyncState(),
 }
 
@@ -125,6 +127,7 @@ function toPersistablePersonal(
   personal: ConversationPersonalState,
   directoryPath: string | null,
   syncState: SessionSyncState,
+  providerId: string | null,
 ): ConversationPersonal {
   const { interactions: _ignored, ...rest } = personal
   const hasSyncData = syncState.localSyncedSequence > 0 || syncState.messages.length > 0
@@ -132,6 +135,7 @@ function toPersistablePersonal(
   return {
     ...rest,
     localDirectoryPath: directoryPath,
+    ...(providerId ? { providerId } : {}),
     syncCache: bounded
       ? {
           syncedSequence: syncState.localSyncedSequence,
@@ -224,7 +228,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [newSessionBusy, setNewSessionBusy] = useState(false)
   const [newSessionError, setNewSessionError] = useState<string | null>(null)
   const [newProviderId, setNewProviderId] = useState<string | null>(null)
-  const [providerByConversation, setProviderByConversation] = useState<Readonly<Record<string, string>>>({})
   const [titleOverridesByKey, setTitleOverridesByKey] = useState<Readonly<Record<string, string>>>({})
   const titleOverridesRef = useRef(titleOverridesByKey)
   titleOverridesRef.current = titleOverridesByKey
@@ -346,6 +349,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         loadError: null,
         personal: personalFromSaved(saved),
         directoryPath: saved?.localDirectoryPath ?? null,
+        providerId: saved?.providerId ?? null,
         syncState: syncStateFromPersonal(saved),
       }
       // 等待恢复的草稿动作可能先于 React 重新渲染，直接从同一记录读取最新值。
@@ -420,7 +424,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           projectId: targetScope.projectId,
           conversationId,
         },
-        toPersistablePersonal(next.personal, next.directoryPath, next.syncState),
+        toPersistablePersonal(next.personal, next.directoryPath, next.syncState, next.providerId),
       )
     }
   }, [persistence])
@@ -701,9 +705,6 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
 
       const created = res.conversation
       pendingRequestRef.current = null
-      if (newProviderId) {
-        setProviderByConversation(prev => ({ ...prev, [created.conversationId]: newProviderId }))
-      }
       includeRegisteredConversation(targetKey, created)
 
       await ensureRecordLoaded(targetScope, targetKey, created.conversationId)
@@ -715,6 +716,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           ...prev,
           loaded: true,
           directoryPath: chosenDir,
+          providerId: newProviderId ?? prev.providerId,
           personal: {
             ...prev.personal,
             draft: {
@@ -810,6 +812,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [currentScopeKey, activeConversations, recordsByKey])
 
+  const currentProviders = useMemo(() => {
+    const map: Record<string, string> = {}
+    if (!currentScopeKey) return map
+    for (const conv of activeConversations) {
+      const rec = recordsByKey[makeRecordKey(currentScopeKey, conv.conversationId)]
+      if (rec?.providerId) map[conv.conversationId] = rec.providerId
+    }
+    return map
+  }, [currentScopeKey, activeConversations, recordsByKey])
+
   const memberById = useMemo(() => {
     const map = new Map<string, UserSummary>()
     for (const member of members) map.set(member.user.id, member.user)
@@ -853,6 +865,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       personal: applyConversationPersonalChange(previous.personal, { kind: "clear-draft", expectedRevision: revision }),
     }), true)
   }, [updateRecord])
+  const handleProviderChange = useCallback((execScope: LocalExecutionScope, providerId: string) => {
+    const trimmed = providerId.trim()
+    if (!trimmed || !scope || !currentScopeKey) return
+    if (
+      execScope.accountId !== scope.accountId
+      || execScope.workspaceId !== scope.workspaceId
+      || execScope.projectId !== scope.projectId
+    ) return
+    const recKey = makeRecordKey(currentScopeKey, execScope.conversationId)
+    const current = recordsRef.current[recKey]
+    if (!current?.loaded || current.providerId === trimmed) return
+    updateRecord(scope, currentScopeKey, execScope.conversationId, prev => (
+      prev.providerId === trimmed ? prev : { ...prev, providerId: trimmed }
+    ), true)
+  }, [scope, currentScopeKey, updateRecord])
   const refreshWorkspaceRef = useRef<((source: ProjectNavigationScope, id: string) => Promise<void>) | null>(null)
   const refreshExecutionWorkspace = useCallback((source: ProjectNavigationScope, id: string) => {
     if (!mountedRef.current) return
@@ -863,8 +890,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     selectedDirectoryPath, directorySelectionRevision, memberById.get(userId)?.userName ?? "我",
     commitAcceptedDraft,
     refreshExecutionWorkspace,
-    providerByConversation,
+    currentProviders,
     handleSessionTitleChange,
+    handleProviderChange,
   )
 
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""

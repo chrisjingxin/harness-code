@@ -99,6 +99,7 @@ const schemas: Record<PersonalKey["kind"], object> = {
       attachmentIds: strings,
     }),
     localDirectoryPath: nullableText,
+    providerId: { anyOf: [{ type: "string", minLength: 1, maxLength: 64 }, { type: "null" }] },
     syncCache: { anyOf: [syncCacheSchema, { type: "null" }] },
   }),
   sessionWorkspace: object(["personal", "positions"], {

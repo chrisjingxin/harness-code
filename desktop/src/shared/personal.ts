@@ -72,6 +72,7 @@ export type ConversationPersonal = {
   readonly expandedOutputs: readonly string[]
   readonly draft: PersonalConversationDraft
   localDirectoryPath: string | null
+  providerId?: string | null
   syncCache: ConversationSyncCache | null
 }
 

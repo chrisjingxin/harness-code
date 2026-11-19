@@ -5,7 +5,7 @@
 import { realpath, stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import type { ListSessionsResponse } from "@agentclientprotocol/sdk"
-import { nativeBinding } from "./native-binding.js"
+import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
 import { BoundSession } from "./session.js"
 import type {
   AgentCommand,
@@ -107,10 +107,10 @@ export class LocalAcpHost {
       existing.assertBinding(root, identity.dev, identity.ino)
       return existing
     }
-    const native = nativeBinding(this.options.bindingDirectory, [
-      this.options.bindingNamespace ?? "", ...ids, root, String(identity.dev), String(identity.ino), this.#command?.executable ?? "",
-      JSON.stringify(this.#command?.args ?? []), this.#command?.env?.HOME ?? this.#command?.env?.USERPROFILE ?? "",
-    ])
+    const native = nativeBinding(
+      this.options.bindingDirectory,
+      buildNativeBindingIdentity(this.options.bindingNamespace, scope, root, identity.dev, identity.ino, this.#command),
+    )
     const diagnosticScope = Object.freeze({ ...scope })
     const bound = new BoundSession(
       root,

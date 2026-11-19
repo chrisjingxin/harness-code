@@ -55,6 +55,7 @@ export type LocalExecutionProviderRegistryLike = {
     readonly reason?: string
   }
   hasProvider?(providerId: string): boolean
+  findBoundProvider?(scope: LocalExecutionScope, cwd: string): Promise<string | undefined>
   close(): Promise<void>
 }
 
@@ -415,20 +416,11 @@ export function createLocalExecutionCoordinator(
         if (!login || !isCurrent(login)) return forbidden()
         if ("error" in runtime) return identityError("INVALID_REQUEST", runtime.error)
 
-        let targetHost: LocalAcpHost
-        let resolvedProviderId: string
-        let providerReason: string | undefined
-        if ("registry" in runtime) {
-          if (providerId !== undefined && runtime.registry.hasProvider && !runtime.registry.hasProvider(providerId)) {
-            return identityError("INVALID_REQUEST", `未知的本机 Agent 类型：${providerId}`)
-          }
-          const resolved = runtime.registry.getHost(providerId)
-          targetHost = resolved.host
-          resolvedProviderId = resolved.providerId ?? providerId ?? "default"
-          providerReason = resolved.available ? undefined : resolved.reason
-        } else {
-          targetHost = runtime.host
-          resolvedProviderId = providerId ?? "default"
+        if ("registry" in runtime && providerId !== undefined && runtime.registry.hasProvider && !runtime.registry.hasProvider(providerId)) {
+          return identityError(
+            "INVALID_REQUEST",
+            `本会话上次使用的本机 Agent（${providerId}）当前未配置，请重新配置或在下方切换可用 Agent。`,
+          )
         }
 
         const key = localExecutionKey(scope)
@@ -443,9 +435,20 @@ export function createLocalExecutionCoordinator(
             || await realpath(directory.path) !== directory.path) {
             return identityError("PROJECT_ROOT_CHANGED", "所选工作目录已变更，请重新选择。")
           }
-          const providerMatches = providerId === undefined
-            ? existing?.providerId === resolvedProviderId
-            : existing?.providerId === providerId
+          let targetHost: LocalAcpHost
+          let resolvedProviderId: string
+          let providerReason: string | undefined
+          if ("registry" in runtime) {
+            const targetProviderId = providerId ?? await runtime.registry.findBoundProvider?.(scope, directory.path)
+            const resolved = runtime.registry.getHost(targetProviderId)
+            targetHost = resolved.host
+            resolvedProviderId = resolved.providerId ?? targetProviderId ?? "default"
+            providerReason = resolved.available ? undefined : resolved.reason
+          } else {
+            targetHost = runtime.host
+            resolvedProviderId = providerId ?? "default"
+          }
+          const providerMatches = existing?.providerId === resolvedProviderId
           if (existing?.login.generation === login.generation && existing.directory.path === directory.path
             && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino
             && providerMatches) {

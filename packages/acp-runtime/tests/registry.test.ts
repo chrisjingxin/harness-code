@@ -208,3 +208,57 @@ test("AcpAgentRegistry 可切换纯标准无扩展 ACP 子进程并完成握手�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test("AcpAgentRegistry.findBoundProvider 在新增 WORKBENCH_ACP_EXECUTABLE 后仍识别会话先前绑定的 Agent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc231-acp-bound-"))
+  try {
+    const workspace = join(root, "ws")
+    const bindings = join(root, "bindings")
+    await Promise.all([mkdir(workspace, { recursive: true }), mkdir(bindings, { recursive: true })])
+
+    const scopeA = {
+      accountId: "11111111111111111111111111111111",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      conversationId: "33333333-3333-4333-8333-333333333333",
+    }
+    const scopeNew = {
+      ...scopeA,
+      conversationId: "44444444-4444-4444-8444-444444444444",
+    }
+
+    const registryBefore = new AcpAgentRegistry({
+      env: process.env,
+      bindingDirectory: bindings,
+      includeCustomFromEnv: false,
+      descriptors: [
+        mockAgentDescriptor("alpha", "Alpha", true, "alpha-agent"),
+        mockAgentDescriptor("beta", "Beta", true, "beta-agent"),
+      ],
+    })
+    const initialHost = registryBefore.getHost("alpha")
+    assert.equal(initialHost.available, true)
+    const session = await initialHost.host.bind(scopeA, workspace)
+    await session.connect()
+    await registryBefore.close()
+
+    const registryAfter = new AcpAgentRegistry({
+      env: {
+        ...process.env,
+        WORKBENCH_ACP_EXECUTABLE: process.execPath,
+        WORKBENCH_ACP_ARGS_JSON: JSON.stringify(["--version"]),
+      },
+      bindingDirectory: bindings,
+      descriptors: [
+        mockAgentDescriptor("alpha", "Alpha", true, "alpha-agent"),
+        mockAgentDescriptor("beta", "Beta", true, "beta-agent"),
+      ],
+    })
+    assert.equal(registryAfter.listProviders().defaultProviderId, "custom")
+    assert.equal(await registryAfter.findBoundProvider(scopeA, workspace), "alpha")
+    assert.equal(await registryAfter.findBoundProvider(scopeNew, workspace), undefined)
+    await registryAfter.close()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
