@@ -370,18 +370,15 @@ function WorkspaceProjectWorkbench(props: {
     members: taskMembers,
     tasks: taskRows.status === "ready" ? taskRows.tasks : undefined,
     knowledge: knowledgeRows.status === "ready" ? knowledgeRows.items : undefined,
-    onChooseMember: canPublish ? assigneeId => setPublishing({ scope: shell.scope, page: currentPage, assigneeId }) : undefined,
+    onChooseMember: canPublish ? assigneeId => setPublishing({
+      scope: shell.scope, page: currentPage, assigneeId, sourceId: selectedConversationId ?? undefined,
+    }) : undefined,
     onOpenTask: taskContext ? openTask : undefined,
     chooseDirectory,
     locateConversation,
   })
 
-  const sourceId = publishing?.sourceId
   const sourceConversations = pageController.conversations.filter(item => item.projectId === shell.scope?.projectId)
-  const publicationSources = sourceId ? [
-    ...sourceConversations.filter(item => item.conversationId === sourceId),
-    ...sourceConversations.filter(item => item.conversationId !== sourceId),
-  ] : sourceConversations
 
   // 看板复用项目导航和任务发布表单，用会话模块已有的本机缓存水位显示同步状态。
   const providers: ProjectPageProviders = {
@@ -479,8 +476,8 @@ function WorkspaceProjectWorkbench(props: {
     />
     {references.dialog}
     {publishing?.scope === shell.scope && publishing?.page === currentPage && taskContext?.projectActive && <ProjectTaskPublication
-      context={taskContext} members={taskMembers} draftMaterials={references.draftMaterials} sources={publicationSources}
-      assigneeId={publishing.assigneeId} onClose={() => setPublishing(null)} onPublished={taskId => {
+      context={taskContext} members={taskMembers} draftMaterials={references.draftMaterials} sources={sourceConversations}
+      assigneeId={publishing.assigneeId} sourceId={publishing.sourceId} onClose={() => setPublishing(null)} onPublished={taskId => {
         setPublishing(null)
         openTask(taskId)
       }} />}

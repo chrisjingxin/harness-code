@@ -67,12 +67,13 @@ function fixedIds(detail: TaskDetail): string[] {
   return [...detail.snapshotIds, ...detail.knowledgeRefs.map(knowledgeReferenceId)]
 }
 
-export function ProjectTaskPublication({ context, members, draftMaterials, sources, assigneeId, onClose, onPublished }: {
+export function ProjectTaskPublication({ context, members, draftMaterials, sources, assigneeId, sourceId, onClose, onPublished }: {
   readonly context: TasksContext
   readonly members: readonly TaskMember[]
   readonly draftMaterials: readonly ConversationSnapshot[]
   readonly sources: readonly ProjectConversationSummary[]
   readonly assigneeId?: string
+  readonly sourceId?: string
   onClose(): void
   onPublished(taskId: string): void
 }) {
@@ -83,6 +84,7 @@ export function ProjectTaskPublication({ context, members, draftMaterials, sourc
     materials={draftMaterials.filter(item => !item.archived).map(item => snapshotReferenceView(item))}
     sources={sources.map(item => ({ id: item.conversationId, name: item.title || "未命名会话" }))}
     initialAssigneeId={assigneeId}
+    initialSourceId={sourceId}
     readMaterial={async sourceId => {
       const source = context.sessions.listProjectConversations(scope).find(item => item.conversationId === sourceId)
       if (!source) throw new Error("来源会话暂不可用。")
