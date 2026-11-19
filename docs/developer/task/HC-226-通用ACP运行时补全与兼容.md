@@ -23,7 +23,7 @@ completed_at: -
 
 此前 `@workbench/acp-runtime` 仅支持最小文本流式与权限审批：握手发送空 `clientCapabilities: {}`、忽略 `SessionUpdate` 中除正文/思考/工具外的 9 类通知、`loadSession` 回放期间因未设 `sessionId` 且 `!prompting` 而全量丢弃历史、`nativeBinding` 无清理且不支持 `loadSession` 时直接永久锁死会话，且缺失 `fs/*`、`terminal/*` 反向 RPC 与标准 ACP 一致性测试套件。
 
-本次在保持 `LocalAcpEvent` 与 `session.subscribe(...)` 对 [`local-execution-ipc.ts`](../../../apps/desktop/src/main/local-execution-ipc.ts) 完全向后兼容的前提下，以增量接口补齐通用 ACP 客户端能力层。
+本次在保持 `LocalAcpEvent` 与 `session.subscribe(...)` 对 [`local-execution-ipc.ts`](../../../desktop/src/main/local-execution-ipc.ts) 完全向后兼容的前提下，以增量接口补齐通用 ACP 客户端能力层。
 
 ## 主要交付内容
 

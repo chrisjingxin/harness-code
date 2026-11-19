@@ -40,7 +40,7 @@ trap 'exit 143' TERM
 
 mysql_root=$HC218_SMOKE_MYSQL_ROOT
 sql=("$mysql_root/bin/mysql" --no-defaults --protocol=SOCKET --socket="$root/mysql.sock" -uroot --default-character-set=utf8mb4)
-service=services/collaboration-server
+service=server
 jar="$service/target/collaboration-server-$(tr -d '\r\n' < VERSION).jar"
 test -f "$jar"
 "$mysql_root/bin/mysqld" --no-defaults --basedir="$mysql_root" --datadir="$root/mysql" \

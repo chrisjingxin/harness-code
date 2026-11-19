@@ -11,7 +11,7 @@ import { setTimeout as pause } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 
 const repo = fileURLToPath(new URL("../..", import.meta.url))
-const desktop = join(repo, "apps/desktop")
+const desktop = join(repo, "desktop")
 const binary = join(repo, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron")
 const python = resolve(process.env.HC218_SMOKE_PYTHON)
 const [origin, run] = process.argv.slice(2)
@@ -154,7 +154,7 @@ async function start(actor) {
     WORKBENCH_SERVICE_ORIGIN: origin, WORKBENCH_ACP_EXECUTABLE: python,
     WORKBENCH_ACP_ARGS_JSON: JSON.stringify(["-c", agentEntry]), DUAL_AGENT_CONFIG_HOME: actor.configHome,
     TMPDIR: actor.temp, DUAL_LOOPBACK_KEY: "dummy-loopback-only", NO_PROXY: "127.0.0.1", PYTHONSAFEPATH: "1",
-    PYTHONPATH: join(repo, "packages/agent"),
+    PYTHONPATH: join(repo, "agent"),
   }
   const child = spawn(binary, [
     "--user-data-dir=" + actor.profile, "--remote-debugging-address=127.0.0.1",

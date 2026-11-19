@@ -4,14 +4,19 @@ __pycache__/
 *.egg-info/
 .venv/
 .pytest_cache/
+.ruff_cache/
 .harness/config.toml
 .harness/config.local.toml
-packages/agent/.harness/
+agent/.harness/
 
 # Node / TypeScript
 node_modules/
 dist/
+packages/collaboration-client/src/schema/
 *.tsbuildinfo
+
+# Java / Maven
+target/
 
 # IDE
 .vscode/

@@ -1,6 +1,6 @@
 # Java 中继层调整方案（基于 11-12 产品讨论结论）
 
-> 状态：方案稿 v2（2026-11-12 15:10，D1～D11 已由用户拍板，见 §8），未改代码和文档。对照基线：[多人协作工作台顶层设计](../architecture/多人协作工作台顶层设计.md)、[HC-210 Spec](../spec/HC-210-Java高可用基础框架.md)、现有 `services/collaboration-server` 源码（V001～V003、[RouteCatalog.java](../../../services/collaboration-server/src/main/java/workbench/collaboration/interfaces/http/RouteCatalog.java)）。
+> 状态：方案稿 v2（2026-11-12 15:10，D1～D11 已由用户拍板，见 §8），未改代码和文档。对照基线：[多人协作工作台顶层设计](../architecture/多人协作工作台顶层设计.md)、[HC-210 Spec](../spec/HC-210-Java高可用基础框架.md)、现有 `services/collaboration-server` 源码（V001～V003、[RouteCatalog.java](../../../server/src/main/java/workbench/collaboration/interfaces/http/RouteCatalog.java)）。
 
 ## 1. 最大变化：从“远程共同操作”改为“各跑各的，只读共享，改动走任务”
 

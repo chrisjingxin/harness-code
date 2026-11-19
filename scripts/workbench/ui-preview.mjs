@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const desktop = join(root, "apps/desktop")
+const desktop = join(root, "desktop")
 const [previewId, operation] = process.argv.slice(2)
 // 每个目标对应仓库内固定的构建配置，不接受用户传入的目录或页面地址。
 const configs = {
@@ -32,9 +32,16 @@ writeFileSync(join(output, "package.json"), JSON.stringify({ private: true, type
 
 const npmCli = process.env.npm_execpath
 if (!npmCli) throw new Error("请通过 npm 脚本运行预览，以确定当前 npm 入口")
-const prepare = spawnSync(process.execPath, [npmCli, "run", "build", "--workspace", "@workbench/contracts", "--workspace", "@workbench/ui"], { cwd: root, stdio: "inherit" })
+const prepare = spawnSync(
+  process.execPath,
+  [npmCli, "run", "build", "--workspace", "@workbench/collaboration-client", "--workspace", "@workbench/acp-runtime", "--workspace", "@workbench/harness-acp"],
+  { cwd: root, stdio: "inherit" },
+)
 if (prepare.error) throw prepare.error
 if (prepare.status !== 0) process.exit(prepare.status ?? 1)
+const theme = spawnSync(process.execPath, [join(root, "scripts/workbench/generate-native-theme.mjs")], { cwd: root, stdio: "inherit" })
+if (theme.error) throw theme.error
+if (theme.status !== 0) process.exit(theme.status ?? 1)
 
 const cli = join(root, "node_modules/electron-vite/bin/electron-vite.js")
 const config = join(desktop, configs[previewId])

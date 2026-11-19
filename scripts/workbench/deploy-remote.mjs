@@ -94,7 +94,7 @@ async function hashFile(path) {
 
 try {
   const info = JSON.parse(ssh(inspectScript, true))
-  const schemaHash = await hashFile(join(root, "services/collaboration-server/src/main/resources/db/schema.sql"))
+  const schemaHash = await hashFile(join(root, "server/src/main/resources/db/schema.sql"))
   console.log(`远端服务：${info.origin}；消息模式：${info.mode}`)
   if (info.schemaHash !== schemaHash) throw new Error("远端数据库脚本与本地不同；请先核对数据库结构和备份，本工具不会自动改表。")
   console.log("数据库脚本与本地一致；现有配置和数据库不会被本工具覆盖。")
@@ -112,7 +112,7 @@ try {
   if (build.error || build.status !== 0) throw new Error(build.error?.message ?? "Java 构建失败。")
   const version = (await readFile(join(root, "VERSION"), "utf8")).trim()
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error("VERSION 无效。")
-  const jar = join(root, `services/collaboration-server/target/release/collaboration-server-${version}.jar`)
+  const jar = join(root, `server/target/release/collaboration-server-${version}.jar`)
   const jarHash = await hashFile(jar)
   if (jarHash === info.jarHash) { console.log("远端已有相同程序，无需重启。"); process.exit(0) }
 

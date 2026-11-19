@@ -25,7 +25,7 @@ const secrets = JSON.parse(await readFile(join(runtime, "db-secrets.json"), "utf
 const admin = join(runtime, "admin.cnf")
 const version = (await readFile(join(repository, "VERSION"), "utf8")).trim()
 assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version), "VERSION无效")
-const jar = join(repository, "services/collaboration-server/target", `collaboration-server-${version}.jar`)
+const jar = join(repository, "server/target", `collaboration-server-${version}.jar`)
 const results = []
 let database, server, client, enabled, memberTime, snapshot
 let completed = false
@@ -93,7 +93,7 @@ const snapshotSql = "SELECT id,username,display_name,enabled,created_at_ms FROM 
 const restoreMember = () => sql(`INSERT INTO wb_workspace_member (workspace_id,user_id,created_at_ms) SELECT w.id,u.id,${memberTime} FROM wb_workspace w JOIN wb_user u ON u.username='user03' WHERE w.slug='demo' AND NOT EXISTS (SELECT 1 FROM wb_workspace_member m WHERE m.workspace_id=w.id AND m.user_id=u.id);`)
 
 try {
-  const compiler = await privateProcess(process.execPath, [join(repository, "node_modules/typescript/bin/tsc"), "-p", join(repository, "apps/desktop/tsconfig.json"), "--noEmit", "false", "--outDir", join(repository, "apps/desktop/dist/lifecycle")], "identity-typecheck.log")
+  const compiler = await privateProcess(process.execPath, [join(repository, "node_modules/typescript/bin/tsc"), "-p", join(repository, "desktop/tsconfig.json"), "--noEmit", "false", "--outDir", join(repository, "desktop/dist/lifecycle")], "identity-typecheck.log")
   await exit(compiler); assert.equal(compiler.exitCode, 0, "生产身份源码编译失败，诊断仅留私有runtime")
   await startDatabase(); await startServer()
   snapshot = await sql(snapshotSql)

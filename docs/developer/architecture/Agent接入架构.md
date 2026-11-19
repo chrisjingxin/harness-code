@@ -14,73 +14,69 @@
 
 由此得出一条总原则：**平台的任何功能，都不能依赖某个 Agent 的配合才能工作。** Harness Code 是我们自己的 Agent，但在平台眼里，它和其他 Agent 一样，只是其中一家。
 
-## 2. 四层结构
+## 2. 分层结构
+
+> 注：HC-231 已完成五层架构与多语言目录重构——`desktop/src/{ui,shared,main/project-service}` 收口桌面 UI 与装配，`packages/collaboration-client` 消费 `contracts/`，`packages/acp-runtime` 承载通用 ACP 运行时与命令描述符，`packages/harness-acp` 为可选 Harness ACP 适配层，`agent/` 存放可选 Harness Python ACP 内核，`packages/providers/{pi,qwen}` 已退役，外部 ACP Agent 直接通过 `createCommandAgentDescriptor` 或 `WORKBENCH_ACP_EXECUTABLE` 接入。
 
 ```text
-① 桌面 UI 层            apps/desktop、packages/workbench-ui
+① 桌面 UI 与装配层      desktop/（src/renderer、src/ui、src/preload、src/main、src/shared）
    │  只按「标准 ACP 事件 + 能力」渲染；不认识任何具体 Agent
    ▼
-② ACP 协议层            packages/acp-runtime
-   │  标准 ACP 客户端全集 + 协议兼容垫片（按协议/SDK 版本，不按 Agent）
+② 通用 ACP 运行时层     packages/acp-runtime/
+   │  标准 ACP 客户端全集 + 协议兼容垫片 + 通用命令描述符/发现/注册表（按协议版本，不按 Agent）
    ▼
-③ Provider 适配层       每个上游家族一份描述，放在平台侧，可选
-   │  启动方式、认证、家族识别、已知差异折算、可选的 _meta 解读
-   │  ├─ harness（默认 Provider）  ├─ cline 家族  ├─ pi 家族  └─ qwen 家族 …
+③ 特定 Agent 适配层     按需独立适配包（如 packages/harness-acp），可选
+   │  启动探测、家族能力预设、可选的 _meta 解读器（仅依赖 @workbench/acp-runtime）
+   │  其他标准 ACP Agent 通过 @workbench/acp-runtime 的 createCommandAgentDescriptor 直接注册
    ▼
 ④ Agent 进程            各家自己的 ACP 实现（含企业魔改版）
-      harness acp / cline --acp / pi-acp / qwen --acp …
+      agent/（Harness Python ACP Agent）/ 外部可执行命令（pi-acp / qwen --acp …）
 ```
 
 | 层 | 负责 | 禁止 |
 |---|---|---|
-| ① UI | 按②给出的能力决定显示什么：会话列表、配置项（模型、思考级别等）、模式、`plan` 进度、表单、命令菜单。Agent 没宣告的能力就不显示对应入口 | 按 Agent 名称写分支；写死斜杠命令；假定某项能力一定存在；直接解读任何 `_meta` |
-| ② ACP 协议层 | 完整实现标准 ACP 客户端；对 SDK 版本差异和 UNSTABLE 能力做统一容错；把 `_meta` 原样交给③中已注册的解读器 | import 任何 Provider 的类型；为某个 Agent 写特殊逻辑 |
-| ③ Provider 适配 | 每个上游家族一份描述（§4）；不需要对方改代码 | 让平台读取 Agent 的数据库、配置文件或内部对象；把某家的私有概念放进①②的公共类型 |
-| ④ Agent 进程 | 各家自带 ACP 实现。Harness 的由 [HC-200](../task/HC-200-Harness独立ACP接入.md) 交付 | — |
+| ① UI 与桌面装配 | 按②给出的能力决定显示什么：会话列表、配置项（模型、思考级别等）、模式、`plan` 进度、表单、命令菜单。Agent 没宣告的能力就不显示对应入口 | 按 Agent 名称写分支；写死斜杠命令；假定某项能力一定存在；直接解读任何 `_meta` |
+| ② ACP 运行时层 | 完整实现标准 ACP 客户端、命令描述符与注册表；对 SDK 版本差异和 UNSTABLE 能力做统一容错；把 `_meta` 原样交给③中已注册的解读器 | import 任何特定 Agent 适配器；包含特定 Agent 硬编码或假设某 Agent 必装 |
+| ③ 特定 Agent 适配 | 可选适配包（如 `packages/harness-acp`）或②的命令描述符；不需要对方改代码 | 让平台读取 Agent 的数据库、配置文件或内部对象；把某家的私有概念放进①②的公共类型 |
+| ④ Agent 进程 | 各家自带 ACP 实现。Harness 的由 [HC-200](../task/HC-200-Harness独立ACP接入.md) 交付（源码在顶层 `agent/`） | — |
 
-依赖方向只能向下。①不知道③的存在，只消费②的通用事件；③的 `_meta` 解读器产出的增强信息，通过②的通用扩展槽交给①显示，缺了它①照常工作。
+依赖方向只能向下。①不知道③的私有实现细节，只消费②的通用事件；③的 `_meta` 解读器产出的增强信息，通过②的通用扩展槽交给①显示，缺了它①照常工作。
 
 ### 2.1 代码组织：目录按层划分
 
-代码的目录结构也按四层组织，一眼能看出每个文件属于哪一层：
+代码的目录结构按五层组织，一眼能看出每个目录属于哪一层（详见 [HC-231 Spec](../spec/HC-231-五层架构与多语言目录重构.md)）：
 
 ```text
-apps/desktop/                     ① 装配：唯一知道注册了哪些 Provider 的地方
-apps/runner/                      ① 装配（执行器侧），同上
-packages/workbench-ui/            ① 通用界面
-packages/workbench-contracts/     ①②③ 共用的公共类型与通用扩展接口（不含任何 Agent 的类型）
-packages/acp-runtime/             ② ACP 协议层：标准客户端、协议兼容垫片、一致性测试工具
-packages/providers/               ③ Provider 适配层，每个家族一个子目录
-  harness/                           默认 Provider（包名 @workbench/harness-provider）
-  cline/  pi/  qwen/  …              其他家族（按需新建）
-packages/agent/                   ④ Harness Agent 进程（默认 Agent，Python）
-                                     其他家族的 Agent 进程是外部制品，不进本仓库
+contracts/                        语言无关线上契约（OpenAPI + JSON Schema Draft 2020-12 + fixtures）
+desktop/                          第 1 层：Electron 桌面（main / preload / renderer / ui / shared / project-service）
+packages/collaboration-client/    第 2 层：纯 TS 协作客户端与语言无关契约衍生类型
+packages/acp-runtime/             第 3 层：通用 ACP 运行时（客户端、垫片、descriptor / discovery / registry）
+packages/harness-acp/             第 4 层（TS 侧）：可选 Harness ACP 适配器与 _meta.harnessCode 解读
+agent/                            第 4 层（Python 侧）：可选 Harness Agent 进程（uv 独立工程）
+server/                           第 5 层（Java 侧）：Spring Boot 协作服务端
 ```
 
 | 目录 | 能依赖 | 不能依赖 |
 |---|---|---|
-| ① `workbench-ui` | `workbench-contracts` | `acp-runtime` 内部、任何 `providers/*`、`packages/agent` |
-| ① `apps/*` | ①②的公开入口；按需注册 `providers/*` | `packages/agent` 的源码（只能把它当子进程启动） |
-| ② `acp-runtime` | `workbench-contracts`、官方 ACP SDK | 任何 `providers/*`、`packages/agent` |
-| ③ `providers/<家族>` | `workbench-contracts`、`acp-runtime` 的公开扩展接口 | 其他家族的 Provider；`workbench-ui` 内部；Agent 的源码或数据文件 |
-| ④ `packages/agent` | 自己的依赖 | 任何平台包（①②③）；与平台只在 ACP 进程边界通信 |
+| `desktop/src/{ui,renderer,shared}` | React、纯共享类型、`@workbench/collaboration-client/types`、`@workbench/acp-runtime/types` | `electron`、Node 内置模块、`packages/harness-acp`、`agent/` |
+| `desktop/src/main` | `desktop/src/shared`、`@workbench/collaboration-client`、`@workbench/acp-runtime`、按需动态探测 `packages/harness-acp` | `agent/` 的源码（只能把它当子进程启动） |
+| `packages/acp-runtime` | 官方 ACP SDK（零 Electron、零具体 Agent 硬编码） | `desktop/`、`packages/harness-acp`、`agent/`、`packages/collaboration-client` |
+| `packages/harness-acp` | `@workbench/acp-runtime` | `desktop/`、`agent/` 源码、其他 Agent 适配器 |
+| `agent/` | 自己的 `uv` 依赖 | 任何 TS 平台包；与平台只在 ACP 进程边界通信 |
 
-每个 Provider 子目录内部固定分三块，只有 `descriptor` 是必需的：
+对于需要专用扩展解析的 Agent 家族，适配器聚焦三块，其中通用可执行 Agent 仅需 `createCommandAgentDescriptor`：
 
 ```text
-providers/<家族>/
-  descriptor   启动命令、认证、家族识别、差异折算、已知限制（纯数据，不依赖 Node/React）
+<家族适配器>/
+  descriptor   启动命令、可用性探测、能力提示
   runtime      可选：该家族 `_meta` 的解读器、专有方法处理（Node 侧）
-  ui           可选：该家族的专有视图（React 侧，经通用扩展槽加载）
 ```
 
-Harness 的 Provider 就是 `providers/harness/`，其中 `runtime`、`ui` 承载 Trace、专有设置和 `_meta.harnessCode` 的解读（见 [HC-201](../task/HC-201-Harness轨迹与设置扩展.md)）。
+Harness 的适配器即 `packages/harness-acp/`，承载可选探测及 `_meta.harnessCode` 解读（原 `packages/providers/{pi,qwen}` 已在 HC-231 退役，通用外部 Agent 直接以命令描述符接入）。
 
-**④ 的物理位置**：Harness Agent 目前在 `packages/agent`，被旧 CLI 等约 150 个文件引用。现在搬到按层命名的目录（例如 `agents/harness/`）成本高、收益小。等 HC-203 退役旧入口、旧引用消失后，再评估是否搬迁。在那之前，`packages/agent` 就是 ④ 层中的默认 Agent。
+**④ 的物理位置**：Harness Python Agent 内核现已独立置于顶层 `agent/`（包含原 `examples/plugins/` 迁入的 `agent/examples/plugins/`），与 TS/Java 构建链彻底解耦。
 
-**不属于任何一层的目录**：`packages/cli`（含 `acp-web` 测试客户端）和 `packages/protocol` 是旧入口和迁移来源，随 HC-203 退役。新代码不能放进去，也不能被①②③依赖。
-
-依赖边界由 `npm run check:boundaries` 检查。新建 `packages/providers/` 的任务要同步扩充检查规则：通用包不能 import 任何 `providers/*`，各 Provider 之间也不能互相 import。
+**边界门禁**：依赖边界由 `npm run check:boundaries -- --self-check` 检查，强制校验 4-workspace 依赖矩阵、`packages/acp-runtime` 零 Agent 硬编码、`desktop/src/{ui,renderer,shared}/` 静态隔离以及已退役路径防回流清单。
 
 ## 3. 一个功能该放在哪里：决策顺序
 
@@ -183,7 +179,7 @@ Harness 能力矩阵按 §6 的八列整理。自动化用脚本化模型，不�
 
 ## 7. Harness Code 的定位
 
-- **默认 Agent 与默认 Provider**：④ 层的默认 Agent 是 Harness（`packages/agent`）；③ 层对应的默认 Provider 是 `packages/providers/harness/`。桌面首次使用时预选 Harness，并注册它的 Provider 描述和 `_meta.harnessCode` 解读器。
+- **默认 Agent 与可选适配器**：④ 层的默认可选 Agent 是 Harness（`agent/`）；③ 层对应的适配器包是 `packages/harness-acp/`（`@workbench/harness-acp`）。桌面主进程按可用探测注册 Harness 适配器，并支持通过 `@workbench/acp-runtime` 的命令描述符或 `WORKBENCH_ACP_EXECUTABLE` 接入任意标准 ACP Agent。
 - **不是必需依赖**：不安装 Harness 时，平台照样能接其他 Agent，Python 不进入基础平台的安装和构建。
 - **没有特权路径**：除了 `_meta.harnessCode` 的增强显示外，Harness 和其他家族走完全相同的①②代码。平台为 Harness 写的任何特殊分支都违反本文。
 - **扩展命名空间就用 `harnessCode`**：别家不会实现我们的扩展，所以不设计「企业通用扩展规范」。`harnessCode` 只在 Harness 上生效；协商规则见 [ACP 通信](ACP通信.md)「扩展约定」。
@@ -192,9 +188,9 @@ Harness 能力矩阵按 §6 的八列整理。自动化用脚本化模型，不�
 ## 8. 接入一个新 Agent 的步骤
 
 ```text
-1. 确认它基于哪个上游家族；没有家族就按「纯标准」接入
+1. 确认它基于哪个上游家族；没有家族或无需 `_meta` 解析时按「纯标准命令描述符」接入
 2. 跑 §6 一致性测试 → 得到能力矩阵
-3. 已有家族：在 `packages/providers/<家族>/descriptor` 里补差异配置；新家族：新建 `packages/providers/<家族>/`
+3. 通用命令式 Agent：通过 `createCommandAgentDescriptor` 或 `WORKBENCH_ACP_EXECUTABLE` 注册；若确需私有 `_meta` 解读才新增独立适配包
 4. 只有确需解读该家族上游自带的 _meta 时，才写解读器
 5. 真实模型互通一次，记录结果
 6. 全程不改 ① UI 层；如果发现非改①不可，说明②或本文漏了通用能力，先修订本文

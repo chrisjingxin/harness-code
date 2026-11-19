@@ -24,15 +24,15 @@ let health
 
 try {
   await mkdir(join(repo, "scripts/workbench"), { recursive: true })
-  await mkdir(join(repo, "services/collaboration-server/src/main/resources/db"), { recursive: true })
-  await mkdir(join(repo, "services/collaboration-server/target/release"), { recursive: true })
+  await mkdir(join(repo, "server/src/main/resources/db"), { recursive: true })
+  await mkdir(join(repo, "server/target/release"), { recursive: true })
   await mkdir(bin)
   for (const file of ["deploy-remote.mjs", "remote-desktop.mjs"]) {
     await copyFile(join(root, "scripts/workbench", file), join(repo, "scripts/workbench", file))
   }
   await writeFile(join(repo, "VERSION"), "0.2.0\n")
-  await writeFile(join(repo, "services/collaboration-server/src/main/resources/db/schema.sql"), "schema")
-  await writeFile(join(repo, "services/collaboration-server/target/release/collaboration-server-0.2.0.jar"), "new jar")
+  await writeFile(join(repo, "server/src/main/resources/db/schema.sql"), "schema")
+  await writeFile(join(repo, "server/target/release/collaboration-server-0.2.0.jar"), "new jar")
   await writeFile(fakeNpm, "require('node:fs').appendFileSync(process.env.TEST_BUILD_LOG,'run\\n'); console.log('origin='+process.env.WORKBENCH_SERVICE_ORIGIN)\n")
   await writeFile(join(bin, "ssh"), `#!/usr/bin/env node
 const fs = require('node:fs'), cp = require('node:child_process');

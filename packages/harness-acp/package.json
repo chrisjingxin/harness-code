@@ -1,0 +1,24 @@
+{
+  "name": "@workbench/harness-acp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@workbench/acp-runtime": "0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5"
+  }
+}

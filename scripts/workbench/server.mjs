@@ -9,7 +9,7 @@ import { createHash } from "node:crypto"
 import { loadContracts } from "./check-contracts.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const service = join(root, "services/collaboration-server")
+const service = join(root, "server")
 const command = process.argv[2]
 if (process.argv.length !== 3 || !["build", "init-demo", "start", "contracts"].includes(command)) throw new Error("必须选择一个已登记的服务端命令")
 const version = (await readFile(join(root, "VERSION"), "utf8")).trim()

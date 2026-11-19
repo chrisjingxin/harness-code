@@ -1,13 +1,13 @@
-/** 文件图标与安全 Markdown 预览的最小检查；先构建 @workbench/ui。 */
+/** 文件图标与安全 Markdown 预览的最小检查。 */
 import assert from "node:assert/strict"
 import { createRequire, register } from "node:module"
 import { createElement } from "react"
 
-// 根入口会引入 CSS；Node 冒烟时忽略样式，仍通过公开入口加载组件。
+// 导入 ui 源码会引入 CSS；Node 冒烟时忽略样式，仍直接验证源码组件。
 register(`data:text/javascript,${encodeURIComponent('export function load(url, context, next) { return url.endsWith(".css") ? { format: "module", shortCircuit: true, source: "" } : next(url, context) }')}`, import.meta.url)
-const { fileIconFor, Markdown, ProjectFilePanel, ConversationView } = await import("@workbench/ui")
-const { renderToStaticMarkup } = createRequire(new URL("../../apps/desktop/package.json", import.meta.url))("react-dom/server")
-const { resolveSessionFileReference } = await import("../../apps/desktop/src/renderer/features/session/session-file-reference.ts")
+const { fileIconFor, Markdown, ProjectFilePanel, ConversationView } = await import("../../desktop/src/ui/index.ts")
+const { renderToStaticMarkup } = createRequire(new URL("../../desktop/package.json", import.meta.url))("react-dom/server")
+const { resolveSessionFileReference } = await import("../../desktop/src/renderer/features/session/session-file-reference.ts")
 
 assert.equal(fileIconFor("src/main.ts").type, "ts")
 assert.equal(fileIconFor("test.PY").type, "python")
