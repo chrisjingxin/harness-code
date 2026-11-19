@@ -48,9 +48,11 @@ const ignoredRetiredEntries = new Set([
   "node_modules",
   "dist",
   "out",
+  "target",
   "__pycache__",
   ".venv",
   ".pytest_cache",
+  ".ruff_cache",
   ".publish",
   ".test-tree-sitter",
   ".claude",
@@ -340,7 +342,11 @@ async function selfCheck() {
     const ignoredOnlyDir = join(tempDir, "ignored-only")
     await mkdir(join(ignoredOnlyDir, "node_modules"), { recursive: true })
     await mkdir(join(ignoredOnlyDir, "dist"), { recursive: true })
+    await mkdir(join(ignoredOnlyDir, "target"), { recursive: true })
+    await mkdir(join(ignoredOnlyDir, ".ruff_cache"), { recursive: true })
     await writeFile(join(ignoredOnlyDir, "dist", "index.js"), "", "utf8")
+    await writeFile(join(ignoredOnlyDir, "target", "app.jar"), "", "utf8")
+    await writeFile(join(ignoredOnlyDir, ".ruff_cache", "tag"), "", "utf8")
     assert.equal(await hasNonIgnoredRetiredContent(ignoredOnlyDir), false)
     await writeFile(join(ignoredOnlyDir, "package.json"), "{}", "utf8")
     assert.equal(await hasNonIgnoredRetiredContent(ignoredOnlyDir), true)
