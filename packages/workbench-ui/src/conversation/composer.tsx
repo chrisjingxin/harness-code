@@ -48,6 +48,8 @@ interface ComposerProps {
   readonly localStatus?: string
   readonly onSend: () => void
   readonly onCancel: () => void
+  /** 新建准备页使用 Enter 换行，提交仍由该页的明确开始动作处理。 */
+  readonly submitOnEnter?: boolean
   readonly children?: ReactNode
 }
 
@@ -312,7 +314,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         return
       }
     }
-    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); if (canSend) onSend(); return }
+    if (event.key === "Enter" && !event.shiftKey && props.submitOnEnter !== false) { event.preventDefault(); event.stopPropagation(); if (canSend) onSend(); return }
     if (event.key === "Escape" && (activity?.active || showCancel)) {
       event.preventDefault()
       event.stopPropagation()
@@ -424,18 +426,18 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             if (!item) return <span key={id}>附件资料暂不可用</span>
             return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><X aria-hidden="true" /></button></span>
           })}</div> : null}
-          <textarea ref={textareaRef} className="wb-composer-textarea" rows={1} value={draft.text} disabled={!canEdit} placeholder={canEdit ? "描述你要做的事，输入 @ 可以引用文件，输入 / 唤起命令…" : "当前无法编辑草稿"} aria-label="消息，Enter 发送，Shift+Enter 换行" onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }} onKeyDown={handleKeyDown} />
+          <textarea ref={textareaRef} className="wb-composer-textarea" rows={1} value={draft.text} disabled={!canEdit} placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或完成的事情，输入 @ 引用项目会话…" : "描述你要做的事，输入 @ 可以引用文件，输入 / 唤起命令…") : "当前无法编辑草稿"} aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"} onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)} onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }} onKeyDown={handleKeyDown} />
           <div className="wb-composer-rail">
             <div className="wb-composer-rail-left">
-              <button type="button" className="wb-composer-tool" disabled={!canEdit || !visible} title="输入 @ 引用工作区文件" onClick={insertMention}>
+              <button type="button" className="wb-composer-tool" disabled={!canEdit || !visible} title={props.submitOnEnter === false ? "输入 @ 引用项目会话" : "输入 @ 引用工作区文件"} onClick={insertMention}>
                 <span className="wb-composer-kbd" aria-hidden="true">@</span>
-                <span>引用文件</span>
+                <span>{props.submitOnEnter === false ? "引用会话" : "引用文件"}</span>
               </button>
               {model.controls.map(control => <CapabilityMenu key={control.id} scope={scope} control={control} onSelect={actions.onCapabilitySelect} />)}
               {children}
             </div>
             <div className="wb-composer-rail-right">
-              <span className="wb-composer-hint">只在本机执行 · Enter 发送</span>
+              <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "只在本机执行 · Enter 发送"}</span>
               {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" /></svg></button> : null}
               {showSend ? <button type="submit" className="wb-composer-send" aria-label="发送消息" disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : "发送消息")}><ArrowUp aria-hidden="true" /></button> : null}
             </div>

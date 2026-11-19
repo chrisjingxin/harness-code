@@ -209,7 +209,9 @@ function Preview(): ReactElement {
   const [directories, setDirectories] = useState<Record<string, string | null>>({
     "c-local-1": "/Users/shen/workspace/plain-notes-folder",
   })
-  const [newDraft, setNewDraft] = useState<NewSessionDraft>({ directoryPath: null, draftText: "" })
+  const [newDraft, setNewDraft] = useState<NewSessionDraft>({
+    directoryPath: null, draftText: "", referenceIds: [], revision: 0, selectionStart: 0, selectionEnd: 0,
+  })
   const [page, setPage] = useState<ProjectPage>({ kind: "conversation", conversationId: "c-zhang-unsynced" })
   const [expandedMembers, setExpandedMembers] = useState<string[]>(["u-zhang", "u-wang", "u-feng", "u-yang"])
   const [selfCollapsed, setSelfCollapsed] = useState(false)
@@ -294,7 +296,9 @@ function Preview(): ReactElement {
     rendering: { copyText: text => window.workbench.copyText(text) },
     resolveOwnerName: userId => members.find(m => m.userId === userId)?.userName ?? userId,
     onChooseNewDirectory: () => { void pickDirectory(path => setNewDraft(prev => ({ ...prev, directoryPath: path }))) },
-    onNewDraftChange: text => setNewDraft(prev => ({ ...prev, draftText: text })),
+    onNewDraftChange: (text, selectionStart = text.length, selectionEnd = selectionStart) => setNewDraft(prev => ({
+      ...prev, draftText: text, selectionStart, selectionEnd, revision: prev.revision + 1,
+    })),
     onStartNewSession: () => {
       const id = `c-local-${Date.now()}`
       const title = newDraft.draftText.trim().split("\n")[0]?.slice(0, 24) || "新建本机会话"
@@ -323,7 +327,7 @@ function Preview(): ReactElement {
           messages: [{ sequence: 1, type: "user", occurredAtMs: Date.now(), payload: JSON.stringify({ text: newDraft.draftText.trim() }) }],
         },
       }))
-      setNewDraft({ directoryPath: null, draftText: "" })
+      setNewDraft({ directoryPath: null, draftText: "", referenceIds: [], revision: 0, selectionStart: 0, selectionEnd: 0 })
       setPage({ kind: "conversation", conversationId: id })
     },
     onChooseSessionDirectory: conversationId => {

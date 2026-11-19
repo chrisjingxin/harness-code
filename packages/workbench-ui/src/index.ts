@@ -27,7 +27,7 @@ export type {
   ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileView, ProjectChangedFile, ProjectChangesView,
   ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps, ProjectGitCommitItem,
 } from "./project/index.js"
-export { ConversationView, ConversationToolBlocks } from "./conversation/index.js"
+export { ConversationComposer, ConversationView, ConversationToolBlocks } from "./conversation/index.js"
 export type {
   ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft,
   ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,

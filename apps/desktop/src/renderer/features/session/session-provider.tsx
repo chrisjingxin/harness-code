@@ -113,7 +113,7 @@ export type SessionPageController = {
   readonly hooks?: SessionExternalHooks
   resolveOwnerName(userId: string): string
   onChooseNewDirectory(): void
-  onNewDraftChange(text: string): void
+  onNewDraftChange(text: string, selectionStart?: number, selectionEnd?: number): void
   onStartNewSession(): void
   onChooseSessionDirectory(conversationId: string): void
   onSyncConversation(conversationId: string): void
@@ -140,6 +140,9 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         const avail = controller.execution.getAvailability("__new__")
         return (
           <NewSessionPage
+            scope={scope}
+            visible={visible}
+            hooks={controller.hooks}
             projectName={controller.projectName}
             draft={controller.newDraft}
             busy={controller.newSessionBusy}

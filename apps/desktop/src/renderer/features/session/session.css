@@ -484,10 +484,24 @@
   margin-bottom: 16px;
 }
 
-.session-new-page textarea {
+.session-new-composer {
+  width: min(680px, 100%);
+}
+
+.session-new-composer .wb-composer-inner {
+  padding: 0;
+}
+
+.session-new-composer .wb-composer-tabs,
+.session-new-composer .wb-composer-rail:has(.wb-composer-rail-left:empty) {
+  display: none;
+}
+
+.session-new-composer .wb-composer-textarea {
   box-sizing: border-box;
   width: min(680px, 100%);
   height: 120px;
+  min-height: 120px;
   resize: vertical;
   border: none;
   border-radius: var(--radius-lg, 10px);
@@ -502,12 +516,12 @@
   transition: box-shadow var(--motion-fast) var(--ease-standard);
 }
 
-.session-new-page textarea::placeholder {
+.session-new-composer .wb-composer-textarea::placeholder {
   color: var(--meta, var(--subtle));
 }
 
-.session-new-page textarea:focus,
-.session-new-page textarea:focus-visible {
+.session-new-composer .wb-composer-textarea:focus,
+.session-new-composer .wb-composer-textarea:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px var(--border-strong, var(--line-strong)), 0 0 0 3px var(--selected);
 }
@@ -852,4 +866,10 @@
   font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
+}
+.session-directory-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }

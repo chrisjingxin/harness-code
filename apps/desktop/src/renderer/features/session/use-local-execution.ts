@@ -6,6 +6,7 @@ import type {
   LocalExecutionAvailability,
   LocalExecutionBinding,
   LocalExecutionScope,
+  LocalDirectoryStatus,
 } from "../../../local-execution-host.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
@@ -42,6 +43,7 @@ type Screen = {
   preparedFor?: Target
   binding?: LocalExecutionBinding
   availability?: LocalExecutionAvailability
+  directoryStatus?: LocalDirectoryStatus
   terminal?: { readonly bindingId: string; readonly availability: LocalExecutionAvailability }
   flight?: Flight
 }
@@ -60,11 +62,13 @@ export function useLocalExecution(
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
   const projectId = project?.projectId
+  const [confirmationRevision, retryPreparation] = useReducer(revision => revision + 1, 0)
+  const confirming = useRef(false)
   const target = useMemo<Target | null>(() => {
     if (!accountId || !workspaceId || !projectId || !conversationId) return null
     const scope = { accountId, workspaceId, projectId, conversationId }
-    return { scope, key: localExecutionKey(scope), directory, selectionRevision }
-  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision])
+    return { scope, key: localExecutionKey(scope), directory, selectionRevision: selectionRevision + confirmationRevision }
+  }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision, confirmationRevision])
   const screens = useRef(new Map<string, Screen>())
   const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName })
   const mounted = useRef(false)
@@ -109,6 +113,7 @@ export function useLocalExecution(
           screen.terminal = notice
           if (screen.binding?.bindingId === notice.bindingId) {
             screen.availability = notice.availability
+            screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
             refresh()
           }
         }
@@ -142,6 +147,7 @@ export function useLocalExecution(
         screen.flight = undefined
         screen.terminal = notice
         if (screen.binding?.bindingId === notice.bindingId) screen.availability = notice.availability
+        screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
         current.current.onWorkspaceRefresh?.(flight.scope, notice.scope.conversationId)
       }
       refresh()
@@ -159,11 +165,14 @@ export function useLocalExecution(
     screen.preparedFor = target
     screen.binding = undefined
     screen.availability = preparing
+    screen.directoryStatus = "checking"
     const lastTerminal = screen.terminal
     refresh()
     void host.prepare(target.scope, target.directory).then(result => {
       if (!active) return
+      screen.directoryStatus = result.directoryStatus
       screen.binding = result.ok ? result.value : undefined
+      if (result.ok) screen.timeline = { ...screen.timeline, failure: null }
       if (!result.ok) screen.availability = { available: false, reason: result.error.message }
       else screen.availability = screen.terminal !== lastTerminal && screen.terminal?.bindingId === result.value.bindingId
         ? screen.terminal.availability : result.value
@@ -171,6 +180,7 @@ export function useLocalExecution(
     }).catch(() => {
       if (!active) return
       screen.availability = { available: false, reason: "无法确认本机执行能力，请重新选择工作目录。" }
+      screen.directoryStatus = "unavailable"
       refresh()
     })
     return () => { active = false }
@@ -192,7 +202,43 @@ export function useLocalExecution(
   return {
     textOnly: true,
     commitsAcceptedDraft: true,
-    getAvailability: id => readAvailability(target, id),
+    getAvailability: id => {
+      const screen = target && screens.current.get(target.key)
+      const preparedForTarget = screen?.preparedFor?.directory === target?.directory
+        && screen?.preparedFor?.selectionRevision === target?.selectionRevision
+      return {
+        ...readAvailability(target, id),
+        ...(target?.scope.conversationId === id ? {
+          directoryStatus: !target.directory ? "confirmation-required"
+            : preparedForTarget ? screen?.directoryStatus ?? "checking" : "checking",
+        } : {}),
+      }
+    },
+    async confirmDirectory(id) {
+      const selected = current.current.target
+      if (!selected || selected.scope.conversationId !== id || confirming.current) return
+      confirming.current = true
+      try {
+        const result = await host.confirmDirectory(selected.scope)
+        if (!mounted.current || current.current.target !== selected) return
+        if (result.ok) {
+          if (result.value) retryPreparation()
+        } else {
+          const screen = screens.current.get(selected.key)
+          if (screen) {
+            screen.availability = { available: false, reason: result.error.message }
+            if (result.error.code === "PROJECT_ROOT_CHANGED") screen.directoryStatus = "invalid"
+            refresh()
+          }
+        }
+      } catch {
+        const screen = screens.current.get(selected.key)
+        if (mounted.current && current.current.target === selected && screen) {
+          screen.availability = { available: false, reason: "无法确认目录，请重试或重新选择。" }
+          refresh()
+        }
+      } finally { confirming.current = false }
+    },
     getView: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.timeline : undefined,
     async cancel(scope, id) {
       const source = current.current.target

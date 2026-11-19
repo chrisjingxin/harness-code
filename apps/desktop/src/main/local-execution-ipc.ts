@@ -1,19 +1,20 @@
 /** 授权本人本机会话、绑定已选目录，并按受理 → 正文 → 终态的顺序向可信窗口转发。 */
 import { randomUUID } from "node:crypto"
-import { realpath, stat } from "node:fs/promises"
-import type { BrowserWindow } from "electron"
+import { dialog, type BrowserWindow } from "electron"
 import type { LocalAcpEvent, LocalAcpHost, LocalAcpSession, UnavailableReason } from "@workbench/acp-runtime"
 import type { CollaborationResult } from "@workbench/contracts"
 import { localExecutionKey } from "../local-execution-host.js"
-import type { LocalExecutionBinding, LocalExecutionNotice, LocalExecutionReceipt, LocalExecutionScope } from "../local-execution-host.js"
+import type { LocalExecutionPreparation, LocalExecutionNotice, LocalExecutionReceipt, LocalExecutionScope } from "../local-execution-host.js"
 import type { CollaborationState } from "./collaboration-state.js"
 import { identityError } from "./collaboration-state.js"
 import { syncPayloadLimit, type ConversationUploads, type FinalizedTurn } from "./conversation-uploads.js"
 import { parseFixedReference } from "../collaboration-reference.js"
+import { inspectDirectory, sameDirectory, type ConfirmedDirectory, type DirectoryConfirmations } from "./directory-confirmations.js"
+import type { PersonalStore } from "./personal-store.js"
+import type { ConversationPersonal } from "../personal-host.js"
 
 export type LocalExecutionRuntime = { readonly host: LocalAcpHost } | { readonly error: string }
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
-type DirectoryGrant = { readonly path: string; readonly dev: bigint; readonly ino: bigint }
 type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & {
   sequence: number
   lastMessageId?: string
@@ -22,7 +23,7 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs"> & {
 type Binding = {
   readonly id: string
   readonly login: Login
-  readonly directory: DirectoryGrant
+  readonly directory: ConfirmedDirectory
   readonly session: LocalAcpSession
   readonly unsubscribe: () => void
   activeTurn?: ActiveTurn
@@ -67,8 +68,10 @@ export function createLocalExecutionIpc(
   identity: CollaborationState,
   uploads: ConversationUploads | null,
   runtime: LocalExecutionRuntime,
+  confirmations: DirectoryConfirmations,
+  personal: PersonalStore,
 ) {
-  const grants = new Map<string, DirectoryGrant>()
+  const grants = new Map<string, ConfirmedDirectory>()
   const bindings = new Map<string, Binding>()
   let tail: Promise<void> = Promise.resolve()
   let disposed = false
@@ -113,6 +116,15 @@ export function createLocalExecutionIpc(
     return isCurrent(login) && session.ownerUserId === login.accountId
       && session.projectId === scope.projectId && session.conversationId === scope.conversationId
       ? ok(null) : forbidden()
+  }
+
+  async function savedDirectory(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<string | null>> {
+    const record = await personal.load({
+      kind: "conversation", workspaceId: scope.workspaceId, projectId: scope.projectId, conversationId: scope.conversationId,
+    })
+    if (!isCurrent(login)) return forbidden()
+    if (!record.ok) return identityError("INTERNAL_ERROR", record.message)
+    return ok((record.value.data as ConversationPersonal | null)?.localDirectoryPath ?? null)
   }
 
   async function resolvePrompt(scope: LocalExecutionScope, login: Login, text: string, referenceIds: readonly string[]) {
@@ -168,39 +180,98 @@ export function createLocalExecutionIpc(
       const login = identity.personalIdentity()
       return async (path: string) => {
         if (!login || !isCurrent(login)) return
-        try {
-          const canonical = await realpath(path)
-          const info = await stat(canonical, { bigint: true })
-          if (info.isDirectory() && isCurrent(login)) grants.set(path, { path: canonical, dev: info.dev, ino: info.ino })
-        } catch { /* 目录已失效，准备执行时会要求重新确认。 */ }
+        const directory = await inspectDirectory(path)
+        if (!isCurrent(login)) return
+        await confirmations.remember(login.accountId, path, directory)
+        if (isCurrent(login)) grants.set(path, directory)
       }
     },
 
-    prepare(scope: LocalExecutionScope, path: string): Promise<CollaborationResult<LocalExecutionBinding>> {
+    /** 旧记录只提供显示路径。用户在原生窗口确认后才建立可以恢复的本机依据。 */
+    async confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>> {
+      const login = identity.personalIdentity()
+      if (!login) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      const saved = await savedDirectory(scope, login)
+      if (!saved.ok) return saved
+      if (!saved.value) return identityError("PROJECT_PATH_INVALID", "该会话尚未保存工作目录，请选择目录。")
+      const path = saved.value
+      let directory: ConfirmedDirectory
+      try { directory = await inspectDirectory(path) }
+      catch { return identityError("PROJECT_ROOT_CHANGED", "工作目录不存在或不可访问，请重新选择。") }
+      if (!isCurrent(login)) return forbidden()
+      const result = await dialog.showMessageBox(window, {
+        type: "question",
+        message: "确认此会话的工作目录",
+        detail: `允许本机会话在以下目录运行 Agent，并在下次登录时恢复此选择？\n\n${path}`,
+        buttons: ["确认目录", "取消"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (!isCurrent(login)) return forbidden()
+      if (result.response !== 0) return ok(false)
+      return enqueue(async () => {
+        const checked = await authorize(scope, login)
+        if (!checked.ok) return checked
+        const latest = await savedDirectory(scope, login)
+        if (!latest.ok) return latest
+        if (latest.value !== path) return identityError("PROJECT_PATH_INVALID", "会话目录已变化，请确认当前目录。")
+        try {
+          if (!sameDirectory(directory, await inspectDirectory(path))) {
+            return identityError("PROJECT_ROOT_CHANGED", "工作目录已变化，请重新选择。")
+          }
+          if (!isCurrent(login)) return forbidden()
+          await confirmations.remember(login.accountId, path, directory)
+          if (!isCurrent(login)) return forbidden()
+          grants.set(path, directory)
+          return ok(true)
+        } catch { return identityError("INTERNAL_ERROR", "无法保存目录确认，请检查本机应用数据目录后重试。") }
+      })
+    },
+
+    prepare(scope: LocalExecutionScope, path: string): Promise<LocalExecutionPreparation> {
       const login = identity.personalIdentity()
       return enqueue(async () => {
-        if (!login || !isCurrent(login)) return forbidden()
-        if ("error" in runtime) return identityError("INVALID_REQUEST", runtime.error)
+        if (!login || !isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
         const key = localExecutionKey(scope)
-        const directory = grants.get(path)
-        if (!directory) return identityError("PROJECT_PATH_INVALID", "请通过「工作目录」重新确认本次执行使用的文件夹。")
         const authorized = await authorize(scope, login)
-        if (!authorized.ok) return authorized
+        if (!authorized.ok) return { ...authorized, directoryStatus: "unavailable" }
+        let directory = grants.get(path)
+        if (!directory) {
+          const saved = await savedDirectory(scope, login)
+          if (!saved.ok) return { ...saved, directoryStatus: "unavailable" }
+          if (saved.value !== path) {
+            return { ...identityError("PROJECT_PATH_INVALID", "此会话的目录尚未确认，请确认已保存目录或重新选择。"), directoryStatus: "confirmation-required" }
+          }
+          try { directory = await confirmations.read(login.accountId, path) ?? undefined }
+          catch {
+            return { ...identityError("INTERNAL_ERROR", "无法读取目录确认记录，请确认目录以重新保存。"), directoryStatus: "confirmation-required" }
+          }
+        }
+        if (!directory) {
+          return { ...identityError("PROJECT_PATH_INVALID", "此目录来自旧的个人记录，尚未确认用于执行。"), directoryStatus: "confirmation-required" }
+        }
         const existing = bindings.get(key)
         try {
-          const info = await stat(directory.path, { bigint: true })
-          if (!info.isDirectory() || info.dev !== directory.dev || info.ino !== directory.ino
-            || await realpath(directory.path) !== directory.path) {
-            return identityError("PROJECT_ROOT_CHANGED", "所选工作目录已变更，请重新选择。")
+          if (!sameDirectory(directory, await inspectDirectory(path))) {
+            return { ...identityError("PROJECT_ROOT_CHANGED", "工作目录已被移动或替换，请重新选择。"), directoryStatus: "invalid" }
           }
+        } catch {
+          return { ...identityError("PROJECT_ROOT_CHANGED", "工作目录不存在或不可访问，请重新选择。"), directoryStatus: "invalid" }
+        }
+        if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
+        if ("error" in runtime) return { ...identityError("INVALID_REQUEST", runtime.error), directoryStatus: "ready" }
+        try {
           if (existing?.login.generation === login.generation && existing.directory.path === directory.path
             && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino) {
-            return ok({ bindingId: existing.id, ...availability(existing.session) })
+            return { ...ok({ bindingId: existing.id, ...availability(existing.session) }), directoryStatus: "ready" }
           }
           if (existing) await release(key, existing)
-          if (!isCurrent(login)) return forbidden()
+          if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
           const session = await runtime.host.bind(scope, directory.path)
-          if (!isCurrent(login)) { await session.close(); return forbidden() }
+          if (!isCurrent(login)) { await session.close(); return { ...forbidden(), directoryStatus: "unavailable" } }
           const bindingId = randomUUID()
           const binding: Binding = { id: bindingId, login, directory, session, unsubscribe: session.subscribe(event => {
             const source = { scope, bindingId, turnId: event.turnId, sequence: event.sequence }
@@ -247,7 +318,9 @@ export function createLocalExecutionIpc(
             publish(login, {
               ...source,
               kind: "finished",
-              availability: availability(session),
+              availability: event.type === "failed" && event.reason === "directory-unavailable"
+                ? { available: false, reason: failureMessages[event.reason], directoryStatus: "invalid" }
+                : availability(session),
               ...(event.type === "failed" ? {
                 failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
               } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
@@ -258,9 +331,9 @@ export function createLocalExecutionIpc(
             }
           }) }
           bindings.set(key, binding)
-          return ok({ bindingId, ...availability(session) })
+          return { ...ok({ bindingId, ...availability(session) }), directoryStatus: "ready" }
         } catch {
-          return identityError("PROJECT_ROOT_CHANGED", "无法确认本机工作目录或释放旧执行连接，请重新选择目录后重试。")
+          return { ...identityError("PROJECT_ROOT_CHANGED", "无法绑定本机目录或释放旧执行连接，请重试。"), directoryStatus: "invalid" }
         }
       })
     },

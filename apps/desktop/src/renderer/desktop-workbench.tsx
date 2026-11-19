@@ -328,6 +328,7 @@ function WorkspaceProjectWorkbench(props: {
     scope: shell.scope,
     selectedConversationId,
     pageKey: JSON.stringify(currentPage),
+    isNewSession: currentPage.kind === "new",
     pageController,
     integration,
     readSnapshot: props.referenceSnapshots,

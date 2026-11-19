@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 
 const localExecution: DesktopLocalExecutionHost = {
   prepare: (scope, directory) => ipcRenderer.invoke("workbench:local-execution:prepare", scope, directory),
+  confirmDirectory: scope => ipcRenderer.invoke("workbench:local-execution:confirm-directory", scope),
   send: (scope, bindingId, requestId, text, referenceIds = []) =>
     ipcRenderer.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds),
   cancel: (scope, bindingId, turnId) => ipcRenderer.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),

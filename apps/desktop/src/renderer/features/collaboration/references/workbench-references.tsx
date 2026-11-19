@@ -9,6 +9,7 @@ import type { CollaborationAppsHost } from "../../../../collaboration-apps-host.
 import { knowledgeReferenceId, parseFixedReference } from "../../../../collaboration-reference.js"
 import type { ProjectNavigationScope } from "../../project-navigation/index.js"
 import { decodeHistoryToTimelineEntries } from "../../session/index.js"
+import { NEW_SESSION_DRAFT_ID } from "../../session/index.js"
 import type {
   ProjectConversationSummary,
   SessionExternalHooks,
@@ -29,6 +30,7 @@ interface WorkbenchReferenceOptions {
   readonly scope: ProjectNavigationScope | null
   readonly selectedConversationId: string | null
   readonly pageKey?: string
+  readonly isNewSession?: boolean
   readonly pageController: SessionPageController
   readonly integration: SessionIntegrationApi
   readonly readSnapshot?: ReferenceActions["readSnapshot"]
@@ -43,7 +45,7 @@ interface WorkbenchReferenceOptions {
 
 /** 快照能力缺失时，工作台沿用原有文件提及和只读页提示。 */
 export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
-  const { scope, selectedConversationId, pageKey, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
+  const { scope, selectedConversationId, pageKey, isNewSession = false, pageController, integration, readSnapshot, host, chooseDirectory, locateConversation,
     members, tasks, onChooseMember, onOpenTask } = options
   const { currentUserId: localDeviceId, conversations, directories, resolveOwnerName } = pageController
   const sourceIsListed = selectedConversationId === null || conversations.some(item =>
@@ -70,7 +72,8 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
   const restoredMaterials = restored?.origin === referenceScope ? restored.materials : undefined
 
   const selected = selectedConversationId && conversations.find(item => item.conversationId === selectedConversationId)
-  const draftIds = selectedConversationId ? pageController.personalStates[selectedConversationId]?.draft.referenceIds ?? [] : []
+  const draftIds = isNewSession ? pageController.newDraft.referenceIds
+    : selectedConversationId ? pageController.personalStates[selectedConversationId]?.draft.referenceIds ?? [] : []
   const executionView = selectedConversationId ? pageController.execution.getView?.(selectedConversationId) : undefined
   const acceptedEntries = executionView?.entries ?? []
   const history = selected ? pageController.syncStates[selected.conversationId]?.messages ?? [] : []
@@ -133,7 +136,8 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
     const origin = referenceScope
     return Boolean(origin && currentOrigin.current === origin
       && origin.namespace === source.namespace && origin.accountId === source.accountId
-      && origin.workspaceId === source.workspaceId && origin.conversationId === source.conversationId
+      && origin.workspaceId === source.workspaceId
+      && (isNewSession ? source.conversationId === NEW_SESSION_DRAFT_ID : origin.conversationId === source.conversationId)
       && origin.projectId === target.projectId && origin.deviceId === target.deviceId)
   }
 
@@ -194,11 +198,22 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
           : { ok: false, message: verified.error.message }
         if (verified.value.archived) return { ok: false, materialUnavailable: true, message: "知识条目已归档，无法新增引用。" }
       }
-      const draftChange: SessionReferenceDraftChange = change.kind === "add"
-        ? { kind: "add", target: change.target, referenceIds: [change.snapshot.id], mention: change.mention }
-        : change.kind === "replace"
-          ? { kind: "replace", referenceId: change.referenceId, replacementId: change.snapshot.id }
-          : change
+      if (isNewSession) {
+        if (change.kind === "add" && change.target.kind !== "pending") return { ok: false, message: "请将引用加入当前新建草稿。" }
+        const result = await integration.applyNewSessionReference(origin, change.kind === "add"
+          ? { kind: "add", referenceIds: [change.snapshot.id], mention: change.mention }
+          : change.kind === "replace" ? { kind: "replace", referenceId: change.referenceId, replacementId: change.snapshot.id } : change)
+        return result.ok ? { ok: true, value: { ...result.value, conversationId: null } } : result
+      }
+      let draftChange: SessionReferenceDraftChange
+      if (change.kind === "add") {
+        const target = change.target
+        if (target.kind === "pending") return { ok: false, message: "新建草稿入口已关闭。" }
+        draftChange = { kind: "add", target, referenceIds: [change.snapshot.id], mention: change.mention }
+      } else {
+        draftChange = change.kind === "replace"
+          ? { kind: "replace", referenceId: change.referenceId, replacementId: change.snapshot.id } : change
+      }
       const result = await integration.applyReferenceDraft(origin, draftChange)
       if (result.ok && change.kind !== "remove" && currentOrigin.current === origin) {
         const snapshot = change.snapshot
@@ -227,7 +242,7 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
         ? { ok: true, value: null }
         : { ok: false, message: "来源会话暂不可用。" }
     },
-  }, Boolean(host))
+  }, Boolean(host), isNewSession)
 
   function referenceView(id: string): ConversationReferenceView {
     const snapshot = fixedMaterial(id)
@@ -280,7 +295,7 @@ export function useWorkbenchReferences(options: WorkbenchReferenceOptions) {
         item.title.toLocaleLowerCase().includes(search) || item.detail.toLocaleLowerCase().includes(search)) }
     },
     onSelectCollaborationCandidate(source, target, candidate, mention) {
-      if (matchesComposer(source, target) && mention.conversationId === referenceScope.conversationId) {
+      if (matchesComposer(source, target) && mention.conversationId === (isNewSession ? NEW_SESSION_DRAFT_ID : referenceScope.conversationId)) {
         if (candidate.kind === "conversation") references.previewConversation(candidate.id, mention)
         if (candidate.kind === "knowledge") references.previewFixed(candidate.id, mention)
         if (candidate.kind === "member" && members?.some(member => member.id === candidate.id)) onChooseMember?.(candidate.id)

@@ -31,6 +31,11 @@ export type ProjectNavigationPersonal = {
 export type ProjectDraftPersonal = {
   directoryPath: string | null
   draftText: string
+  /** 旧个人记录可只有文字和目录，恢复时补齐引用、选区和修订。 */
+  referenceIds?: readonly string[]
+  revision?: number
+  selectionStart?: number
+  selectionEnd?: number
 }
 /** 跨机器会话在本机主动拉取后保存的定稿正文缓存与水位；超限裁剪后置 cacheTruncated。 */
 export type ConversationSyncCache = {

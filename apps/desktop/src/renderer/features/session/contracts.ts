@@ -7,6 +7,7 @@
  */
 import type { ReactNode } from "react"
 import type { LocalExecutionView } from "./local-execution-view.js"
+import type { LocalExecutionAvailability } from "../../../local-execution-host.js"
 import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationTimelineEntry } from "@workbench/ui"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 
@@ -82,11 +83,23 @@ export type SessionSyncState = {
 export type NewSessionDraft = {
   readonly directoryPath: string | null
   readonly draftText: string
+  readonly referenceIds: readonly string[]
+  readonly revision: number
+  readonly selectionStart: number
+  readonly selectionEnd: number
 }
+
+/** 输入区用于标记尚未登记的项目草稿，仅用于本机 UI。 */
+export const NEW_SESSION_DRAFT_ID = "new-session-draft"
+export type NewSessionReferenceChange =
+  | { readonly kind: "add"; readonly referenceIds: readonly string[]; readonly mention?: ConversationMentionOrigin }
+  | { readonly kind: "replace"; readonly referenceId: string; readonly replacementId: string }
+  | { readonly kind: "remove"; readonly referenceId: string }
 
 /** 页面只消费执行视图与用户动作。正式装配负责按原范围提交已受理的草稿修订。 */
 export interface LocalSessionExecutionPort {
-  getAvailability(conversationId: string): { readonly available: boolean; readonly reason?: string }
+  getAvailability(conversationId: string): LocalExecutionAvailability
+  confirmDirectory?(conversationId: string): Promise<void>
   readonly textOnly?: boolean
   readonly commitsAcceptedDraft?: boolean
   getView?(conversationId: string): LocalExecutionView | undefined
@@ -140,6 +153,10 @@ export type SessionIntegrationApi = {
   listMyLocalConversations(scope: ProjectNavigationScope): readonly ProjectConversationSummary[]
   /** 合并到本人本机会话的最新草稿，登记后失败时带回已创建会话以供重试。 */
   applyReferenceDraft(scope: SessionDraftScope, change: SessionReferenceDraftChange): Promise<SessionReferenceDraftResult>
+  /** 仅更新当前项目的未创建草稿，绝不登记会话或发送。 */
+  applyNewSessionReference(scope: SessionDraftScope, change: NewSessionReferenceChange): Promise<
+    { readonly ok: true; readonly value: { readonly draftRevision: number } } | { readonly ok: false; readonly message: string }
+  >
   /** 定位成功后显示目标会话输入区，保留它已打开的文件页签。 */
   revealReferenceDraft(scope: SessionDraftScope, conversationId: string): void
 }

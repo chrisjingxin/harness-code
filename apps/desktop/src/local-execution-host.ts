@@ -6,8 +6,14 @@ export type LocalExecutionScope = {
   readonly projectId: string
   readonly conversationId: string
 }
-export type LocalExecutionAvailability = { readonly available: boolean; readonly reason?: string }
+export type LocalDirectoryStatus = "checking" | "ready" | "confirmation-required" | "invalid" | "unavailable"
+export type LocalExecutionAvailability = {
+  readonly available: boolean
+  readonly reason?: string
+  readonly directoryStatus?: LocalDirectoryStatus
+}
 export type LocalExecutionBinding = LocalExecutionAvailability & { readonly bindingId: string }
+export type LocalExecutionPreparation = CollaborationResult<LocalExecutionBinding> & { readonly directoryStatus: LocalDirectoryStatus }
 export type LocalExecutionToolLocation = {
   readonly path: string
   readonly line?: number
@@ -57,7 +63,9 @@ export type LocalExecutionNotice = LocalExecutionUploadNotice | ({
 ))
 
 export interface DesktopLocalExecutionHost {
-  prepare(scope: LocalExecutionScope, directory: string): Promise<CollaborationResult<LocalExecutionBinding>>
+  prepare(scope: LocalExecutionScope, directory: string): Promise<LocalExecutionPreparation>
+  /** 从该会话的本机个人记录取路径，经原生确认窗口记住旧目录。 */
+  confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>>
   /** 主进程按固定 ID 自行读取材料。发送端始终传用户原文。 */
   send(scope: LocalExecutionScope, bindingId: string, requestId: string, text: string, referenceIds?: readonly string[]): Promise<CollaborationResult<LocalExecutionReceipt>>
   cancel(scope: LocalExecutionScope, bindingId: string, turnId: string): Promise<CollaborationResult<null>>

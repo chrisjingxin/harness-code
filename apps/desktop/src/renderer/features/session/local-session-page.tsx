@@ -71,6 +71,13 @@ export function LocalSessionPage({
     if (!viewingFile) setPvMax(false)
   }, [viewingFile])
   const availability = execution.getAvailability(conversation.conversationId)
+  const [confirmingDirectory, setConfirmingDirectory] = useState(false)
+  const directoryStatus = availability.directoryStatus
+  const directoryNeedsAction = Boolean(directoryPath && (directoryStatus === "confirmation-required" || directoryStatus === "invalid" || directoryStatus === "unavailable"))
+  const directoryStatusLabel = directoryStatus === "checking" ? "检查中"
+    : directoryStatus === "confirmation-required" ? "待确认"
+      : directoryStatus === "invalid" ? "已失效"
+        : directoryStatus === "unavailable" ? "待检查" : ""
   const hasUnsupportedMaterial = execution.textOnly && personal.draft.attachmentIds.length > 0
   const folderName = directoryBasename(directoryPath)
   const referenceKey = JSON.stringify([scope.namespace, scope.accountId, scope.workspaceId, scope.conversationId, conversation.projectId, directoryPath])
@@ -144,9 +151,13 @@ export function LocalSessionPage({
     attachments: [],
   }
   const permission = activeExecution?.permission
-  const view = activeExecution
+  const projected = activeExecution
     ? projectLocalExecution({ entries, contentRevision, composer }, activeExecution)
     : { entries, contentRevision, composer }
+  // 目录阻止发送时，旧执行/上传提示不能盖住当前目录失败原因。
+  const view = directoryNeedsAction
+    ? { ...projected, composer: { ...projected.composer, statusText: availability.reason } }
+    : projected
   const isRunning = Boolean(activeExecution?.activeTurnId)
   const updatedLabel = formatShortTime(conversation.updatedAt)
 
@@ -167,10 +178,10 @@ export function LocalSessionPage({
                     type="button"
                     className="session-directory-button"
                     onClick={onChooseDirectory}
-                    title={directoryPath ? `当前工作目录（仅本机可用）：${directoryPath}` : "选择一个本机文件夹（支持普通非 Git 目录）"}
+                    title={directoryPath ? [directoryPath, directoryStatusLabel ? availability.reason : undefined].filter(Boolean).join("\n") : "选择一个本机文件夹（支持普通非 Git 目录）"}
                   >
                     <FolderIcon size={12} />
-                    <span>{folderName ? `工作目录 · ${folderName}` : "选择工作目录"}</span>
+                    <span>{folderName ? `工作目录 · ${folderName}${directoryStatusLabel ? ` · ${directoryStatusLabel}` : ""}` : "选择工作目录"}</span>
                     <ChevronDownIcon size={11} />
                   </button>
                 </div>
@@ -258,7 +269,23 @@ export function LocalSessionPage({
                 onOpenFile,
                 rendering: messageRendering,
               }}
-              slots={hooks?.composerExtra ? { composer: hooks.composerExtra } : undefined}
+              slots={hooks?.composerExtra || directoryNeedsAction ? {
+                composer: <>
+                  {hooks?.composerExtra}
+                  {directoryNeedsAction ? <span className="session-directory-actions">
+                    {directoryStatus === "confirmation-required" && execution.confirmDirectory ? (
+                      <button type="button" className="wb-button wb-button-secondary wb-button-small" disabled={confirmingDirectory}
+                        onClick={() => {
+                          setConfirmingDirectory(true)
+                          void execution.confirmDirectory!(conversation.conversationId).finally(() => setConfirmingDirectory(false))
+                        }}>
+                        {confirmingDirectory ? "正在确认…" : "确认目录"}
+                      </button>
+                    ) : null}
+                    <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={onChooseDirectory}>选择目录</button>
+                  </span> : null}
+                </>,
+              } : undefined}
             />
           </div>
         </div>

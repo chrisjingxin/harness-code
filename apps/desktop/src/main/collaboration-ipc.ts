@@ -16,6 +16,7 @@ import { LocalDirectoryService } from "./local-directory-host.js"
 import { PersonalStore } from "./personal-store.js"
 import { createLocalExecutionIpc, type LocalExecutionRuntime } from "./local-execution-ipc.js"
 import type { LocalExecutionScope } from "../local-execution-host.js"
+import { DirectoryConfirmations } from "./directory-confirmations.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const USER_ID = /^[0-9a-f]{32}$/
@@ -96,7 +97,11 @@ export function bindCollaborationIpc(
         },
       )
     : null
-  const execution = createLocalExecutionIpc(window, identity, uploads, runtime)
+  const execution = createLocalExecutionIpc(
+    window, identity, uploads, runtime,
+    new DirectoryConfirmations(join(app.getPath("userData"), "directory-confirmations"), origin ?? ""),
+    personal,
+  )
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const channels: string[] = []
@@ -177,6 +182,8 @@ export function bindCollaborationIpc(
     isLocalExecutionScope(scope) && isNonEmptyString(directory, 4096)
       ? execution.prepare(scope, directory)
       : identityError("INVALID_REQUEST", "本机会话或目录参数无效。"))
+  handle("workbench:local-execution:confirm-directory", 1, scope =>
+    isLocalExecutionScope(scope) ? execution.confirmDirectory(scope) : identityError("INVALID_REQUEST", "本机会话参数无效。"))
   handle("workbench:local-execution:send", 5, (scope, bindingId, requestId, text, referenceIds) =>
     isLocalExecutionScope(scope) && isId(bindingId) && isId(requestId)
       && typeof text === "string" && text.length <= 16_384 && Buffer.byteLength(text, "utf8") <= 32_768

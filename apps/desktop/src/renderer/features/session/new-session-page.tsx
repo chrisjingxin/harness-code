@@ -6,11 +6,19 @@
  * 并诚实展示当前设备登记与 Agent 可用性；选择目录和输入草稿仅保存在本人本机范围，不自动建会。
  */
 import type { ReactElement } from "react"
+import { ConversationComposer } from "@workbench/ui"
+import type { ConversationComposerView } from "@workbench/ui"
+import type { ProjectNavigationScope } from "../project-navigation/index.js"
 import { ArrowRightIcon, ChevronDownIcon, FolderIcon } from "./icons.js"
 import { directoryBasename } from "./session-model.js"
-import type { NewSessionDraft } from "./contracts.js"
+import { NEW_SESSION_DRAFT_ID } from "./contracts.js"
+import type { NewSessionDraft, SessionExternalHooks } from "./contracts.js"
+import { newSessionConversationDraft } from "./new-session-draft.js"
 
 export type NewSessionPageProps = {
+  readonly scope: ProjectNavigationScope
+  readonly visible: boolean
+  readonly hooks?: SessionExternalHooks
   readonly projectName: string
   readonly draft: NewSessionDraft
   readonly busy: boolean
@@ -20,11 +28,14 @@ export type NewSessionPageProps = {
   readonly agentAvailable: boolean
   readonly errorMessage?: string | null
   readonly onChooseDirectory: () => void
-  readonly onDraftChange: (text: string) => void
+  readonly onDraftChange: (text: string, selectionStart?: number, selectionEnd?: number) => void
   readonly onStartSession: () => void
 }
 
 export function NewSessionPage({
+  scope,
+  visible,
+  hooks,
   projectName,
   draft,
   busy,
@@ -38,15 +49,20 @@ export function NewSessionPage({
   onStartSession,
 }: NewSessionPageProps): ReactElement {
   const folderName = directoryBasename(draft.directoryPath)
-  const hasPrompt = draft.draftText.trim().length > 0
+  const hasPrompt = draft.draftText.trim().length > 0 || draft.referenceIds.length > 0
   const canSubmit = Boolean(draft.directoryPath && hasPrompt && canCreateConversation && !busy)
   const disabledReason = !draft.directoryPath
     ? "请先选择一个本机工作目录"
     : !hasPrompt
-      ? "请输入你想讨论或推进的事项"
+      ? "请输入事项或加入引用材料"
       : !canCreateConversation
         ? createBlockedReason ?? "当前尚不能发起新会话"
         : undefined
+  const composer: ConversationComposerView = {
+    primaryActions: "none", send: { enabled: false }, cancel: { enabled: false },
+    commands: [], controls: [], references: hooks?.references ?? [], attachments: [],
+    projectTarget: { projectId: scope.projectId, deviceId: scope.accountId },
+  }
 
   return (
     <section className="session-new-page" aria-label="新会话准备">
@@ -71,12 +87,27 @@ export function NewSessionPage({
           {agentLabel}
         </span>
       </div>
-      <textarea
-        value={draft.draftText}
-        onChange={event => onDraftChange(event.currentTarget.value)}
-        placeholder="描述你想讨论或完成的事情…"
-        aria-label="新会话初始内容"
-      />
+      <div className="session-new-composer">
+        <ConversationComposer
+          scope={{ ...scope, conversationId: NEW_SESSION_DRAFT_ID }}
+          visible={visible}
+          model={composer}
+          draft={newSessionConversationDraft(draft)}
+          actions={{
+            onPersonalChange: (_source, change) => {
+              if (change.kind === "draft-text") onDraftChange(change.text, change.selectionStart, change.selectionEnd)
+            },
+            onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
+            onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
+            onReferenceAction: hooks?.onReferenceAction,
+          }}
+          sendBlocked
+          cancelBlocked
+          submitOnEnter={false}
+          onSend={() => {}}
+          onCancel={() => {}}
+        >{hooks?.composerExtra}</ConversationComposer>
+      </div>
       <div className="session-new-send">
         <span
           className="session-new-status"

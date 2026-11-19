@@ -78,6 +78,10 @@ const schemas: Record<PersonalKey["kind"], object> = {
   projectDraft: object(["directoryPath", "draftText"], {
     directoryPath: nullableText,
     draftText: { type: "string", maxLength: 262144 },
+    referenceIds: strings,
+    revision: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    selectionStart: { type: "integer", minimum: 0, maximum: 262144 },
+    selectionEnd: { type: "integer", minimum: 0, maximum: 262144 },
   }),
   conversation: object(["scroll", "expandedTools", "expandedOutputs", "draft", "localDirectoryPath", "syncCache"], {
     scroll: object(["anchorEntryId", "offsetPx", "following", "seenContentRevision"], {
