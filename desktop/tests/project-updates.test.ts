@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import type { NotificationEvent } from "@workbench/collaboration-client/types"
-import { dispatchProjectUpdates } from "../src/renderer/features/project-updates/use-project-updates.ts"
+import { dispatchProjectUpdates, shouldRefreshTaskDetail } from "../src/renderer/features/project-updates/use-project-updates.ts"
 import type { ProjectUpdateTargets } from "../src/renderer/features/project-updates/use-project-updates.ts"
 
 function createTracker(overrides: Partial<ProjectUpdateTargets> = {}) {
@@ -68,4 +68,12 @@ test("仅收到其他项目事件或团队知识事件时不触发当前项目 r
   assert.equal(calls.board, 0)
   assert.deepEqual(calls.tasks, [])
   assert.deepEqual(calls.knowledge, [["kb-2"]])
+})
+
+test("shouldRefreshTaskDetail 仅在停留对应任务详情页或成员整表刷新时触发重拉", () => {
+  assert.equal(shouldRefreshTaskDetail({ kind: "task", taskId: "task-1" }, ["task-1"]), true)
+  assert.equal(shouldRefreshTaskDetail({ kind: "task", taskId: "task-1" }, []), true)
+  assert.equal(shouldRefreshTaskDetail({ kind: "task", taskId: "task-1" }, ["task-2"]), false)
+  assert.equal(shouldRefreshTaskDetail({ kind: "tasks" }, ["task-1"]), false)
+  assert.equal(shouldRefreshTaskDetail({ kind: "board" }, []), false)
 })

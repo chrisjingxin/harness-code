@@ -86,3 +86,12 @@ export function dispatchProjectUpdates(events: readonly NotificationEvent[], tar
   if (targets.isBoardActive !== false && (projectDetail || conversations || tasks.size)) targets.refreshBoard()
   if (knowledge.size) targets.refreshKnowledge([...knowledge])
 }
+
+/** 当前停留在任务详情页且本轮轻量通知命中该任务（或发生项目成员变更整表刷新）时，同步触发详情重拉。 */
+export function shouldRefreshTaskDetail(
+  page: { readonly kind: string; readonly taskId?: string },
+  taskIds: readonly string[],
+): boolean {
+  if (page.kind !== "task" || !page.taskId) return false
+  return taskIds.length === 0 || taskIds.includes(page.taskId)
+}

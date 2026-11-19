@@ -5,6 +5,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  applyConversationTitleOverrides,
   boundCachedMessages,
   buildSessionBadge,
   classifyConversation,
@@ -12,8 +13,10 @@ import {
   deriveSyncStatus,
   emptySyncState,
   mergeIncrementalHistory,
+  resolveConversationTitle,
   toNavigationSessionEntries,
 } from "../src/renderer/features/session/session-model.ts"
+import { localExecutionKey } from "../src/shared/index.ts"
 import type { ProjectConversationSummary, ProjectHistoryMessage } from "../src/renderer/features/session/contracts.ts"
 
 const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {}): ProjectConversationSummary => ({
@@ -136,4 +139,30 @@ test("mergeIncrementalHistory 超过单页 200 条上限时分两页无损合并
   assert.equal(mergedPage2.messages[0]?.sequence, 1)
   assert.equal(mergedPage2.messages.at(-1)?.sequence, 250)
   assert.equal(mergedPage2.syncedSequence, 250)
+})
+
+test("resolveConversationTitle 与 applyConversationTitleOverrides 优先显示实时改名标题并隔离作用域", () => {
+  assert.equal(resolveConversationTitle("原登记标题", "  新会话标题  "), "新会话标题")
+  assert.equal(resolveConversationTitle("原登记标题", "   "), "原登记标题")
+  assert.equal(resolveConversationTitle("", undefined), "未命名会话")
+
+  const scope = { accountId: "user-self", workspaceId: "ws-1", projectId: "proj-1" }
+  const items = [
+    sampleConversation({ conversationId: "conv-1", ownerUserId: "user-self", title: "初始标题" }),
+    sampleConversation({ conversationId: "conv-2", ownerUserId: "user-peer", title: "他人标题" }),
+  ]
+
+  // 无匹配覆盖时保持原引用稳定，避免不必要的重渲染
+  assert.equal(applyConversationTitleOverrides(items, scope, {}), items)
+
+  const targetKey = localExecutionKey({ ...scope, conversationId: "conv-1" })
+  const otherProjectKey = localExecutionKey({ accountId: "user-self", workspaceId: "ws-1", projectId: "proj-2", conversationId: "conv-2" })
+  const updated = applyConversationTitleOverrides(items, scope, {
+    [targetKey]: "  重构标题  ",
+    [otherProjectKey]: "不应污染其他项目",
+  })
+
+  assert.notEqual(updated, items)
+  assert.equal(updated[0]?.title, "重构标题")
+  assert.equal(updated[1]?.title, "他人标题")
 })

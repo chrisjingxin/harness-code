@@ -13,13 +13,15 @@ import type {
   MemberSummary,
   UserSummary,
 } from "@workbench/collaboration-client/types"
-import type {
-  ConversationPersonal,
-  DesktopHost,
-  DesktopLocalExecutionHost,
-  LocalDirectoryHost,
-  ProjectConversationHost,
-  ProjectDraftPersonal,
+import {
+  localExecutionKey,
+  type ConversationPersonal,
+  type DesktopHost,
+  type DesktopLocalExecutionHost,
+  type LocalDirectoryHost,
+  type LocalExecutionScope,
+  type ProjectConversationHost,
+  type ProjectDraftPersonal,
 } from "../../../shared/index.js"
 import type { ConversationPersonalState, ConversationScope, RenderingActions } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
@@ -34,6 +36,7 @@ import type {
 import { SessionRightDock } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import {
+  applyConversationTitleOverrides,
   boundCachedMessages,
   classifyConversation,
   emptySyncState,
@@ -222,6 +225,18 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [newSessionError, setNewSessionError] = useState<string | null>(null)
   const [newProviderId, setNewProviderId] = useState<string | null>(null)
   const [providerByConversation, setProviderByConversation] = useState<Readonly<Record<string, string>>>({})
+  const [titleOverridesByKey, setTitleOverridesByKey] = useState<Readonly<Record<string, string>>>({})
+  const titleOverridesRef = useRef(titleOverridesByKey)
+  titleOverridesRef.current = titleOverridesByKey
+  const handleSessionTitleChange = useCallback((execScope: LocalExecutionScope, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    const key = localExecutionKey(execScope)
+    if (titleOverridesRef.current[key] === trimmed) return
+    const next = { ...titleOverridesRef.current, [key]: trimmed }
+    titleOverridesRef.current = next
+    setTitleOverridesByKey(next)
+  }, [])
   const pendingRequestRef = useRef<{ signature: string; requestId: string } | null>(null)
   const pendingAutoSendRef = useRef<{
     readonly scope: ProjectNavigationScope
@@ -801,13 +816,18 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [members])
 
+  const effectiveConversations = useMemo(
+    () => applyConversationTitleOverrides(activeConversations, scope, titleOverridesByKey),
+    [activeConversations, scope, titleOverridesByKey],
+  )
+
   const navigationSource: NavigationSessionSource = useMemo(() => {
     if (!scope || !currentScopeKey) {
       return { entries: [], availability: { state: "unavailable", message: "请先选择项目。" }, retry: () => {} }
     }
     const status = activeList?.status ?? "loading"
     return {
-      entries: toNavigationSessionEntries(activeConversations, userId, currentSyncStates),
+      entries: toNavigationSessionEntries(effectiveConversations, userId, currentSyncStates),
       availability: status === "failed"
         ? { state: "failed", message: activeList?.error || "无法加载会话列表。" }
         : status === "ready"
@@ -815,10 +835,10 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           : { state: "loading" },
       retry: () => { void refreshMetadata(scope) },
     }
-  }, [scope, currentScopeKey, activeList, activeConversations, userId, currentSyncStates, refreshMetadata])
+  }, [scope, currentScopeKey, activeList, effectiveConversations, userId, currentSyncStates, refreshMetadata])
 
   const selectedConv = selectedConversationId
-    ? activeConversations.find(item => item.conversationId === selectedConversationId) ?? null
+    ? effectiveConversations.find(item => item.conversationId === selectedConversationId) ?? null
     : null
   const selectedIsLocal = Boolean(
     selectedConv && classifyConversation(selectedConv, userId) === "local",
@@ -844,6 +864,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     commitAcceptedDraft,
     refreshExecutionWorkspace,
     providerByConversation,
+    handleSessionTitleChange,
   )
 
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
@@ -911,7 +932,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const pageController: SessionPageController = useMemo(() => ({
     projectName,
     currentUserId: userId,
-    conversations: activeConversations,
+    conversations: effectiveConversations,
     syncStates: currentSyncStates,
     personalStates: currentPersonalStates,
     directories: currentDirectories,
@@ -1012,7 +1033,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }), [
     projectName,
     userId,
-    activeConversations,
+    effectiveConversations,
     currentSyncStates,
     currentPersonalStates,
     currentDirectories,
@@ -1039,8 +1060,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const listProjectConversations = useCallback<SessionIntegrationApi["listProjectConversations"]>(targetScope => {
     const targetKey = makeScopeKey(targetScope)
     if (!stillActive(targetKey)) return EMPTY_CONVERSATIONS
-    return (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
+    const base = (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
       .filter(item => item.projectId === targetScope.projectId)
+    return applyConversationTitleOverrides(base, targetScope, titleOverridesRef.current)
   }, [])
 
   const listMyLocalConversations = useCallback<SessionIntegrationApi["listMyLocalConversations"]>(targetScope => {

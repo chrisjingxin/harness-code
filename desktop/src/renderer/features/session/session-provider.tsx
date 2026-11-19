@@ -33,6 +33,7 @@ import {
   deriveSyncStatus,
   directoryBasename,
   emptySyncState,
+  resolveConversationTitle,
 } from "./session-model.js"
 
 export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {
@@ -308,7 +309,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       const kind = classify(conversation)
       const isLocal = kind === "local"
       const activeExecution = isLocal ? controller.execution.getView?.(conversation.conversationId) : undefined
-      const title = conversation.title || activeExecution?.sessionState?.sessionTitle || "未命名会话"
+      const title = resolveConversationTitle(conversation.title, activeExecution?.sessionState?.sessionTitle)
 
       if (isLocal) {
         const directoryPath = controller.directories[conversation.conversationId] ?? null

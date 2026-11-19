@@ -119,6 +119,7 @@ export function useLocalExecution(
   onAccepted: (scope: ProjectNavigationScope, conversationId: string, revision: number) => void,
   onWorkspaceRefresh?: (scope: ProjectNavigationScope, conversationId: string) => void,
   preferredProviders?: Readonly<Record<string, string>>,
+  onSessionTitleChange?: (scope: LocalExecutionScope, title: string) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
@@ -132,13 +133,26 @@ export function useLocalExecution(
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
   const providerOverrides = useRef(new Map<string, string>())
-  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders })
+  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange })
   const mounted = useRef(false)
   const [, refresh] = useReducer(revision => revision + 1, 0)
 
   useLayoutEffect(() => {
-    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders }
-  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders])
+    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange }
+  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange])
+
+  function applySessionStateNotice(
+    scope: LocalExecutionScope,
+    screen: Screen,
+    state: LocalExecutionSessionState,
+  ): void {
+    const prevTitle = screen.timeline.sessionState?.sessionTitle?.trim()
+    screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "session-state", state })
+    const nextTitle = state.sessionTitle?.trim()
+    if (nextTitle && nextTitle !== prevTitle) {
+      current.current.onSessionTitleChange?.(scope, nextTitle)
+    }
+  }
 
   function applyElicitationNotice(
     scope: LocalExecutionScope,
@@ -162,7 +176,7 @@ export function useLocalExecution(
     screen.pendingBindingNotices?.delete(bindingId)
     if (!buffered) return
     if (buffered.sessionState) {
-      screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "session-state", state: buffered.sessionState })
+      applySessionStateNotice(scope, screen, buffered.sessionState)
     }
     if (buffered.elicitation !== undefined) {
       applyElicitationNotice(scope, bindingId, screen, buffered.elicitation)
@@ -207,7 +221,7 @@ export function useLocalExecution(
 
       if (notice.kind === "session-state") {
         if (screen.binding?.bindingId === notice.bindingId) {
-          screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "session-state", state: notice.state })
+          applySessionStateNotice(notice.scope, screen, notice.state)
           refresh()
         } else if (!screen.binding && notice.bindingId !== screen.retiredBindingId) {
           pushBufferedNotice(screen, notice.bindingId, { sessionState: notice.state })

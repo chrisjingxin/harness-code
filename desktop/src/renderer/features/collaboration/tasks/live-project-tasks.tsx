@@ -121,15 +121,16 @@ export function ProjectTaskPublication({ context, members, draftMaterials, sourc
 
 const uncertain = (code: string) => ["NETWORK_UNAVAILABLE", "INVALID_SERVER_RESPONSE", "INTERNAL_ERROR"].includes(code)
 
-export function LiveProjectTasks({ context, rows, taskId, navigator, onCreate }: {
+export function LiveProjectTasks({ context, rows, taskId, detailRevision, navigator, onCreate }: {
   readonly context: TasksContext
   readonly rows: TaskRows
   readonly taskId?: string
+  readonly detailRevision?: number
   readonly navigator: ProjectNavigator
   onCreate(): void
 }) {
   const { scope, projectName, projectActive, ownerName, refreshTaskMetadata } = context
-  if (taskId) return <LiveTaskDetail context={context} taskId={taskId} navigator={navigator} />
+  if (taskId) return <LiveTaskDetail context={context} taskId={taskId} detailRevision={detailRevision} navigator={navigator} />
   if (rows.status !== "ready") return <section className="project-task-page">
     <h1>项目任务</h1>
     <p role={rows.status === "error" ? "alert" : "status"}>{rows.status === "error" ? rows.message : "正在读取项目任务…"}</p>
@@ -141,12 +142,19 @@ export function LiveProjectTasks({ context, rows, taskId, navigator, onCreate }:
     onOpenTask={id => navigator.openPage({ kind: "task", taskId: id })} />
 }
 
-function LiveTaskDetail({ context, taskId, navigator }: { context: TasksContext; taskId: string; navigator: ProjectNavigator }) {
+function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
+  context: TasksContext
+  taskId: string
+  detailRevision?: number
+  navigator: ProjectNavigator
+}) {
   const { host, scope, projectActive, ownerName, localDeviceId, sessions } = context
   const { workspaceId, projectId, accountId } = scope
   const mounted = useRef(false)
   const replay = useRef<{ signature: string; requestId: string } | null>(null)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const detailRef = useRef<TaskDetail | null>(null)
+  detailRef.current = detail
   const [materials, setMaterials] = useState<TaskMaterial[]>([])
   const [notice, setNotice] = useState("")
   const [attempt, setAttempt] = useState(0)
@@ -164,7 +172,12 @@ function LiveTaskDetail({ context, taskId, navigator }: { context: TasksContext;
     setNotice("")
     void host.readTask(workspaceId, projectId, taskId).then(result => {
       if (!current) return
-      if (!result.ok) { setDetail(null); setNotice(result.error.message); return }
+      if (!result.ok) {
+        // 后台轻量通知触发刷新遇到瞬时网络报错时保留已打开详情，仅在首次加载或资源已不可用时清空。
+        if (!detailRef.current || result.error.code === "RESOURCE_NOT_FOUND") setDetail(null)
+        setNotice(result.error.message)
+        return
+      }
       if (result.value.task.projectId !== projectId || result.value.task.taskId !== taskId) {
         setNotice("返回任务与当前项目不一致。")
         return
@@ -172,7 +185,7 @@ function LiveTaskDetail({ context, taskId, navigator }: { context: TasksContext;
       setDetail(result.value)
     }).catch(() => { if (current) setNotice("无法读取任务，请重试。") })
     return () => { current = false }
-  }, [host, workspaceId, projectId, taskId, attempt])
+  }, [host, workspaceId, projectId, taskId, attempt, detailRevision])
 
   const materialKey = JSON.stringify(detail ? fixedIds(detail) : [])
   useEffect(() => {

@@ -69,6 +69,7 @@ export interface TeamKnowledgeProps {
   readonly rendering?: RenderingActions
   readonly controls?: ReactNode
   readonly initialItemId?: string
+  readonly selectedRequest?: { readonly itemId: string; readonly token: number }
   onEditItem?(itemId: string): void
 }
 
@@ -92,13 +93,14 @@ export function TeamKnowledge(props: TeamKnowledgeProps) {
   return <KnowledgePage key={JSON.stringify([namespace, accountId, teamId])} {...props} />
 }
 
-function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, onEditItem }: TeamKnowledgeProps) {
+function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, selectedRequest, onEditItem }: TeamKnowledgeProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [content, setContent] = useState<Resource<KnowledgeVersionContent> | null>(null)
   const [history, setHistory] = useState<HistoryState>({ status: "closed" })
   const [preview, setPreview] = useState(false)
   const contentRequest = useRef<symbol | null>(null)
   const historyRequest = useRef<symbol | null>(null)
+  const listRef = useRef<HTMLElement>(null)
   const selected = items.status === "ready" ? items.value.find(item => item.id === selectedId) : undefined
 
   useLayoutEffect(() => () => {
@@ -108,6 +110,14 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
   useEffect(() => {
     if (initialItemId) selectItem(initialItemId)
   }, [initialItemId])
+  useEffect(() => {
+    if (selectedRequest?.itemId) selectItem(selectedRequest.itemId)
+  }, [selectedRequest?.itemId, selectedRequest?.token])
+  useEffect(() => {
+    if (!selectedId || items.status !== "ready") return
+    const activeButton = listRef.current?.querySelector<HTMLButtonElement>('button[aria-current="true"]')
+    activeButton?.scrollIntoView?.({ block: "nearest" })
+  }, [selectedId, items.status])
 
   async function loadContent(itemId: string, versionId?: string): Promise<void> {
     const request = Symbol()
@@ -157,7 +167,7 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
     <section className="team-knowledge-page" aria-label="团队知识">
       {controls ? <div className="view-bar">{controls}</div> : null}
       <div className="team-knowledge-layout">
-        <nav className="team-knowledge-list" aria-label="知识条目">
+        <nav className="team-knowledge-list" ref={listRef} aria-label="知识条目">
           <h2>知识条目</h2>
           {items.status === "loading" && <p role="status">正在读取条目…</p>}
           {(items.status === "error" || items.status === "unavailable") && <p role="alert">{items.message}</p>}

@@ -48,12 +48,13 @@ interface LiveTeamKnowledgeProps {
   readonly rendering: RenderingActions
   readonly ownerName: (id: string) => string
   readonly canReference: boolean
+  readonly requestedItem?: { readonly itemId: string; readonly token: number } | null
   previewFixed(id: string): void
   refreshMetadata(scope: ProjectNavigationScope): void
 }
 
 export function LiveTeamKnowledge({
-  host, scope, teamName, revision, rendering, ownerName, canReference, previewFixed, refreshMetadata,
+  host, scope, teamName, revision, rendering, ownerName, canReference, requestedItem, previewFixed, refreshMetadata,
 }: LiveTeamKnowledgeProps) {
   const { workspaceId, accountId, namespace } = scope
   const [queryInput, setQueryInput] = useState("")
@@ -61,6 +62,21 @@ export function LiveTeamKnowledge({
   const [items, setItems] = useState<KnowledgeList>({ status: "loading" })
   const [editing, setEditing] = useState<{ itemId?: string } | null>(null)
   const [updated, setUpdated] = useState<{ itemId?: string; revision: number }>()
+  const [targetRequest, setTargetRequest] = useState<{ readonly itemId: string; readonly token: number } | undefined>(
+    requestedItem ?? undefined,
+  )
+  const lastHandledToken = useRef(requestedItem?.token ?? 0)
+
+  useEffect(() => {
+    if (!requestedItem || requestedItem.token === lastHandledToken.current) return
+    lastHandledToken.current = requestedItem.token
+    if (query) {
+      setItems({ status: "loading" })
+      setQuery("")
+    }
+    setQueryInput("")
+    setTargetRequest(requestedItem)
+  }, [requestedItem, query])
 
   useEffect(() => {
     let current = true
@@ -102,6 +118,7 @@ export function LiveTeamKnowledge({
       teamName={teamName}
       items={items}
       initialItemId={updated?.itemId}
+      selectedRequest={targetRequest}
       rendering={rendering}
       onEditItem={itemId => setEditing({ itemId })}
       controls={<form className="team-knowledge-toolbar" onSubmit={event => {
@@ -142,6 +159,7 @@ export function LiveTeamKnowledge({
     {editing && <KnowledgeEditor host={host} workspaceId={workspaceId} itemId={editing.itemId}
       onClose={() => setEditing(null)} onSaved={detail => {
         setEditing(null)
+        setTargetRequest(undefined)
         if (query) setQuery("")
         setQueryInput("")
         setUpdated(previous => ({

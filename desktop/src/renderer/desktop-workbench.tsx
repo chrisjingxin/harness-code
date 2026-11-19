@@ -31,7 +31,7 @@ import type { TasksContext } from "./features/collaboration/tasks/live-project-t
 import { LiveTeamKnowledge, useWorkspaceKnowledgeMetadata } from "./features/collaboration/knowledge/live-team-knowledge.js"
 import { createBoardPageProvider } from "./features/board/board-provider.js"
 import { useProjectBoard } from "./features/board/use-project-board.js"
-import { useProjectUpdates } from "./features/project-updates/use-project-updates.js"
+import { useProjectUpdates, shouldRefreshTaskDetail } from "./features/project-updates/use-project-updates.js"
 import { useWorkbenchReferences } from "./features/collaboration/references/workbench-references.js"
 import type { ReferenceActions } from "./features/collaboration/references/conversation-references.js"
 import { PersonalPersistence } from "./personal-persistence.js"
@@ -268,6 +268,14 @@ function WorkspaceProjectWorkbench(props: {
     task.assigneeId === props.user.id && task.status !== "done" && task.status !== "cancelled").length : null
   const knowledgeRows = useWorkspaceKnowledgeMetadata(props.collaborationApps, shell.scope, knowledgeRevision)
   const knowledgeCount = knowledgeRows.status === "ready" ? knowledgeRows.items.length : null
+  const [taskDetailRevision, setTaskDetailRevision] = useState(0)
+  const [knowledgeRequest, setKnowledgeRequest] = useState<{ readonly itemId: string; readonly token: number } | null>(null)
+  useEffect(() => {
+    setKnowledgeRequest(null)
+  }, [props.workspaceId, props.user.id])
+  useEffect(() => {
+    if (currentPage.kind !== "knowledge") setKnowledgeRequest(null)
+  }, [currentPage.kind])
   const [publishing, setPublishing] = useState<{ scope: typeof shell.scope; page: typeof currentPage; assigneeId?: string; sourceId?: string } | null>(null)
 
   function locateConversation(conversation: ProjectConversationSummary): boolean {
@@ -328,7 +336,13 @@ function WorkspaceProjectWorkbench(props: {
       if (scope) void integration.refreshMetadata(scope).catch(() => {})
     },
     refreshBoard,
-    refreshTasks: () => { if (scope) refreshTaskMetadata(scope) },
+    refreshTasks: taskIds => {
+      if (!scope) return
+      refreshTaskMetadata(scope)
+      if (shouldRefreshTaskDetail(currentPage, taskIds)) {
+        setTaskDetailRevision(value => value + 1)
+      }
+    },
     refreshKnowledge: () => { if (scope) refreshKnowledgeMetadata(scope) },
   })
   const canPublish = Boolean(props.collaborationApps && currentProject?.status === "active")
@@ -398,7 +412,7 @@ function WorkspaceProjectWorkbench(props: {
           if (!visible || (page.kind !== "tasks" && page.kind !== "task")) return null
           const id = page.kind === "task" ? page.taskId : undefined
           return <div className="collaboration-page-scroll" key={JSON.stringify([scope, id])}>
-            <LiveProjectTasks context={taskContext} rows={taskRows} taskId={id} navigator={navigator}
+            <LiveProjectTasks context={taskContext} rows={taskRows} taskId={id} detailRevision={taskDetailRevision} navigator={navigator}
               onCreate={() => setPublishing({ scope, page: currentPage })} />
           </div>
         },
@@ -410,6 +424,7 @@ function WorkspaceProjectWorkbench(props: {
             <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName}
               ownerName={pageController.resolveOwnerName} rendering={pageController.rendering}
               revision={knowledgeRevision} refreshMetadata={refreshKnowledgeMetadata}
+              requestedItem={knowledgeRequest}
               canReference={references.canReference} previewFixed={references.previewFixed} />
           </div>
         },
@@ -450,6 +465,10 @@ function WorkspaceProjectWorkbench(props: {
       knowledgeCount={knowledgeCount}
       sessions={projectSessions.navigationSource}
       providers={providers}
+      onSelectKnowledge={knowledgeId => {
+        setKnowledgeRequest(prev => ({ itemId: knowledgeId, token: (prev?.token ?? 0) + 1 }))
+        shell.openPage({ kind: "knowledge" })
+      }}
     />
     {references.dialog}
     {publishing?.scope === shell.scope && publishing?.page === currentPage && taskContext?.projectActive && <ProjectTaskPublication

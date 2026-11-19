@@ -452,7 +452,7 @@ export function LocalSessionPage({
     : undefined
 
   return (
-    <section className="session-center" aria-label={conversation.title || sessionState?.sessionTitle || "本机会话"}>
+    <section className="session-center" aria-label={sessionState?.sessionTitle?.trim() || conversation.title || "本机会话"}>
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
           <div className="session-conversation-wrap">

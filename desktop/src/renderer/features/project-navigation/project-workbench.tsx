@@ -274,6 +274,7 @@ export type ProjectWorkbenchProps = {
   taskCount?: number | null
   knowledgeCount?: number | null
   providers?: ProjectPageProviders
+  onSelectKnowledge?(knowledgeId: string): void
 }
 
 function resolveProvider(page: ProjectPage, providers: ProjectPageProviders): ProjectPageProvider | undefined {
@@ -436,7 +437,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       team={shell.team.members}
       selfUserId={user.id}
       justCreated={shell.created === projectId}
-      sessionCount={sessions.entries.length}
+      sessionCount={myEntries.length}
       taskCount={props.tasks?.length}
       knowledgeCount={props.knowledge?.length ?? props.knowledgeCount ?? undefined}
       onChanged={shell.reloadProject}
@@ -534,7 +535,10 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           onClose={() => setPaletteOpen(false)}
           onSelectSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
           onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
-          onSelectKnowledge={() => shell.openPage({ kind: "knowledge" })}
+          onSelectKnowledge={knowledgeId => {
+            if (props.onSelectKnowledge) props.onSelectKnowledge(knowledgeId)
+            else shell.openPage({ kind: "knowledge" })
+          }}
         />
       )}
     </>
