@@ -483,11 +483,18 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   color: var(--fg-2, var(--muted));
   font-size: var(--text-xs, 12px);
 }
+/* 只给可取消的草稿卡留位置，历史引用继续沿用原来的正文宽度。 */
+.wb-composer-reference:has(> .wb-composer-reference-remove) { position: relative; padding-inline-end: 38px; }
 .wb-composer-reference-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.wb-composer-reference-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
-.wb-composer-reference strong { color: var(--fg, var(--text-soft)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-composer-reference-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; flex: 1 1 auto; }
+.wb-composer-reference strong { max-width: 100%; color: var(--fg, var(--text-soft)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-composer-reference-badge {
   flex: 0 0 auto;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 1px 6px;
   border-radius: var(--radius-pill, 999px);
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
@@ -497,6 +504,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   font-weight: 500;
 }
 .wb-composer-reference-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.wb-composer-reference .wb-composer-reference-remove { position: absolute; inset-block-start: 6px; inset-inline-end: 6px; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; }
 .wb-composer-reference p { max-height: 4.4em; overflow: auto; margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .wb-composer-attachments > span {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 0;

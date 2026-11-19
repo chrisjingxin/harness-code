@@ -630,8 +630,16 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                   <strong>{reference.sourceLabel}</strong>
                   {reference.rangeLabel ? <span className="wb-composer-reference-badge">{reference.rangeLabel}</span> : null}
                 </div>
-                <div className="wb-composer-reference-actions">{(["open", "refresh", "remove"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : action === "refresh" ? "刷新" : "移除"}</button>)}</div>
+                <div className="wb-composer-reference-actions">{(["open", "refresh"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : "刷新"}</button>)}</div>
               </div>
+              <button
+                type="button"
+                className="wb-composer-reference-remove"
+                aria-label={`取消引用 ${reference.sourceLabel}`}
+                title={reference.actions.remove.reason || (!actions.onReferenceAction ? "当前无法取消引用" : "取消这次引用")}
+                disabled={!actions.onReferenceAction || !reference.actions.remove.enabled}
+                onClick={() => actions.onReferenceAction?.(scope, reference.id, "remove")}
+              ><IconX size={14} aria-hidden="true" /></button>
               {reference.snapshotText ? <p>{reference.snapshotText}</p> : null}
               {reference.status !== "ready" ? <p role="status">{reference.message || (reference.status === "loading" ? "正在读取引用…" : "引用来源暂不可用")}</p> : null}
             </div>
