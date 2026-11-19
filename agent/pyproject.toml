@@ -1,0 +1,87 @@
+[project]
+name = "harness-agent"
+version = "0.2.0"
+description = "Harness Agent kernel — deepagents + LangChain + LangGraph"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "deepagents==0.7.3",
+    "langchain==1.3.15",
+    "langchain-core==1.6.2",
+    "langgraph-checkpoint-sqlite==3.0.3",
+    "langchain-openai==1.3.3",
+    "langchain-mcp-adapters==0.2.1",
+    "PyYAML==6.0.3",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "pydantic==2.12.5",
+    "tomli-w>=1.1.0",
+    "websockets==15.0.1",
+    "tree-sitter>=0.24.0,<0.27.0",
+    "tree-sitter-bash>=0.25.0,<0.26.0",
+    "agent-client-protocol==0.12.1",
+]
+
+[project.scripts]
+harness-agent = "harness_agent.__main__:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+]
+
+[tool.uv]
+# DeepAgents 0.7.3 imports Anthropic integrations at module load time, but
+# Harness always supplies an explicit model and never uses that provider.
+# Keep the packages out of resolution and let the installation step apply the
+# source patch recorded under agent/scripts/.
+exclude-dependencies = [
+    "anthropic",
+    "langchain-anthropic",
+    "claude-agent-sdk",
+]
+constraint-dependencies = [
+    "anyio==4.12.1",
+    "certifi==2026.7.22",
+    "cffi==2.1.1",
+    "charset-normalizer==3.5.1",
+    "google-auth==2.56.3",
+    "google-genai==2.19.0",
+    "idna==3.19",
+    "jsonpointer==3.0.0",
+    "langchain-google-genai==4.3.1",
+    "langsmith==0.10.16",
+    "mcp==1.29.0",
+    "openai==2.54.0",
+    "ormsgpack==1.12.0",
+    "packaging==26.3",
+    "pydantic-settings==2.15.0",
+    "pygments==2.21.0",
+    "regex==2026.7.19",
+    "sqlite-vec==0.1.6",
+    "sse-starlette==3.4.8",
+    "tiktoken==0.12.0",
+    "tqdm==4.70.0",
+    "uuid-utils==0.12.0",
+    "uvicorn==0.52.4",
+    "xxhash==3.6.0",
+]
+link-mode = "copy"
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["harness_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"harness_agent/protocol/protocol_v3.json" = "harness_agent/protocol/protocol_v3.json"
+"harness_agent/protocol/protocol_v3.sha256" = "harness_agent/protocol/protocol_v3.sha256"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "e2e: requires a loopback-only mock OpenAI server",
+    "codegraph_integration: requires local CodeGraph 1.1.6 platform package",
+]

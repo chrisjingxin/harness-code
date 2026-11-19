@@ -6,12 +6,16 @@ __pycache__/
 .pytest_cache/
 .harness/config.toml
 .harness/config.local.toml
-packages/agent/.harness/
+agent/.harness/
 
 # Node / TypeScript
 node_modules/
 dist/
+packages/collaboration-client/src/schema/
 *.tsbuildinfo
+
+# Java / Maven
+server/target/
 
 # IDE
 .vscode/

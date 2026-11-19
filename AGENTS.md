@@ -4,7 +4,7 @@
 
 本分支是独立桌面协作工作台，入口为 Electron + React/TypeScript。Harness/Python 是可选 Agent。2026-11-12 远端已合入 HC-210 Java 基础及 HC-211 四个服务端停点，HC-211 仍进行中，HC-212 待实施；桌面与 Runner 的新版业务装配尚需适配。实际阶段和验证以各 Task 为准。
 
-根 npm workspace 列出新平台八个显式目录（`packages/workbench-contracts`、`packages/acp-runtime`、`packages/project-service`、`packages/workbench-ui`、`packages/providers/{harness,pi,qwen}`、`apps/desktop`）。旧 `packages/cli`、`packages/protocol`、`packages/runner-core`、`apps/runner` 与 vendor 依赖已由 HC-203 退役；`packages/agent` 作为可选 Harness Python ACP Agent 内核独立保留，不进入新产品默认安装/启动/构建。产品入口说明以 README 和 docs/user 为准，过程文档放 docs/developer。
+根 npm workspace 列出新平台四个显式目录（`desktop`、`packages/collaboration-client`、`packages/acp-runtime`、`packages/harness-acp`），配合顶层 `contracts/`、`agent/` 与 `server/` 组成五层架构。旧 `packages/cli`、`packages/protocol`、`packages/runner-core`、`apps/runner`、`packages/providers/{pi,qwen}`、旧独立包 `packages/{workbench-contracts,workbench-ui,project-service}` 与 vendor 依赖已退役；顶层 `agent/` 作为可选 Harness Python ACP Agent 内核独立保留，不进入新产品默认安装/启动/构建。产品入口说明以 README 和 docs/user 为准，过程文档放 docs/developer。
 
 ### HC-192 实施期间的用户覆盖规则
 
@@ -101,7 +101,7 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 2. **工作区保洁**：首先执行 `git status --short`，识别并保留用户既有改动，严禁为清理工作区而擅自回滚无关文件。
 3. **顺序不可跳**：无确认的 Task 不写 Spec；无确认的 Spec 不写 Plan；无 Todo 不进入实现。
 4. **单一事实源与范围锁定**：用户结果以 Task 为准，行为契约以 Spec 为准，步骤以 Plan 为准，执行以 Todo 为准。执行 Agent 严禁自行扩大范围或修改公开 interface；发现冲突时立即停止，回写阻塞点并修订上游文档。
-5. **按变更归属选包**：桌面视图与宿主装配改 `packages/workbench-ui` / `apps/desktop/`，平台契约改 `packages/workbench-contracts/`，通用 ACP 运行时改 `packages/acp-runtime/`，多代理描述符改 `packages/providers/*`，本机文件与只读 Git 改 `packages/project-service/`，可选 Harness Python 内核改 `packages/agent/`，Java 协作服务改 `services/collaboration-server/`。
+5. **按变更归属选包**：桌面视图、宿主装配、桌面共享契约及本机只读文件/Git 改 `desktop/`（对应 `src/ui`、`src/shared`、`src/main`、`src/main/project-service`），语言无关线上契约改 `contracts/`，跨平台协作客户端改 `packages/collaboration-client/`，通用 ACP 运行时改 `packages/acp-runtime/`，Harness ACP 适配器改 `packages/harness-acp/`，可选 Harness Python 内核改 `agent/`，Java 协作服务改 `server/`。
 6. **按停点交付（核心底线）**：
    - 每次实现只推进到下一个可演示停点（用户能看见实际效果的工作包）；
    - 到达停点后勾选对应 Todo，向用户说明如何观察（如 `npm run dev` 看哪块）并**立即停下等待用户确认**；
@@ -116,13 +116,13 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 
 ### 项目结构与职责边界
 
-- `apps/desktop/`：Electron main/preload/renderer 装配与受限原生端口。
-- `packages/workbench-ui/`：通用 React 基础工作台，不直接依赖 Node/Electron。
-- `packages/workbench-contracts/`：独立平台契约类型与 JSON Schema，不回引旧 Harness 协议。
-- `packages/acp-runtime/`、`packages/project-service/`：通用 ACP 运行时与本机只读文件/Git 服务独立包。
-- `packages/providers/{harness,pi,qwen}/`：多代理 ACP Provider 描述符与能力提示。
-- `packages/agent/`：可选 Harness Python ACP Agent 内核（含内部自用 `protocol`、`diagnostic_log` 与 `scripts/` 依赖补丁/校验），不进入通用桌面安装图。
-- `services/collaboration-server/`：Java Spring Boot 协作服务端（含唯一 `schema.sql`）。
+- `contracts/`：语言无关线上 OpenAPI 与 JSON Schema Draft 2020-12 契约及 fixtures。
+- `desktop/`：Electron main/preload/renderer 装配与受限原生端口，并内聚原工作台 UI（`src/ui/`）、桌面共享契约（`src/shared/`）与本机只读文件/Git 服务（`src/main/project-service/`）。
+- `packages/collaboration-client/`：跨平台纯 TS 协作客户端与语言无关契约衍生类型，不直接依赖 Node/Electron。
+- `packages/acp-runtime/`：通用 ACP 运行时与本机/桌面进程连接、发现与注册表。
+- `packages/harness-acp/`：可选 Harness ACP 适配器（仅依赖 `@workbench/acp-runtime`）。
+- `agent/`：可选 Harness Python ACP Agent 内核（含内部自用 `protocol`、`diagnostic_log`、`examples/plugins/` 与 `scripts/` 依赖补丁/校验），不进入通用桌面安装图。
+- `server/`：Java Spring Boot 协作服务端（含唯一 `schema.sql`）。
 - `scripts/workbench/`：新平台依赖边界、契约烟测与防回流检查；`scripts/project/`：文档、Task、版本管理。
 - `docs/user/`、`docs/developer/`：用户说明与开发过程文档。
 
@@ -136,7 +136,7 @@ Agent 接受任务后，必须严格遵循以下开工顺序与不变量约束�
 ## 构建、测试与开发命令
 
 - `npm ci`：按唯一根锁安装新平台，不安装旧 CLI/Python/OpenTUI。
-- `npm run dev`：启动 Electron 基础桌面；`npm run build`：构建全部八个新工作区工程。
+- `npm run dev`：启动 Electron 基础桌面；`npm run build`：构建全部四个新工作区工程。
 - `npm --workspace @workbench/desktop run preview`：运行已构建的本地页面。
 - `npm run typecheck`：新工程类型检查。
 - `npm run check:boundaries -- --self-check`：新包依赖、公开入口、宿主访问与负例夹具。

@@ -9,18 +9,20 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
 const workspaceOutputs = (manifest.workspaces ?? []).flatMap(workspace => [
   resolve(root, workspace, "dist"),
-  ...(workspace === "apps/desktop" ? [resolve(root, workspace, "out")] : []),
+  ...(workspace === "desktop" ? [resolve(root, workspace, "out")] : []),
 ])
 const targets = [
   resolve(root, "node_modules"),
   ...workspaceOutputs,
-  resolve(root, "packages/agent/.venv"),
+  resolve(root, "packages/collaboration-client/src/schema"),
+  resolve(root, "agent/.venv"),
   resolve(root, ".pytest_cache"),
-  resolve(root, "packages/agent/.pytest_cache"),
+  resolve(root, "agent/.pytest_cache"),
+  resolve(root, "server/target"),
 ]
 
 for (const target of targets) {
   rmSync(target, { recursive: true, force: true })
 }
 
-console.log("已清理所有依赖与构建产物（node_modules、新工作区 dist/out、.venv、pytest 缓存，已保留 tmp/）")
+console.log("已清理所有依赖与构建产物（node_modules、新工作区 dist/out、agent/.venv、pytest 缓存、server/target，已保留 tmp/）")

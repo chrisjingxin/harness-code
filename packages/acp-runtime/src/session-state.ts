@@ -108,7 +108,7 @@ export function parseModes(modes?: SessionModeState | null): LocalAcpModesState 
   }
 }
 
-/** 兼容部分 Agent（如 pi-acp）在会话响应中附带的旧版 models 字段。 */
+/** 兼容部分标准 ACP Agent 在会话响应中附带的旧版 models 字段。 */
 export function parseModels(raw: unknown): LocalAcpModelsState | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const record = raw as { currentModelId?: unknown; availableModels?: unknown }

@@ -26,7 +26,7 @@ npm --workspace @workbench/desktop run preview
 
 ## 显式启动 Java 数据基础
 
-只有下列服务命令需要完整 JDK 21、Maven 和已准备的 MySQL 兼容数据库；桌面构建不会自动安装这些工具或启动数据库。通过 `JAVA_HOME` 指定 JDK，必要时用 `MAVEN_EXECUTABLE` 指定 Maven。首次准备数据库需由 DBA 或开发者显式执行[唯一 schema.sql](services/collaboration-server/src/main/resources/db/schema.sql)，之后再初始化演示数据和启动；应用只核对结构，不建表。
+只有下列服务命令需要完整 JDK 21、Maven 和已准备的 MySQL 兼容数据库；桌面构建不会自动安装这些工具或启动数据库。通过 `JAVA_HOME` 指定 JDK，必要时用 `MAVEN_EXECUTABLE` 指定 Maven。首次准备数据库需由 DBA 或开发者显式执行[唯一 schema.sql](server/src/main/resources/db/schema.sql)，之后再初始化演示数据和启动；应用只核对结构，不建表。
 
 ```sh
 npm run server:build
@@ -58,8 +58,8 @@ npm run check:boundaries -- --self-check
 npm run project:check
 ```
 
-八个 workspace（`workbench-contracts`、`acp-runtime`、`project-service`、`workbench-ui`、`providers/{harness,pi,qwen}`、`apps/desktop`）共用唯一根 `package-lock.json`；普通安装使用 `npm ci`。必要工程管理小套为 `npm run test:project`，完整回归在总体开发后统一执行。
+四个 workspace（`desktop`、`packages/collaboration-client`、`packages/acp-runtime`、`packages/harness-acp`）共用唯一根 `package-lock.json`；普通安装使用 `npm ci`。必要工程管理小套为 `npm run test:project`，完整回归在总体开发后统一执行。
 
-新入口位于 `apps/desktop`，UI 与契约位于 `packages/workbench-ui` 和 `packages/workbench-contracts`，ACP 运行时、多代理 Provider 与项目服务独立成包。旧 CLI、TUI、独立 Web、旧 `@za38/protocol`、旧 `apps/runner` / `packages/runner-core` 及 OpenTUI/Bun vendor 源码已由 HC-203 退役；`packages/agent` 作为可选 Harness Python ACP Agent 独立保留，不进入默认安装和运行路径，平台可在无 Harness/Python 时使用其他 ACP Agent。
+架构采用五层多语言目录：`contracts/` 存放语言无关的线上 OpenAPI 与 Schema 契约；桌面壳与工作台 UI/本地文件服务位于 `desktop/`（含 `src/ui`、`src/shared`、`src/main/project-service`），跨平台协作客户端位于 `packages/collaboration-client`，通用 ACP 运行时位于 `packages/acp-runtime`，可选 Harness ACP 适配器与 Python 内核位于 `packages/harness-acp` 和顶层 `agent/`，Java 协作服务端位于 `server/`。旧 CLI、TUI、独立 Web、旧 `@za38/protocol`、旧 `apps/runner` / `packages/runner-core`、`packages/providers/{pi,qwen}` 及 OpenTUI/Bun vendor 源码已退役；`agent/` 作为可选 Harness Python ACP Agent 独立保留，不进入默认安装和运行路径，平台可在无 Harness/Python 时使用其他 ACP Agent。
 
 设计与进度见 [HC-193](docs/developer/task/HC-193-独立桌面工程与分包.md)、[总体设计](docs/developer/architecture/多人协作工作台顶层设计.md)和[开发工作流](docs/developer/project/开发工作流.md)。

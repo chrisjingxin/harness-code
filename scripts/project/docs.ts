@@ -10,9 +10,17 @@ import { TASK_BOARD_PATH, TASK_DIR, TASK_ID_MATCH_GLOBAL, listMarkdownFiles, loa
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
-const CURRENT_DESKTOP_SPEC_IDS = /^(?:HC-203|HC-217|HC-218|HC-219|HC-220|HC-222)-/
+const CURRENT_DESKTOP_SPEC_IDS = /^(?:HC-203|HC-217|HC-218|HC-219|HC-220|HC-222|HC-231)-/
 
 const RETIRED_PATH_PREFIXES = [
+  "apps/",
+  "services/",
+  "examples/",
+  "packages/workbench-contracts/",
+  "packages/workbench-ui/",
+  "packages/project-service/",
+  "packages/providers/",
+  "packages/agent/",
   "packages/cli/",
   "packages/protocol/",
   "packages/runner-core/",

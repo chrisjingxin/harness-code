@@ -1,8 +1,8 @@
 /** 真实身份并发冒烟：仅传输闸门延迟旧响应，状态/网络实现均来自生产编译结果。 */
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
-import { CollaborationState } from "../../apps/desktop/dist/lifecycle/src/main/collaboration-state.js"
-import { verifyDesktopSource } from "../../apps/desktop/dist/lifecycle/src/main/trusted-source.js"
+import { CollaborationState } from "@workbench/collaboration-client"
+import { verifyDesktopSource } from "../../desktop/dist/lifecycle/src/main/trusted-source.js"
 
 const origin = process.env.HC194_SMOKE_ORIGIN
 assert(origin, "必须提供本轮origin")

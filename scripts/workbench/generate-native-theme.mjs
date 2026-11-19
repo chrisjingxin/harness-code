@@ -1,12 +1,13 @@
 /** 从唯一公共 CSS 色表生成原生窗口颜色；主进程不需要加载 React 或 CSS。 */
-import { readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const source = new URL("../../packages/workbench-ui/src/theme/colors.css", import.meta.url)
-const js = new URL("../../packages/workbench-ui/dist/native-theme.js", import.meta.url)
-const types = new URL("../../packages/workbench-ui/dist/native-theme.d.ts", import.meta.url)
+const source = new URL("../../desktop/src/ui/theme/colors.css", import.meta.url)
+const output = new URL("../../desktop/src/shared/native-theme.ts", import.meta.url)
 
 // 若色表不合法，移除上次生成物，避免后续构建误用已经过期的颜色。
-await Promise.all([rm(js, { force: true }), rm(types, { force: true })])
+await rm(output, { force: true })
 const css = (await readFile(source, "utf8")).replace(/\/\*[\s\S]*?\*\//g, "")
 const colors = {}
 for (const mode of ["light", "dark"]) {
@@ -24,6 +25,11 @@ for (const mode of ["light", "dark"]) {
   }
   colors[mode] = values
 }
-const jsContent = `/** 由公共 CSS 生成；请修改色表而不是此产物。 */\nexport const nativeTheme = Object.freeze({\n  light: Object.freeze(${JSON.stringify(colors.light)}),\n  dark: Object.freeze(${JSON.stringify(colors.dark)}),\n})\n`
-const typesContent = `/** 从公共主题生成的原生背景及文字颜色。 */\nexport declare const nativeTheme: Readonly<{\n  light: Readonly<{ background: string; text: string }>\n  dark: Readonly<{ background: string; text: string }>\n}>\n`
-await Promise.all([writeFile(js, jsContent), writeFile(types, typesContent)])
+await mkdir(dirname(fileURLToPath(output)), { recursive: true })
+const content = `/** 由公共 CSS 生成；请修改色表而不是此产物。 */
+export const nativeTheme = Object.freeze({
+  light: Object.freeze(${JSON.stringify(colors.light)}),
+  dark: Object.freeze(${JSON.stringify(colors.dark)}),
+})
+`
+await writeFile(output, content, "utf8")

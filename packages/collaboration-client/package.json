@@ -1,0 +1,38 @@
+{
+  "name": "@workbench/collaboration-client",
+  "version": "0.2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "sync:schemas": "node -e \"const fs=require('node:fs'),p=require('node:path');fs.mkdirSync('src/schema',{recursive:true});for(const n of['platform','organization','collaboration'])fs.copyFileSync(p.join('../../contracts/schema',n+'.schema.json'),p.join('src/schema',n+'.schema.json'))\"",
+    "build": "npm run sync:schemas && tsc -p tsconfig.json && node -e \"const fs=require('node:fs'),p=require('node:path');fs.mkdirSync('dist/schema',{recursive:true});for(const n of['platform','organization','collaboration'])fs.copyFileSync(p.join('src/schema',n+'.schema.json'),p.join('dist/schema',n+'.schema.json'))\"",
+    "prepack": "npm run build",
+    "typecheck": "npm run sync:schemas && tsc -p tsconfig.json --noEmit",
+    "test": "npm run sync:schemas && node --no-warnings --experimental-loader ../../scripts/typescript_loader.mjs --test tests/*.test.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    }
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "tough-cookie": "6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5"
+  }
+}

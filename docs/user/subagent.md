@@ -1,6 +1,6 @@
 # 子代理（Subagent）
 
-> **适用范围**：本文说明可选 **Harness Python ACP Agent** 内核（`packages/agent/`）内的 `task` 子代理委派机制与权限边界；通用桌面工作台与其他 ACP Agent 不要求实现相同子代理策略。原独立 CLI / TUI / `/web` 入口已退役。
+> **适用范围**：本文说明可选 **Harness Python ACP Agent** 内核（`agent/`）内的 `task` 子代理委派机制与权限边界；通用桌面工作台与其他 ACP Agent 不要求实现相同子代理策略。原独立 CLI / TUI / `/web` 入口已退役。
 
 子代理是由主代理通过 `task` 工具委派的独立执行单元。每个子代理拥有独立的上下文窗口、工具集和系统提示词，执行完毕后向主代理返回单一结果。
 

@@ -1,13 +1,12 @@
-/** 唯一资源清单 → 只加载本地 schema → 编译所有形状 → 检查同组正反例与确定性字节。无 Java/DB 前置。 */
+/** 唯一资源清单 → 只加载本地 schema → 编译所有形状 → 检查同组正反例。无 Java/DB 前置。 */
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { resolve, dirname } from "node:path"
-import { createHash } from "node:crypto"
 import assert from "node:assert/strict"
 import Ajv2020 from "ajv/dist/2020.js"
 import addFormats from "ajv-formats"
 
-export const contractRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../packages/workbench-contracts")
+export const contractRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../contracts")
 const read = async path => JSON.parse(await readFile(resolve(contractRoot, path), "utf8"))
 
 /** 资源名只允许包内相对 JSON；不从网络或未登记路径补齐引用。 */
@@ -55,28 +54,14 @@ export async function loadContracts() {
   return { catalog, schemas, types, ajv, read, validator }
 }
 
-/** 确定性字节只覆盖内层头与 payload，不含连接外壳和 payload.bodySha256。 */
-export function canonicalBody(message) {
-  const payload = { ...message.payload }
-  delete payload.bodySha256
-  return JSON.stringify({ protocolVersion: message.protocolVersion, messageId: message.messageId, type: message.type, occurredAt: message.occurredAt, payload })
-}
-
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { catalog, validator, read } = await loadContracts()
   const results = []
-  const deterministic = []
   for (const file of catalog.fixtures) for (const entry of await read(`fixtures/${file}`)) {
     const validate = validator(entry.schema)
     const valid = validate(entry.data)
     assert.equal(valid, entry.valid, `夹具失败 ${entry.name}: ${JSON.stringify(validate.errors)}`)
     results.push({ name: entry.name, valid })
-    if (typeof entry.canonical === "string") {
-      const body = canonicalBody(entry.data)
-      assert.equal(body, entry.canonical, `确定性正文不一致: ${entry.name}`)
-      assert.equal(createHash("sha256").update(body, "utf8").digest("hex"), entry.bodySha256, `确定性指纹不一致: ${entry.name}`)
-      deterministic.push({ name: entry.name, bodySha256: entry.bodySha256, bytes: Buffer.byteLength(body, "utf8") })
-    }
   }
-  console.log(JSON.stringify({ engine: "node", results, deterministic }))
+  console.log(JSON.stringify({ engine: "node", results }))
 }

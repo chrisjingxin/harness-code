@@ -68,7 +68,7 @@ ACP Agent 与 Git 写占用的生命周期接合、Agent 在途写入及相关 A
 
 ### 本机停点实施证据（2026-11-11）
 
-从 `@workbench/project-service` 根出口调用 `createProjectService(projectRoot)`。宿主注入真实项目根后可列目录、查候选、读预览、取 Git 状态与 Diff、按选择提交及向既有 upstream 推送。分开返回提交和推送结果。组合操作确认提交后重读状态，用实际 SHA、提交后快照与原 upstream 发起推送。当前本机占用在宿主进程内按真实项目及 Git 公共目录协调，提交额外使用 Git 索引锁。线上写请求账本与设备接线仍按 Spec 的前置安排。[包公开入口](../../../packages/project-service/src/index.ts) · [本机 Todo](../todo/HC-199-文件与Git服务迁移.md)
+从 `@workbench/project-service` 根出口调用 `createProjectService(projectRoot)`。宿主注入真实项目根后可列目录、查候选、读预览、取 Git 状态与 Diff、按选择提交及向既有 upstream 推送。分开返回提交和推送结果。组合操作确认提交后重读状态，用实际 SHA、提交后快照与原 upstream 发起推送。当前本机占用在宿主进程内按真实项目及 Git 公共目录协调，提交额外使用 Git 索引锁。线上写请求账本与设备接线仍按 Spec 的前置安排。[包公开入口](../../../desktop/src/main/project-service/index.ts) · [本机 Todo](../todo/HC-199-文件与Git服务迁移.md)
 
 macOS 15.4 x86_64、Node 22.23.2、Apple Git 2.39.5。运行 `npm run build --workspace @workbench/project-service`、`npm run typecheck --workspace @workbench/project-service`、`npm run check:boundaries -- --self-check`，均通过。边界检查覆盖七个 workspace、公开入口和拒绝旧依赖的夹具。
 

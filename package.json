@@ -6,18 +6,14 @@
     "node": ">=22.12.0"
   },
   "workspaces": [
-    "packages/workbench-contracts",
+    "packages/collaboration-client",
     "packages/acp-runtime",
-    "packages/project-service",
-    "packages/workbench-ui",
-    "packages/providers/harness",
-    "packages/providers/pi",
-    "packages/providers/qwen",
-    "apps/desktop"
+    "packages/harness-acp",
+    "desktop"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "dev": "npm run build --workspace @workbench/contracts --workspace @workbench/acp-runtime --workspace @workbench/project-service --workspace @workbench/harness-provider --workspace @workbench/pi-provider --workspace @workbench/qwen-provider --workspace @workbench/ui && npm run dev --workspace @workbench/desktop",
+    "dev": "npm run build --workspace @workbench/collaboration-client --workspace @workbench/acp-runtime --workspace @workbench/harness-acp && npm run dev --workspace @workbench/desktop",
     "dev:remote": "node scripts/workbench/remote-desktop.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "check:boundaries": "node scripts/workbench/check-boundaries.mjs",

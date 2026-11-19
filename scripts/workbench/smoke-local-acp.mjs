@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDesktopLocalAcpHost } from "../../apps/desktop/src/main/local-acp-host.ts"
+import { createDesktopLocalAcpHost } from "../../desktop/src/main/local-acp-host.ts"
 
 const host = createDesktopLocalAcpHost()
 const firstOnly = process.argv.includes("--first")

@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict"
 import { createInterface } from "node:readline"
-import { CollaborationClient } from "../../apps/desktop/src/main/collaboration-client.ts"
+import { CollaborationClient } from "@workbench/collaboration-client"
 
 const origin = process.env.HC194_SMOKE_ORIGIN
 assert(origin, "必须显式提供本轮服务 origin")

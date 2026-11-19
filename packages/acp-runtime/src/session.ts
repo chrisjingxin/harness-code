@@ -17,6 +17,7 @@ import {
   ndJsonStream,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
+  type ElicitationContentValue,
   type ListSessionsResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -259,7 +260,16 @@ export class BoundSession implements LocalAcpSession {
     const pending = this.#elicitation
     if (!pending || pending.id !== requestId || this.#closing || pending.turn?.cancelling) return false
     const reply: CreateElicitationResponse = answer.action === "accept"
-      ? { action: "accept", ...(answer.content !== undefined ? { content: { ...answer.content } } : {}) }
+      ? {
+          action: "accept",
+          ...(answer.content !== undefined
+            ? {
+                content: Object.fromEntries(
+                  Object.entries(answer.content).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
+                ) as Record<string, ElicitationContentValue>,
+              }
+            : {}),
+        }
       : { action: answer.action }
     this.resolveElicitation(reply)
     return true
@@ -394,7 +404,7 @@ export class BoundSession implements LocalAcpSession {
           ...("toolCallId" in input && input.toolCallId ? { toolCallId: input.toolCallId } : {}),
           ...("requestId" in input && input.requestId !== undefined ? { requestId: input.requestId } : {}),
           message: input.message,
-          requestedSchema: input.requestedSchema,
+          requestedSchema: input.requestedSchema as unknown as Readonly<Record<string, unknown>>,
         },
       })
     })
@@ -532,7 +542,7 @@ export class BoundSession implements LocalAcpSession {
 
   private launchAgent(command: AgentCommand): Agent {
     const child = spawn(command.executable, command.args ?? [], {
-      cwd: this.root, env: command.env, stdio: "pipe", windowsHide: true, shell: false, detached: process.platform !== "win32",
+      cwd: this.root, env: command.env as NodeJS.ProcessEnv | undefined, stdio: "pipe", windowsHide: true, shell: false, detached: process.platform !== "win32",
     })
     const exited = new Promise<void>(resolve => child.once("close", () => resolve()))
     // stderr 不进入协议、对话正文、窗口或上传。诊断消费者只接收受限大小的分片。

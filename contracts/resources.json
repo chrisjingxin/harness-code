@@ -1,0 +1,17 @@
+{
+  "schemas": [
+    "platform.schema.json",
+    "organization.schema.json",
+    "collaboration.schema.json"
+  ],
+  "openapi": [
+    "platform.openapi.json",
+    "organization.openapi.json",
+    "collaboration.openapi.json"
+  ],
+  "fixtures": [
+    "identity.json",
+    "organization.json",
+    "collaboration.json"
+  ]
+}

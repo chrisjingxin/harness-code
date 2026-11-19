@@ -12,9 +12,9 @@
 | Task（产品任务） | Project 内向成员显式发布的协作任务，支持关联固定引用快照并由接收者在本机主动选择目录与 Agent 开始。 | 工程研发看板卡片（`HC-XXX`）。 |
 | 轻量通知（SSE） | Java 协作服务向桌面推送的简报、Task 或知识元数据变更通知；只触发元数据刷新，不自动下载正文或启动 Agent。 | 正文消息流、下行控制命令。 |
 | `LocalAcpHost` | `@workbench/acp-runtime` 提供的标准 ACP 宿主封装，管理本机 Agent 子进程启动、会话绑定、提示发送、流式事件与交互请求。 | 特定 Agent 内部模型循环、云端账号体系。 |
-| Provider（代理提供方） | 实现本机 ACP 接入描述符的可插拔 Agent 实例（如 `harness`、`pi`、`qwen` 或 `custom`）。 | 平台核心启动前置依赖。 |
+| Provider（代理提供方） | 实现本机 ACP 接入描述符的可插拔 Agent 实例（如 `@workbench/harness-acp` 或通过 `createCommandAgentDescriptor` / `WORKBENCH_ACP_EXECUTABLE` 接入的标准 ACP Agent）。 | 平台核心启动前置依赖。 |
 
-## 2. 可选 Harness Python Agent 内核术语（`packages/agent`）
+## 2. 可选 Harness Python Agent 内核术语（`agent/`）
 
 | 术语 | 定义 | 不包含 |
 | --- | --- | --- |
