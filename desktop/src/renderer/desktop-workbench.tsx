@@ -442,6 +442,11 @@ function WorkspaceProjectWorkbench(props: {
     </div>
   </div>
 
+  const paletteMetadataMessage = !props.collaborationApps ? "任务与知识服务尚未接入。"
+    : taskRows.status === "error" ? taskRows.message
+    : knowledgeRows.status === "error" ? knowledgeRows.message
+    : taskRows.status === "loading" || knowledgeRows.status === "loading" ? "正在读取任务与知识摘要…" : undefined
+
   return <>
     <ProjectWorkbench
       shell={shell}
@@ -461,6 +466,7 @@ function WorkspaceProjectWorkbench(props: {
       personalError={props.personalError}
       tasks={taskRows.status === "ready" ? taskRows.tasks : undefined}
       knowledge={knowledgeRows.status === "ready" ? knowledgeRows.items : undefined}
+      metadataMessage={paletteMetadataMessage}
       taskCount={taskCount}
       knowledgeCount={knowledgeCount}
       sessions={projectSessions.navigationSource}

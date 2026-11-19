@@ -92,7 +92,7 @@ export class ProjectRoot {
     try {
       const actual = await realpath(lexical)
       this.assertReadable(actual, protectedPaths)
-      if (directory && actual !== lexical) throw new ProjectServiceError("unsupported", "目录链接不可展开。")
+      if (directory && actual !== lexical) throw new ProjectServiceError("outside-project", "目录链接不可展开。")
       return actual
     } catch (error) {
       throw filesystemError(error)

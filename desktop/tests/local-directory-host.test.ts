@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, test } from "node:test"
@@ -172,4 +172,126 @@ test("Git 仓库暴露只读变更列表与 diff 并按账号隔离绑定", asyn
   })
   assert.equal(crossAccount.ok, false)
   if (!crossAccount.ok) assert.equal(crossAccount.error.code, "RESOURCE_NOT_FOUND")
+})
+
+// HC-199 收敛到通用包后，保留桌面与通用包原先有差异的目录范围和展示行为。
+test("普通目录与仓库子目录的搜索只返回指定目录内候选，空目录与忽略文件仍可浏览", async () => {
+  const service = new LocalDirectoryService(() => "user-1")
+  for (const root of [plainDir, gitDir]) {
+    mkdirSync(join(root, "scope", "empty"), { recursive: true })
+    mkdirSync(join(root, "other"), { recursive: true })
+    writeFileSync(join(root, "scope", "match.txt"), "scoped\n")
+    writeFileSync(join(root, "other", "match.txt"), "outside scope\n")
+    writeFileSync(join(root, "scope", "ignored.txt"), "explicitly browsable\n")
+    writeFileSync(join(root, ".gitignore"), "ignored.txt\n")
+    await service.bindDirectory("ws-1", "proj-1", "conv", root)
+    const found = await service.readDirectory("ws-1", "proj-1", "conv", {
+      kind: "searchCandidates", directory: "scope", query: "match",
+    })
+    assert.ok(found.ok && found.value.kind === "searchCandidates")
+    assert.deepEqual(found.value.value.items.map(item => item.path), ["scope/match.txt"])
+
+    const list = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "scope" })
+    assert.ok(list.ok && list.value.kind === "listDirectory")
+    assert.deepEqual(list.value.value.entries.map(item => item.name), ["empty", "ignored.txt", "match.txt"])
+  }
+  const binding = await service.bindDirectory("ws-1", "proj-1", "subdir", join(gitDir, "scope"))
+  assert.ok(binding.ok)
+  assert.equal(binding.value.isGitRepository, false)
+  const found = await service.readDirectory("ws-1", "proj-1", "subdir", {
+    kind: "searchCandidates", directory: "", query: "ignored",
+  })
+  assert.ok(found.ok && found.value.kind === "searchCandidates")
+  assert.deepEqual(found.value.value.items.map(item => item.path), ["ignored.txt"])
+  const preview = await service.readDirectory("ws-1", "proj-1", "subdir", { kind: "readPreview", path: "match.txt" })
+  assert.ok(preview.ok && preview.value.kind === "readPreview")
+  assert.equal(preview.value.value.content, "scoped\n")
+  const status = await service.readDirectory("ws-1", "proj-1", "subdir", { kind: "gitStatus" })
+  assert.ok(status.ok && status.value.kind === "gitStatus")
+  assert.equal(status.value.value.snapshot, "non-git")
+})
+
+test("有界分页和预览截断保留元数据，目录变化后旧游标失效", async () => {
+  const service = new LocalDirectoryService(() => "user-1")
+  mkdirSync(join(plainDir, "many"))
+  for (let i = 0; i < 513; i++) writeFileSync(join(plainDir, "many", `${i}.txt`), "row")
+  writeFileSync(join(plainDir, "large.md"), "中文😀\n".repeat(40_000))
+  await service.bindDirectory("ws-1", "proj-1", "conv", plainDir)
+  const first = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "many" })
+  assert.ok(first.ok && first.value.kind === "listDirectory")
+  assert.equal(first.value.value.entries.length, 512)
+  assert.equal(first.value.value.truncated, false)
+  assert.ok(first.value.value.nextCursor)
+  const cursor = first.value.value.nextCursor
+  const last = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "many", cursor })
+  assert.ok(last.ok && last.value.kind === "listDirectory")
+  assert.equal(last.value.value.entries.length, 1)
+  assert.equal(last.value.value.nextCursor, undefined)
+  writeFileSync(join(plainDir, "many", "new.txt"), "new")
+  const expired = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "many", cursor })
+  assert.ok(!expired.ok)
+  assert.equal(expired.error.code, "PROJECT_CURSOR_EXPIRED")
+  const preview = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "readPreview", path: "large.md" })
+  assert.ok(preview.ok && preview.value.kind === "readPreview")
+  assert.equal(preview.value.value.truncated, true)
+  assert.equal(preview.value.value.displayedBytes, Buffer.byteLength(preview.value.value.content))
+  assert.ok(preview.value.value.displayedBytes < preview.value.value.sizeBytes)
+  assert.ok(!preview.value.value.content.includes("�"))
+})
+
+test("Git 管理目录及其别名不可读，普通根内文件链接仍能预览而目录链接不可展开", async () => {
+  const root = join(tempRoot, "separate-git")
+  const metadata = join(root, "private-metadata")
+  mkdirSync(root)
+  execFileSync("git", ["init", "-q", `--separate-git-dir=${metadata}`], { cwd: root })
+  symlinkSync(metadata, join(root, "metadata-link"))
+  writeFileSync(join(root, "safe.txt"), "safe\n")
+  symlinkSync(join(root, "safe.txt"), join(root, "file-link"))
+  mkdirSync(join(root, "folder"))
+  symlinkSync(join(root, "folder"), join(root, "directory-link"))
+  const service = new LocalDirectoryService(() => "user-1")
+  await service.bindDirectory("ws-1", "proj-1", "conv", root)
+  const list = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "" })
+  assert.ok(list.ok && list.value.kind === "listDirectory")
+  assert.ok(!list.value.value.entries.some(item => item.path === "private-metadata"))
+  for (const path of ["private-metadata/HEAD", "metadata-link/HEAD"]) {
+    const denied = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "readPreview", path })
+    assert.ok(!denied.ok)
+    assert.equal(denied.error.code, "PROJECT_FILE_DENIED")
+  }
+  const linked = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "readPreview", path: "file-link" })
+  assert.ok(linked.ok && linked.value.kind === "readPreview")
+  assert.equal(linked.value.value.content, "safe\n")
+  const denied = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "listDirectory", directory: "directory-link" })
+  assert.ok(!denied.ok)
+  assert.equal(denied.error.code, "PROJECT_FILE_DENIED")
+})
+
+test("内容变化但 porcelain 状态未变时旧 Git 快照仍被拒绝，未跟踪文件可查看 Diff", async () => {
+  const service = new LocalDirectoryService(() => "user-1")
+  await service.bindDirectory("ws-1", "proj-1", "conv", gitDir)
+  const status = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "gitStatus" })
+  assert.ok(status.ok && status.value.kind === "gitStatus")
+  const snapshot = status.value.value.snapshot
+  const newFile = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "gitDiff", snapshot, path: "new-note.txt" })
+  assert.ok(newFile.ok && newFile.value.kind === "gitDiff")
+  assert.ok(newFile.value.value.text.includes("+untracked note"))
+  writeFileSync(join(gitDir, "docs", "guide.md"), "# Guide\nDifferent line\n")
+  const stale = await service.readDirectory("ws-1", "proj-1", "conv", { kind: "gitDiff", snapshot, path: "docs/guide.md" })
+  assert.ok(!stale.ok)
+  assert.equal(stale.error.code, "PROJECT_GIT_STALE")
+})
+
+
+test("绑定根被替换后文件与非 Git 状态读取均拒绝跟随同名新目录", async () => {
+  const service = new LocalDirectoryService(() => "user-1")
+  await service.bindDirectory("ws-1", "proj-1", "conv", plainDir)
+  renameSync(plainDir, `${plainDir}-previous`)
+  mkdirSync(plainDir)
+  writeFileSync(join(plainDir, "README.md"), "replacement")
+  for (const action of [{ kind: "readPreview", path: "README.md" }, { kind: "gitStatus" }] as const) {
+    const result = await service.readDirectory("ws-1", "proj-1", "conv", action)
+    assert.ok(!result.ok)
+    assert.equal(result.error.code, "PROJECT_ROOT_CHANGED")
+  }
 })

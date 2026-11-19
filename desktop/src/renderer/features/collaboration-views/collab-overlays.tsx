@@ -332,6 +332,7 @@ export function CommandPaletteModal({
   peerSessions,
   tasks,
   knowledge,
+  metadataMessage,
   onClose,
   onSelectSession,
   onSelectTask,
@@ -344,6 +345,7 @@ export function CommandPaletteModal({
   readonly peerSessions: readonly NavigationSessionEntry[]
   readonly tasks: readonly TaskSummary[]
   readonly knowledge: readonly KnowledgeSummary[]
+  readonly metadataMessage?: string
   readonly onClose: () => void
   readonly onSelectSession: (conversationId: string) => void
   readonly onSelectTask: (taskId: string) => void
@@ -491,6 +493,7 @@ export function CommandPaletteModal({
         </div>
 
         <div className="palette-list" role="listbox" aria-label="搜索结果">
+          {metadataMessage && <div className="p-hint" role="status">{metadataMessage}</div>}
           {groups.length === 0 ? (
             <div className="pop-empty">
               没有匹配的内容。

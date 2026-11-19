@@ -83,6 +83,9 @@ export class LocalDirectoryService implements LocalDirectoryHost {
 
     try {
       const service = await createProjectService(directoryPath)
+      if (accountId !== this.#getAccountId()) {
+        return identityError("AUTHENTICATION_REQUIRED", "登录账号已变化，请重新选择本机工作目录。")
+      }
       this.#bindings.set(bindingKey(accountId, workspaceId, projectId, conversationKey), service)
       return {
         ok: true,
@@ -106,37 +109,43 @@ export class LocalDirectoryService implements LocalDirectoryHost {
     if (!accountId) {
       return identityError("AUTHENTICATION_REQUIRED", "请先登录后再读取本机工作目录。")
     }
-    const service = this.#bindings.get(bindingKey(accountId, workspaceId, projectId, conversationKey))
+    const key = bindingKey(accountId, workspaceId, projectId, conversationKey)
+    const service = this.#bindings.get(key)
     if (!service) {
       return identityError("RESOURCE_NOT_FOUND", "当前会话尚未绑定本机工作目录。")
     }
 
     try {
+      let response: ProjectReadResponse
       switch (action.kind) {
         case "listDirectory":
-          return { ok: true, value: { kind: "listDirectory", value: await service.listDirectory(action.directory, action.cursor) } }
+          response = { kind: "listDirectory", value: await service.listDirectory(action.directory, action.cursor) }
+          break
         case "searchCandidates":
-          return {
-            ok: true,
-            value: {
-              kind: "searchCandidates",
-              value: await service.searchCandidates({
-                directory: action.directory,
-                query: action.query,
-                limit: action.limit,
-              }),
-            },
+          response = {
+            kind: "searchCandidates",
+            value: await service.searchCandidates({
+              directory: action.directory,
+              query: action.query,
+              limit: action.limit ?? 200,
+            }),
           }
+          break
         case "readPreview":
-          return { ok: true, value: { kind: "readPreview", value: await service.readPreview(action.path) } }
+          response = { kind: "readPreview", value: await service.readPreview(action.path) }
+          break
         case "gitStatus":
-          return { ok: true, value: { kind: "gitStatus", value: await service.gitStatus() } }
+          response = { kind: "gitStatus", value: await service.gitStatus() }
+          break
         case "gitDiff":
-          return {
-            ok: true,
-            value: { kind: "gitDiff", value: await service.gitDiff({ snapshot: action.snapshot, path: action.path }) },
-          }
+          response = { kind: "gitDiff", value: await service.gitDiff({ snapshot: action.snapshot, path: action.path }) }
+          break
       }
+      // 读取期间切换账号或重选目录后，旧结果不再交给当前页面。
+      if (accountId !== this.#getAccountId() || this.#bindings.get(key) !== service) {
+        return identityError("RESOURCE_NOT_FOUND", "当前会话的本机工作目录绑定已变化，请刷新。")
+      }
+      return { ok: true, value: response }
     } catch (error) {
       return toDirectoryError(error)
     }

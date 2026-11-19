@@ -25,21 +25,19 @@ import java.util.UUID;
  * 本服务从不执行任何 DDL——库表结构唯一来源是 classpath:db/schema.sql，由运维手工建库。
  *
  * <p>【核心架构底线与校验规则 (Invariants)】
- * 1. 严格 11 张控制面小表（HC-211 组织层模型）：
- *    - 必须存在 wb_user、wb_workspace、wb_workspace_member、wb_device、wb_repository、
- *      wb_project、wb_project_member、wb_project_repository、wb_local_repo_binding、
- *      wb_conversation、wb_conversation_repository；
+ * 1. 核对当前 19 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量）：
+ *    - 完整集合见 REQUIRED_TABLES，与唯一 schema.sql 对齐；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
  *      业务标识列带实体前缀（wb_user.user_id 为 CHAR(32) 唯一索引，wb_project.project_id 等为 CHAR(36) 唯一索引）；
- *    - 抽查新语义关键列：wb_device.owner_user_id、wb_repository.remote_url_sha256、
+ *    - 抽查新语义关键列：wb_repository.remote_url_sha256、
  *      wb_conversation 的 owner/status/brief/synced_sequence/brief_updated_at 等；
  *    - 团队规范落库形态：时间列 DATETIME(3)（*_at，应用当前时区），状态列 TINYINT，全列 NOT NULL。
  * 2. 彻底移除旧模型残留：
  *    - 绝不允许出现历史流水表（wb_message、wb_execution 系列、wb_request_receipt、
  *      wb_device_request、wb_outbox_event）；
  *    - 绝不允许出现旧协作模型表 wb_device_project、wb_handoff、wb_message_reference；
- *    - wb_device 不得再有 workspace_id 列（设备属人不属团队，D11）；
+ *    - 首版按用户登录上传，旧 wb_device 与 wb_local_repo_binding 表必须退出；
  *    - wb_conversation 不得再有 current_user_id/active_execution_id/next_sequence/created_by_user_id 旧列；
  *    - 全表不得残留旧 *_at_ms BIGINT 时间列（已迁移为 *_at DATETIME(3)）。
  *    一旦探测到残留立即拒绝服务启动。

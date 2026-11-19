@@ -271,6 +271,7 @@ export type ProjectWorkbenchProps = {
   sessions?: NavigationSessionSource
   tasks?: readonly TaskSummary[]
   knowledge?: readonly KnowledgeSummary[]
+  metadataMessage?: string
   taskCount?: number | null
   knowledgeCount?: number | null
   providers?: ProjectPageProviders
@@ -302,6 +303,9 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   )
   const [collabPopoverOpen, setCollabPopoverOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // 项目切换后关闭旧结果浮层，避免用户在新项目点击旧任务或知识。
+  useEffect(() => { setPaletteOpen(false); setCollabPopoverOpen(false) }, [shell.scope])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -532,6 +536,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           peerSessions={peerEntries}
           tasks={props.tasks ?? []}
           knowledge={props.knowledge ?? []}
+          metadataMessage={props.metadataMessage}
           onClose={() => setPaletteOpen(false)}
           onSelectSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
           onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}

@@ -5,19 +5,35 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: 张景新
 priority: P1
-status: 进行中
+status: 待验收
 owner: 张景新
 branch: harness_lody
 scope: 对照 Open Design 工作台原型稿与 t3code 对话时间线，优化中央 Agent 会话的阅读界面：去头像的人右/Agent 左版面、紧凑工具日志行与连续工具分组、回答完成后自动折叠思考过程、运行状态归入当轮、审批改用提醒色、代码块外观对齐、关键状态变化配轻量动效；新增 t3code 式左侧会话锚定（按提问跳转）；把强调色收敛为 workbench-ui 公共单一来源，设置中一键切换后会话区同步生效。不改线上协议、后端接口和会话装配数据来源。
 acceptance: 会话中用户消息靠右无头像、Agent 回复靠左无头像且正文不再缩进；连续 2 个以上工具合并为可折叠组，失败只标图标与徽标；Agent 回答完成后思考过程自动收起为一行、可手动展开；宽窗口左侧出现按提问排列的锚点，悬停预览、点击跳转并高亮目标提问，窄窗口自动隐藏；设置中切换 4 种强调色，会话区所有强调元素即时变色且仓库内不再有写死的紫色色值；浅/深主题、980/760 宽度与减少动态效果下均无错位；构建、类型、边界检查与 impeccable detect 通过。
 user_docs: 实施阶段更新 docs/user/独立桌面工作台.md 的会话阅读与强调色说明
 developer_docs: docs/developer/spec/HC-222-Agent会话界面优化.md；docs/developer/plan/HC-222-Agent会话界面优化.md；docs/developer/todo/HC-222-Agent会话界面优化.md；docs/developer/architecture/桌面前端交互设计.md
-test_evidence: -
+test_evidence: 2026-11-18 用户（本机）完成停点3必要验证；本轮三种预览构建、文件渲染检查与macOS Electron核心路径通过，详见正文；本地产物tmp/hc222-verification-20261118/；impeccable命令不可用，完整组合留HC-204
 references: docs/developer/task/archive/HC-221-工作台原型UI对齐.md；docs/developer/task/HC-206-既有对话视图复用.md；docs/developer/task/HC-218-会话只读与主动同步.md；原型稿 Open Design 项目 c3-harness-code-workbench-v3/index.html（.tl-* 与 .tl-minimap）；t3code apps/web/src/components/chat（MessagesTimeline、TimelineMinimap、TimelineWorkGroupRows、TimelineUserMessageRow、TimelineAssistantRows）
 completed_at: -
 ---
 
 # HC-222 Agent会话界面优化
+
+## 2026-11-18 最终必要验证（用户本机，待验收）
+
+用户授权验证最后一项。由用户（本机）在干净的 `harness_lody@085ebfdd1755115ad75c8da82a2781f22f57594e` 完成；保留张景新的原拆解、实现归属和已提交 UI（`6b9ab90`、`72b84dd`、`1df3980`）。本轮没有生产源码修改，没有提交或推送。下文“尚未产出推理”等描述保留为早期背景；当前本机思考与工具接通情况以停点 2 记录和当前源码为准。
+
+**检查与产物。** 本轮执行 `npm --workspace @workbench/desktop run build:conversation-preview`、`build:session-preview`、`build:project-preview` 及 `node --experimental-strip-types scripts/workbench/smoke-file-rendering.mjs`，均通过。沿用统筹在 `36e728d` rebase 后完成的全 workspace 构建、类型与工程/边界检查；核对 `36e728d..085ebfd` 没有 desktop、workbench-ui、contracts、acp-runtime 源码变化，本轮也没有生产修改，不重复整库检查。最终文档检查与 diff 空白检查结果见 Todo。
+
+**发送与过程阅读。** macOS 独立 Electron 的 HC-218「本机执行界面夹具」中发送固定文本，出现思考、连续工具和两段回复。工具仍运行时过程保持展开；约 25 秒终态后自动收起，回复留在外面；手动展开过程、思考和工具组后可回看。夹具中未完成的修改工具在终态显示失败，是现有受控材料，不是实际 Agent 失败。`hc218-smoke.json` 与运行中／完成收起／手动展开三张截图记录了结果。
+
+**锚点与代表宽度。** HC-206 预览追加消息后锚点由 6 项变为 7 项；悬停显示提问与时间，点击首条跳转并高亮气泡、退出跟随，方向键可移动到下一提问。CDP 设定代表 viewport 为 1280、980、760px（高度 1000px），实际会话容器分别为 1194、894、674px；仅首个宽栏显示锚点，后两者隐藏，没有横向溢出。阈值判断依据会话容器，不能把 980px 应用 viewport 误当成 980px 会话容器。深色截图及减少动态效果下的静态高亮证据见 `hc206-smoke.json` 与对应截图。
+
+**强调色与文件阅读。** 用独立资料目录打开既有正式桌面产物，在设置中真实点击四种强调色，选中状态与保存值一致，重载后青碧仍保留；受控会话按正式页面选中的同一公共 `data-accent` 检查发送按钮与当前锚点，四种颜色均变化。这里没有声称两个隔离进程的设置互相同步。写死紫色检索只命中 `theme/accent.ts`、`theme/accent.css`。HC-207 从现有文件树打开 README，中央与右侧均能切换 Markdown 预览／源码；HC-206 文件候选的「预览」可达原打开动作回调。`accent-smoke.json`、`file-smoke.json` 和截图记录了结果；真实目录边界与文件读取沿用既有证据。
+
+**工具限制与范围。** 尝试 `impeccable detect packages/workbench-ui/src/conversation --json` 返回 127（`command not found`），本轮不声称检测通过；保留停点 2 已记录的 0 项历史结果，按用户必要冒烟约定不新增安装或 Skill 门槛。CodeGraph、OpenWiki CLI 也不可用。本轮三个会话／文件入口均为受控预览，正式桌面只检查未登录设置；未启动 Java/MySQL 或真实模型。完整主题、尺寸、缩放、键盘、异常组合以及 Windows、TDSQL、真实中间件仍由 HC-204 统一验收。
+
+本地证据目录：`tmp/hc222-verification-20261118/`，包含构建日志、最终四份冒烟 JSON、截图、临时驱动及 `manifest.json` 中实际加载产物的 SHA-256。验证进程只使用自身临时资料目录，结束后仅收尾自身进程。本卡最后一个执行项已完成，状态设为待验收，用户验收项保持待确认；不标已完成、不归档。总看板与跨卡文档由统筹整合。
 
 ## 2026-11-17 会话阅读补充
 

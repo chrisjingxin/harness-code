@@ -15,7 +15,7 @@ import { ProjectTaskDetail, ProjectTaskList, TaskMaterialCard } from "./project-
 import type { ProjectTaskSummary, TaskMaterial, TaskMember } from "./project-tasks.js"
 import { PublishTaskDialog } from "./publish-task-dialog.js"
 
-const labels: Record<TaskStatus, string> = {
+export const labels: Record<TaskStatus, string> = {
   todo: "待接收", doing: "进行中", review: "待验收", done: "已完成", cancelled: "已取消",
 }
 
