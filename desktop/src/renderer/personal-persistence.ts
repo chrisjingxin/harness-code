@@ -40,6 +40,17 @@ export class PersonalPersistence {
     this.#send(canonical, { key, revision, value: structuredClone(value) })
   }
 
+  /** 等待主进程确认标题写盘，关窗时也等待本次修改。 */
+  async renameConversation(key: Extract<PersonalKey, { kind: "conversation" }>, title: string): Promise<PersonalResult<string>> {
+    const generation = this.#generation
+    const result = this.host.renameConversation(key, title)
+      .catch(() => ({ ok: false, message: "会话标题保存失败，请重试。" } as const))
+    const task = result.then(() => {}).finally(() => { this.#pending.delete(task) })
+    this.#pending.add(task)
+    const saved = await result
+    return generation === this.#generation ? saved : { ok: false, message: "账号已变化。" }
+  }
+
   #send(canonical: string, record: { key: PersonalKey; revision: number; value: PersonalValue }): void {
     const generation = this.#generation
     let task: Promise<void>

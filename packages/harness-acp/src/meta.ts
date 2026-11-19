@@ -19,6 +19,7 @@ export const HARNESS_CLIENT_EXTENSION_CAPABILITIES = {
 /** Harness 推荐开启的宿主客户端能力提示：表单交互、工作区文件与自动新建兜底恢复。 */
 export const HARNESS_HOST_HINTS: AcpAgentHostHints = {
   enableElicitation: true,
+  extraClientCapabilitiesMeta: { [HARNESS_EXT_KEY]: HARNESS_CLIENT_EXTENSION_CAPABILITIES },
   enableClientFs: true,
   restorePolicy: "fallback-new",
 }

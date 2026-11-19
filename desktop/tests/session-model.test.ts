@@ -16,7 +16,6 @@ import {
   resolveConversationTitle,
   toNavigationSessionEntries,
 } from "../src/renderer/features/session/session-model.ts"
-import { localExecutionKey } from "../src/shared/index.ts"
 import type { ProjectConversationSummary, ProjectHistoryMessage } from "../src/renderer/features/session/contracts.ts"
 
 const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {}): ProjectConversationSummary => ({
@@ -145,6 +144,7 @@ test("resolveConversationTitle 与 applyConversationTitleOverrides 优先显示�
   assert.equal(resolveConversationTitle("原登记标题", "  新会话标题  "), "新会话标题")
   assert.equal(resolveConversationTitle("原登记标题", "   "), "原登记标题")
   assert.equal(resolveConversationTitle("", undefined), "未命名会话")
+  assert.equal(resolveConversationTitle("原登记标题", "Agent 新建议", "  手动标题  "), "手动标题")
 
   const scope = { accountId: "user-self", workspaceId: "ws-1", projectId: "proj-1" }
   const items = [
@@ -152,15 +152,11 @@ test("resolveConversationTitle 与 applyConversationTitleOverrides 优先显示�
     sampleConversation({ conversationId: "conv-2", ownerUserId: "user-peer", title: "他人标题" }),
   ]
 
-  // 无匹配覆盖时保持原引用稳定，避免不必要的重渲染
-  assert.equal(applyConversationTitleOverrides(items, scope, {}), items)
+  assert.equal(applyConversationTitleOverrides(items, scope, () => undefined), items)
 
-  const targetKey = localExecutionKey({ ...scope, conversationId: "conv-1" })
-  const otherProjectKey = localExecutionKey({ accountId: "user-self", workspaceId: "ws-1", projectId: "proj-2", conversationId: "conv-2" })
-  const updated = applyConversationTitleOverrides(items, scope, {
-    [targetKey]: "  重构标题  ",
-    [otherProjectKey]: "不应污染其他项目",
-  })
+  const updated = applyConversationTitleOverrides(items, scope, id => id === "conv-1"
+    ? { sessionTitle: "  Agent 新建议  ", customTitle: "  重构标题  " }
+    : { sessionTitle: "无权覆盖的标题", customTitle: "无权覆盖的标题" })
 
   assert.notEqual(updated, items)
   assert.equal(updated[0]?.title, "重构标题")

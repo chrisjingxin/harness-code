@@ -124,10 +124,14 @@ function createFakeWindow() {
   return { window, notices }
 }
 
-function createMockRuntime() {
+function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState"]>["agentCapabilities"]) {
   const listeners = new Set<AcpListener>()
   let turnCounter = 0
   const session: BoundSession = {
+    ...(agentCapabilities ? { getState: () => ({
+      connected: true, authMethods: [], configOptions: [], availableCommands: [], plans: [],
+      restoreStatus: { kind: "none" as const }, agentCapabilities,
+    }) } : {}),
     getAvailability: () => ({ available: true }),
     send: () => ({ status: "accepted", turnId: `turn-${++turnCounter}` }),
     cancel: () => true,
@@ -876,6 +880,52 @@ test("不同服务 origin 隔离目录确认记录，旧个人记录路径经 co
     assert.equal(readyAfterRestart.directoryStatus, "ready")
     await ipcRestarted.dispose()
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("仅已协商的 Harness 旁路跳过上传，标准 Agent 的定稿照常入队", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc234-side-turn-"))
+  const identity = await createSignedInState(USER_A)
+  const { window, notices } = createFakeWindow()
+  const meta = { harnessCode: { version: 1, capabilities: ["commands", "approval", "subagent", "runSummary"] } }
+  const { runtime, emit } = createMockRuntime({ _meta: meta })
+  const batches: ConversationSyncRequest[] = []
+  const uploads = new ConversationUploads(join(root, "uploads"), {
+    watermark: async () => ({ ok: true, value: 0 }),
+    upload: async (_scope, request) => {
+      batches.push(request)
+      return { ok: true, value: { syncedSequence: request.messages.at(-1)?.sequence ?? 0 } }
+    },
+  }, () => {})
+  uploads.useAccount(USER_A)
+  const coordinator = createLocalExecutionCoordinator(window, identity, uploads, { registry: {
+    listProviders: () => ({ providers: [], defaultProviderId: "harness" }),
+    getHost: providerId => ({ providerId: providerId ?? "harness", host: runtime.host, available: true, clientMeta: meta }),
+    close: async () => {},
+  } })
+  try {
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    await coordinator.captureDirectorySelection()(root)
+    const a = await coordinator.prepare(scope, root, "harness")
+    assert.ok(a.ok)
+    const sent = await coordinator.send(scope, a.value.bindingId, REQ_ID, "/btw fixture", [])
+    assert.ok(sent.ok && sent.value.status === "accepted")
+    const turn = sent.value.turnId
+    emit({ type: "text-delta", turnId: turn, sequence: 1, text: "only here", rawMeta: { harnessCode: { ephemeral: true } } })
+    emit({ type: "completed", turnId: turn, sequence: 2, shareable: true })
+    assert.ok((notices as LocalExecutionNotice[]).some(event => event.kind === "finished" && event.ephemeral))
+
+    const b = await coordinator.prepare(scope, root, "custom")
+    assert.ok(b.ok)
+    const next = await coordinator.send(scope, b.value.bindingId, REQ_ID, "standard text", [])
+    assert.ok(next.ok && next.value.status === "accepted")
+    emit({ type: "text-delta", turnId: next.value.turnId, sequence: 1, text: "shared", rawMeta: { harnessCode: { ephemeral: true } } })
+    emit({ type: "completed", turnId: next.value.turnId, sequence: 2, shareable: true })
+    await waitFor(() => batches.length > 0)
+    assert.deepEqual(batches.flatMap(batch => batch.messages.map(message => JSON.parse(message.payload).text)), ["standard text", "shared"])
+  } finally {
+    await coordinator.dispose()
     await rm(root, { recursive: true, force: true })
   }
 })

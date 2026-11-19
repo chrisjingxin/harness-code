@@ -27,12 +27,15 @@ import {
   type SessionUpdate,
 } from "@agentclientprotocol/sdk"
 import { setTimeout as delay } from "node:timers/promises"
+import { sessionSetupPayload, type PreparedSessionSetup } from "./session-setup.js"
 import { agentStdout } from "./agent-stdio.js"
 import { createClientCapabilityHandlers, type ClientCapabilityController } from "./client-capabilities.js"
 import type { NativeBinding } from "./native-binding.js"
 import {
   buildClientCapabilities,
   cloneSessionState,
+  configMode,
+  metadata,
   emptySessionState,
   mergeSessionInfo,
   parseAuthMethods,
@@ -55,6 +58,7 @@ import type {
   LocalAcpEvent,
   LocalAcpHostOptions,
   LocalAcpPromptBlock,
+  LocalAcpModesState,
   LocalAcpReplayFrame,
   LocalAcpRestoreReason,
   LocalAcpSendResult,
@@ -98,6 +102,7 @@ type Agent = {
   sessionId?: string
   openingNewSession?: boolean
   replayingSessionId?: string
+  replayActivity?: () => void
   replayFrames?: LocalAcpReplayFrame[]
   pendingSessionUpdates?: SessionUpdate[]
   disconnected: boolean
@@ -143,6 +148,9 @@ export class BoundSession implements LocalAcpSession {
   #elicitation?: PendingElicitation
   #closing?: Promise<void>
   #state: LocalAcpSessionState = emptySessionState()
+  #legacyModes?: LocalAcpModesState
+  #configRevision = 0
+  #needsHistory = false
 
   constructor(
     private readonly root: string,
@@ -152,8 +160,19 @@ export class BoundSession implements LocalAcpSession {
     private readonly nativeBinding: NativeBinding,
     private readonly release: () => void,
     private readonly diagnostic: (pid: number, turnId: string | undefined, stderr: string) => void,
-    private readonly options: LocalAcpHostOptions = {},
+    private readonly options: LocalAcpHostOptions,
+    private readonly setup: PreparedSessionSetup,
   ) {}
+
+  assertSessionSetup(setup: PreparedSessionSetup): void {
+    if (setup.signature !== this.setup.signature) throw new Error("请关闭绑定后再修改附加目录或 MCP 配置。")
+  }
+
+  private async sessionPayload() {
+    const { payload, diagnostics } = await sessionSetupPayload(this.root, this.setup, this.#state.agentCapabilities)
+    this.#state = { ...this.#state, setupDiagnostics: diagnostics.length ? diagnostics : undefined }
+    return payload
+  }
 
   private get handshakeTimeoutMs(): number {
     return this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
@@ -212,14 +231,14 @@ export class BoundSession implements LocalAcpSession {
     return this.sendPrompt([{ type: "text", text }])
   }
 
-  sendPrompt(blocks: readonly LocalAcpPromptBlock[]): LocalAcpSendResult {
+  sendPrompt(blocks: readonly LocalAcpPromptBlock[], historyOnReset: readonly LocalAcpPromptBlock[] = []): LocalAcpSendResult {
     const availability = this.getAvailability()
     if (!availability.available) return { status: "rejected", reason: availability.reason }
     if (!hasPromptContent(blocks)) return { status: "rejected", reason: "empty-text" }
     const turn: Turn = { id: randomUUID(), sequence: 0, prompting: false }
     this.#active = turn
     // 留出当前调用栈，确保消费者先拿到受理结果和 turnId。
-    queueMicrotask(() => void this.run(turn, [...blocks]))
+    queueMicrotask(() => void this.run(turn, [...blocks], [...historyOnReset]))
     return { status: "accepted", turnId: turn.id }
   }
 
@@ -278,6 +297,11 @@ export class BoundSession implements LocalAcpSession {
   async setMode(modeId: string): Promise<void> {
     if (this.#closing) throw new Error("本机会话已关闭。")
     const agent = await this.openSessionWithRecovery()
+    const modern = configMode(this.#state.configOptions)
+    if (modern) {
+      if (!modern.options.some(item => item.value === modeId)) throw new Error("该会话模式不可用。")
+      return this.setConfigOption(modern.id, modeId)
+    }
     await agent.connection.setSessionMode({ sessionId: agent.sessionId!, modeId })
     this.updateModeState(modeId, true)
   }
@@ -288,8 +312,9 @@ export class BoundSession implements LocalAcpSession {
     const payload = typeof value === "boolean"
       ? { sessionId: agent.sessionId!, configId, type: "boolean" as const, value }
       : { sessionId: agent.sessionId!, configId, value }
+    const before = this.#configRevision
     const response = await agent.connection.setSessionConfigOption(payload)
-    this.updateConfigOptions(response.configOptions, true)
+    if (before === this.#configRevision) this.updateConfigOptions(response.configOptions, true)
   }
 
   async authenticate(methodId: string): Promise<void> {
@@ -329,7 +354,7 @@ export class BoundSession implements LocalAcpSession {
     let pendingUpdates: SessionUpdate[] = []
     try {
       resumed = await within(
-        agent.connection.resumeSession({ sessionId, cwd: this.root, mcpServers: [] }),
+        agent.connection.resumeSession({ ...await this.sessionPayload(), sessionId }),
         this.handshakeTimeoutMs,
       )
       if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
@@ -341,6 +366,7 @@ export class BoundSession implements LocalAcpSession {
       agent.openingNewSession = false
       agent.pendingSessionUpdates = undefined
     }
+    this.#needsHistory = false
     this.applyOpenedResponse(resumed)
     for (const update of pendingUpdates) this.applySessionUpdateToState(update)
     this.#state = {
@@ -371,9 +397,10 @@ export class BoundSession implements LocalAcpSession {
         id,
         title: input.toolCall.title || "Agent 请求工具权限",
         // 附带规范化工具细节（diff、参数、关联位置、终端引用），供桌面审批卡片呈现决策上下文。
-        tool: toLocalAcpTool(input.toolCall),
+        ...metadata(input._meta),
+        tool: { ...toLocalAcpTool(input.toolCall), ...metadata(input.toolCall._meta) },
         options: input.options.map(option => ({
-          id: option.optionId, label: option.name, allows: option.kind.startsWith("allow_"),
+          id: option.optionId, label: option.name, allows: option.kind.startsWith("allow_"), ...metadata(option._meta),
         })),
       } })
     })
@@ -482,11 +509,11 @@ export class BoundSession implements LocalAcpSession {
       const agent = await this.ensureInitialized()
       if (agent.sessionId) return agent
       try {
-        await this.openSession(agent)
-        return agent
+        return await this.openSession(agent)
       } catch (error) {
-        await this.stopAgent(agent).catch(() => {})
-        if (this.#agent === agent) this.#agent = undefined
+        const current = this.#agent
+        if (current) await this.stopAgent(current).catch(() => {})
+        if (this.#agent === current) this.#agent = undefined
         throw error
       }
     })()
@@ -498,7 +525,7 @@ export class BoundSession implements LocalAcpSession {
     }
   }
 
-  private async run(turn: Turn, blocks: readonly LocalAcpPromptBlock[]): Promise<void> {
+  private async run(turn: Turn, blocks: readonly LocalAcpPromptBlock[], historyOnReset: readonly LocalAcpPromptBlock[]): Promise<void> {
     try {
       await this.assertDirectoryIntact()
     } catch {
@@ -525,12 +552,12 @@ export class BoundSession implements LocalAcpSession {
     if (turn.cancelling) { this.finish(turn, { type: "cancelled" }); return }
     turn.prompting = true
     try {
-      const result = await agent.connection.prompt({
-        sessionId: agent.sessionId!,
-        prompt: toSdkPromptBlocks(blocks),
-      })
+      // 重建时只交接一次。RPC 发出后即算消费，避免回复丢失时重复注入。
+      const prompt = this.#needsHistory ? [...historyOnReset, ...blocks] : blocks
+      this.#needsHistory = false
+      const result = await agent.connection.prompt({ sessionId: agent.sessionId!, prompt: toSdkPromptBlocks(prompt) })
       this.finish(turn, result.stopReason === "end_turn"
-        ? { type: "completed", shareable: !turn.cancelling && !turn.denied && this.#permission?.turn !== turn }
+        ? { type: "completed", shareable: !turn.cancelling && !turn.denied && this.#permission?.turn !== turn, ...metadata(result._meta) }
         : result.stopReason === "cancelled" ? { type: "cancelled" }
         : { type: "failed", reason: "agent-stopped", stopReason: result.stopReason })
     } catch {
@@ -590,7 +617,7 @@ export class BoundSession implements LocalAcpSession {
     return agent
   }
 
-  private async openSession(agent: Agent): Promise<void> {
+  private async openSession(agent: Agent): Promise<Agent> {
     let nativeId: string | undefined
     let resetReason: LocalAcpRestoreReason | undefined
     let staleId: string | undefined
@@ -612,16 +639,21 @@ export class BoundSession implements LocalAcpSession {
         staleId = nativeId
       } else {
         const loaded = await this.tryLoadSession(agent, nativeId)
-        if (loaded) return
+        if (loaded) return agent
+        // 未完成的 load 可能迟到。旧进程确认退出后，才能新建会话。
+        await this.stopAgent(agent)
+        if (this.#agent === agent) this.#agent = undefined
         if (this.restorePolicy === "strict") throw new RestoreError("session-restore-failed")
-        await this.nativeBinding.clear().catch(() => {})
-        if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
+        if (this.#closing) throw new Error("本机会话已关闭。")
+        await this.nativeBinding.clear()
+        agent = await this.ensureInitialized()
         resetReason = "session-restore-failed"
         staleId = nativeId
       }
     }
 
     await this.openNewSession(agent, resetReason ? { reason: resetReason, previousSessionId: staleId ?? "" } : undefined)
+    return agent
   }
 
   private async tryLoadSession(agent: Agent, nativeId: string): Promise<boolean> {
@@ -629,11 +661,19 @@ export class BoundSession implements LocalAcpSession {
     agent.replayFrames = []
     agent.pendingSessionUpdates = []
     this.resetTransientSessionUpdates()
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const loaded = await within(
-        agent.connection.loadSession({ sessionId: nativeId, cwd: this.root, mcpServers: [] }),
-        this.handshakeTimeoutMs,
-      )
+      const idleMs = this.options.sessionLoadReplayIdleMs
+      const idle = new Promise<never>((_, reject) => {
+        if (idleMs !== undefined && Number.isSafeInteger(idleMs) && idleMs > 0) {
+          agent.replayActivity = () => {
+            clearTimeout(idleTimer)
+            idleTimer = setTimeout(() => reject(new RestoreError("session-restore-failed")), idleMs)
+          }
+        }
+      })
+      const request = agent.connection.loadSession({ ...await this.sessionPayload(), sessionId: nativeId })
+      const loaded = await within(Promise.race([request, idle]), this.handshakeTimeoutMs)
       if (agent.disconnected || this.#closing) return false
       const replayFrames = agent.replayFrames
       const pendingUpdates = agent.pendingSessionUpdates
@@ -641,6 +681,7 @@ export class BoundSession implements LocalAcpSession {
       agent.replayFrames = undefined
       agent.pendingSessionUpdates = undefined
       agent.sessionId = nativeId
+      this.#needsHistory = false
       this.applyOpenedResponse(loaded)
       for (const update of pendingUpdates) this.applySessionUpdateToState(update)
       this.#state = {
@@ -659,6 +700,9 @@ export class BoundSession implements LocalAcpSession {
       agent.pendingSessionUpdates = undefined
       this.resetTransientSessionUpdates()
       return false
+    } finally {
+      clearTimeout(idleTimer)
+      agent.replayActivity = undefined
     }
   }
 
@@ -676,7 +720,7 @@ export class BoundSession implements LocalAcpSession {
     let nativeId: string
     let pendingUpdates: SessionUpdate[] = []
     try {
-      opened = await within(agent.connection.newSession({ cwd: this.root, mcpServers: [] }), this.handshakeTimeoutMs)
+      opened = await within(agent.connection.newSession(await this.sessionPayload()), this.handshakeTimeoutMs)
       nativeId = opened.sessionId
       if (!nativeId) throw new Error("无法创建本机 Agent 会话。")
       if (agent.disconnected || this.#closing) throw new Error("本机 Agent 已断开。")
@@ -698,6 +742,7 @@ export class BoundSession implements LocalAcpSession {
         ? { kind: "reset", reason: resetFrom.reason, previousSessionId: resetFrom.previousSessionId, sessionId: nativeId }
         : { kind: "new", sessionId: nativeId },
     }
+    this.#needsHistory = Boolean(resetFrom)
     if (resetFrom) {
       this.emitSession({
         type: "session-reset",
@@ -711,6 +756,7 @@ export class BoundSession implements LocalAcpSession {
   }
 
   private resetTransientSessionUpdates(): void {
+    this.#legacyModes = undefined
     this.#state = {
       ...this.#state,
       modes: undefined,
@@ -725,15 +771,10 @@ export class BoundSession implements LocalAcpSession {
   }
 
   private applyOpenedResponse(response: OpenedMeta): void {
-    const modes = parseModes(response.modes)
+    this.#legacyModes = parseModes(response.modes)
     const models = parseModels(response.models)
-    const configOptions = parseConfigOptions(response.configOptions)
-    this.#state = {
-      ...this.#state,
-      ...(modes ? { modes, currentModeId: modes.currentModeId } : {}),
-      ...(models ? { models } : {}),
-      ...(response.configOptions ? { configOptions } : {}),
-    }
+    this.#state = { ...this.#state, ...(models ? { models } : {}) }
+    this.updateConfigOptions(response.configOptions ?? [], false)
   }
 
   private onUpdate(agent: Agent, { sessionId, update }: SessionNotification): void {
@@ -743,6 +784,7 @@ export class BoundSession implements LocalAcpSession {
     if (agent.replayingSessionId === sessionId && !agent.sessionId) {
       const frame = toReplayFrame(update)
       if (frame) {
+        agent.replayActivity?.()
         agent.replayFrames?.push(frame)
         return
       }
@@ -770,7 +812,7 @@ export class BoundSession implements LocalAcpSession {
     // 4) 轮次流式内容与工具更新：仅在当前活跃 prompting 轮次发射给 subscribe()。
     if (!this.#active?.prompting) return
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
-      this.emit(this.#active, { type: "tool", tool: toLocalAcpTool(update) })
+      this.emit(this.#active, { type: "tool", tool: { ...toLocalAcpTool(update), ...metadata(update._meta) } })
       return
     }
     if (update.sessionUpdate === "agent_thought_chunk") {
@@ -780,7 +822,10 @@ export class BoundSession implements LocalAcpSession {
       return
     }
     if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" && update.content.text) {
-      this.emit(this.#active, { type: "text-delta", text: update.content.text, messageId: update.messageId ?? undefined })
+      this.emit(this.#active, {
+        type: "text-delta", text: update.content.text, messageId: update.messageId ?? undefined,
+        ...metadata(update.content._meta), ...metadata(update._meta),
+      })
     }
   }
 
@@ -869,18 +914,21 @@ export class BoundSession implements LocalAcpSession {
   }
 
   private updateModeState(currentModeId: string, emitEvent: boolean): void {
-    const prevModes = this.#state.modes
-    this.#state = {
-      ...this.#state,
-      currentModeId,
-      ...(prevModes ? { modes: { ...prevModes, currentModeId } } : {}),
-    }
+    if (this.#legacyModes) this.#legacyModes = { ...this.#legacyModes, currentModeId }
+    if (configMode(this.#state.configOptions)) return
+    this.#state = { ...this.#state, currentModeId, modes: this.#legacyModes }
     if (emitEvent) this.emitSession({ type: "current-mode", currentModeId })
   }
 
   private updateConfigOptions(raw: readonly SessionConfigOption[], emitEvent: boolean): void {
+    this.#configRevision++
     const configOptions = parseConfigOptions(raw)
-    this.#state = { ...this.#state, configOptions }
+    const modern = configMode(configOptions)
+    const modes = modern ? {
+      currentModeId: modern.currentValue,
+      availableModes: modern.options.map(({ value, name, description }) => ({ id: value, name, ...(description ? { description } : {}) })),
+    } : this.#legacyModes
+    this.#state = { ...this.#state, configOptions, modes, currentModeId: modes?.currentModeId }
     if (emitEvent) this.emitSession({ type: "config-options", configOptions: structuredClone(configOptions) })
   }
 

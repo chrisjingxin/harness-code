@@ -48,6 +48,7 @@ export function emptySessionState(): LocalAcpSessionState {
 export function buildClientCapabilities(options: LocalAcpHostOptions): ClientCapabilities {
   return {
     plan: {},
+    ...(options.extraClientCapabilitiesMeta ? { _meta: structuredClone(options.extraClientCapabilitiesMeta) } : {}),
     ...(options.enableClientFs !== false ? { fs: { readTextFile: true, writeTextFile: true } } : {}),
     ...(options.enableClientTerminal === true ? { terminal: true } : {}),
     ...(options.enableElicitation === true ? { elicitation: { form: {} } } : {}),
@@ -109,6 +110,19 @@ export function parseModes(modes?: SessionModeState | null): LocalAcpModesState 
 }
 
 /** 兼容部分标准 ACP Agent 在会话响应中附带的旧版 models 字段。 */
+export function configMode(options: readonly LocalAcpConfigOption[]) {
+  return options.find((option): option is Extract<LocalAcpConfigOption, { type: "select" }> =>
+    option.type === "select" && option.category === "mode" && option.options.some(item => item.value === option.currentValue))
+}
+
+/** ACP 允许附加元数据。只保留有大小上限的普通对象供受信任宿主投影。 */
+export function metadata(value: unknown): { rawMeta?: Readonly<Record<string, unknown>> } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  try {
+    return JSON.stringify(value).length <= 32_768 ? { rawMeta: value as Record<string, unknown> } : {}
+  } catch { return {} }
+}
+
 export function parseModels(raw: unknown): LocalAcpModelsState | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const record = raw as { currentModelId?: unknown; availableModels?: unknown }
@@ -211,9 +225,11 @@ export function upsertPlan(
 
 export function mergeSessionInfo(
   current: LocalAcpSessionInfo | undefined,
-  update: { readonly title?: string | null; readonly updatedAt?: string | null },
+  update: { readonly title?: string | null; readonly updatedAt?: string | null; readonly _meta?: unknown },
 ): LocalAcpSessionInfo {
   return {
+    ...(current?.rawMeta ? { rawMeta: current.rawMeta } : {}),
+    ...metadata(update._meta),
     ...(update.title !== undefined ? { title: update.title } : current?.title !== undefined ? { title: current.title } : {}),
     ...(update.updatedAt !== undefined ? { updatedAt: update.updatedAt } : current?.updatedAt !== undefined ? { updatedAt: current.updatedAt } : {}),
   }

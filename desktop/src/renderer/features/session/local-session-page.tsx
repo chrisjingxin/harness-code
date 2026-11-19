@@ -39,8 +39,7 @@ import {
 } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
-import { parseUndoListMessage } from "./undo-choice.js"
-import { UndoChoiceCard } from "./undo-choice-card.js"
+import { CodeCheckpointPanel } from "./code-checkpoint-panel.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
@@ -241,7 +240,7 @@ export function LocalSessionPage({
           retryRevision: activeExecution?.permissionRetryRevision,
           options: permission.options.map(option => ({
             id: option.id,
-            label: option.label,
+            label: option.scope ? option.label + " · " + { once: "仅本次", thread: "本会话", project: "本项目目录" }[option.scope] : option.label,
             ...(option.id === "reject_with_feedback" ? { description: "拒绝并在下一步填写原因或修改建议" } : {}),
             tone: option.allows ? "positive" as const : "negative" as const,
             behavior: option.allows ? "confirm" as const : "immediate" as const,
@@ -260,53 +259,7 @@ export function LocalSessionPage({
     ? { ...projected, composer: { ...projected.composer, statusText: availability.reason } }
     : projected
 
-  const sendUndoCommand = async (command: string) => {
-    if (!execution.send) {
-      return { status: "rejected" as const, message: "当前无法发送回退命令。" }
-    }
-    return execution.send({
-      scope: {
-        namespace: scope.namespace,
-        accountId: scope.accountId,
-        workspaceId: scope.workspaceId,
-        projectId: conversation.projectId,
-      },
-      conversationId: conversation.conversationId,
-      directoryPath,
-      draftRevision: personal.draft.revision,
-      text: command,
-      referenceIds: [],
-      attachmentIds: [],
-    })
-  }
-
-  const baseEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
-  const undoDisabledReason = !execution.send
-    ? "当前无法发送回退命令"
-    : !availability.available
-      ? availability.reason ?? "本机 Agent 暂不可用"
-      : undefined
-  const renderedEntries = baseEntries.map((entry, idx) => {
-    if (entry.kind !== "message" || entry.role !== "assistant" || entry.streaming) return entry
-    const undoItems = parseUndoListMessage(entry.text)
-    if (!undoItems) return entry
-    const stale = baseEntries.slice(idx + 1).some(
-      later => !(later.kind === "message" && later.role === "assistant" && !later.streaming && !later.text.trim()),
-    )
-    return {
-      kind: "extension" as const,
-      id: entry.id,
-      content: (
-        <UndoChoiceCard
-          items={undoItems}
-          stale={stale}
-          busy={Boolean(activeExecution?.activeTurnId)}
-          disabledReason={undoDisabledReason}
-          onExecuteUndo={sendUndoCommand}
-        />
-      ),
-    }
-  })
+  const renderedEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
 
   const restoreKey = sessionState?.restoreStatus.kind === "reset"
     ? `${conversation.conversationId}:${sessionState.restoreStatus.sessionId}`
@@ -314,8 +267,15 @@ export function LocalSessionPage({
   const showRestoreBanner = Boolean(capabilities.restoreNotice && restoreKey && dismissedRestoreKey !== restoreKey)
   const activePlans = sessionState?.plans ?? []
 
-  const aboveTimelineSlot = showRestoreBanner || capabilityError || activePlans.length > 0 ? (
+  const diagnostic = sessionState?.setupDiagnostics?.join(" ")
+  const aboveTimelineSlot = execution.codeCheckpoint || showRestoreBanner || capabilityError || diagnostic || activePlans.length > 0 ? (
     <div className="session-above-timeline">
+      {execution.codeCheckpoint && <CodeCheckpointPanel
+        key={referenceKey}
+        running={Boolean(activeExecution?.activeTurnId)}
+        run={action => execution.codeCheckpoint!(conversation.conversationId, action)}
+      />}
+      {diagnostic && <p className="session-restore-banner" role="status">{diagnostic}</p>}
       {showRestoreBanner ? (
         <div className="session-restore-banner" role="status">
           <IconAlertTriangle size={14} stroke={1.8} />
@@ -487,7 +447,7 @@ export function LocalSessionPage({
     : undefined
 
   return (
-    <section className="session-center" aria-label={sessionState?.sessionTitle?.trim() || conversation.title || "本机会话"}>
+    <section className="session-center" aria-label={conversation.title || "本机会话"}>
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
           <div className="session-conversation-wrap">
@@ -559,17 +519,6 @@ export function LocalSessionPage({
                   if (targetScope.conversationId !== scope.conversationId) return
                   const currentText = personal.draft.text
                   const trimmedLeft = currentText.trimStart()
-                  const hasOnlySlashPrefix = !trimmedLeft || (trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft))
-                  if (itemId === "undo" && hasOnlySlashPrefix && execution.send && availability.available && !activeExecution?.activeTurnId) {
-                    onPersonalChange(targetScope, {
-                      kind: "draft-text",
-                      text: "",
-                      selectionStart: 0,
-                      selectionEnd: 0,
-                    })
-                    void sendUndoCommand("/undo list")
-                    return
-                  }
                   const commandPrefix = `/${itemId} `
                   const nextText = trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft)
                     ? commandPrefix

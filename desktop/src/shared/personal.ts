@@ -78,7 +78,18 @@ export type ConversationPersonal = {
   readonly draft: PersonalConversationDraft
   localDirectoryPath: string | null
   providerId?: string | null
+  /** 由主进程确认归属后保存的本机手动标题。 */
+  readonly customTitle?: string
   syncCache: ConversationSyncCache | null
+}
+
+export const EMPTY_CONVERSATION_PERSONAL: ConversationPersonal = {
+  scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
+  expandedTools: [],
+  expandedOutputs: [],
+  draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: 0, referenceIds: [], attachmentIds: [] },
+  localDirectoryPath: null,
+  syncCache: null,
 }
 
 /** 右侧项目文件/变更栏的纯数据布局与选中状态。 */
@@ -125,5 +136,6 @@ export type PersonalResult<T> = { ok: true; value: T } | { ok: false; message: s
 export interface PersonalHost {
   load(key: PersonalKey): Promise<PersonalResult<PersonalRead>>
   save(key: PersonalKey, revision: number, value: PersonalValue): Promise<PersonalResult<null>>
+  renameConversation(key: Extract<PersonalKey, { kind: "conversation" }>, title: string): Promise<PersonalResult<string>>
   onCloseRequested(listener: () => Promise<boolean>): () => void
 }

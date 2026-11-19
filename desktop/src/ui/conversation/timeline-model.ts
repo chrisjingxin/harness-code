@@ -21,9 +21,19 @@ export function segmentAgentEntries(entries: readonly ConversationTimelineEntry[
     else for (const tool of run) segments.push({ kind: "entry", entry: tool })
     run = []
   }
+  const parents = new Set(entries.flatMap(entry => entry.kind === "tool" && !entry.parentToolId ? [entry.id] : []))
+  const children = new Map<string, ToolEntry[]>()
   for (const entry of entries) {
-    if (entry.kind === "tool") run.push(entry)
-    else {
+    if (entry.kind !== "tool" || !entry.parentToolId || !parents.has(entry.parentToolId)) continue
+    const siblings = children.get(entry.parentToolId) ?? []
+    siblings.push(entry)
+    children.set(entry.parentToolId, siblings)
+  }
+  for (const entry of entries) {
+    if (entry.kind === "tool") {
+      if (entry.parentToolId && parents.has(entry.parentToolId)) continue
+      run.push(entry, ...(children.get(entry.id) ?? []))
+    } else {
       flush()
       segments.push({ kind: "entry", entry })
     }

@@ -12,7 +12,7 @@ import type { ProjectGitDiff, ProjectGitFile, ProjectGitStatus } from "./types.j
 export const MAX_GIT_FILES = 1_000
 const MAX_INDEX_BYTES = 32 * 1024 * 1024
 const MAX_HASH_FILE_BYTES = 1024 * 1024
-const DIFF_LIMIT = 96 * 1024
+export const DIFF_LIMIT = 96 * 1024
 
 export type GitRepository = { root: ProjectRoot; gitDir: string; commonDir: string; indexPath: string }
 export type WorkingInput = { kind: "deleted" } | { kind: "file" | "symlink"; digest: string; executable: number }
@@ -36,8 +36,15 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** 仅当规范路径恰好是 Git 仓库顶层目录时视为 Git 仓库根，防止子目录误借上层仓库边界。 */
-export async function detectGitRoot(canonicalRoot: string): Promise<{ isGitRepository: boolean; protectedPaths: string[] }> {
-  const probe = await gitCommand(canonicalRoot, ["rev-parse", "--show-toplevel"], { timeout: 3_000 })
+function gitProbe(deadline?: number): { timeout: number } {
+  const timeout = deadline === undefined ? 3_000 : Math.min(3_000, deadline - Date.now())
+  if (timeout < 1) throw new ProjectServiceError("git-unavailable", "探测 Git 工作树超时。")
+  return { timeout }
+}
+
+export async function detectGitRoot(canonicalRoot: string, deadline?: number): Promise<{ isGitRepository: boolean; protectedPaths: string[] }> {
+  const probe = await gitCommand(canonicalRoot, ["rev-parse", "--show-toplevel"], gitProbe(deadline))
+  if (deadline !== undefined && probe.state === "interrupted") throw new ProjectServiceError("git-unavailable", "探测 Git 工作树超时。")
   if (probe.state !== "exited" || probe.code !== 0) {
     return { isGitRepository: false, protectedPaths: [] }
   }
@@ -46,8 +53,9 @@ export async function detectGitRoot(canonicalRoot: string): Promise<{ isGitRepos
     return { isGitRepository: false, protectedPaths: [] }
   }
   const protectedPaths = new Set<string>()
-  for (const flag of ["--absolute-git-dir", "--git-common-dir"]) {
-    const result = await gitCommand(canonicalRoot, ["rev-parse", "--path-format=absolute", flag], { timeout: 3_000 })
+  const flags = await Promise.all(["--absolute-git-dir", "--git-common-dir"].map(flag =>
+    gitCommand(canonicalRoot, ["rev-parse", "--path-format=absolute", flag], gitProbe(deadline))))
+  for (const result of flags) {
     if (result.state === "exited" && result.code === 0) {
       const target = resolve(canonicalRoot, gitLine(result.stdout))
       protectedPaths.add(target)
@@ -69,13 +77,13 @@ export function nonGitStatus(): ProjectGitStatus {
   }
 }
 
-export async function openRepository(root: ProjectRoot): Promise<GitRepository | null> {
+export async function openRepository(root: ProjectRoot, deadline?: number): Promise<GitRepository | null> {
   await root.verify()
-  const detected = await detectGitRoot(root.path)
+  const detected = await detectGitRoot(root.path, deadline)
   if (!detected.isGitRepository) return null
   const [gitDir, commonDir, indexPath] = await Promise.all(
     ["--absolute-git-dir", "--git-common-dir", "--git-path"].map(option => gitRun(root.path,
-      ["rev-parse", "--path-format=absolute", option, ...(option === "--git-path" ? ["index"] : [])],
+      ["rev-parse", "--path-format=absolute", option, ...(option === "--git-path" ? ["index"] : [])], gitProbe(deadline),
     )),
   )
   const canonicalGitDir = await realpath(resolve(root.path, gitLine(gitDir)))

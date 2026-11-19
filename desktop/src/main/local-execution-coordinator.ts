@@ -15,6 +15,8 @@ import type {
   LocalAcpElicitationAnswer,
   LocalAcpEvent,
   LocalAcpHost,
+  LocalAcpMeta,
+  LocalAcpPermission,
   LocalAcpPromptBlock,
   LocalAcpSession,
   LocalAcpSessionState,
@@ -33,9 +35,13 @@ import {
 import {
   localExecutionKey,
   parseFixedReference,
+  type CodeCheckpointAction,
+  type CodeCheckpointReply,
   type ConversationPersonal,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
+  type LocalExecutionPermission,
+  type LocalExecutionTool,
   type LocalExecutionPreparation,
   type LocalExecutionReceipt,
   type LocalExecutionScope,
@@ -48,10 +54,17 @@ import {
   sameDirectory,
   type DirectoryGrant,
 } from "./local-directory-grants.js"
+import {
+  parseHarnessAgentCapabilitiesMeta, parseHarnessApprovalMeta, parseHarnessCommandMeta,
+  parseHarnessParentMeta, parseHarnessRunMeta,
+} from "@workbench/harness-acp"
 import type { PersonalStore } from "./personal-store.js"
+import { CodeCheckpoints, overlappingDirectories, type CheckpointStart } from "./project-service/checkpoints.js"
 
 export type LocalExecutionCoordinatorOptions = {
   readonly grantsDir?: string
+  readonly checkpointsDir?: string
+  readonly confirmCheckpointRestore?: (path: string) => Promise<boolean>
   readonly origin?: string
   readonly personal?: PersonalStore
   readonly confirmDirectoryPrompt?: (path: string) => Promise<boolean>
@@ -61,6 +74,7 @@ export type LocalExecutionProviderRegistryLike = {
   listProviders(): AcpAgentList
   getHost(providerId?: string): {
     readonly providerId: string | null
+    readonly clientMeta?: LocalAcpMeta
     readonly host: LocalAcpHost
     readonly available: boolean
     readonly reason?: string
@@ -80,6 +94,8 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
   sequence: number
   lastMessageId?: string
   needsSegmentBreak?: boolean
+  checkpoint?: CheckpointStart
+  ephemeral?: boolean
   toolStates: Map<string, LocalAcpTool>
   finalizedTools: Map<string, FinalizedToolSummary>
 }
@@ -93,6 +109,8 @@ type Binding = {
   readonly unsubscribe: () => void
   readonly unsubscribeSession?: () => void
   activeTurn?: ActiveTurn
+  checkpointPending?: Promise<void>
+  checkpointUnsafe?: boolean
 }
 
 const unavailableMessages: Record<UnavailableReason | "empty-text", string> = {
@@ -146,10 +164,11 @@ function toExecutionSessionState(providerId: string, state: LocalAcpSessionState
     ...(currentModeId !== undefined ? { currentModeId } : {}),
     ...(models ? { models } : {}),
     configOptions,
-    availableCommands,
+    availableCommands: availableCommands.map(({ meta: _meta, ...command }) => command),
     plans,
     ...(usage ? { usage } : {}),
     restoreStatus,
+    ...(state.setupDiagnostics?.length ? { setupDiagnostics: state.setupDiagnostics } : {}),
     ...(sessionInfo?.title !== undefined ? { sessionTitle: sessionInfo.title } : {}),
   }
 }
@@ -225,6 +244,47 @@ function recordFinalizedTool(turn: ActiveTurn, incoming: LocalAcpTool): void {
   if (summarized) turn.finalizedTools.set(incoming.id, summarized)
 }
 
+function projectTool(tool: LocalAcpTool, subagent: boolean): LocalExecutionTool {
+  const { rawMeta, ...standard } = tool
+  const parent = subagent ? parseHarnessParentMeta(rawMeta)?.toolCallId : undefined
+  return parent && parent.length <= 1024 ? { ...standard, parentToolCallId: parent } : standard
+}
+
+function projectPermission(permission: LocalAcpPermission, approval: boolean): LocalExecutionPermission {
+  const { rawMeta, tool, options, ...standard } = permission
+  const defaultScope = approval ? parseHarnessApprovalMeta(rawMeta)?.scope : undefined
+  return {
+    ...standard,
+    ...(tool ? { tool: projectTool(tool, false) } : {}),
+    options: options.map(({ rawMeta, ...option }) => {
+      const scope = approval ? parseHarnessApprovalMeta(rawMeta)?.scope ?? defaultScope : undefined
+      return scope === "once" || scope === "thread" || scope === "project" ? { ...option, scope } : option
+    }),
+  }
+}
+
+/** 将同一会话的本机定稿缓存压到 8 KiB 内。只传消息文本，不带工具或引用字段。 */
+function previousPrompt(record: ConversationPersonal | null): LocalAcpPromptBlock[] {
+  const header = "以下仅为旧会话的定稿历史引用。请以随后提供的本轮内容为准。\n"
+  const history: string[] = []
+  let left = 8192 - Buffer.byteLength(header)
+  for (const item of (record?.syncCache?.messages ?? []).slice(-24).reverse()) {
+    if (item.type !== "user" && item.type !== "assistant") continue
+    let text = item.payload
+    try {
+      const decoded = JSON.parse(text)
+      if (typeof decoded?.text === "string") text = decoded.text
+    } catch { /* 旧缓存的纯文本仍可以引用。 */ }
+    if (!text.trim() || left <= 64) continue
+    const line = (item.type === "user" ? "用户：" : "助手：") + JSON.stringify(text.slice(0, 1200)) + "\n"
+    const bytes = Buffer.byteLength(line)
+    if (bytes > left) continue
+    history.unshift(line)
+    left -= bytes
+  }
+  return history.length ? [{ type: "text", text: header + history.join("") }] : []
+}
+
 /** 窗口绑定独占订阅，应用级 ACP 宿主可在新窗口打开时继续接受新的绑定。 */
 export function createLocalExecutionCoordinator(
   window: BrowserWindow,
@@ -234,6 +294,7 @@ export function createLocalExecutionCoordinator(
   options?: LocalExecutionCoordinatorOptions,
 ) {
   const bindings = new Map<string, Binding>()
+  const checkpoints = options?.checkpointsDir ? new CodeCheckpoints(options.checkpointsDir, options.origin ?? "") : null
   let tail: Promise<void> = Promise.resolve()
   let disposed = false
 
@@ -267,8 +328,13 @@ export function createLocalExecutionCoordinator(
     })
   }
 
+  function overlapping(binding: Binding): Binding[] {
+    return [...bindings.values()].filter(item => overlappingDirectories(binding.directory.path, item.directory.path))
+  }
+
   async function release(key: string, binding: Binding): Promise<void> {
     await binding.session.close()
+    await binding.checkpointPending
     binding.unsubscribe()
     binding.unsubscribeSession?.()
     bindings.delete(key)
@@ -348,6 +414,45 @@ export function createLocalExecutionCoordinator(
   }
 
   return {
+    async codeCheckpoint(scope: LocalExecutionScope, action: CodeCheckpointAction): Promise<CollaborationResult<CodeCheckpointReply>> {
+      const login = identity.personalIdentity()
+      const key = localExecutionKey(scope)
+      const binding = bindings.get(key)
+      if (!login || !binding || binding.login.generation !== login.generation || !checkpoints) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      const current = () => isCurrent(login) && bindings.get(key) === binding
+      if (!current()) return forbidden()
+      if (action.kind === "restore") {
+        if (!checkpoints.hasPreview(scope, action.token) || !options?.confirmCheckpointRestore) {
+          return identityError("INVALID_REQUEST", "还原确认已失效，请重新预览。")
+        }
+        if (!await options.confirmCheckpointRestore(binding.directory.path)) return identityError("INVALID_REQUEST", "已取消还原。")
+      }
+
+      return enqueue(async () => {
+        if (!current()) return forbidden()
+        if (action.kind === "restore" || action.kind === "preview") {
+          if (overlapping(binding).some(item => item.activeTurn || item.checkpointUnsafe)) {
+            return identityError("INVALID_REQUEST", "请先停止重叠目录中的运行，并确认 Agent 已结束写入。")
+          }
+        }
+        await Promise.all(overlapping(binding).map(item => item.checkpointPending))
+        if (!current()) return forbidden()
+        if (action.kind === "restore") {
+          const stillAuthorized = await authorize(scope, login)
+          if (!stillAuthorized.ok || !current()) return forbidden()
+        }
+        try {
+          return ok(await checkpoints.run(scope, binding.directory, action, current,
+            () => options?.personal?.otherConversationDirectories(scope) ?? Promise.resolve([])))
+        } catch (error) {
+          const message = error instanceof Error && !("code" in error) ? error.message : "本机轮次快照操作失败。"
+          return identityError("PROJECT_PATH_INVALID", message)
+        }
+      })
+    },
+
     async listProviders(): Promise<CollaborationResult<AcpAgentList>> {
       const login = identity.personalIdentity()
       if (!login || !isCurrent(login)) return forbidden()
@@ -529,17 +634,21 @@ export function createLocalExecutionCoordinator(
             directoryStatus: "ready",
           }
         }
+        await checkpoints?.register(scope, directory)
+        if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
         const existing = bindings.get(key)
         try {
           let targetHost: LocalAcpHost
           let resolvedProviderId: string
           let providerReason: string | undefined
+          let clientMeta: LocalAcpMeta | undefined
           if ("registry" in runtime) {
             const targetProviderId = providerId ?? await runtime.registry.findBoundProvider?.(scope, directory.path)
             const resolved = runtime.registry.getHost(targetProviderId)
             targetHost = resolved.host
             resolvedProviderId = resolved.providerId ?? targetProviderId ?? "default"
             providerReason = resolved.available ? undefined : resolved.reason
+            clientMeta = resolved.clientMeta
           } else {
             targetHost = runtime.host
             resolvedProviderId = providerId ?? "default"
@@ -566,6 +675,9 @@ export function createLocalExecutionCoordinator(
           const session = await targetHost.bind(scope, directory.path)
           if (!isCurrent(login)) { await session.close(); return { ...forbidden(), directoryStatus: "unavailable" } }
           const bindingId = randomUUID()
+          const clientCapabilities = resolvedProviderId === "harness" ? parseHarnessAgentCapabilitiesMeta(clientMeta)?.capabilities ?? [] : []
+          const enabled = (capability: string) => clientCapabilities.includes(capability)
+            && Boolean(parseHarnessAgentCapabilitiesMeta(session.getState?.()?.agentCapabilities)?.capabilities.includes(capability))
           const binding: Binding = {
             id: bindingId,
             login,
@@ -579,6 +691,7 @@ export function createLocalExecutionCoordinator(
               if (!turn || turn.turnId !== event.turnId || turn.sequence + 1 !== event.sequence) return
               turn.sequence = event.sequence
               if (event.type === "text-delta") {
+                if (enabled("commands") && parseHarnessCommandMeta(event.rawMeta)?.ephemeral === true) turn.ephemeral = true
                 if (turn.reply !== undefined && event.text) {
                   // 工具/审批打断或 messageId 切换后插入段落空行，避免上传定稿粘连，同时防止叠出多余空行。
                   const needsBreak = turn.reply.length > 0 && Boolean(
@@ -605,19 +718,35 @@ export function createLocalExecutionCoordinator(
               }
               if (event.type === "tool") {
                 if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
-                recordFinalizedTool(turn, event.tool)
-                publish(login, { ...source, kind: "tool", tool: event.tool })
+                const tool = projectTool(event.tool, enabled("subagent"))
+                recordFinalizedTool(turn, tool)
+                publish(login, { ...source, kind: "tool", tool })
                 return
               }
               if (event.type === "permission") {
                 if (turn.reply && turn.reply.length > 0) turn.needsSegmentBreak = true
-                publish(login, { ...source, kind: "permission", request: event.request })
+                publish(login, { ...source, kind: "permission",
+                  request: event.request ? projectPermission(event.request, enabled("approval")) : null,
+                })
                 return
               }
+              if (event.type === "completed" && enabled("commands") && parseHarnessCommandMeta(event.rawMeta)?.ephemeral === true) turn.ephemeral = true
+              const metrics = event.type === "completed" && enabled("runSummary") ? parseHarnessRunMeta(event.rawMeta) : undefined
               binding.activeTurn = undefined
+              if (checkpoints && turn.checkpoint) {
+                const stopped = event.type !== "failed" || event.reason === "agent-stopped"
+                if (!stopped && (event.reason === "prompt-failed" || event.reason === "agent-disconnected")) binding.checkpointUnsafe = true
+                // 通知可立刻渲染。下一轮和还原会等待同目录的终态快照完成。
+                const pending = checkpoints.finish(turn.checkpoint, turn.turnId, turn.acceptedAtMs, event.type, stopped)
+                  .catch(() => {})
+                  .finally(() => { if (binding.checkpointPending === pending) binding.checkpointPending = undefined })
+                binding.checkpointPending = pending
+              }
               publish(login, {
                 ...source,
                 kind: "finished",
+                ...(turn.ephemeral ? { ephemeral: true } : {}),
+                ...(metrics ? { runSummary: { durationMs: metrics.durationMs, cachedTokens: metrics.usage?.cachedTokens } } : {}),
                 availability: event.type === "failed" && event.reason === "directory-unavailable"
                   ? { available: false, reason: failureMessages[event.reason], directoryStatus: "invalid" }
                   : availability(session, binding.providerReason),
@@ -626,7 +755,7 @@ export function createLocalExecutionCoordinator(
                 } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
               })
               // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
-              if (event.type === "completed" && event.shareable && isCurrent(login)) {
+              if (event.type === "completed" && event.shareable && !turn.ephemeral && isCurrent(login)) {
                 const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
                 void uploads?.enqueue(scope, {
                   turnId: turn.turnId,
@@ -747,11 +876,33 @@ export function createLocalExecutionCoordinator(
         }
         blocks.push(...attachmentBlocks)
 
-        const result = attachmentBlocks.length > 0 && binding.session.sendPrompt
-          ? binding.session.sendPrompt(blocks)
+        let checkpoint: CheckpointStart | undefined
+        if (checkpoints) {
+          const related = overlapping(binding)
+          if (related.some(item => item.activeTurn)) return ok({ status: "rejected", reason: "同一工作目录有会话正在运行，请等待该轮结束。" })
+          await Promise.all(related.map(item => item.checkpointPending))
+          checkpoint = await checkpoints.begin(scope, binding.directory)
+          if (!isCurrent(login)) {
+            await checkpoints.discard(checkpoint)
+            return forbidden()
+          }
+        }
+
+        const history = !/^\/[a-z][\w-]*(?:\s|$)/i.test(text.trimStart()) && options?.personal
+          ? previousPrompt(await options.personal.load({ kind: "conversation", workspaceId: scope.workspaceId,
+              projectId: scope.projectId, conversationId: scope.conversationId,
+            }).then(result => result.ok ? result.value.data as ConversationPersonal | null : null).catch(() => null))
+          : []
+        if (!isCurrent(login)) {
+          await checkpoints?.discard(checkpoint)
+          return forbidden()
+        }
+        const result = (attachmentBlocks.length > 0 || history.length > 0) && binding.session.sendPrompt
+          ? binding.session.sendPrompt(blocks, history)
           : binding.session.send(prompt || attachmentBlocks.map(b => b.type === "resource_link" ? `@${b.name}` : "").join(" "))
 
         if (result.status === "rejected") {
+          await checkpoints?.discard(checkpoint)
           return ok({
             status: "rejected",
             reason: result.reason === "agent-not-configured" && binding.providerReason
@@ -765,6 +916,7 @@ export function createLocalExecutionCoordinator(
           referenceIds: ids,
           reply: "",
           acceptedAtMs: Date.now(),
+          checkpoint,
           sequence: 0,
           toolStates: new Map(),
           finalizedTools: new Map(),

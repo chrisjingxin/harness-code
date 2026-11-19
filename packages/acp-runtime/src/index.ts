@@ -4,6 +4,7 @@
  */
 import { realpath, stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
+import { prepareSessionSetup } from "./session-setup.js"
 import type { ListSessionsResponse } from "@agentclientprotocol/sdk"
 import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
 import { BoundSession } from "./session.js"
@@ -51,7 +52,7 @@ export interface LocalAcpSession {
   /** 受理后宿主接管该轮。消费者应先订阅，以便接到首段正文和终态。 */
   send(text: string): LocalAcpSendResult
   /** 发送结构化内容块（支持 text / resource / resource_link / image）。 */
-  sendPrompt(blocks: readonly LocalAcpPromptBlock[]): LocalAcpSendResult
+  sendPrompt(blocks: readonly LocalAcpPromptBlock[], historyOnReset?: readonly LocalAcpPromptBlock[]): LocalAcpSendResult
   /** 停止当前轮。返回表示已匹配轮次，实际结果由终态事件交付。 */
   cancel(turnId: string): boolean
   /** 仅回答匹配的待处理审批。 */
@@ -93,7 +94,7 @@ export class LocalAcpHost {
   }
 
   /** cwd 必须来自受信任宿主的目录选择。绑定后改变目录需先关闭旧句柄。 */
-  async bind(scope: LocalAcpScope, cwd: string): Promise<LocalAcpSession> {
+  async bind(scope: LocalAcpScope, cwd: string, setup?: import("./types.js").LocalAcpSessionSetup): Promise<LocalAcpSession> {
     const ids = [scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId]
     if (ids.some(id => !id.trim())) throw new Error("缺少本机会话标识。")
     if (!isAbsolute(cwd)) throw new Error("本机工作目录必须使用绝对路径。")
@@ -102,9 +103,15 @@ export class LocalAcpHost {
     if (!identity.isDirectory()) throw new Error("本机工作目录不可用。")
     if (this.#closing) throw new Error("本机执行宿主已关闭。")
     const key = JSON.stringify(ids)
+    const preparedSetup = await prepareSessionSetup(root, {
+      additionalDirectories: setup?.additionalDirectories ?? this.options.additionalDirectories,
+      mcpServers: setup?.mcpServers ?? this.options.mcpServers,
+    })
+    if (this.#closing) throw new Error("本机执行宿主已关闭。")
     const existing = this.#sessions.get(key)
     if (existing) {
       existing.assertBinding(root, identity.dev, identity.ino)
+      existing.assertSessionSetup(preparedSetup)
       return existing
     }
     const native = nativeBinding(
@@ -126,6 +133,7 @@ export class LocalAcpHost {
         }
       },
       this.options,
+      preparedSetup,
     )
 
     this.#sessions.set(key, bound)

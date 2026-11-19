@@ -25,6 +25,8 @@ export type ConversationTimelineEntry =
       readonly text: string
       readonly createdAtMs?: number
       readonly streaming?: boolean
+      readonly ephemeral?: boolean
+      readonly runSummary?: { readonly durationMs?: number; readonly cachedTokens?: number }
       /** 消息只持有固定材料标识，装配方经当前权限读取正文。 */
       readonly referenceIds?: readonly string[]
     }
@@ -34,6 +36,7 @@ export type ConversationTimelineEntry =
       readonly id: string
       readonly label: string
       readonly originalName?: string
+      readonly parentToolId?: string
       readonly summary?: string
       readonly status: "running" | "completed" | "failed"
       readonly tone: "read" | "write" | "neutral"

@@ -1,13 +1,13 @@
 /**
  * 本机执行 IPC 通道注册表。
  *
- * 【功能定义】统一经 `ipc-guard.ts` 注册 `workbench:local-execution:*` 全部 9 条受保护通道，
+ * 【功能定义】统一经 `ipc-guard.ts` 注册 `workbench:local-execution:*` 受保护通道，
  * 对请求来源、参数个数、标识与结构化载体做白名单校验后转交 `LocalExecutionCoordinator`。
  * 【协作边界】不包含目录持久化与 ACP 状态机细节（分别位于 `local-directory-grants.ts` 与 `local-execution-coordinator.ts`）。
  */
 import type { BrowserWindow } from "electron"
 import type { LocalAcpElicitationAnswer } from "@workbench/acp-runtime"
-import { parseFixedReference, type LocalExecutionScope } from "../shared/index.js"
+import { parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope } from "../shared/index.js"
 import {
   createCollaborationIpcRegistrar,
   formatIpcError,
@@ -29,6 +29,20 @@ function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
     && isUuid(value.workspaceId)
     && isUuid(value.projectId)
     && isUuid(value.conversationId)
+}
+
+function isCheckpointAction(value: unknown): value is CodeCheckpointAction {
+  if (!isPlainObject(value)) return false
+  const keys = Object.keys(value).sort().join(",")
+  if (value.kind === "history") return keys === "kind"
+  if (value.kind === "restore") return keys === "kind,token" && isUuid(value.token)
+  if (!isUuid(value.turnId)) return false
+  if (value.kind === "changes") return keys === "kind,turnId"
+  if (value.kind === "diff") return keys === "kind,path,turnId"
+    && typeof value.path === "string" && value.path.length > 0 && value.path.length <= 4096 && !value.path.includes("\0")
+  return value.kind === "preview" && (value.target === "guard"
+    ? keys === "guardId,kind,target,turnId" && isUuid(value.guardId)
+    : keys === "kind,target,turnId" && (value.target === "base" || value.target === "post"))
 }
 
 function isValidAttachments(value: unknown): value is string[] | undefined {
@@ -120,6 +134,11 @@ export function bindLocalExecutionIpc(
     isLocalExecutionScope(scope) && isUuid(bindingId) && isNonControlString(requestId, 256) && isValidElicitationAnswer(answer)
       ? execution.answerElicitation(scope, bindingId, requestId, answer)
       : formatIpcError("INVALID_REQUEST", "表单应答参数无效。"))
+
+  ipc.handle("workbench:local-execution:code-checkpoint", 2, (scope, action) =>
+    isLocalExecutionScope(scope) && isCheckpointAction(action)
+      ? execution.codeCheckpoint(scope, action)
+      : formatIpcError("INVALID_REQUEST", "轮次快照参数无效。"))
 
   return () => ipc.dispose()
 }

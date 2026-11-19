@@ -75,7 +75,7 @@ export function ConversationToolCard({
   )
 
   return (
-    <div className={`wb-conversation-tool-row wb-conversation-tool-${tool.status}`} data-tone={tool.tone}>
+    <div className={`wb-conversation-tool-row wb-conversation-tool-${tool.status}`} data-tone={tool.tone} data-child-tool={Boolean(tool.parentToolId) || undefined}>
       {expandable && onToggle ? (
         <button
           type="button"

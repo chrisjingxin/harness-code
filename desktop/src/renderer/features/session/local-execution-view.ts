@@ -10,11 +10,12 @@
 import type {
   AcpAgentList,
   LocalAcpElicitationRequest,
-  LocalAcpPermission,
-  LocalAcpTool,
 } from "@workbench/acp-runtime/types"
 import type {
   LocalExecutionAvailability,
+  LocalExecutionRunSummary,
+  LocalExecutionTool as LocalAcpTool,
+  LocalExecutionPermission as LocalAcpPermission,
   LocalExecutionSessionState,
 } from "../../../shared/index.js"
 import type {
@@ -86,7 +87,7 @@ export type LocalExecutionViewUpdate =
   | { readonly kind: "elicitation"; readonly request: LocalAcpElicitationRequest | null }
   | { readonly kind: "elicitation-decision"; readonly turnId?: string | null; readonly requestId: string; readonly title: string; readonly statusLabel: string; readonly description?: string }
   | { readonly kind: "session-state"; readonly state: LocalExecutionSessionState }
-  | { readonly kind: "finished"; readonly turnId: string; readonly failure?: string }
+  | { readonly kind: "finished"; readonly turnId: string; readonly failure?: string; readonly ephemeral?: boolean; readonly runSummary?: LocalExecutionRunSummary }
   | { readonly kind: "upload"; readonly turnId: string; readonly failure?: string; readonly firstSequence?: number; readonly syncedSequence?: number }
 
 function finishActiveReasoning(entries: readonly LocalEntry[], entryPrefix: string): readonly LocalEntry[] {
@@ -298,6 +299,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     const prevSnapshot = state.toolSnapshots?.[id]
     const mergedTool: LocalAcpTool = {
       id: update.tool.id,
+      parentToolCallId: update.tool.parentToolCallId ?? prevSnapshot?.parentToolCallId,
       title: update.tool.title ?? prevSnapshot?.title,
       status: update.tool.status ?? prevSnapshot?.status,
       kind: update.tool.kind ?? prevSnapshot?.kind,
@@ -317,6 +319,8 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       tone: toneForKind(mergedTool.kind) ?? existing?.tone ?? "neutral",
       status: status === "completed" || status === "failed" ? status : status ? "running" : existing?.status ?? "running",
       ...(detail ? { detail } : {}),
+      ...(mergedTool.parentToolCallId && mergedTool.parentToolCallId !== mergedTool.id
+        ? { parentToolId: entryPrefix + ":tool:" + mergedTool.parentToolCallId } : {}),
     }
     // 工具开始即表明本段思考与先发正文暂告一段落，停掉思考扫光与尾部流式光标。
     const settled = finishStreamingAssistant(finishActiveReasoning(state.entries, entryPrefix), entryPrefix)
@@ -397,8 +401,16 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
 
   if (update.kind !== "finished") return state
 
+  const lastAssistant = (update.ephemeral || update.runSummary)
+    ? state.entries.filter(entry => entry.kind === "message" && entry.id.startsWith(assistantPrefix)).at(-1) : undefined
   let entries: LocalEntry[] = state.entries.map(entry => {
-    if (entry.kind === "message" && entry.id.startsWith(assistantPrefix) && entry.streaming) return { ...entry, streaming: false }
+    if (entry.kind === "message" && entry.id.startsWith(assistantPrefix) && (entry.streaming || entry === lastAssistant)) {
+      return {
+        ...entry, streaming: false,
+        ...(entry === lastAssistant && update.ephemeral ? { ephemeral: true } : {}),
+        ...(entry === lastAssistant && update.runSummary ? { runSummary: update.runSummary } : {}),
+      }
+    }
     if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running") {
       return { ...entry, status: "failed" as const }
     }
@@ -764,6 +776,8 @@ export function buildComposerCapabilities(input: {
   }
 
   for (const opt of sessionState?.configOptions ?? []) {
+    if (sessionState?.modes && opt.category === "mode" && opt.type === "select"
+      && opt.options.some(item => item.value === opt.currentValue)) continue
     if (opt.type === "select" && opt.options.length > 0) {
       controls.push({
         id: `config:${opt.id}`,

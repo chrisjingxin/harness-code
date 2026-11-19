@@ -98,6 +98,7 @@ ipcRenderer.on("personal:prepare-close", (_event: unknown, request: string) => {
 const personal: PersonalHost = {
   load: key => ipcRenderer.invoke("personal:load", key),
   save: (key, revision, value) => ipcRenderer.invoke("personal:save", key, revision, value),
+  renameConversation: (key, title) => ipcRenderer.invoke("personal:rename-conversation", key, title),
   onCloseRequested: listener => {
     closeListener = listener
     return () => { if (closeListener === listener) closeListener = null }

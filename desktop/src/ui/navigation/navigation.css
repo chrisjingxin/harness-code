@@ -187,6 +187,18 @@
   position: absolute; right: 8px; top: 12px;
   width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
 }
+.pnav-session-row { flex: none; position: relative; }
+.pnav-session-row:has(.pnav-session-actions) .sess-item { padding-right: 40px; }
+.pnav-session-row:has(.pnav-session-actions) .unsync-dot { right: 34px; }
+.pnav-session-actions { position: absolute; top: 5px; right: 4px; width: 28px; }
+.pnav-session-menu { position: static; width: auto; margin: 2px 0; }
+.pnav-session-rename { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 2px; }
+.pnav-session-rename input {
+  flex: 1 0 100%; min-width: 0; padding: 5px 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--text);
+}
+.pnav-session-rename p { flex-basis: 100%; margin: 0; color: var(--danger); font-size: var(--text-xs); }
 .side-empty { padding: 10px 8px; font-size: var(--text-sm); color: var(--meta); line-height: 1.6; }
 
 /* 头像原语 */

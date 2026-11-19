@@ -3,15 +3,16 @@
  * 文件仅存本账号在各工作区/项目/会话下的个人状态与已主动拉取的正文缓存；每次加载均通过服务端重新核验访问权限。
  */
 import { createHash, randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { isAbsolute, join } from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
+import { EMPTY_CONVERSATION_PERSONAL } from "../shared/personal.js"
 import type { ConversationPersonal, PersonalKey, PersonalRead, PersonalResult, PersonalValue } from "../shared/index.js"
 import type { CollaborationState } from "@workbench/collaboration-client"
 
 type Identity = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type Entry = { revision: number; flushed: number; data: PersonalValue | null; writing: Promise<void> | null }
-type Authorized = { identity: Identity; name: string }
+type Authorized = { identity: Identity; name: string; ownsConversation: boolean }
 type CachedPermission = Authorized & { expiresAtMs: number }
 const PERMISSION_TTL_MS = 60_000
 const fail = (message: string): PersonalResult<never> => ({ ok: false, message })
@@ -103,6 +104,7 @@ const schemas: Record<PersonalKey["kind"], object> = {
       attachmentIds: strings,
     }),
     localDirectoryPath: nullableText,
+    customTitle: { type: "string", minLength: 1, maxLength: 80 },
     providerId: { anyOf: [{ type: "string", minLength: 1, maxLength: 64 }, { type: "null" }] },
     syncCache: { anyOf: [syncCacheSchema, { type: "null" }] },
   }),
@@ -251,6 +253,7 @@ export class PersonalStore {
     request = (async (): Promise<PersonalResult<Authorized>> => {
       try {
         const parts = [identity.accountId, key.kind]
+        let ownsConversation = false
         if (key.kind === "workspace") parts.push(key.workspaceId)
         if (key.kind === "projectNavigation" || key.kind === "projectDraft") {
           // 项目记录与准备页草稿只给仍可访问该项目的账号读写；被移出后旧选择随之失效。
@@ -279,6 +282,7 @@ export class PersonalStore {
             this.#permissions.delete(cacheKey)
             return fail("会话范围已变化，请重试。")
           }
+          ownsConversation = conversation.ownerUserId === identity.accountId
           parts.push(key.workspaceId, key.projectId, key.conversationId)
         }
         if (!this.#current(identity)) {
@@ -288,6 +292,7 @@ export class PersonalStore {
         const authorization: CachedPermission = {
           identity,
           name: this.#name(parts),
+          ownsConversation,
           expiresAtMs: Date.now() + PERMISSION_TTL_MS,
         }
         this.#permissions.set(cacheKey, authorization)
@@ -319,7 +324,7 @@ export class PersonalStore {
       if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("个人记录格式无效")
       const value = record as Record<string, unknown>
       if (Object.keys(value).sort().join(",") !== "data,revision,version" || value.version !== 1 || !Number.isSafeInteger(value.revision)
-        || (value.revision as number) < 1 || !validators[kind](value.data)) throw new Error("个人记录格式无效")
+        || (value.revision as number) < 0 || !validators[kind](value.data)) throw new Error("个人记录格式无效")
       return { revision: value.revision as number, flushed: value.revision as number, data: value.data as PersonalValue, writing: null }
     })()
     this.#entries.set(name, promise)
@@ -359,39 +364,95 @@ export class PersonalStore {
     if (key.kind !== "account" && !authorized.identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
     if (key.kind === "account" && (value as { workspaceId: string | null }).workspaceId !== null
       && !authorized.identity.workspaces.includes((value as { workspaceId: string }).workspaceId)) return fail("工作区不可用。")
+    if (key.kind === "conversation" && Object.hasOwn(value as ConversationPersonal, "customTitle")) {
+      return fail("请通过会话重命名保存标题。")
+    }
     const candidate = key.kind === "conversation"
       ? enforceConversationBudget(value as ConversationPersonal)
       : structuredClone(value as PersonalValue)
-    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") > HARD_RECORD_BYTES) return fail("个人视图过大，未能保存。")
     try {
       const entry = await this.#entry(authorized.name, key.kind)
       if (!this.#current(authorized.identity)) return fail("账号已变化，个人视图未保存。")
       if ((revision as number) < entry.revision) return ok(null)
       if ((revision as number) > entry.revision) {
+        const title = key.kind === "conversation" ? (entry.data as ConversationPersonal | null)?.customTitle : undefined
+        const next = title ? { ...candidate, customTitle: title } : candidate
+        if (Buffer.byteLength(JSON.stringify(next), "utf8") > HARD_RECORD_BYTES) return fail("个人视图过大，未能保存。")
         entry.revision = revision as number
-        entry.data = candidate
+        entry.data = next
       }
       while (entry.flushed < (revision as number)) await this.#write(authorized.name, entry)
       return ok(null)
     } catch { return fail("个人视图保存失败，请检查应用数据目录后重试。") }
   }
 
+  /** 标题独立于渲染层的个人视图修订，写盘成功后才合并进最新记录。 */
+  async renameConversation(key: unknown, rawTitle: unknown): Promise<PersonalResult<string>> {
+    if (!validKey(key) || key.kind !== "conversation" || typeof rawTitle !== "string") return fail("会话标题无效。")
+    const title = rawTitle.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim()
+    if (!title || [...title].length > 80) return fail("请输入 1～80 个字符的会话标题。")
+    const result = await this.#authorize(key)
+    if (!result.ok) return result
+    const { identity, name, ownsConversation } = result.value
+    if (!ownsConversation) return fail("只能重命名自己的会话。")
+    try {
+      const entry = await this.#entry(name, key.kind)
+      while (entry.writing) await entry.writing
+      if (!this.#current(identity)) return fail("账号已变化，会话标题未保存。")
+      const current = (entry.data as ConversationPersonal | null) ?? EMPTY_CONVERSATION_PERSONAL
+      if (current.customTitle === title) return ok(title)
+
+      const revision = entry.revision
+      const data = { ...current, customTitle: title }
+      if (Buffer.byteLength(JSON.stringify(data), "utf8") > HARD_RECORD_BYTES) return fail("个人记录过大，会话标题未保存。")
+      const write = this.#writeRecord(name, revision, data).then(() => {
+        // 等待磁盘时可能收到新版草稿。只合并标题，让后续写盘保留两边的改动。
+        entry.data = { ...(entry.data ?? current), customTitle: title }
+        entry.flushed = revision
+      })
+      entry.writing = write.catch(() => {}).finally(() => { entry.writing = null })
+      await write
+      return this.#current(identity) ? ok(title) : fail("账号已变化，请重新读取会话。")
+    } catch { return fail("会话标题保存失败，请重试。") }
+  }
+
+  async #writeRecord(name: string, revision: number, data: PersonalValue | null): Promise<void> {
+    await mkdir(this.#root, { recursive: true, mode: 0o700 })
+    const target = join(this.#root, `${name}.json`), temporary = `${target}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporary, JSON.stringify({ version: 1, revision, data }), { encoding: "utf8", mode: 0o600, flag: "wx" })
+      await rename(temporary, target)
+    } finally { await rm(temporary, { force: true }).catch(() => {}) }
+  }
+
   async #write(name: string, entry: Entry): Promise<void> {
     if (entry.writing) return entry.writing
     entry.writing = (async () => {
-      await mkdir(this.#root, { recursive: true, mode: 0o700 })
       while (entry.flushed < entry.revision) {
         const revision = entry.revision
-        const data = JSON.stringify({ version: 1, revision, data: entry.data })
-        const target = join(this.#root, `${name}.json`), temporary = `${target}.${randomUUID()}.tmp`
-        try {
-          await writeFile(temporary, data, { encoding: "utf8", mode: 0o600, flag: "wx" })
-          await rename(temporary, target)
-        } finally { await rm(temporary, { force: true }).catch(() => {}) }
+        await this.#writeRecord(name, revision, entry.data)
         entry.flushed = revision
       }
     })().finally(() => { entry.writing = null })
     return entry.writing
+  }
+
+  /** 只供主进程确认旧会话是否也记录了相同或重叠的目录。 */
+  async otherConversationDirectories(scope: { accountId: string; workspaceId: string; projectId: string; conversationId: string }): Promise<readonly string[]> {
+    const own = this.#name([scope.accountId, "conversation", scope.workspaceId, scope.projectId, scope.conversationId]) + ".json"
+    const entries = await readdir(this.#root, { withFileTypes: true }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+      throw error
+    })
+    const files = entries.filter(item => item.name !== own && /^[0-9a-f]{64}\.json$/.test(item.name))
+    if (files.length > 5_000) throw new Error("个人记录过多，无法确认工作树隔离。")
+    const directories: string[] = []
+    for (const item of files) {
+      if (!item.isFile()) throw new Error("个人记录格式无效，无法确认工作树隔离。")
+      const value = JSON.parse(await readFile(join(this.#root, item.name), "utf8"))?.data?.localDirectoryPath
+      if (typeof value === "string" && isAbsolute(value)) directories.push(value)
+    }
+    return directories
   }
 
   /** 关窗前等待所有已接收的最新修订；失败时保留待写内容供下一次重试。 */
@@ -399,7 +460,7 @@ export class PersonalStore {
     try {
       const entries = await Promise.all([...this.#entries.entries()].map(async ([name, promise]) => ({ name, entry: await promise })))
       await Promise.all(entries.map(async ({ name, entry }) => {
-        while (entry.flushed < entry.revision) await this.#write(name, entry)
+        while (entry.writing || entry.flushed < entry.revision) await this.#write(name, entry)
       }))
       return true
     } catch { return false }

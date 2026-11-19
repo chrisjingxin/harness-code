@@ -76,6 +76,7 @@ type ConversationRecordState = {
   readonly personal: ConversationPersonalState
   readonly directoryPath: string | null
   readonly providerId: string | null
+  readonly customTitle?: string
   readonly syncState: SessionSyncState
 }
 
@@ -231,17 +232,15 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [newSessionBusy, setNewSessionBusy] = useState(false)
   const [newSessionError, setNewSessionError] = useState<string | null>(null)
   const [newProviderId, setNewProviderId] = useState<string | null>(null)
-  const [titleOverridesByKey, setTitleOverridesByKey] = useState<Readonly<Record<string, string>>>({})
-  const titleOverridesRef = useRef(titleOverridesByKey)
-  titleOverridesRef.current = titleOverridesByKey
-  const handleSessionTitleChange = useCallback((execScope: LocalExecutionScope, title: string) => {
-    const trimmed = title.trim()
-    if (!trimmed) return
+  const [agentTitles, setAgentTitles] = useState<Readonly<Record<string, string | undefined>>>({})
+  const agentTitlesRef = useRef(agentTitles)
+  agentTitlesRef.current = agentTitles
+  const handleSessionTitleChange = useCallback((execScope: LocalExecutionScope, title: string | undefined) => {
     const key = localExecutionKey(execScope)
-    if (titleOverridesRef.current[key] === trimmed) return
-    const next = { ...titleOverridesRef.current, [key]: trimmed }
-    titleOverridesRef.current = next
-    setTitleOverridesByKey(next)
+    if (agentTitlesRef.current[key] === title) return
+    const next = { ...agentTitlesRef.current, [key]: title }
+    agentTitlesRef.current = next
+    setAgentTitles(next)
   }, [])
   const pendingRequestRef = useRef<{ signature: string; requestId: string; conversation?: ProjectConversationSummary } | null>(null)
   const pendingAutoSendRef = useRef<{
@@ -366,6 +365,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         personal: personalFromSaved(saved),
         directoryPath: saved?.localDirectoryPath ?? null,
         providerId: saved?.providerId ?? null,
+        customTitle: saved?.customTitle,
         syncState: syncStateFromPersonal(saved),
       }
       // 等待恢复的草稿动作可能先于 React 重新渲染，直接从同一记录读取最新值。
@@ -384,11 +384,11 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const activeList = currentScopeKey ? listsByScope[currentScopeKey] : undefined
   const activeConversations = activeList?.conversations ?? EMPTY_CONVERSATIONS
 
-  // 启动或切换项目后预加载已有服务端水位的本地同步缓存（只读本地 PersonalStore，绝不触发 /history），保证重启后左栏立即保留「已同步 / 有更新」状态。
+  // 本人会话即使从未同步也可能已改名。复用限并发的个人记录恢复，远端正文仍由原入口按需读取。
   useEffect(() => {
     if (!scope || !currentScopeKey || activeConversations.length === 0) return
     const pending = activeConversations
-      .filter(item => item.syncedSequence > 0)
+      .filter(item => item.ownerUserId === scope.accountId || item.syncedSequence > 0)
       .filter(item => {
         const recKey = makeRecordKey(currentScopeKey, item.conversationId)
         return !recordsRef.current[recKey]?.loaded && !loadInFlightRef.current.has(recKey)
@@ -855,10 +855,42 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [members])
 
+  const withDisplayTitles = useCallback((
+    conversations: readonly ProjectConversationSummary[],
+    targetScope: ProjectNavigationScope | null,
+    records: typeof recordsByKey,
+    suggestions: typeof agentTitles,
+  ) => {
+    if (!targetScope) return conversations
+    const key = makeScopeKey(targetScope)
+    return applyConversationTitleOverrides(conversations, targetScope, conversationId => ({
+      customTitle: records[makeRecordKey(key, conversationId)]?.customTitle,
+      sessionTitle: suggestions[localExecutionKey({ ...targetScope, conversationId })],
+    }))
+  }, [])
+
   const effectiveConversations = useMemo(
-    () => applyConversationTitleOverrides(activeConversations, scope, titleOverridesByKey),
-    [activeConversations, scope, titleOverridesByKey],
+    () => withDisplayTitles(activeConversations, scope, recordsByKey, agentTitles),
+    [activeConversations, scope, recordsByKey, agentTitles, withDisplayTitles],
   )
+
+  const renameConversation = useCallback(async (conversationId: string, title: string): Promise<string | null> => {
+    if (!scope || !stillActive(currentScopeKey) || !listsRef.current[currentScopeKey]?.conversations.some(
+      item => item.conversationId === conversationId && item.ownerUserId === scope.accountId,
+    )) return "当前会话不可重命名。"
+
+    const loaded = await ensureRecordLoaded(scope, currentScopeKey, conversationId)
+    if (!stillActive(currentScopeKey)) return "当前项目已变化。"
+    if (!loaded) return "无法读取会话的个人记录，请重试。"
+    const result = await persistence.renameConversation({
+      kind: "conversation", workspaceId: scope.workspaceId, projectId: scope.projectId, conversationId,
+    }, title)
+    if (!result.ok) return result.message
+    if (mountedRef.current) {
+      updateRecord(scope, currentScopeKey, conversationId, previous => ({ ...previous, customTitle: result.value }), false)
+    }
+    return null
+  }, [scope, currentScopeKey, persistence, ensureRecordLoaded, updateRecord])
 
   const navigationSource: NavigationSessionSource = useMemo(() => {
     if (!scope || !currentScopeKey) {
@@ -873,8 +905,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           ? { state: "ready" }
           : { state: "loading" },
       retry: () => { void refreshMetadata(scope) },
+      renameConversation,
     }
-  }, [scope, currentScopeKey, activeList, effectiveConversations, userId, currentSyncStates, refreshMetadata])
+  }, [scope, currentScopeKey, activeList, effectiveConversations, userId, currentSyncStates, refreshMetadata, renameConversation])
 
   const selectedConv = selectedConversationId
     ? effectiveConversations.find(item => item.conversationId === selectedConversationId) ?? null
@@ -1118,8 +1151,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     if (!stillActive(targetKey)) return EMPTY_CONVERSATIONS
     const base = (listsRef.current[targetKey]?.conversations ?? EMPTY_CONVERSATIONS)
       .filter(item => item.projectId === targetScope.projectId)
-    return applyConversationTitleOverrides(base, targetScope, titleOverridesRef.current)
-  }, [])
+    return withDisplayTitles(base, targetScope, recordsRef.current, agentTitlesRef.current)
+  }, [withDisplayTitles])
 
   const listMyLocalConversations = useCallback<SessionIntegrationApi["listMyLocalConversations"]>(targetScope => {
     return listProjectConversations(targetScope).filter(item => classifyConversation(item, userId) === "local")

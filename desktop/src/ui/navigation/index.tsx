@@ -8,6 +8,7 @@ import {
   IconBook,
   IconCheck,
   IconChevronDown,
+  IconDots,
   IconLayoutGrid,
   IconListCheck,
   IconLock,
@@ -17,7 +18,7 @@ import {
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { NavigationMemberGroup } from "./members.js";
+import type { NavigationMemberGroup, NavigationSessionEntry } from "./members.js";
 
 export { buildMemberGroups } from "./members.js";
 export type {
@@ -84,6 +85,8 @@ export type ProjectNavigationActions = {
   /** 若宿主支持新建会话弹窗，优先触发该函数。 */
   createSession?(): void;
   selectConversation(conversationId: string): void;
+  /** 保存失败时返回可显示的原因。 */
+  renameConversation?(conversationId: string, title: string): Promise<string | null>;
   toggleMember(userId: string): void;
   setSearch(text: string): void;
   openCommandPalette?(): void;
@@ -397,6 +400,120 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
   );
 }
 
+function SessionRow({ entry, active, localDeviceName, select, rename }: {
+  entry: NavigationSessionEntry;
+  active: boolean;
+  localDeviceName?: string | null;
+  select: ProjectNavigationActions["selectConversation"];
+  rename: ProjectNavigationActions["renameConversation"];
+}) {
+  const [mode, setMode] = useState<"menu" | "edit" | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menuItem = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
+  const canRename = Boolean(rename && !isOtherDevice);
+  const hasUnread = entry.badge?.tone === "accent" || entry.badge?.tone === "warning";
+  const deviceLabel = isOtherDevice ? "其他设备 · 只读" : localDeviceName ? `本机 · ${localDeviceName}` : "本机";
+
+  useEffect(() => {
+    if (mode === "edit") {
+      input.current?.focus();
+      input.current?.select();
+    }
+    if (mode !== "menu") return;
+    menuItem.current?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setMode(null);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [mode]);
+
+  function close() {
+    setMode(null);
+    trigger.current?.focus();
+  }
+
+  async function save() {
+    if (!rename || saving) return;
+    setSaving(true);
+    setError("");
+    const message = await rename(entry.conversationId, draft).catch(() => "会话标题保存失败，请重试。");
+    setSaving(false);
+    if (message) {
+      setError(message);
+      input.current?.focus();
+    } else close();
+  }
+
+  return (
+    <div className="pnav-session-row" ref={root} onKeyDown={event => {
+      if (!mode || saving || event.nativeEvent.isComposing || event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    }}>
+      <button
+        type="button"
+        className={`sess-item pnav-session${active ? " is-active" : ""}`}
+        title={entry.title}
+        data-active={active}
+        aria-current={active ? "page" : undefined}
+        onClick={() => select(entry.conversationId)}
+      >
+        <span className="sess-title pnav-ellipsis">{entry.title}</span>
+        <span className="sess-meta">
+          {isOtherDevice && <IconLock size={10} aria-hidden="true" />}
+          <span className="line">{deviceLabel} · {entry.timeLabel}</span>
+        </span>
+        {hasUnread && <span className="unsync-dot" aria-label="有更新" />}
+      </button>
+      {canRename && <>
+        <button
+          ref={trigger}
+          type="button"
+          className="pnav-icon-button pnav-session-actions"
+          aria-label={`会话操作：${entry.title}`}
+          aria-haspopup="menu"
+          aria-expanded={mode === "menu"}
+          onClick={() => {
+            if (saving) return;
+            if (mode) close();
+            else setMode("menu");
+          }}
+        >
+          <IconDots size={15} aria-hidden="true" />
+        </button>
+        {mode === "menu" && <div className="pnav-menu pnav-session-menu" role="menu" aria-label="会话操作">
+          <button type="button" role="menuitem" ref={menuItem} onClick={() => {
+            setDraft(entry.title);
+            setError("");
+            setMode("edit");
+          }}>重命名</button>
+        </div>}
+        {mode === "edit" && <form className="pnav-session-rename" onSubmit={event => { event.preventDefault(); void save(); }}>
+          <input
+            ref={input}
+            aria-label="会话标题"
+            aria-invalid={Boolean(error)}
+            value={draft}
+            readOnly={saving}
+            onChange={event => { setDraft(event.target.value); setError(""); }}
+          />
+          <button type="submit" className="wb-button wb-button-secondary wb-button-small" disabled={saving}>{saving ? "保存中…" : "保存"}</button>
+          <button type="button" className="wb-button wb-button-secondary wb-button-small" disabled={saving} onClick={close}>取消</button>
+          {error && <p role="alert">{error}</p>}
+        </form>}
+      </>}
+    </div>
+  );
+}
+
 export function ProjectNavigation({ view, actions }: ProjectNavigationProps): ReactElement {
   const hasProject = view.currentProjectId !== null;
   const selfGroup = view.groups.find((g) => g.self);
@@ -563,35 +680,16 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                   )}
                 </p>
               )}
-              {mySessions.map((entry) => {
-                const active = view.activePage === "conversation" && view.selectedConversationId === entry.conversationId;
-                const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
-                const hasUnread = entry.badge?.tone === "accent" || entry.badge?.tone === "warning";
-                const deviceLabel = isOtherDevice
-                  ? "其他设备 · 只读"
-                  : view.localDeviceName
-                    ? `本机 · ${view.localDeviceName}`
-                    : "本机";
-                const metaText = `${deviceLabel} · ${entry.timeLabel}`;
-                return (
-                  <button
-                    key={entry.conversationId}
-                    type="button"
-                    className={`sess-item pnav-session${active ? " is-active" : ""}`}
-                    title={entry.title}
-                    data-active={active}
-                    aria-current={active ? "page" : undefined}
-                    onClick={() => actions.selectConversation(entry.conversationId)}
-                  >
-                    <span className="sess-title pnav-ellipsis">{entry.title}</span>
-                    <span className="sess-meta">
-                      {isOtherDevice && <IconLock size={10} aria-hidden="true" />}
-                      <span className="line">{metaText}</span>
-                    </span>
-                    {hasUnread && <span className="unsync-dot" aria-label="有更新" />}
-                  </button>
-                );
-              })}
+              {mySessions.map(entry => (
+                <SessionRow
+                  key={`${view.currentProjectId}:${entry.conversationId}`}
+                  entry={entry}
+                  active={view.activePage === "conversation" && view.selectedConversationId === entry.conversationId}
+                  localDeviceName={view.localDeviceName}
+                  select={actions.selectConversation}
+                  rename={actions.renameConversation}
+                />
+              ))}
             </>
           )}
         </div>

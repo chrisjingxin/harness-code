@@ -23,6 +23,7 @@ export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutio
       ipc.invoke("workbench:local-execution:set-config-option", scope, bindingId, configId, value),
     answerElicitation: (scope, bindingId, requestId, answer) =>
       ipc.invoke("workbench:local-execution:answer-elicitation", scope, bindingId, requestId, answer),
+    codeCheckpoint: (scope, action) => ipc.invoke("workbench:local-execution:code-checkpoint", scope, action),
     onNotice: listener => {
       const receive = (_event: unknown, notice: LocalExecutionNotice) => listener(notice)
       ipc.on("workbench:local-execution:notice", receive)

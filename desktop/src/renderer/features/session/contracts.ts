@@ -15,7 +15,7 @@ import type {
   HistoryMessage,
 } from "@workbench/collaboration-client/types"
 import type { AcpAgentList, LocalAcpElicitationAnswer } from "@workbench/acp-runtime/types"
-import type { LocalExecutionAvailability } from "../../../shared/index.js"
+import type { CodeCheckpointAction, CodeCheckpointReply, LocalExecutionAvailability } from "../../../shared/index.js"
 import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationTimelineEntry } from "../../../ui/index.js"
 import type { LocalExecutionView } from "./local-execution-view.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
@@ -79,6 +79,7 @@ export type NewSessionReferenceChange =
 /** 页面只消费执行视图与用户动作。正式装配负责按原范围提交已受理的草稿修订。 */
 export interface LocalSessionExecutionPort {
   getAvailability(conversationId: string): LocalExecutionAvailability
+  codeCheckpoint?(conversationId: string, action: CodeCheckpointAction): Promise<CodeCheckpointReply>
   confirmDirectory?(conversationId: string): Promise<void>
   readonly textOnly?: boolean
   readonly commitsAcceptedDraft?: boolean

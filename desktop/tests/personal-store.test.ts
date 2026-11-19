@@ -3,7 +3,7 @@
  * 并发在途请求去重、身份代次切换淘汰以及授权失败清理。
  */
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -367,6 +367,69 @@ test("PersonalStore 兼容未含 providerId 的历史会话记录并校验与持
     // 非法 providerId（空串或非字符串）必须被拒绝
     assert.equal((await store.save(convKey, 3, { ...sampleConversation, providerId: "" })).ok, false)
     assert.equal((await store.save(convKey, 3, { ...sampleConversation, providerId: 123 as unknown as string })).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("本人改名与个人视图并发保存，重启后两个改动均保留", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc234-personal-title-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const key = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+
+    assert.deepEqual(await store.load(key), { ok: true, value: { revision: 0, data: null } })
+    assert.equal((await store.renameConversation(key, "   \n ")).ok, false)
+    assert.equal((await store.renameConversation(key, "字".repeat(81))).ok, false)
+    const [renamed, saved] = await Promise.all([
+      store.renameConversation(key, "  本机\t\n标题  "),
+      store.save(key, 1, sampleConversation),
+    ])
+    assert.deepEqual(renamed, { ok: true, value: "本机 标题" })
+    assert.equal(saved.ok, true)
+    assert.equal((await store.save(key, 2, { ...sampleConversation, customTitle: "越过改名入口" })).ok, false)
+
+    const reopened = new PersonalStore(mock.state, ORIGIN, dir)
+    assert.deepEqual(await reopened.load(key), {
+      ok: true, value: { revision: 1, data: { ...sampleConversation, customTitle: "本机 标题" } },
+    })
+    assert.equal((await reopened.save(key, 2, { ...sampleConversation, expandedTools: ["tool"] })).ok, true)
+    const persisted = new PersonalStore(mock.state, ORIGIN, dir)
+    assert.deepEqual(await persisted.load(key), {
+      ok: true, value: { revision: 2, data: { ...sampleConversation, expandedTools: ["tool"], customTitle: "本机 标题" } },
+    })
+
+    mock.setIdentity({ generation: 2, accountId: USER_B, workspaces: [WORKSPACE_ID] })
+    assert.equal((await reopened.load(key)).ok, true)
+    assert.equal((await reopened.renameConversation(key, "队友伪造标题")).ok, false)
+    assert.equal((await reopened.save(key, 1, { ...sampleConversation, customTitle: "队友伪造标题" })).ok, false)
+    assert.equal((await reopened.save(key, 1, sampleConversation)).ok, true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("先改名的空记录以原修订接收首份个人视图，改名写入失败时仍读取旧标题", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc234-title-first-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const key = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    assert.deepEqual(await store.renameConversation(key, "首个标题"), { ok: true, value: "首个标题" })
+    const reopened = new PersonalStore(mock.state, ORIGIN, dir)
+    const initial = await reopened.load(key)
+    assert.equal(initial.ok && initial.value.revision, 0)
+    assert.equal(initial.ok && (initial.value.data as ConversationPersonal).customTitle, "首个标题")
+    assert.equal((await reopened.save(key, 1, sampleConversation)).ok, true)
+
+    const root = join(dir, "personal-view-v2")
+    await rename(root, join(dir, "moved"))
+    await writeFile(root, "模拟保存路径不可用")
+    assert.equal((await reopened.renameConversation(key, "写入失败的标题")).ok, false)
+    assert.deepEqual(await reopened.load(key), {
+      ok: true, value: { revision: 1, data: { ...sampleConversation, customTitle: "首个标题" } },
+    })
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

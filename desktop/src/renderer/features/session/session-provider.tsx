@@ -9,6 +9,7 @@
  */
 import type { ReactElement, ReactNode } from "react"
 import type { UserSummary } from "@workbench/collaboration-client/types"
+import { EMPTY_CONVERSATION_PERSONAL } from "../../../shared/personal.js"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -33,14 +34,13 @@ import {
   deriveSyncStatus,
   directoryBasename,
   emptySyncState,
-  resolveConversationTitle,
 } from "./session-model.js"
 
 export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {
-  scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
-  expandedTools: [],
-  expandedOutputs: [],
-  draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: 0, referenceIds: [], attachmentIds: [] },
+  scroll: EMPTY_CONVERSATION_PERSONAL.scroll,
+  expandedTools: EMPTY_CONVERSATION_PERSONAL.expandedTools,
+  expandedOutputs: EMPTY_CONVERSATION_PERSONAL.expandedOutputs,
+  draft: EMPTY_CONVERSATION_PERSONAL.draft,
   interactions: {},
 }
 
@@ -313,7 +313,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       const kind = classify(conversation)
       const isLocal = kind === "local"
       const activeExecution = isLocal ? controller.execution.getView?.(conversation.conversationId) : undefined
-      const title = resolveConversationTitle(conversation.title, activeExecution?.sessionState?.sessionTitle)
+      const title = conversation.title
 
       if (isLocal) {
         const directoryPath = controller.directories[conversation.conversationId] ?? null

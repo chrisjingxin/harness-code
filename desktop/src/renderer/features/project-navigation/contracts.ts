@@ -28,6 +28,8 @@ export type NavigationSessionSource = {
   entries: readonly NavigationSessionEntry[]
   availability: { state: "ready" | "loading" | "failed" | "unavailable"; message?: string }
   retry(): void
+  /** 保存成功返回空值，失败返回可向用户展示的信息。 */
+  renameConversation?(conversationId: string, title: string): Promise<string | null>
 }
 
 /** 每个页面提供者导出的渲染入口；外壳负责挂载和隐藏，不了解页面内部状态。 */

@@ -45,6 +45,8 @@ export type AcpConformanceOptions = {
   readonly permissionPromptText?: string
   readonly cancelPromptText?: string
   readonly restorePromptText?: string
+  /** 测试 Agent 宣告 load 支持但故意超时/失败时，核对重建。 */
+  readonly expectRestoreReset?: boolean
   readonly requireTools?: boolean
   readonly requirePermission?: boolean
   readonly malformedStdoutCommand?: AgentCommand
@@ -207,6 +209,31 @@ export async function runAcpConformanceSuite(
       return { detail: `sessionId=${state.sessionId}` }
     }))
 
+    checks.push(await runCheck("config-mode", "session", "配置型会话模式可读取并切换", async () => {
+      const state = session.getState()
+      const option = state.configOptions.find(item => item.type === "select" && item.category === "mode")
+      if (!option || option.type !== "select") return { status: "skip", detail: "Agent 未声明配置型模式" }
+      assert.equal(state.currentModeId, option.currentValue)
+      const next = option.options.find(item => item.value !== option.currentValue)
+      if (!next) return { detail: "当前会话只有一个模式" }
+      await session.setMode(next.value)
+      assert.equal(session.getState().currentModeId, next.value)
+      return { detail: "模式经配置更新完成切换" }
+    }))
+
+    checks.push(await runCheck("session-setup-capabilities", "session", "附加目录和 MCP 能力协商", async () => {
+      const { additionalDirectories = [], mcpServers = [] } = options.hostOptions ?? {}
+      if (!additionalDirectories.length && !mcpServers.length) return { status: "skip", detail: "未配置附加目录或 MCP" }
+      const { agentCapabilities: capabilities, setupDiagnostics = [] } = session.getState()
+      if (!capabilities?.sessionCapabilities?.additionalDirectories && additionalDirectories.length) {
+        assert.ok(setupDiagnostics.some(message => message.includes("附加目录")), "缺少附加目录过滤诊断")
+      }
+      if (mcpServers.some(server => "type" in server && capabilities?.mcpCapabilities?.[server.type] !== true)) {
+        assert.ok(setupDiagnostics.some(message => message.includes("MCP")), "缺少 MCP 传输过滤诊断")
+      }
+      return { detail: setupDiagnostics.join(" ") || "已与 Agent 完成建会参数协商" }
+    }))
+
     checks.push(await runCheck("tool-call-lifecycle", "run", "工具调用生命周期映射", async () => {
       const events = await runPromptTurn(session, options.toolPromptText ?? "tool", timeoutMs)
       const terminal = events.at(-1)
@@ -276,11 +303,11 @@ export async function runAcpConformanceSuite(
         const state = session2.getState()
         const hadLeak = events.some(e => e.type === "text-delta" && e.text.includes("replayed-"))
         assert.equal(hadLeak, false, "回放帧不得泄漏到轮次 subscribe() 事件流")
-        if (agentCapabilities?.loadSession) {
+        if (agentCapabilities?.loadSession && !options.expectRestoreReset) {
           assert.equal(state.restoreStatus.kind, "restored", `支持 loadSession 时应 restored，实际为 ${state.restoreStatus.kind}`)
           return { detail: `restored (${sessionEvents.filter(e => e.type === "replay").length} replay frames)` }
         }
-        assert.equal(state.restoreStatus.kind, "reset", `不支持 loadSession 时应 fallback-new reset，实际为 ${state.restoreStatus.kind}`)
+        assert.equal(state.restoreStatus.kind, "reset", `无法恢复时应 fallback-new reset，实际为 ${state.restoreStatus.kind}`)
         assert.equal(sessionEvents.some(e => e.type === "session-reset"), true)
         return { detail: `reset (${state.restoreStatus.reason})` }
       } finally {

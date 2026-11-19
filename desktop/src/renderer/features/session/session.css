@@ -1245,169 +1245,31 @@
 }
 
 /* 交互式 /undo 回退选择题卡片 */
-.session-undo-card {
-  display: grid;
-  gap: 10px;
-  max-width: 660px;
-  padding: 12px 14px;
-  border: 1px solid var(--border, var(--line));
-  border-radius: var(--radius-surface, 12px);
+.session-checkpoint { align-self: start; }
+.session-checkpoint-dialog {
+  width: min(770px, 92vw);
+  max-height: 86vh;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
   background: var(--surface);
-  box-shadow: 0 2px 8px -4px rgba(15, 23, 42, 0.08);
+  color: var(--text);
+  box-shadow: var(--elev-pop);
 }
-
-.session-undo-head {
+.session-checkpoint-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.session-checkpoint-head, .session-checkpoint-buttons {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.session-undo-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm, 13px);
-  font-weight: 600;
-  color: var(--fg, var(--text));
-}
-
-.session-undo-title svg {
-  color: var(--accent);
-}
-
-.session-undo-count {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs, 11px);
-  color: var(--muted);
-}
-
-.session-undo-list {
-  display: grid;
-  gap: 4px;
-  max-height: 240px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.session-undo-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 7px 9px;
-  border-radius: var(--radius-control, 8px);
-  border: 1px solid transparent;
-  background: var(--surface-2);
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.session-undo-item:hover {
-  background: var(--hover);
-}
-
-.session-undo-item[data-checked="true"] {
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border, var(--line)));
-}
-
-.session-undo-item input[type="radio"] {
-  flex: none;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.session-undo-turn-tag {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border, var(--line));
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg-2, var(--text-soft));
-}
-
-.session-undo-summary {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-sm, 13px);
-  color: var(--fg, var(--text));
-}
-
-.session-undo-files {
-  flex: none;
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.session-undo-foot {
-  display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding-top: 8px;
-  box-shadow: inset 0 1px 0 var(--border-soft, var(--line-soft));
+  margin-bottom: 10px;
 }
-
-.session-undo-modes {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--surface-2);
-}
-
-.session-undo-mode-btn {
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--text-xs, 12px);
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-
-.session-undo-mode-btn.is-active {
-  background: var(--surface);
-  color: var(--fg, var(--text));
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-}
-
-.session-undo-mode-btn:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-}
-
-.session-undo-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.session-undo-hint {
-  font-size: var(--text-xs, 12px);
-  color: var(--muted);
-}
-
-.session-undo-error {
-  margin: 0;
-  font-size: var(--text-xs, 12px);
-  color: var(--danger-fg, var(--danger));
-}
+.session-checkpoint-head h3 { margin: 0 auto 0 0; }
+.session-checkpoint-dialog select { max-width: 100%; color: var(--text); background: var(--surface-2); }
+.session-checkpoint-files { max-height: 210px; overflow: auto; padding-left: 20px; }
+.session-checkpoint-files button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.session-checkpoint-diff { max-height: 320px; overflow: auto; }
+.session-checkpoint-dialog [role="alert"] { color: var(--danger); }
 
 .session-directory-actions {
   display: inline-flex;

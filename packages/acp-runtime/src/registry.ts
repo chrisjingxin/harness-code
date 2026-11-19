@@ -17,7 +17,7 @@ import type {
 import { buildAugmentedGuiPath, findInPath, isExecutableFile } from "./discovery.js"
 import { LocalAcpHost } from "./index.js"
 import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
-import type { AgentCommand, LocalAcpHostOptions, LocalAcpScope } from "./types.js"
+import type { AgentCommand, LocalAcpHostOptions, LocalAcpMeta, LocalAcpScope } from "./types.js"
 
 const DEFAULT_HOST_HINTS: AcpAgentHostHints = {
   enableElicitation: true,
@@ -133,6 +133,7 @@ export type AcpAgentRegistryOptions = {
 }
 
 export type ResolvedAgentHost = {
+  readonly clientMeta?: LocalAcpMeta
   readonly providerId: string | null
   readonly host: LocalAcpHost
   readonly available: boolean
@@ -270,11 +271,13 @@ export class AcpAgentRegistry {
           ? { enableClientTerminal: descriptor.hostHints.enableClientTerminal }
           : {}),
         restorePolicy: descriptor.hostHints.restorePolicy ?? "fallback-new",
+        extraClientCapabilitiesMeta: descriptor.hostHints.extraClientCapabilitiesMeta,
+        sessionLoadReplayIdleMs: descriptor.hostHints.sessionLoadReplayIdleMs,
       }
       host = new LocalAcpHost(resolution.command, hostOptions)
       this.#hosts.set(targetId, host)
     }
-    return { providerId: targetId, host, available: true }
+    return { providerId: targetId, host, available: true, clientMeta: descriptor.hostHints.extraClientCapabilitiesMeta }
   }
 
   private getFallbackHost(): LocalAcpHost {

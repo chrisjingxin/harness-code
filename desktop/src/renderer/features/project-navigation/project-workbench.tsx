@@ -390,6 +390,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       setCollabPopoverOpen(false)
       shell.openPage({ kind: "conversation", conversationId })
     },
+    renameConversation: sessions.renameConversation,
     toggleMember: shell.toggleMember,
     setSearch: shell.setSearch,
     openCommandPalette: () => {

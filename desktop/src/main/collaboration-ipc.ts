@@ -199,6 +199,17 @@ export function bindCollaborationIpc(
     : null
   const execution = createLocalExecutionCoordinator(window, identity, uploads, runtime, {
     grantsDir: join(app.getPath("userData"), "local-execution-grants"),
+    checkpointsDir: join(app.getPath("userData"), "local-checkpoints"),
+    confirmCheckpointRestore: async path => {
+      const result = await dialog.showMessageBox(window, {
+        type: "warning",
+        message: "确认工作树专用并还原文件？",
+        detail: "请确认以下 linked worktree 只供当前会话使用。将应用预览中的文件改动。\n\n" + path,
+        buttons: ["取消", "确认还原"],
+        defaultId: 0, cancelId: 0, noLink: true,
+      })
+      return result.response === 1
+    },
     origin: origin ?? "",
     personal,
     confirmDirectoryPrompt: async path => {
@@ -316,6 +327,8 @@ export function bindCollaborationIpc(
 
   ipc.handleRaw("personal:load", 1, key => personal.load(key), () => ({ ok: false, message: "无法读取个人视图。" }))
   ipc.handleRaw("personal:save", 3, (key, revision, value) => personal.save(key, revision, value), () => ({ ok: false, message: "无法保存个人视图。" }))
+  ipc.handleRaw("personal:rename-conversation", 2, (key, title) => personal.renameConversation(key, title),
+    () => ({ ok: false, message: "无法保存会话标题。" }))
 
   let allowedToClose = false
   let closeRequest: string | null = null

@@ -49,6 +49,7 @@ export type LocalExecutionSessionState = Pick<
   | "plans"
   | "usage"
   | "restoreStatus"
+  | "setupDiagnostics"
 > & {
   readonly providerId: string
   readonly sessionTitle?: string | null
@@ -83,6 +84,15 @@ export type LocalExecutionElicitationNotice = {
   readonly request: LocalAcpElicitationRequest | null
 }
 
+export type LocalExecutionTool = Omit<LocalAcpTool, "rawMeta"> & { readonly parentToolCallId?: string }
+export type LocalExecutionPermission = Omit<LocalAcpPermission, "rawMeta" | "tool" | "options"> & {
+  readonly tool?: LocalExecutionTool
+  readonly options: readonly (Omit<LocalAcpPermission["options"][number], "rawMeta"> & {
+    readonly scope?: "once" | "thread" | "project"
+  })[]
+}
+export type LocalExecutionRunSummary = { readonly durationMs?: number; readonly cachedTokens?: number }
+
 export type LocalExecutionNotice =
   | LocalExecutionUploadNotice
   | LocalExecutionSessionStateNotice
@@ -95,10 +105,34 @@ export type LocalExecutionNotice =
       | { readonly kind: "accepted"; readonly requestId: string; readonly text: string }
       | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
-      | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalAcpTool }
-      | { readonly kind: "permission"; readonly sequence: number; readonly request: LocalAcpPermission | null }
-      | { readonly kind: "finished"; readonly sequence: number; readonly failure?: string; readonly availability: LocalExecutionAvailability }
+      | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
+      | { readonly kind: "permission"; readonly sequence: number; readonly request: LocalExecutionPermission | null }
+      | { readonly kind: "finished"; readonly sequence: number; readonly failure?: string; readonly availability: LocalExecutionAvailability; readonly ephemeral?: boolean; readonly runSummary?: LocalExecutionRunSummary }
     ))
+
+/** 轮次快照只在本机解析，页面只提交轮次、文件或确认凭据。 */
+export type CodeCheckpointAction =
+  | { kind: "history" }
+  | { kind: "changes"; turnId: string }
+  | { kind: "diff"; turnId: string; path: string }
+  | { kind: "preview"; turnId: string; target: "base" | "post" | "guard"; guardId?: string }
+  | { kind: "restore"; token: string }
+
+export type CodeCheckpointTurn = {
+  turnId: string
+  ordinal: number
+  createdAtMs: number
+  status: "completed" | "cancelled" | "failed"
+  unavailable?: string
+  guards: readonly { id: string; createdAtMs: number }[]
+}
+
+export type CodeCheckpointReply =
+  | { kind: "history"; turns: readonly CodeCheckpointTurn[]; restoreBlocked?: string }
+  | { kind: "changes"; files: readonly { path: string; oldPath?: string; added: number | null; removed: number | null }[] }
+  | { kind: "diff"; text: string; truncated: boolean }
+  | { kind: "preview"; token: string; paths: readonly string[] }
+  | { kind: "restored"; paths: readonly string[]; failure?: string }
 
 export interface DesktopLocalExecutionHost {
   listProviders(): Promise<CollaborationResult<AcpAgentList>>
@@ -119,6 +153,7 @@ export interface DesktopLocalExecutionHost {
   setMode(scope: LocalExecutionScope, bindingId: string, modeId: string): Promise<CollaborationResult<null>>
   setConfigOption(scope: LocalExecutionScope, bindingId: string, configId: string, value: string | boolean): Promise<CollaborationResult<null>>
   answerElicitation(scope: LocalExecutionScope, bindingId: string, requestId: string, answer: LocalAcpElicitationAnswer): Promise<CollaborationResult<null>>
+  codeCheckpoint(scope: LocalExecutionScope, action: CodeCheckpointAction): Promise<CollaborationResult<CodeCheckpointReply>>
   onNotice(listener: (notice: LocalExecutionNotice) => void): () => void
 }
 

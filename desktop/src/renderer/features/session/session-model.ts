@@ -5,7 +5,7 @@
  * 把服务端的 ConversationSummary / HistoryMessage 与本地缓存水位组合成可供左栏和中央页展示的
  * 确定性数据结构，不持有网络、React 状态或磁盘读写。
  */
-import { localExecutionKey, parseFixedReference } from "../../../shared/index.js"
+import { parseFixedReference } from "../../../shared/index.js"
 import type { ConversationTimelineEntry, NavigationSessionEntry } from "../../../ui/index.js"
 import type {
   ProjectConversationSummary,
@@ -245,33 +245,27 @@ export function directoryBasename(directoryPath: string | null): string {
   return parts.at(-1) || directoryPath
 }
 
-/** 会话展示标题优先采纳实时 ACP 会话标题（如 `/title` 改名结果），为空时回退到服务端登记标题。 */
-export function resolveConversationTitle(conversationTitle: string, sessionTitle?: string | null): string {
-  const liveTitle = sessionTitle?.trim()
-  if (liveTitle) return liveTitle
-  const storedTitle = conversationTitle.trim()
-  return storedTitle || "未命名会话"
+/** 本机手动标题优先于当前 Agent 建议与服务端登记标题。 */
+export function resolveConversationTitle(conversationTitle: string, sessionTitle?: string | null, customTitle?: string): string {
+  return customTitle?.trim() || sessionTitle?.trim() || conversationTitle.trim() || "未命名会话"
 }
 
-/** 将当前窗口收到的实时会话标题覆盖到项目会话摘要列表中，驱动左栏、⌘K 与选择下拉实时更新。 */
+/** 摘要列表是左栏、顶栏、搜索和会话选择器共用的展示来源。 */
 export function applyConversationTitleOverrides(
   conversations: readonly ProjectConversationSummary[],
-  scope: { readonly accountId: string; readonly workspaceId: string; readonly projectId: string } | null,
-  overrides: Readonly<Record<string, string>>,
+  scope: { readonly accountId: string; readonly projectId: string } | null,
+  localTitles: (conversationId: string) => { sessionTitle?: string; customTitle?: string } | undefined,
 ): readonly ProjectConversationSummary[] {
   if (!scope || conversations.length === 0) return conversations
   let changed = false
   const next = conversations.map(item => {
-    const key = localExecutionKey({
-      accountId: scope.accountId,
-      workspaceId: scope.workspaceId,
-      projectId: scope.projectId,
-      conversationId: item.conversationId,
-    })
-    const override = overrides[key]?.trim()
-    if (!override || override === item.title) return item
+    const local = item.projectId === scope.projectId && item.ownerUserId === scope.accountId
+      ? localTitles(item.conversationId)
+      : undefined
+    const title = resolveConversationTitle(item.title, local?.sessionTitle, local?.customTitle)
+    if (title === item.title) return item
     changed = true
-    return { ...item, title: override }
+    return { ...item, title }
   })
   return changed ? next : conversations
 }

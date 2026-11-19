@@ -1,5 +1,6 @@
 /** HC-226：标准 ACP 一致性测试套件（runAcpConformanceSuite）正例与反例验证。 */
 import assert from "node:assert/strict"
+import { tmpdir } from "node:os"
 import { test } from "node:test"
 import { runAcpConformanceSuite } from "../dist/index.js"
 
@@ -7,6 +8,7 @@ const sdkUrl = import.meta.resolve("@agentclientprotocol/sdk")
 
 const buildMockAgentScript = (options: { loadSession: boolean; failCancel?: boolean }) => `
 import { Readable, Writable } from "node:stream"
+import assert from "node:assert/strict"
 import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from ${JSON.stringify(sdkUrl)}
 
 let cancelRequested = false
@@ -19,10 +21,14 @@ new AgentSideConnection(connection => ({
       agentCapabilities: { loadSession: ${options.loadSession ? "true" : "false"} },
     }
   },
-  async newSession() {
+  async newSession(params) {
+    assert.equal(params.additionalDirectories, undefined)
+    assert.deepEqual(params.mcpServers, [])
     return { sessionId: "conf-sess-" + Math.random().toString(36).slice(2, 7) }
   },
   async loadSession(params) {
+    assert.equal(params.additionalDirectories, undefined)
+    assert.deepEqual(params.mcpServers, [])
     await connection.sessionUpdate({
       sessionId: params.sessionId,
       update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "replayed-user" } },
@@ -97,12 +103,19 @@ test("runAcpConformanceSuite 对支持 loadSession 的标准 mock Agent 全项�
     executable: process.execPath,
     args: ["--input-type=module", "-e", buildMockAgentScript({ loadSession: true })],
     env: process.env,
+  }, {
+    hostOptions: {
+      additionalDirectories: [tmpdir()],
+      mcpServers: [{ type: "sse", name: "filtered", url: "https://example.invalid/sse", headers: [] }],
+    },
   })
   assert.equal(report.passed, true, JSON.stringify(report.checks, null, 2))
   assert.equal(report.summary.fail, 0)
   assert.equal(report.protocolVersion, 1)
   assert.equal(report.agentInfo?.name, "conformance-mock")
   assert.ok(report.checks.length >= 7)
+  assert.equal(report.checks.find(check => check.id === "config-mode")?.status, "skip")
+  assert.match(report.checks.find(check => check.id === "session-setup-capabilities")?.detail ?? "", /附加目录.*MCP/)
 })
 
 test("runAcpConformanceSuite 对不支持 loadSession 的 Agent 验证回退恢复并全项通过", async () => {

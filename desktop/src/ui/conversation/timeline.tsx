@@ -521,6 +521,11 @@ function TimelineRow({
               : entry.text}
           </div>
         </div>
+        {entry.ephemeral && <small className="wb-conversation-enrichment">旁路问答 · 仅本机</small>}
+        {entry.runSummary && <small className="wb-conversation-enrichment">
+          {[entry.runSummary.durationMs === undefined ? "" : (entry.runSummary.durationMs / 1000).toFixed(1) + " 秒",
+            entry.runSummary.cachedTokens === undefined ? "" : "缓存 " + entry.runSummary.cachedTokens + " Token"].filter(Boolean).join(" · ")}
+        </small>}
         {entry.role === "assistant" && !entry.streaming && entry.text.trim().length > 0 && typeof rendering?.copyText === "function" ? (
           <ReplyFooter text={entry.text} rendering={rendering} />
         ) : null}

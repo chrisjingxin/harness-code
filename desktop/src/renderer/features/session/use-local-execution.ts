@@ -121,7 +121,7 @@ export function useLocalExecution(
   onAccepted: (scope: ProjectNavigationScope, conversationId: string, revision: number) => void,
   onWorkspaceRefresh?: (scope: ProjectNavigationScope, conversationId: string) => void,
   preferredProviders?: Readonly<Record<string, string>>,
-  onSessionTitleChange?: (scope: LocalExecutionScope, title: string) => void,
+  onSessionTitleChange?: (scope: LocalExecutionScope, title: string | undefined) => void,
   onProviderChange?: (scope: LocalExecutionScope, providerId: string) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
@@ -151,12 +151,9 @@ export function useLocalExecution(
     screen: Screen,
     state: LocalExecutionSessionState,
   ): void {
-    const prevTitle = screen.timeline.sessionState?.sessionTitle?.trim()
     screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "session-state", state })
-    const nextTitle = state.sessionTitle?.trim()
-    if (nextTitle && nextTitle !== prevTitle) {
-      current.current.onSessionTitleChange?.(scope, nextTitle)
-    }
+    const title = state.connected ? state.sessionTitle?.trim() : undefined
+    current.current.onSessionTitleChange?.(scope, title || undefined)
   }
 
   function applyElicitationNotice(
@@ -228,7 +225,8 @@ export function useLocalExecution(
         if (screen.binding?.bindingId === notice.bindingId) {
           applySessionStateNotice(notice.scope, screen, notice.state)
           refresh()
-        } else if (!screen.binding && notice.bindingId !== screen.retiredBindingId) {
+        } else if (!screen.binding) {
+          // 主进程有时复用原绑定；准备回包到达后只消费所返回 bindingId 的状态。
           pushBufferedNotice(screen, notice.bindingId, { sessionState: notice.state })
         }
         return
@@ -279,7 +277,7 @@ export function useLocalExecution(
         ? { kind: "assistant-text", turnId: notice.turnId, text: notice.text, messageId: notice.messageId }
         : notice.kind === "tool" ? notice
           : notice.kind === "thought" ? { kind: "thought", turnId: notice.turnId, text: notice.text }
-            : { kind: "finished", turnId: notice.turnId, failure: notice.failure })
+            : { kind: "finished", turnId: notice.turnId, failure: notice.failure, ephemeral: notice.ephemeral, runSummary: notice.runSummary })
       if (notice.kind === "tool"
         && (notice.tool.status === "completed" || notice.tool.status === "failed")
         && (WORKSPACE_MUTATING_TOOL_KINDS.has(notice.tool.kind ?? "") || Boolean(notice.tool.diffs?.length))) {
@@ -337,6 +335,7 @@ export function useLocalExecution(
     screen.binding = undefined
     screen.availability = preparing
     screen.directoryStatus = "checking"
+    current.current.onSessionTitleChange?.(target.scope, undefined)
     const lastTerminal = screen.terminal
     refresh()
     void host.prepare(target.scope, target.directory, desiredProvider).then(result => {
@@ -384,6 +383,16 @@ export function useLocalExecution(
   if (!host) return undefined
   return {
     textOnly: false,
+    async codeCheckpoint(conversationId, action) {
+      const selected = current.current.target
+      if (!selected?.directory || selected.scope.conversationId !== conversationId) throw new Error("请先确认本机会话的工作目录。")
+      const result = await host.codeCheckpoint(selected.scope, action)
+      if (!result.ok) throw new Error(result.error.message)
+      if (result.value.kind === "restored" && result.value.paths.length > 0 && project) {
+        current.current.onWorkspaceRefresh?.(project, conversationId)
+      }
+      return result.value
+    },
     commitsAcceptedDraft: true,
     getAvailability: id => {
       const screen = target && screens.current.get(target.key)
@@ -457,6 +466,7 @@ export function useLocalExecution(
       screen.availability = preparing
       screen.directoryStatus = "checking"
       screen.timeline = { ...screen.timeline, sessionState: undefined, elicitation: null }
+      current.current.onSessionTitleChange?.(source.scope, undefined)
       refresh()
 
       try {

@@ -2,7 +2,7 @@
  * 【功能定义】`@workbench/acp-runtime/types` 纯前端安全 DTO 子出口。
  * 【协作边界】严禁导入 Node 内建模块、`child_process` 或 Electron，供桌面渲染层与 Preload 按契约安全引用。
  */
-import type { AgentCapabilities } from "@agentclientprotocol/sdk"
+import type { AgentCapabilities, McpServer } from "@agentclientprotocol/sdk"
 
 export type * from "./descriptor.js"
 
@@ -32,13 +32,17 @@ export type LocalAcpToolLocation = {
   readonly line?: number
 }
 
+/** Agent 附加的协议元数据，由受信任宿主按协商结果解释。 */
+export type LocalAcpMeta = Readonly<Record<string, unknown>>
+
 /** 选项来自 Agent，界面只传回该请求的选项标识。 */
 export type LocalAcpPermission = {
+  readonly rawMeta?: LocalAcpMeta
   readonly id: string
   readonly title: string
   /** 触发权限审批的原工具细节（含 diff、参数与关联路径），供界面直接展示。 */
   readonly tool?: LocalAcpTool
-  readonly options: readonly { readonly id: string; readonly label: string; readonly allows: boolean }[]
+  readonly options: readonly { readonly id: string; readonly label: string; readonly allows: boolean; readonly rawMeta?: LocalAcpMeta }[]
 }
 
 /** 工具携带的一处文件差异；文本可能按长度截断。 */
@@ -50,6 +54,7 @@ export type LocalAcpToolDiff = {
 
 /** 标准 ACP 工具通知的显示投影：标题/状态之外，携带已整理的参数、输出、差异文本与终端引用。 */
 export type LocalAcpTool = {
+  readonly rawMeta?: LocalAcpMeta
   readonly id: string
   readonly title?: string
   readonly status?: "pending" | "in_progress" | "completed" | "failed"
@@ -73,11 +78,11 @@ export type LocalAcpEvent = {
   readonly turnId: string
   readonly sequence: number
 } & (
-  | { readonly type: "text-delta"; readonly text: string; readonly messageId?: string }
+  | { readonly type: "text-delta"; readonly text: string; readonly messageId?: string; readonly rawMeta?: LocalAcpMeta }
   | { readonly type: "thought-delta"; readonly text: string }
   | { readonly type: "tool"; readonly tool: LocalAcpTool }
   | { readonly type: "permission"; readonly request: LocalAcpPermission | null }
-  | { readonly type: "completed"; readonly shareable: boolean }
+  | { readonly type: "completed"; readonly shareable: boolean; readonly rawMeta?: LocalAcpMeta }
   | { readonly type: "cancelled" }
   | ({ readonly type: "failed" } & Failure)
 )
@@ -171,6 +176,7 @@ export type LocalAcpPlanState =
   | { readonly kind: "file"; readonly id: string; readonly uri: string }
 
 export type LocalAcpSessionInfo = {
+  readonly rawMeta?: LocalAcpMeta
   readonly title?: string | null
   readonly updatedAt?: string | null
 }
@@ -210,6 +216,7 @@ export type LocalAcpSessionState = {
   readonly sessionInfo?: LocalAcpSessionInfo
   readonly usage?: LocalAcpSessionUsage
   readonly restoreStatus: LocalAcpRestoreStatus
+  readonly setupDiagnostics?: readonly string[]
 }
 
 export type LocalAcpPromptBlock =
@@ -288,7 +295,16 @@ export type LocalAcpDiagnostic = {
 
 export type LocalAcpRestorePolicy = "fallback-new" | "strict"
 
-export type LocalAcpHostOptions = {
+/** 由受信任宿主配置。目录必须已经获得宿主授权，MCP 不从 Agent 文本或页面消息读取。 */
+export type LocalAcpSessionSetup = {
+  readonly additionalDirectories?: readonly string[]
+  readonly mcpServers?: readonly McpServer[]
+}
+
+export type LocalAcpHostOptions = LocalAcpSessionSetup & {
+  readonly extraClientCapabilitiesMeta?: LocalAcpMeta
+  /** 启用后从第一条有效回放帧计时，静默超时仍视为恢复失败。 */
+  readonly sessionLoadReplayIdleMs?: number
   readonly bindingDirectory?: string
   readonly bindingNamespace?: string
   /** 原生会话恢复失败或 Agent 不支持时的策略；默认 `"fallback-new"` 自动清理旧绑定并重建会话。 */
