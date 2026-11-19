@@ -57,10 +57,65 @@ export class PersonalPersistence {
     this.#pending.add(task)
   }
 
-  /** 先等待所有在途保存，再用相同修订重试失败项，避免旧值覆盖新值。 */
+  #retryFailed(canonical: string, record: { key: PersonalKey; revision: number; value: PersonalValue }): void {
+    if (!this.#loaded.has(canonical)) return
+    const generation = this.#generation
+    let task: Promise<void>
+    task = (async () => {
+      try {
+        const saved = await this.host.save(record.key, record.revision, record.value)
+        if (generation !== this.#generation || this.#revisions.get(canonical) !== record.revision) return
+        if (saved.ok) {
+          this.#failed.delete(canonical)
+          if (!this.#failed.size) this.notice("")
+          return
+        }
+      } catch {
+        // 首次直接重试抛异常时继续尝试通过 load 恢复主进程权限缓存。
+      }
+
+      // 兜底：若主进程权限缓存丢失，先 load 重建权限授权再按最新修订写回本地草稿。
+      let reloaded: PersonalResult<PersonalRead>
+      try {
+        reloaded = await this.host.load(record.key)
+      } catch {
+        if (generation === this.#generation && this.#revisions.get(canonical) === record.revision) {
+          this.notice("个人视图保存失败，请重试。")
+        }
+        return
+      }
+      if (generation !== this.#generation || this.#revisions.get(canonical) !== record.revision) return
+      if (!reloaded.ok) {
+        this.notice(reloaded.message)
+        return
+      }
+
+      const nextRevision = Math.max(record.revision, reloaded.value.revision + 1)
+      this.#revisions.set(canonical, nextRevision)
+      try {
+        const retried = await this.host.save(record.key, nextRevision, record.value)
+        if (generation !== this.#generation || this.#revisions.get(canonical) !== nextRevision) return
+        if (retried.ok) {
+          this.#failed.delete(canonical)
+          if (!this.#failed.size) this.notice("")
+        } else {
+          this.#failed.set(canonical, { ...record, revision: nextRevision })
+          this.notice(retried.message)
+        }
+      } catch {
+        if (generation === this.#generation && this.#revisions.get(canonical) === nextRevision) {
+          this.#failed.set(canonical, { ...record, revision: nextRevision })
+          this.notice("个人视图保存失败，请重试。")
+        }
+      }
+    })().finally(() => { this.#pending.delete(task) })
+    this.#pending.add(task)
+  }
+
+  /** 先等待所有在途保存，再用相同修订重试失败项；必要时先 load 恢复权限缓存。 */
   async flush(): Promise<boolean> {
     while (this.#pending.size) await Promise.all([...this.#pending])
-    for (const [canonical, record] of this.#failed) this.#send(canonical, record)
+    for (const [canonical, record] of [...this.#failed.entries()]) this.#retryFailed(canonical, record)
     while (this.#pending.size) await Promise.all([...this.#pending])
     return this.#failed.size === 0
   }

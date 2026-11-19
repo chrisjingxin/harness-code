@@ -109,6 +109,7 @@ export function useConversationReferences(
   sessions: readonly ReferenceSession[],
   actions: ReferenceActions,
   supportsRange = false,
+  preferredConversationId?: string | null,
 ) {
   const origin = scope ? conversationKey(scope) : ""
   const key = scope ? JSON.stringify([origin, scope.projectId, scope.deviceId, scope.pageKey]) : ""
@@ -134,9 +135,57 @@ export function useConversationReferences(
     show(pending)
     const result = await runAction(() => actions.readSnapshot(scope, request), "无法读取会话快照，请重试。")
     if (active.current !== pending) return
+    const preferredTargetId = preferredConversationId ?? scope.conversationId ?? null
+    const defaultSelection: Selection | null = request.kind === "refresh"
+      ? null
+      : preferredTargetId && sessions.some(item => item.id === preferredTargetId)
+        ? { kind: "existing", conversationId: preferredTargetId }
+        : sessions.length === 1
+          ? { kind: "existing", conversationId: sessions[0]!.id }
+          : null
     show(result.ok
-      ? { ...pending, phase: "preview", snapshot: Object.freeze({ ...result.value }), selection: null }
+      ? { ...pending, phase: "preview", snapshot: Object.freeze({ ...result.value }), selection: defaultSelection }
       : { ...pending, phase: "read-error", message: result.message })
+  }
+
+  /** 将已确认的固定材料（如团队知识）直接加入指定本人会话草稿，跳过冗余目标选择弹窗。 */
+  async function addFixedToSession(
+    referenceId: string,
+    conversationId: string,
+    mention?: ConversationMentionOrigin,
+  ): Promise<void> {
+    if (!scope) return
+    const request: SnapshotRequest = { kind: "fixed", referenceId }
+    const pending: Flow = { key, request, mention, phase: "reading" }
+    show(pending)
+    const readResult = await runAction(() => actions.readSnapshot(scope, request), "无法读取引用，请重试。")
+    if (active.current !== pending) return
+    if (!readResult.ok) {
+      show({ ...pending, phase: "read-error", message: readResult.message })
+      return
+    }
+    const snapshot = Object.freeze({ ...readResult.value })
+    const change: ReferenceDraftChange = {
+      kind: "add",
+      target: { kind: "existing", conversationId },
+      snapshot,
+      mention,
+    }
+    const applyResult = await runAction(() => actions.applyDraft(scope, change), "无法加入草稿，请重试。")
+    if (active.current !== pending) return
+    if (!applyResult.ok) {
+      show("materialUnavailable" in applyResult
+        ? { key, request, mention, phase: "read-error", message: applyResult.message }
+        : {
+            ...pending,
+            phase: "preview",
+            snapshot,
+            selection: { kind: "existing", conversationId },
+            message: applyResult.message,
+          })
+      return
+    }
+    await locate(request, applyResult.value.conversationId)
   }
 
   async function chooseDirectory(current: Preview): Promise<void> {
@@ -260,6 +309,9 @@ export function useConversationReferences(
     previewFixed(referenceId: string, mention?: ConversationMentionOrigin) {
       if (!active.current && !cardAction.current) void load({ kind: "fixed", referenceId }, mention)
     },
+    addFixedToSession(referenceId: string, conversationId: string, mention?: ConversationMentionOrigin) {
+      if (!active.current && !cardAction.current) void addFixedToSession(referenceId, conversationId, mention)
+    },
     onReferenceAction,
     dialog,
     notice,
@@ -307,7 +359,7 @@ function ReferenceDialog({ flow, sessions, onRange, onClose, onRetry, onSelect, 
       event.preventDefault()
       onClose()
     }}>
-      <h2 id={title}>{refreshing ? "刷新引用预览" : "会话引用预览"}</h2>
+      <h2 id={title}>{refreshing ? "刷新引用预览" : flow.request.kind === "fixed" ? "引用团队知识" : "会话引用预览"}</h2>
       {onRange && flow.request.kind === "preview" && (flow.phase === "preview" || flow.phase === "reading" || flow.phase === "read-error") &&
         <label>取材范围 <select value={rangeId} disabled={busy || flow.phase === "reading"}
           onChange={event => onRange(ranges.find(item => item.id === event.target.value)?.range)}>

@@ -82,8 +82,10 @@ interface ComposerProps {
 export function ConversationComposer(props: ComposerProps): ReactElement {
   const { scope, visible, activity, model, draft, actions, sendBlocked, cancelBlocked, localStatus, onSend, onCancel, children } = props
   const rootRef = useRef<HTMLFormElement | null>(null)
+  const backdropRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const composing = useRef(false)
+  const [isComposing, setIsComposing] = useState(false)
   const pendingCaret = useRef<number | null>(null)
   const wasEditableRef = useRef(false)
   const [commandOpen, setCommandOpen] = useState(false)
@@ -258,6 +260,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     textarea.style.height = `${Math.min(maxHeight, Math.max(44, textarea.scrollHeight))}px`
     // 窗口变矮时 CSS 会进一步限制高度，长草稿仍须能在输入框内滚动。
     textarea.style.overflowY = "auto"
+    if (backdropRef.current) backdropRef.current.scrollTop = textarea.scrollTop
   }, [draft.text])
 
   useLayoutEffect(() => {
@@ -340,14 +343,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) return
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault()
-      event.stopPropagation()
-      invalidateCandidates()
-      setCommandIndex(0)
-      setCommandOpen(value => !value)
-      return
-    }
     if (event.key === "Tab" && (event.ctrlKey || event.metaKey || event.altKey)) return
     if (commandOpen && !event.shiftKey) {
       if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Tab", "Escape"].includes(event.key)) {
@@ -458,6 +453,9 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     }
   }
   const displayStatus = localStatus || hint || model.statusText
+
+  const highlightSegments = !isComposing ? splitComposerHighlightSegments(draft.text) : null
+  const showHighlight = Boolean(highlightSegments?.some(segment => segment.kind === "mention"))
 
   const showCategoryEmpty = () => {
     if (activeTab === "file") {
@@ -619,10 +617,15 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             const reference = model.references.find(item => item.id === id)
             if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
             return <div key={reference.id} className="wb-composer-reference">
-              <div><strong>{reference.sourceLabel}</strong> <span>{reference.rangeLabel}</span></div>
+              <div className="wb-composer-reference-head">
+                <div className="wb-composer-reference-meta">
+                  <strong>{reference.sourceLabel}</strong>
+                  {reference.rangeLabel ? <span className="wb-composer-reference-badge">{reference.rangeLabel}</span> : null}
+                </div>
+                <div className="wb-composer-reference-actions">{(["open", "refresh", "remove"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : action === "refresh" ? "刷新" : "移除"}</button>)}</div>
+              </div>
               {reference.snapshotText ? <p>{reference.snapshotText}</p> : null}
               {reference.status !== "ready" ? <p role="status">{reference.message || (reference.status === "loading" ? "正在读取引用…" : "引用来源暂不可用")}</p> : null}
-              <div>{(["open", "refresh", "remove"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : action === "refresh" ? "刷新" : "移除"}</button>)}</div>
             </div>
           })}</div> : null}
           {draft.attachmentIds.length ? <div className="wb-composer-attachments" aria-label="附件">{draft.attachmentIds.map(id => {
@@ -630,21 +633,42 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             if (!item) return <span key={id}>附件资料暂不可用</span>
             return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><IconX aria-hidden="true" /></button></span>
           })}</div> : null}
-          <textarea
-            ref={textareaRef}
-            className="wb-composer-textarea"
-            rows={1}
-            value={draft.text}
-            disabled={!canEdit}
-            placeholder={canEdit ? "描述任务，@ 引用文件/知识/会话，/ 唤起命令…" : "当前无法编辑草稿"}
-            aria-label="消息，Enter 发送，Shift+Enter 换行"
-            onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
-            onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
-            onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }}
-            onCompositionStart={() => { composing.current = true }}
-            onCompositionEnd={() => { composing.current = false }}
-            onKeyDown={handleKeyDown}
-          />
+          <div className="wb-composer-editor" data-highlighted={showHighlight || undefined}>
+            {showHighlight && highlightSegments ? (
+              <div ref={backdropRef} className="wb-composer-backdrop" aria-hidden="true">
+                {highlightSegments.map((segment, index) => (
+                  segment.kind === "mention"
+                    ? <mark key={index} className="wb-composer-inline-mention">{segment.text}</mark>
+                    : <span key={index}>{segment.text}</span>
+                ))}
+                {draft.text.endsWith("\n") ? " " : null}
+              </div>
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              className="wb-composer-textarea"
+              rows={1}
+              value={draft.text}
+              disabled={!canEdit}
+              placeholder={canEdit ? "描述任务，@ 引用文件/知识/会话，/ 唤起命令…" : "当前无法编辑草稿"}
+              aria-label="消息，Enter 发送，Shift+Enter 换行"
+              onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+              onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+              onScroll={event => {
+                if (backdropRef.current) backdropRef.current.scrollTop = event.currentTarget.scrollTop
+              }}
+              onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }}
+              onCompositionStart={() => {
+                composing.current = true
+                setIsComposing(true)
+              }}
+              onCompositionEnd={() => {
+                composing.current = false
+                setIsComposing(false)
+              }}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
           <div className="wb-composer-rail">
             <div className="wb-composer-rail-left">
               <button
@@ -663,7 +687,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                 className="wb-composer-tool"
                 disabled={!canEdit || !visible}
                 aria-expanded={commandOpen}
-                title="输入 / 或点击查看可用斜杠命令（Ctrl/Cmd+K）"
+                title="输入 / 或点击查看可用斜杠命令"
                 onMouseDown={event => event.preventDefault()}
                 onClick={toggleCommandMenu}
               >
@@ -789,3 +813,30 @@ function filterCommands(items: readonly ConversationMenuItemView[], text: string
 
 function clamp(index: number, count: number): number { return count ? Math.max(0, Math.min(count - 1, index)) : 0 }
 function parentDirectory(path: string): string { const index = path.lastIndexOf("/"); return index < 0 ? "" : path.slice(0, index) }
+
+type ComposerHighlightSegment = { readonly kind: "plain" | "mention"; readonly text: string }
+
+/** 将输入文本切分为普通文本与 `@引用` 词元，避免误伤邮箱等内部 `@`。 */
+function splitComposerHighlightSegments(text: string): ComposerHighlightSegment[] {
+  if (!text.includes("@")) return [{ kind: "plain", text }]
+  const segments: ComposerHighlightSegment[] = []
+  const pattern = /(^|\s)(@"(?:[^"\n]*)"|@[^\s@]+)/g
+  let cursor = 0
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0
+    const leadingSpace = match[1] ?? ""
+    const mention = match[2] ?? ""
+    const mentionStart = start + leadingSpace.length
+    if (mentionStart > cursor) {
+      segments.push({ kind: "plain", text: text.slice(cursor, mentionStart) })
+    }
+    if (mention) {
+      segments.push({ kind: "mention", text: mention })
+    }
+    cursor = mentionStart + mention.length
+  }
+  if (cursor < text.length) {
+    segments.push({ kind: "plain", text: text.slice(cursor) })
+  }
+  return segments
+}

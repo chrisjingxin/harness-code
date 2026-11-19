@@ -54,7 +54,7 @@ export type ProcessSummary = {
 export type TurnProcessSplit = {
   readonly processSummary: ProcessSummary | null
   readonly processSegments: readonly TimelineSegment[]
-  readonly finalEntry?: Extract<ConversationTimelineEntry, { kind: "message" }>
+  readonly finalEntry?: Extract<ConversationTimelineEntry, { kind: "message" | "extension" }>
 }
 
 /** 拆分一轮的“过程片段”与末尾正文；过程达到 ≥2 段时收进外层总览折叠组。 */
@@ -62,19 +62,19 @@ export function splitTurnProcess(
   entries: readonly ConversationTimelineEntry[],
   activity?: ConversationTimelineActivity | null,
 ): TurnProcessSplit {
-  // 若末尾只跟着追尾思考（reasoning），回溯跳过它们：只要紧邻一条助手回复且其后无工具/审批，
-  // 仍把它当作 finalEntry 留在折叠区外，避免最终回答被吞进“思考过程”。
+  // 若末尾只跟着追尾思考（reasoning），回溯跳过它们：只要紧邻一条助手回复或扩展交互卡片且其后无工具/审批，
+  // 仍把它当作 finalEntry 留在折叠区外，避免最终回答或选择题卡片被吞进“思考过程”。
   let finalIndex = -1
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]!
     if (entry.kind === "reasoning") continue
-    if (entry.kind === "message" && entry.role === "assistant") {
+    if ((entry.kind === "message" && entry.role === "assistant") || entry.kind === "extension") {
       finalIndex = index
     }
     break
   }
   const finalEntry = finalIndex >= 0
-    ? (entries[finalIndex] as Extract<ConversationTimelineEntry, { kind: "message" }>)
+    ? (entries[finalIndex] as Extract<ConversationTimelineEntry, { kind: "message" | "extension" }>)
     : undefined
   const processEntries = finalIndex >= 0
     ? [...entries.slice(0, finalIndex), ...entries.slice(finalIndex + 1)]

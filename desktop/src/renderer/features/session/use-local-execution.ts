@@ -82,6 +82,9 @@ function summarizeElicitationAnswer(answer: LocalAcpElicitationAnswer): string {
   if (answer.action === "decline") return "已跳过（拒绝填写）"
   if (answer.action === "cancel") return "已取消"
   const decision = typeof answer.content?.decision === "string" ? answer.content.decision : undefined
+  if (decision === "approved") return "已批准并开始执行"
+  if (decision === "revise") return "已提交修改意见"
+  if (decision === "abandoned") return "已放弃"
   if (decision === "accepted") return "已批准并提交"
   if (decision === "edited") return "已附修改意见提交"
   if (decision === "rejected") return "已拒绝"

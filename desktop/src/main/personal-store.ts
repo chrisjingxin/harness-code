@@ -222,8 +222,13 @@ export class PersonalStore {
     const now = Date.now()
     const cached = this.#permissions.get(cacheKey)
     if (cached) {
-      if (this.#current(cached.identity) && cached.expiresAtMs > now) return ok(cached)
-      this.#permissions.delete(cacheKey)
+      if (!this.#current(cached.identity)) {
+        this.#permissions.delete(cacheKey)
+      } else if (cached.expiresAtMs > now) {
+        return ok(cached)
+      }
+      // 若仅是 TTL 过期（仍属当前身份代次），保留 cached 占位至重验完成或失败，
+      // 避免在途 HTTP 核验期间并发到达的 save() 读不到缓存而误报未确认范围。
     }
 
     // 合并同一授权范围的并发在途校验，避免打开多会话或连续加载时重复打满服务端权限接口。

@@ -68,7 +68,14 @@ export function DesktopWorkbench(hosts: Hosts) {
     : identity.state.status === "connectionError" && identity.state.lastKnownUser ? `signed:${identity.state.lastKnownUser.id}` : identity.state.status
   const persistence = useMemo(() => new PersonalPersistence(personalHost, setPersonalError), [personalHost, identityKey])
   useEffect(() => { setPersonalError(""); return personalHost.onCloseRequested(() => persistence.flush()) }, [personalHost, persistence])
-  const guardedIdentity = { ...identity, signOut: async () => { if (await persistence.flush()) await identity.signOut() } }
+  const guardedIdentity = {
+    ...identity,
+    signOut: async () => {
+      try { await persistence.flush() } catch { /* 退出前尽力落盘，保存失败不阻断账号退出。 */ }
+      persistence.reset()
+      await identity.signOut()
+    },
+  }
   return <DesktopSession key={identityKey} {...hosts} identity={guardedIdentity} preferences={preferences}
     persistence={persistence} personalError={personalError} />
 }
@@ -297,6 +304,18 @@ function WorkspaceProjectWorkbench(props: {
     },
   })
   const { pageController, integration } = projectSessions
+  const [lastLocalConversationId, setLastLocalConversationId] = useState<string | null>(null)
+  useEffect(() => {
+    setLastLocalConversationId(null)
+  }, [shell.projectId, props.user.id])
+  useEffect(() => {
+    if (!selectedConversationId) return
+    const selected = pageController.conversations.find(item => item.conversationId === selectedConversationId)
+    if (selected?.ownerUserId === props.user.id) {
+      setLastLocalConversationId(selectedConversationId)
+    }
+  }, [selectedConversationId, pageController.conversations, props.user.id])
+  const preferredConversationId = selectedConversationId ?? lastLocalConversationId
   const scope = shell.scope
   const { refresh: refreshBoard, ...board } = useProjectBoard(props.projectUpdates, scope, currentPage.kind === "board")
   // 订阅跟随团队外壳。切页面、切项目时只替换刷新目标，正文读取仍在原页面动作内。
@@ -328,6 +347,7 @@ function WorkspaceProjectWorkbench(props: {
   const references = useWorkbenchReferences({
     scope: shell.scope,
     selectedConversationId,
+    preferredConversationId,
     pageController,
     integration,
     readSnapshot: props.referenceSnapshots,
