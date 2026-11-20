@@ -10,6 +10,8 @@ import { createProjectUpdatesHost } from "./project-updates-api.js"
 
 const host: DesktopHost = {
   chooseDirectory: () => ipcRenderer.invoke("workbench:choose-directory"),
+  chooseFiles: () => ipcRenderer.invoke("workbench:choose-files"),
+  chooseContextDirectories: () => ipcRenderer.invoke("workbench:choose-context-directories"),
   getWindowState: () => ipcRenderer.invoke("workbench:get-window-state"),
   setThemeMode: mode => ipcRenderer.invoke("workbench:set-theme-mode", mode),
   adjustZoom: action => ipcRenderer.invoke("workbench:adjust-zoom", action),

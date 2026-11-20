@@ -6,10 +6,14 @@ import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { AnnotatedUserMessage } from "../src/ui/conversation/annotations.tsx"
 import { ConversationComposer } from "../src/ui/conversation/composer.tsx"
 import {
+  applyLeadingSlashCommand,
   insertMentionTrigger,
-  toggleAttachmentPath,
+  mergeAttachmentPaths,
+  removeLeadingCommandOnBackspace,
+  splitComposerHighlightSegments,
 } from "../src/ui/conversation/mention-policy.ts"
 import type { ConversationComposerView, ConversationDraft } from "../src/ui/conversation/types.ts"
 import {
@@ -50,14 +54,49 @@ test("insertMentionTrigger 在不同光标上下文正确插入 @ 并保留词�
   assert.deepEqual(insertMentionTrigger("请看这里和那里", 2, 5), { text: "请看 @那里", cursor: 4 })
 })
 
-test("toggleAttachmentPath 支持追加、去重与二次移除", () => {
-  assert.deepEqual(toggleAttachmentPath([], "src/app.tsx"), ["src/app.tsx"])
-  assert.deepEqual(toggleAttachmentPath(["src/app.tsx", "src/app.tsx", "README.md"], "docs/a.md"), [
-    "src/app.tsx",
-    "README.md",
-    "docs/a.md",
+test("mergeAttachmentPaths 合并追加本机文件或目录并去重", () => {
+  assert.deepEqual(mergeAttachmentPaths([], ["/tmp/a.ts"]), ["/tmp/a.ts"])
+  assert.deepEqual(
+    mergeAttachmentPaths(["/tmp/a.ts", "/tmp/dir/"], ["/tmp/dir/", "/tmp/b.md", ""]),
+    ["/tmp/a.ts", "/tmp/dir/", "/tmp/b.md"],
+  )
+})
+
+test("splitComposerHighlightSegments、removeLeadingCommandOnBackspace 与 applyLeadingSlashCommand 正确处理命令块与提及", () => {
+  assert.deepEqual(splitComposerHighlightSegments("/goal 请查看 @src/app.tsx"), [
+    { kind: "command", text: "/goal" },
+    { kind: "plain", text: " 请查看 " },
+    { kind: "mention", text: "@src/app.tsx" },
   ])
-  assert.deepEqual(toggleAttachmentPath(["src/app.tsx", "README.md"], "src/app.tsx"), ["README.md"])
+  assert.deepEqual(splitComposerHighlightSegments("/go"), [{ kind: "plain", text: "/go" }])
+  assert.deepEqual(splitComposerHighlightSegments("/goal", { includeBareLeadingCommand: true }), [
+    { kind: "command", text: "/goal" },
+  ])
+  assert.deepEqual(splitComposerHighlightSegments("/goal", { commandIds: ["goal", "plan"] }), [
+    { kind: "command", text: "/goal" },
+  ])
+  assert.deepEqual(splitComposerHighlightSegments("/Users/dev/a.ts", { includeBareLeadingCommand: true }), [
+    { kind: "plain", text: "/Users/dev/a.ts" },
+  ])
+  assert.deepEqual(splitComposerHighlightSegments("// comment", { includeBareLeadingCommand: true }), [
+    { kind: "plain", text: "// comment" },
+  ])
+  assert.deepEqual(splitComposerHighlightSegments("联系 a@example.com 查看"), [
+    { kind: "plain", text: "联系 a@example.com 查看" },
+  ])
+
+  assert.deepEqual(removeLeadingCommandOnBackspace("/goal hello", 6, 6), { text: "hello", cursor: 0 })
+  assert.deepEqual(removeLeadingCommandOnBackspace("/goal hello", 5, 5), { text: "hello", cursor: 0 })
+  assert.deepEqual(removeLeadingCommandOnBackspace("  /plan arg", 8, 8), { text: "  arg", cursor: 2 })
+  assert.equal(removeLeadingCommandOnBackspace("/goal hello", 11, 11), null)
+  assert.equal(removeLeadingCommandOnBackspace("/goal", 5, 5), null)
+  assert.equal(removeLeadingCommandOnBackspace("/goal hello", 5, 6), null)
+
+  assert.deepEqual(applyLeadingSlashCommand("", "goal"), { text: "/goal ", cursor: 6 })
+  assert.deepEqual(applyLeadingSlashCommand("/go", "goal"), { text: "/goal ", cursor: 6 })
+  assert.deepEqual(applyLeadingSlashCommand("/goal arg1", "plan"), { text: "/plan arg1", cursor: 6 })
+  assert.deepEqual(applyLeadingSlashCommand("帮我审查代码", "review"), { text: "/review 帮我审查代码", cursor: 8 })
+  assert.deepEqual(applyLeadingSlashCommand("/Users/dev/a.ts", "goal"), { text: "/goal /Users/dev/a.ts", cursor: 6 })
 })
 
 test("buildDirectoryContextView 与 handleDirectoryContextAction 正确构造菜单并分发动作", () => {
@@ -127,10 +166,16 @@ test("ConversationComposer 渲染双层上下文壳、+ 菜单、Tooltip 与文�
         ],
       },
       attachments: [
-        { id: "desktop/src/ui/composer.tsx", label: "composer.tsx", path: "desktop/src/ui/composer.tsx", availability: { enabled: true } },
+        { id: "/Users/dev/notes.md", label: "notes.md", path: "/Users/dev/notes.md", kind: "file", availability: { enabled: true } },
+        { id: "/Users/dev/refs/", label: "refs/", path: "/Users/dev/refs", kind: "directory", availability: { enabled: true } },
       ],
     }),
-    draft: baseDraft({ attachmentIds: ["desktop/src/ui/composer.tsx"] }),
+    draft: baseDraft({
+      text: "/goal 检查 @src/app.tsx",
+      selectionStart: 20,
+      selectionEnd: 20,
+      attachmentIds: ["/Users/dev/notes.md", "/Users/dev/refs/"],
+    }),
     actions: { onPersonalChange() {}, onSend: async () => ({ status: "accepted" }) },
     sendBlocked: false,
     cancelBlocked: true,
@@ -146,9 +191,13 @@ test("ConversationComposer 渲染双层上下文壳、+ 菜单、Tooltip 与文�
   assert.match(htmlWithContext, /· 3/)
   assert.match(htmlWithContext, /class="wb-composer-add-btn"/)
   assert.match(htmlWithContext, /class="wb-composer-add-tooltip"[^>]*>添加上下文</)
+  assert.match(htmlWithContext, /class="wb-composer-inline-command">\/goal<\/mark>/)
+  assert.match(htmlWithContext, /class="wb-composer-inline-mention">@src\/app\.tsx<\/mark>/)
   assert.match(htmlWithContext, /class="wb-composer-attachments"/)
-  assert.match(htmlWithContext, /title="desktop\/src\/ui\/composer\.tsx"/)
-  assert.match(htmlWithContext, /aria-label="移除 composer\.tsx"/)
+  assert.match(htmlWithContext, /data-kind="file" title="\/Users\/dev\/notes\.md"/)
+  assert.match(htmlWithContext, /aria-label="移除 notes\.md"/)
+  assert.match(htmlWithContext, /data-kind="directory" title="\/Users\/dev\/refs"/)
+  assert.match(htmlWithContext, /aria-label="移除 refs\/"/)
 
   const htmlWithoutGit = renderToStaticMarkup(createElement(ConversationComposer, {
     scope: testScope,
@@ -198,4 +247,19 @@ test("session-provider 顶栏不再重复渲染目录切换按钮，保留标题
   assert.doesNotMatch(source, /session-directory-button/)
   assert.match(source, /className="tb-name"/)
   assert.match(source, /className="tb-state running"/)
+})
+
+test("AnnotatedUserMessage 同步渲染行首 /命令 与 @引用 块状样式且不误伤普通绝对路径", () => {
+  const commandHtml = renderToStaticMarkup(createElement(AnnotatedUserMessage, {
+    text: "/goal 检查 @src/app.tsx",
+  }))
+  assert.match(commandHtml, /class="wb-message-inline-command">\/goal<\/span>/)
+  assert.match(commandHtml, /class="wb-message-inline-mention">@src\/app\.tsx<\/span>/)
+
+  const pathHtml = renderToStaticMarkup(createElement(AnnotatedUserMessage, {
+    text: "/Users/dev/a.ts",
+  }))
+  assert.doesNotMatch(pathHtml, /wb-message-inline-command/)
+  assert.doesNotMatch(pathHtml, /wb-message-inline-mention/)
+  assert.equal(pathHtml, "/Users/dev/a.ts")
 })

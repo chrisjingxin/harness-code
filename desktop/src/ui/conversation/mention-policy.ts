@@ -41,12 +41,111 @@ export function insertMentionTrigger(
   }
 }
 
-/** 切换工作区文件附件选中状态：已存在则移除，否则去重后追加。 */
-export function toggleAttachmentPath(current: readonly string[], path: string): string[] {
-  const unique = [...new Set(current)]
-  return unique.includes(path)
-    ? unique.filter(item => item !== path)
-    : [...unique, path]
+/** 合并追加本机文件或目录附件路径并按原顺序去重。 */
+export function mergeAttachmentPaths(current: readonly string[], additions: readonly string[]): string[] {
+  return [...new Set([...current, ...additions].filter(item => item.length > 0))]
+}
+
+export type ComposerHighlightSegment = {
+  readonly kind: "plain" | "mention" | "command"
+  readonly text: string
+}
+
+const LEADING_COMMAND_PATTERN = /^(\s*)(\/[a-zA-Z][\w:-]*)(?=\s|$)/
+const LEADING_COMMAND_WITH_SPACE_PATTERN = /^(\s*)(\/[a-zA-Z][\w:-]*)([ \t])/
+
+/** 将输入与用户消息正文切分为普通文本、行首 `/命令` 与 `@引用` 段，不改变原有字符长度与空格，确保输入框叠层光标对齐。 */
+export function splitComposerHighlightSegments(
+  text: string,
+  options?: {
+    readonly includeBareLeadingCommand?: boolean
+    readonly commandIds?: readonly string[]
+  },
+): ComposerHighlightSegment[] {
+  const segments: ComposerHighlightSegment[] = []
+  let restStart = 0
+  const commandMatch = LEADING_COMMAND_PATTERN.exec(text)
+  if (commandMatch) {
+    const leadingWhitespace = commandMatch[1] ?? ""
+    const commandToken = commandMatch[2] ?? ""
+    const cmdEnd = leadingWhitespace.length + commandToken.length
+    const hasFollowingWhitespace = cmdEnd < text.length && /\s/.test(text[cmdEnd]!)
+    const commandName = commandToken.slice(1).toLowerCase()
+    const matchesKnownCommand = Boolean(options?.commandIds?.some(id => id.toLowerCase() === commandName))
+    const atEndOfText = cmdEnd === text.length
+    if (hasFollowingWhitespace || (atEndOfText && (options?.includeBareLeadingCommand || matchesKnownCommand))) {
+      if (leadingWhitespace) segments.push({ kind: "plain", text: leadingWhitespace })
+      segments.push({ kind: "command", text: commandToken })
+      restStart = cmdEnd
+    }
+  }
+
+  const rest = restStart > 0 ? text.slice(restStart) : text
+  if (rest.length > 0) {
+    if (!rest.includes("@")) {
+      segments.push({ kind: "plain", text: rest })
+    } else {
+      const pattern = /(^|\s)(@"(?:[^"\n]*)"|@[^\s@]+)/g
+      let cursor = 0
+      for (const match of rest.matchAll(pattern)) {
+        const start = match.index ?? 0
+        const leadingSpace = match[1] ?? ""
+        const mention = match[2] ?? ""
+        const mentionStart = start + leadingSpace.length
+        if (mentionStart > cursor) {
+          segments.push({ kind: "plain", text: rest.slice(cursor, mentionStart) })
+        }
+        if (mention) {
+          segments.push({ kind: "mention", text: mention })
+        }
+        cursor = mentionStart + mention.length
+      }
+      if (cursor < rest.length) {
+        segments.push({ kind: "plain", text: rest.slice(cursor) })
+      }
+    }
+  }
+
+  return segments.length > 0 ? segments : [{ kind: "plain", text: "" }]
+}
+
+/** 当光标停留在行首 `/command` 结尾或紧随空格后按 Backspace 时，整块删除命令并保留后续正文。 */
+export function removeLeadingCommandOnBackspace(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+): { readonly text: string; readonly cursor: number } | null {
+  if (selectionStart !== selectionEnd) return null
+  const match = LEADING_COMMAND_WITH_SPACE_PATTERN.exec(text)
+  if (!match) return null
+  const cmdStart = match[1]!.length
+  const cmdEnd = cmdStart + match[2]!.length
+  const afterSpace = cmdEnd + 1
+  if (selectionStart !== afterSpace && selectionStart !== cmdEnd) return null
+  return {
+    text: `${text.slice(0, cmdStart)}${text.slice(afterSpace)}`,
+    cursor: cmdStart,
+  }
+}
+
+/** 在行首应用或替换斜杠命令（已有命令时直接替换而不叠加），并定位光标到命令空格之后。 */
+export function applyLeadingSlashCommand(
+  text: string,
+  commandId: string,
+): { readonly text: string; readonly cursor: number } {
+  const commandPrefix = `/${commandId} `
+  const cursor = commandPrefix.length
+  if (/^\s*\/[^\s/]*$/.test(text)) {
+    return { text: commandPrefix, cursor }
+  }
+  const existing = /^(\s*)\/[a-zA-Z][\w:-]*([ \t]+|$)/.exec(text)
+  if (existing) {
+    return { text: `${commandPrefix}${text.slice(existing[0].length)}`, cursor }
+  }
+  if (text.trim().length > 0) {
+    return { text: `${commandPrefix}${text}`, cursor }
+  }
+  return { text: commandPrefix, cursor }
 }
 
 /** 选中项始终留在最多八行的窗口内；首尾移动不循环。 */

@@ -18,12 +18,36 @@ import { CONTROL_CHAR_PATTERN } from "./ipc-guard.js"
 
 export const MAX_PERSISTED_GRANTS = 200
 export const MAX_ATTACHMENTS = 200
+export const MAX_ATTACHMENT_GRANTS = 500
 const MAX_GRANT_FILE_BYTES = 1_048_576
 
 export type DirectoryGrant = {
   readonly path: string
   readonly dev: bigint
   readonly ino: bigint
+}
+
+export type LocalPathGrant = {
+  readonly path: string
+  readonly kind: "file" | "directory"
+  readonly dev: bigint
+  readonly ino: bigint
+}
+
+function stripTrailingPathSeparator(rawPath: string): string {
+  if (/^[/\\]+$/.test(rawPath)) return rawPath[0]!
+  if (/^[a-zA-Z]:[/\\]+$/.test(rawPath)) return `${rawPath.slice(0, 2)}${rawPath[2]}`
+  return rawPath.replace(/[/\\]+$/, "")
+}
+
+/** 校验并读取本机文件或目录的真实规范路径与实体标识。 */
+async function inspectLocalPath(rawPath: string, expectedKind: "file" | "directory"): Promise<LocalPathGrant> {
+  if (!isAbsolute(rawPath) || rawPath.includes("\0")) throw new Error("附件路径无效。")
+  const canonical = await realpath(stripTrailingPathSeparator(rawPath))
+  const info = await stat(canonical, { bigint: true })
+  if (expectedKind === "file" && !info.isFile()) throw new Error("所选路径不是普通文件。")
+  if (expectedKind === "directory" && !info.isDirectory()) throw new Error("所选路径不是目录。")
+  return { path: canonical, kind: expectedKind, dev: info.dev, ino: info.ino }
 }
 
 /** 读取当前目录的真实身份；原始路径的符号链接变化也会在恢复核对中被识别。 */
@@ -196,10 +220,73 @@ export function createLocalDirectoryGrantStore(
   }
 }
 
-/** 对工作区相对路径附件做严格目录沙箱校验（含 `realpath` 防软链接逃逸），通过后转为标准 ACP `resource_link`。 */
+/** 创建按当前登录会话隔离的显式原生选择器附件授权存储（仅内存持有，登出即清空）。 */
+export function createLocalAttachmentGrantStore(
+  isCurrent: (login: GrantLoginContext) => boolean,
+) {
+  let owner: GrantLoginContext | null = null
+  const grants = new Map<string, LocalPathGrant>()
+
+  const matchesOwner = (login: GrantLoginContext): boolean =>
+    owner !== null && owner.accountId === login.accountId && owner.generation === login.generation
+
+  return {
+    clearMemory(): void {
+      owner = null
+      grants.clear()
+    },
+    async captureSelections(
+      login: GrantLoginContext | null,
+      paths: readonly string[],
+      kind: "file" | "directory",
+    ): Promise<readonly string[]> {
+      if (!login || !isCurrent(login)) return []
+      if (!matchesOwner(login)) {
+        grants.clear()
+        owner = { accountId: login.accountId, generation: login.generation }
+      }
+      const accepted: string[] = []
+      for (const raw of new Set(paths)) {
+        if (typeof raw !== "string" || raw.length === 0 || raw.length > 1024 || CONTROL_CHAR_PATTERN.test(raw)) {
+          continue
+        }
+        let grant: LocalPathGrant
+        try {
+          grant = await inspectLocalPath(raw, kind)
+        } catch {
+          continue
+        }
+        if (!isCurrent(login)) return []
+        if (!matchesOwner(login)) {
+          grants.clear()
+          owner = { accountId: login.accountId, generation: login.generation }
+        }
+        if (!grants.has(grant.path) && grants.size >= MAX_ATTACHMENT_GRANTS) {
+          const oldest = grants.keys().next().value
+          if (oldest !== undefined) grants.delete(oldest)
+        }
+        grants.delete(grant.path)
+        grants.set(grant.path, grant)
+        const normalizedReturn = kind === "directory" && !grant.path.endsWith("/") && !grant.path.endsWith("\\")
+          ? `${grant.path}/`
+          : grant.path
+        accepted.push(normalizedReturn)
+      }
+      return accepted
+    },
+    getGrant(login: GrantLoginContext, rawPath: string): LocalPathGrant | undefined {
+      if (!isCurrent(login) || !matchesOwner(login)) return undefined
+      const normalized = stripTrailingPathSeparator(rawPath)
+      return grants.get(normalized) ?? grants.get(rawPath)
+    },
+  }
+}
+
+/** 对工作区相对路径附件与显式授权的本机文件/目录做沙箱与防调包校验，通过后转为标准 ACP `resource_link`。 */
 export async function resolveAttachmentBlocks(
   directory: DirectoryGrant,
   attachments: readonly string[],
+  resolveGrantedPath?: (rawPath: string) => LocalPathGrant | undefined,
 ): Promise<CollaborationResult<readonly LocalAcpPromptBlock[]> | { readonly rejectedReason: string }> {
   const uniquePaths = [...new Set(attachments)]
   if (uniquePaths.length === 0) return { ok: true, value: [] }
@@ -219,6 +306,59 @@ export async function resolveAttachmentBlocks(
 
   const blocks: LocalAcpPromptBlock[] = []
   for (const rawPath of uniquePaths) {
+    if (isAbsolute(rawPath) || /^[a-zA-Z]:[\\/]/.test(rawPath)) {
+      if (!rawPath || typeof rawPath !== "string" || rawPath.length > 1024 || CONTROL_CHAR_PATTERN.test(rawPath)) {
+        return identityError("PROJECT_PATH_INVALID", `附件路径无效：${rawPath}`)
+      }
+      const grant = resolveGrantedPath?.(rawPath)
+      if (!grant) {
+        return identityError("PROJECT_PATH_INVALID", `所选本机路径未经系统选择器授权，请通过「+」重新选择：${rawPath}`)
+      }
+      const expectedKind = rawPath.endsWith("/") || rawPath.endsWith("\\") ? "directory" : "file"
+      if (grant.kind !== expectedKind) {
+        return identityError("PROJECT_PATH_INVALID", `附件类型与授权记录不匹配：${rawPath}`)
+      }
+      let canonical: string
+      let info
+      try {
+        canonical = await realpath(grant.path)
+        info = await stat(canonical, { bigint: true })
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException | null)?.code
+        if (code === "ENOENT" || code === "ENOTDIR") {
+          return { rejectedReason: `附件${grant.kind === "directory" ? "目录" : "文件"}不存在：${rawPath}` }
+        }
+        return identityError("PROJECT_PATH_INVALID", `无法读取附件路径：${rawPath}`)
+      }
+      const kindMatches = grant.kind === "directory" ? info.isDirectory() : info.isFile()
+      if (!kindMatches || canonical !== grant.path || info.dev !== grant.dev || info.ino !== grant.ino) {
+        return identityError("PROJECT_PATH_INVALID", `所选本机路径已变更，请重新选择：${rawPath}`)
+      }
+      const insideWorkspace = isInsideRoot(directory.path, canonical)
+      if (grant.kind === "directory") {
+        const dirBase = basename(canonical)
+        const dirName = insideWorkspace
+          ? `${relative(directory.path, canonical).replaceAll("\\", "/")}/`
+          : dirBase ? `${dirBase}/` : canonical
+        blocks.push({
+          type: "resource_link",
+          uri: pathToFileURL(canonical).href,
+          name: dirName,
+          title: canonical,
+          mimeType: "inode/directory",
+        })
+      } else {
+        blocks.push({
+          type: "resource_link",
+          uri: pathToFileURL(canonical).href,
+          name: insideWorkspace ? relative(directory.path, canonical).replaceAll("\\", "/") : basename(canonical),
+          title: insideWorkspace ? basename(canonical) : canonical,
+          size: Number(info.size),
+        })
+      }
+      continue
+    }
+
     if (!isSafeRelativeWorkspacePath(rawPath)) {
       return identityError("PROJECT_PATH_INVALID", `附件路径越界或无效，仅允许引用当前工作目录内的文件：${rawPath}`)
     }

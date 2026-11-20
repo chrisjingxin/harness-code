@@ -24,6 +24,7 @@ import {
   MAX_DRAFT_ANNOTATIONS,
   Markdown,
   SelectionToolbar,
+  applyLeadingSlashCommand,
   composeAnnotatedPrompt,
   normalizeAnnotationSelectedText,
   normalizeAnnotationSourceLabel,
@@ -72,6 +73,8 @@ export type LocalSessionPageProps = {
   readonly centralFiles?: SessionCentralFilesState
   readonly onChooseDirectory?: () => void
   readonly onSelectDirectory?: (directoryPath: string) => void
+  readonly onChooseLocalFiles?: () => void
+  readonly onChooseLocalDirectories?: () => void
   readonly onOpenChangesPanel?: () => void
   readonly onRefreshGitStatus?: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
@@ -103,6 +106,8 @@ export function LocalSessionPage({
   onPersonalChange,
   onChooseDirectory,
   onSelectDirectory,
+  onChooseLocalFiles,
+  onChooseLocalDirectories,
   onOpenChangesPanel,
   onRefreshGitStatus,
   onCapabilitySelect,
@@ -322,35 +327,36 @@ export function LocalSessionPage({
     items: [
       {
         id: "files",
-        label: "文件",
+        label: "本机文件",
         icon: "file",
-        behavior: "files",
+        behavior: "custom",
         availability: execution.textOnly
           ? { enabled: false, reason: attachmentUnavailableReason }
           : !directoryPath
             ? { enabled: false, reason: "请先在顶部选择工作目录" }
-            : !directoryReady || !onRequestFileCandidates
-              ? { enabled: false, reason: availability.reason ?? "工作目录暂不可读" }
+            : !directoryReady || !onChooseLocalFiles
+              ? { enabled: false, reason: availability.reason ?? "当前无法选择本机文件" }
               : { enabled: true },
       },
       {
         id: "folder",
-        label: "目录",
+        label: "本机目录",
         icon: "folder",
-        behavior: directoryReady && onRequestFileCandidates ? "folder" : "custom",
-        availability: execution.textOnly && directoryPath
+        behavior: "custom",
+        availability: execution.textOnly
           ? { enabled: false, reason: attachmentUnavailableReason }
-          : directoryReady && onRequestFileCandidates
-            ? { enabled: true }
-            : onChooseDirectory
-              ? switchingAvailability
-              : { enabled: false, reason: "当前无法浏览或选择目录" },
+          : !directoryPath
+            ? { enabled: false, reason: "请先在顶部选择工作目录" }
+            : !directoryReady || !onChooseLocalDirectories
+              ? { enabled: false, reason: availability.reason ?? "当前无法选择本机目录" }
+              : { enabled: true },
       },
       {
         id: "mention",
         label: "提及",
         icon: "mention",
         behavior: "mention",
+        badge: "工作区与协作",
         availability: composerProjectTarget
           ? { enabled: true }
           : { enabled: false, reason: "请先选择工作目录或连接协作范围" },
@@ -385,14 +391,20 @@ export function LocalSessionPage({
     controls: capabilities.controls,
     projectTarget: composerProjectTarget,
     references: hooks?.references ?? [],
-    attachments: personal.draft.attachmentIds.map(path => ({
-      id: path,
-      label: path.split("/").at(-1) || path,
-      path,
-      availability: execution.textOnly
-        ? { enabled: false, reason: attachmentUnavailableReason }
-        : { enabled: true },
-    })),
+    attachments: personal.draft.attachmentIds.map(rawPath => {
+      const isDir = rawPath.endsWith("/") || rawPath.endsWith("\\")
+      const clean = rawPath.replace(/[/\\]+$/, "")
+      const base = clean.split(/[/\\]/).at(-1) || clean || rawPath
+      return {
+        id: rawPath,
+        label: isDir ? `${base}/` : base,
+        path: clean || rawPath,
+        kind: isDir ? "directory" : "file",
+        availability: execution.textOnly
+          ? { enabled: false, reason: attachmentUnavailableReason }
+          : { enabled: true },
+      }
+    }),
     contextBar: {
       directory: directoryContext,
       ...(gitContext ? { git: gitContext } : {}),
@@ -701,20 +713,12 @@ export function LocalSessionPage({
                   : undefined,
                 onCommand: (targetScope, itemId) => {
                   if (targetScope.conversationId !== scope.conversationId) return
-                  const currentText = personal.draft.text
-                  const trimmedLeft = currentText.trimStart()
-                  const commandPrefix = `/${itemId} `
-                  const nextText = trimmedLeft.startsWith("/") && !/\s/.test(trimmedLeft)
-                    ? commandPrefix
-                    : currentText.trim().length > 0
-                      ? `${commandPrefix}${currentText}`
-                      : commandPrefix
-                  const cursor = commandPrefix.length
+                  const next = applyLeadingSlashCommand(personal.draft.text, itemId)
                   onPersonalChange(targetScope, {
                     kind: "draft-text",
-                    text: nextText,
-                    selectionStart: cursor,
-                    selectionEnd: cursor,
+                    text: next.text,
+                    selectionStart: next.cursor,
+                    selectionEnd: next.cursor,
                   })
                 },
                 onCapabilitySelect: (targetScope, controlId, itemId) => {
@@ -771,9 +775,9 @@ export function LocalSessionPage({
                   else if (itemId === "refresh-git") onRefreshGitStatus?.()
                 },
                 onContextMenuAction: (targetScope, itemId) => {
-                  if (targetScope.conversationId === scope.conversationId && itemId === "folder") {
-                    onChooseDirectory?.()
-                  }
+                  if (targetScope.conversationId !== scope.conversationId) return
+                  if (itemId === "files") onChooseLocalFiles?.()
+                  else if (itemId === "folder") onChooseLocalDirectories?.()
                 },
                 rendering: messageRendering,
               }}

@@ -541,6 +541,22 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 }
 .wb-composer-backdrop::-webkit-scrollbar { background: transparent; }
 .wb-composer-backdrop::-webkit-scrollbar-thumb { background: transparent; }
+.wb-composer-inline-command {
+  padding: 1px 0;
+  margin: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow:
+    -2.5px 0 0 color-mix(in srgb, var(--accent) 15%, transparent),
+    2.5px 0 0 color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+:root[data-theme="dark"] .wb-composer-inline-command {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow:
+    -2.5px 0 0 color-mix(in srgb, var(--accent) 20%, transparent),
+    2.5px 0 0 color-mix(in srgb, var(--accent) 20%, transparent);
+}
 .wb-composer-inline-mention {
   padding: 0;
   margin: 0;
@@ -719,66 +735,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-context-menu-badge[data-tone="accent"] { color: var(--accent); }
 .wb-context-menu-badge[data-tone="danger"] { color: var(--danger); }
 
-.wb-command-menu, .wb-mention-menu, .wb-file-picker-menu { position: absolute; inset-inline: 6px; bottom: calc(100% + 4px); z-index: 20; margin: 0; padding: 6px; border: 1px solid var(--border, var(--line)); border-radius: 14px; background: var(--surface); box-shadow: var(--elev-pop); }
-.wb-file-picker-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px 6px;
-  margin-bottom: 4px;
-  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
-}
-.wb-file-picker-back,
-.wb-file-picker-close {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-2, var(--muted));
-  font: inherit;
-  font-size: var(--text-xs, 12px);
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-.wb-file-picker-close { width: 26px; padding: 0; justify-content: center; }
-.wb-file-picker-back:hover,
-.wb-file-picker-close:hover { background: var(--hover); color: var(--fg, var(--text)); }
-.wb-file-picker-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--muted);
-}
-.wb-file-picker-search svg { flex: none; }
-.wb-file-picker-search input {
-  width: 100%;
-  min-width: 0;
-  padding: 4px 2px;
-  border: 0;
-  background: transparent;
-  color: var(--fg, var(--text));
-  font: inherit;
-  font-size: var(--text-sm, 13px);
-}
-.wb-file-picker-search input:focus { outline: none; }
-.wb-file-picker-crumb {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 8px 6px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs, 11px);
-}
-.wb-file-picker-crumb span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-file-picker-dir-arrow { flex: 0 0 auto; margin-left: auto; color: var(--muted); }
-.wb-file-picker-attached { flex: 0 0 auto; margin-left: auto; color: var(--accent); }
+.wb-command-menu, .wb-mention-menu { position: absolute; inset-inline: 6px; bottom: calc(100% + 4px); z-index: 20; margin: 0; padding: 6px; border: 1px solid var(--border, var(--line)); border-radius: 14px; background: var(--surface); box-shadow: var(--elev-pop); }
 .wb-command-menu { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .wb-composer-menu-empty { margin: 8px; color: var(--muted); font-size: var(--text-sm, 12.5px); }
 .wb-command-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: center; gap: 8px; width: 100%; min-height: var(--control-standard); padding: 6px 8px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--fg, var(--text)); text-align: left; cursor: pointer; font-family: var(--font-mono); font-size: var(--text-xs, 12px); }
@@ -1351,5 +1308,20 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   margin-top: 6px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.wb-message-inline-command,
+.wb-message-inline-mention {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+}
+:root[data-theme="dark"] .wb-message-inline-command,
+:root[data-theme="dark"] .wb-message-inline-mention {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 

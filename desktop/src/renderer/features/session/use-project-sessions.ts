@@ -23,6 +23,7 @@ import {
   type ProjectConversationHost,
   type ProjectDraftPersonal,
 } from "../../../shared/index.js"
+import { mergeAttachmentPaths } from "../../../ui/index.js"
 import type { ConversationPersonalState, ConversationScope, RenderingActions } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
 import type { NavigationSessionSource, ProjectNavigationScope } from "../project-navigation/contracts.js"
@@ -819,6 +820,30 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     }).catch(() => {})
   }, [scope, currentScopeKey, host, updateRecord])
 
+  const appendLocalAttachments = useCallback((conversationId: string, choose: () => Promise<readonly string[]>) => {
+    if (!scope || !currentScopeKey) return
+    const targetScope = scope
+    const targetKey = currentScopeKey
+    void choose().then(picked => {
+      if (picked.length === 0 || !stillActive(targetKey)) return
+      updateRecord(targetScope, targetKey, conversationId, prev => ({
+        ...prev,
+        personal: applyConversationPersonalChange(prev.personal, {
+          kind: "draft-attachments",
+          attachmentIds: mergeAttachmentPaths(prev.personal.draft.attachmentIds, picked),
+        }),
+      }), true)
+    }).catch(() => {})
+  }, [scope, currentScopeKey, updateRecord])
+
+  const onChooseLocalFiles = useCallback((conversationId: string) => {
+    appendLocalAttachments(conversationId, () => host.chooseFiles())
+  }, [appendLocalAttachments, host])
+
+  const onChooseLocalDirectories = useCallback((conversationId: string) => {
+    appendLocalAttachments(conversationId, () => host.chooseContextDirectories())
+  }, [appendLocalAttachments, host])
+
   const onPersonalChange = useCallback((targetConvScope: ConversationScope, change: Parameters<typeof applyConversationPersonalChange>[1]) => {
     if (!scope || !currentScopeKey) return
     if (targetConvScope.workspaceId !== scope.workspaceId || targetConvScope.accountId !== scope.accountId) return
@@ -1073,6 +1098,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     onStartNewSession: () => { void onStartNewSession() },
     onChooseSessionDirectory,
     onSelectSessionDirectory,
+    onChooseLocalFiles,
+    onChooseLocalDirectories,
     getGitSummary: conversationId => (scope ? localDir.getGitSummary(scope, conversationId) : null),
     onOpenChangesPanel: conversationId => {
       if (!scope) return
@@ -1184,6 +1211,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     onStartNewSession,
     onChooseSessionDirectory,
     onSelectSessionDirectory,
+    onChooseLocalFiles,
+    onChooseLocalDirectories,
     syncConversation,
     refreshBrief,
     onPersonalChange,

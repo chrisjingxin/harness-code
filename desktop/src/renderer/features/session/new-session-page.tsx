@@ -10,7 +10,7 @@ import type { AcpAgentInfo } from "@workbench/acp-runtime/types"
 import { ConversationComposer } from "../../../ui/index.js"
 import type { ConversationComposerView, RenderingActions } from "../../../ui/index.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
-import { buildDirectoryContextView, directoryBasename, handleDirectoryContextAction } from "./session-model.js"
+import { buildDirectoryContextView, handleDirectoryContextAction } from "./session-model.js"
 import { NEW_SESSION_DRAFT_ID } from "./contracts.js"
 import type { NewSessionDraft, SessionExternalHooks } from "./contracts.js"
 import { newSessionConversationDraft } from "./new-session-draft.js"
@@ -60,7 +60,6 @@ export function NewSessionPage({
   onDraftChange,
   onStartSession,
 }: NewSessionPageProps): ReactElement {
-  const folderName = directoryBasename(draft.directoryPath)
   const hasPrompt = draft.draftText.trim().length > 0 || draft.referenceIds.length > 0
   const canSubmit = Boolean(draft.directoryPath && hasPrompt && canCreateConversation && !busy)
   const disabledReason = !draft.directoryPath
@@ -118,23 +117,24 @@ export function NewSessionPage({
       items: [
         {
           id: "files",
-          label: "文件",
+          label: "本机文件",
           icon: "file",
-          behavior: "files",
-          availability: { enabled: false, reason: "开始会话后可添加工作区文件" },
+          behavior: "custom",
+          availability: { enabled: false, reason: "开始会话后可添加本机文件" },
         },
         {
           id: "folder",
-          label: folderName ? "更换工作目录" : "选择工作目录",
+          label: "本机目录",
           icon: "folder",
           behavior: "custom",
-          availability: switchingAvailability,
+          availability: { enabled: false, reason: "开始会话后可添加本机目录" },
         },
         {
           id: "mention",
           label: "提及",
           icon: "mention",
           behavior: "mention",
+          badge: "项目协作",
           availability: hooks?.onRequestCollaborationCandidates
             ? switchingAvailability
             : { enabled: false, reason: "协作引用暂不可用" },
@@ -177,9 +177,6 @@ export function NewSessionPage({
                 onSelectDirectory,
                 onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
               })
-            },
-            onContextMenuAction: (_source, itemId) => {
-              if (itemId === "folder") onChooseDirectory()
             },
             onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
             onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,

@@ -65,6 +65,8 @@ export type SessionPageController = {
   onStartNewSession(): void
   onChooseSessionDirectory(conversationId: string): void
   onSelectSessionDirectory?(conversationId: string, directoryPath: string): void
+  onChooseLocalFiles?(conversationId: string): void
+  onChooseLocalDirectories?(conversationId: string): void
   getGitSummary?(conversationId: string): LocalDirectoryGitSummary | null
   onOpenChangesPanel?(conversationId: string): void
   onRefreshGitStatus?(conversationId: string): void
@@ -192,6 +194,12 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
             onSelectDirectory={controller.onSelectSessionDirectory
               ? path => controller.onSelectSessionDirectory!(conversation.conversationId, path)
+              : undefined}
+            onChooseLocalFiles={controller.onChooseLocalFiles
+              ? () => controller.onChooseLocalFiles!(conversation.conversationId)
+              : undefined}
+            onChooseLocalDirectories={controller.onChooseLocalDirectories
+              ? () => controller.onChooseLocalDirectories!(conversation.conversationId)
               : undefined}
             onOpenChangesPanel={controller.onOpenChangesPanel
               ? () => controller.onOpenChangesPanel!(conversation.conversationId)

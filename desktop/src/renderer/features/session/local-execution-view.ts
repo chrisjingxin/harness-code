@@ -690,25 +690,41 @@ function isSafeAttachmentCandidate(candidate: string, quoted: boolean): boolean 
   return quoted || cleaned.includes("/") || /\.[a-z0-9_-]{1,12}$/i.test(cleaned)
 }
 
-/** 从用户输入草稿中提取安全的相对路径 `@file` / `@"file name"` 引用，与显式附件标识合并去重。 */
+function isSafeExplicitAttachment(candidate: string): boolean {
+  if (!candidate || candidate.length > 1024 || /[\u0000-\u001f\u007f]/.test(candidate)) return false
+  if (/^(\/|\\|[a-zA-Z]:[\\/])/.test(candidate)) {
+    const segments = candidate.split(/[\\/]+/).filter(Boolean)
+    return !segments.some(seg => seg === "." || seg === "..")
+  }
+  return isSafeAttachmentCandidate(candidate, true)
+}
+
+/** 从用户输入草稿中提取安全的相对路径 `@file` / `@"file name"` 引用与显式本机文件/目录附件，合并去重。 */
 export function extractFileAttachments(text: string, explicitAttachmentIds: readonly string[] = []): string[] {
   const result: string[] = []
   const seen = new Set<string>()
-  const pushIfSafe = (raw: string, quoted: boolean) => {
+  const pushExplicit = (raw: string) => {
+    const trimmed = raw.trim()
+    const normalized = /^(\/|\\|[a-zA-Z]:[\\/])/.test(trimmed) ? trimmed : trimmed.replace(/^(?:\.\/)+/, "")
+    if (!isSafeExplicitAttachment(normalized) || seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  const pushTextCandidate = (raw: string, quoted: boolean) => {
     const trimmed = raw.trim().replace(/^(?:\.\/)+/, "")
     if (!isSafeAttachmentCandidate(trimmed, quoted) || seen.has(trimmed)) return
     seen.add(trimmed)
     result.push(trimmed)
   }
 
-  for (const id of explicitAttachmentIds) pushIfSafe(id, true)
+  for (const id of explicitAttachmentIds) pushExplicit(id)
   const parsed = parseAnnotatedUserMessage(text)
   const scanText = parsed ? parsed.body : text
   const pattern = /(?:^|[\s(（[【])@(?:"([^"\n]+)"|([^\s"'，。；：！？、）)】》”’]+))/g
   for (const match of scanText.matchAll(pattern)) {
     const quoted = match[1] !== undefined
     const raw = quoted ? match[1]! : (match[2] ?? "").replace(/[),.;:!?]+$/, "")
-    pushIfSafe(raw, quoted)
+    pushTextCandidate(raw, quoted)
   }
   return result
 }

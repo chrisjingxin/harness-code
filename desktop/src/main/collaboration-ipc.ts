@@ -376,5 +376,8 @@ export function bindCollaborationIpc(
     identity.dispose()
     ipc.dispose()
   })
-  return execution.captureDirectorySelection
+  return {
+    captureDirectorySelection: execution.captureDirectorySelection,
+    captureAttachmentSelections: execution.captureAttachmentSelections,
+  }
 }

@@ -10,6 +10,8 @@ import type { ThemeMode, WindowState } from "../../shared/index.js"
 import {
   ConversationView,
   MAX_DRAFT_ANNOTATIONS,
+  applyLeadingSlashCommand,
+  mergeAttachmentPaths,
   normalizeAnnotationSelectedText,
   normalizeAnnotationSourceLabel,
 } from "../../ui/index.js"
@@ -349,12 +351,18 @@ function TimelinePreview() {
       { id: "attachment-1", label: "固定示例附件", availability: { enabled: true } },
       ...personal.draft.attachmentIds
         .filter(id => id !== "attachment-1")
-        .map(path => ({
-          id: path,
-          label: path.split("/").at(-1) || path,
-          path,
-          availability: { enabled: true },
-        })),
+        .map(rawPath => {
+          const isDir = rawPath.endsWith("/") || rawPath.endsWith("\\")
+          const clean = rawPath.replace(/[/\\]+$/, "")
+          const base = clean.split(/[/\\]/).at(-1) || clean || rawPath
+          return {
+            id: rawPath,
+            label: isDir ? `${base}/` : base,
+            path: clean || rawPath,
+            kind: (isDir ? "directory" : "file") as "directory" | "file",
+            availability: { enabled: true },
+          }
+        }),
     ],
     contextBar: {
       directory: {
@@ -382,9 +390,9 @@ function TimelinePreview() {
       title: "添加上下文",
       tooltip: "添加上下文",
       items: [
-        { id: "files", label: "文件", icon: "file", behavior: "files", availability: { enabled: true } },
-        { id: "folder", label: "目录", icon: "folder", behavior: "folder", availability: { enabled: true } },
-        { id: "mention", label: "提及", icon: "mention", behavior: "mention", availability: { enabled: true } },
+        { id: "files", label: "本机文件", icon: "file", behavior: "custom", availability: { enabled: true } },
+        { id: "folder", label: "本机目录", icon: "folder", behavior: "custom", availability: { enabled: true } },
+        { id: "mention", label: "提及", icon: "mention", behavior: "mention", badge: "工作区与协作", availability: { enabled: true } },
         { id: "actions", label: "命令", icon: "action", behavior: "command", availability: { enabled: true } },
         { id: "external-source", label: "外部资料源", icon: "external", behavior: "custom", badge: "去配置", badgeTone: "danger", availability: { enabled: true } },
       ],
@@ -422,7 +430,16 @@ function TimelinePreview() {
       record(sourceScope, `交互回调：${result === "waiting" ? "等待外部事实" : "结果待确认"}`)
       if (result === "unknown") throw new Error("示例结果待确认")
     },
-    onCommand: (sourceScope, itemId) => { record(sourceScope, `命令意图：${itemId}`) },
+    onCommand: (sourceScope, itemId) => {
+      record(sourceScope, `命令意图：${itemId}`)
+      const next = applyLeadingSlashCommand(personal.draft.text, itemId)
+      updatePersonal(sourceScope, {
+        kind: "draft-text",
+        text: next.text,
+        selectionStart: next.cursor,
+        selectionEnd: next.cursor,
+      })
+    },
     onCapabilitySelect: (sourceScope, controlId, itemId) => {
       record(sourceScope, `能力意图：${controlId} / ${itemId}`)
       if (itemId !== "manage") setSelectedModels(previous => ({ ...previous, [scopeKey(sourceScope)]: itemId }))
@@ -457,7 +474,20 @@ function TimelinePreview() {
     },
     onDirectoryContextAction: (sourceScope, itemId) => { record(sourceScope, `目录上下文意图：${itemId}`) },
     onGitContextAction: (sourceScope, itemId) => { record(sourceScope, `Git 上下文意图：${itemId}`) },
-    onContextMenuAction: (sourceScope, itemId) => { record(sourceScope, `添加上下文扩展意图：${itemId}`) },
+    onContextMenuAction: (sourceScope, itemId) => {
+      record(sourceScope, `添加上下文扩展意图：${itemId}`)
+      if (itemId === "files") {
+        updatePersonal(sourceScope, {
+          kind: "draft-attachments",
+          attachmentIds: mergeAttachmentPaths(personal.draft.attachmentIds, ["/Users/example/docs/设计说明.md"]),
+        })
+      } else if (itemId === "folder") {
+        updatePersonal(sourceScope, {
+          kind: "draft-attachments",
+          attachmentIds: mergeAttachmentPaths(personal.draft.attachmentIds, ["/Users/example/references/"]),
+        })
+      }
+    },
     rendering,
   }
 

@@ -8,8 +8,13 @@ import type { ThemeMode, WindowState } from "../shared/index.js"
 import { nativeTheme as workbenchNativeTheme } from "../shared/native-theme.js"
 import { createStrictIpcRegistrar, isNonEmptyString } from "./ipc-guard.js"
 
+export type DesktopSelectionCapture = {
+  readonly captureDirectorySelection?: () => (path: string) => Promise<void>
+  readonly captureAttachmentSelections?: (kind: "file" | "directory") => (paths: readonly string[]) => Promise<readonly string[]>
+}
+
 /** 绑定可信主窗口；窗口销毁时移除 IPC 和系统主题监听，允许 macOS 重开。 */
-export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, captureDirectorySelection?: () => (path: string) => Promise<void>): void {
+export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, selectionCapture?: DesktopSelectionCapture): void {
   let themeMode: ThemeMode = "system"
   let zoomPercent = 100
   let choosing = false
@@ -26,12 +31,42 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, captur
   ipc.handle("workbench:choose-directory", 0, async () => {
     if (choosing) throw new Error("目录选择器已打开")
     choosing = true
-    const recordSelection = captureDirectorySelection?.()
+    const recordSelection = selectionCapture?.captureDirectorySelection?.()
     try {
       const result = await dialog.showOpenDialog(window, { title: "选择工作目录", buttonLabel: "选择目录", properties: ["openDirectory"] })
       const path = result.canceled ? null : result.filePaths[0] ?? null
       if (path) await recordSelection?.(path)
       return path
+    } finally { choosing = false }
+  })
+  ipc.handle("workbench:choose-files", 0, async () => {
+    if (choosing) throw new Error("选择器已打开")
+    choosing = true
+    const recordSelection = selectionCapture?.captureAttachmentSelections?.("file")
+    try {
+      const result = await dialog.showOpenDialog(window, {
+        title: "选择本机文件",
+        buttonLabel: "添加文件",
+        properties: ["openFile", "multiSelections"],
+      })
+      if (result.canceled || result.filePaths.length === 0) return []
+      return recordSelection ? await recordSelection(result.filePaths) : result.filePaths
+    } finally { choosing = false }
+  })
+  ipc.handle("workbench:choose-context-directories", 0, async () => {
+    if (choosing) throw new Error("选择器已打开")
+    choosing = true
+    const recordSelection = selectionCapture?.captureAttachmentSelections?.("directory")
+    try {
+      const result = await dialog.showOpenDialog(window, {
+        title: "选择本机目录",
+        buttonLabel: "添加目录",
+        properties: ["openDirectory", "multiSelections"],
+      })
+      if (result.canceled || result.filePaths.length === 0) return []
+      return recordSelection
+        ? await recordSelection(result.filePaths)
+        : result.filePaths.map(item => (item.endsWith("/") || item.endsWith("\\") ? item : `${item}/`))
     } finally { choosing = false }
   })
   ipc.handle("workbench:set-theme-mode", 1, value => {

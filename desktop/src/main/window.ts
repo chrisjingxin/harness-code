@@ -28,10 +28,10 @@ export function createWindow(onCloseAborted: () => void, execution?: LocalExecut
     webPreferences: { preload: fileURLToPath(new URL("../preload/index.cjs", import.meta.url)), contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false },
   })
   // 预览不挂载身份或执行端口，避免接触现有服务和本机执行。
-  const captureDirectorySelection = execution
+  const selectionCapture = execution
     ? bindCollaborationIpc(window, trustedUrl, onCloseAborted, execution)
     : undefined
-  bindDesktopIpc(window, trustedUrl, captureDirectorySelection)
+  bindDesktopIpc(window, trustedUrl, selectionCapture)
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", event => { event.preventDefault() })
   window.webContents.on("will-frame-navigate", event => { event.preventDefault() })

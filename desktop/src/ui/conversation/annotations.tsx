@@ -19,7 +19,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent, ReactElement } from "react"
 
 import {
@@ -29,6 +29,7 @@ import {
   normalizeAnnotationSelectedText,
   parseAnnotatedUserMessage,
 } from "./annotations-codec.js"
+import { splitComposerHighlightSegments } from "./mention-policy.js"
 import type { ConversationDraftAnnotation } from "./types.js"
 
 export interface ComposerAnnotationsBarProps {
@@ -255,13 +256,31 @@ export function ComposerAnnotationsBar({
   )
 }
 
-/** 时间线用户消息气泡：识别附带引用的文本并渲染紧凑可展开的行内引用块。 */
+function InlineHighlightedUserText({ text }: { readonly text: string }): ReactElement {
+  const segments = splitComposerHighlightSegments(text, { includeBareLeadingCommand: true })
+  if (!segments.some(segment => segment.kind !== "plain")) {
+    return <>{text}</>
+  }
+  return (
+    <>
+      {segments.map((segment, index) => (
+        segment.kind === "command"
+          ? <span key={index} className="wb-message-inline-command">{segment.text}</span>
+          : segment.kind === "mention"
+            ? <span key={index} className="wb-message-inline-mention">{segment.text}</span>
+            : <Fragment key={index}>{segment.text}</Fragment>
+      ))}
+    </>
+  )
+}
+
+/** 时间线用户消息气泡：识别附带引用的文本并渲染紧凑可展开的行内引用块，并同步高亮行首 `/命令` 与 `@引用`。 */
 export function AnnotatedUserMessage({ text }: { readonly text: string }): ReactElement {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
   const parsed = parseAnnotatedUserMessage(text)
 
   if (!parsed) {
-    return <>{text}</>
+    return <InlineHighlightedUserText text={text} />
   }
 
   const expandedItem = expandedIndex !== null ? parsed.annotations[expandedIndex] ?? null : null
@@ -312,7 +331,7 @@ export function AnnotatedUserMessage({ text }: { readonly text: string }): React
           </div>
         ) : null}
       </div>
-      {parsed.body ? <div className="wb-message-annotated-body">{parsed.body}</div> : null}
+      {parsed.body ? <div className="wb-message-annotated-body"><InlineHighlightedUserText text={parsed.body} /></div> : null}
     </div>
   )
 }

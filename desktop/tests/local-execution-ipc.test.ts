@@ -84,6 +84,7 @@ async function createSignedInState(userId: string) {
   const transport: typeof fetch = async input => {
     const url = String(input)
     if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+    if (url.endsWith("/api/v1/auth/logout")) return jsonOk(null)
     if (url.endsWith("/api/v1/auth/demo-login") || url.endsWith("/api/v1/auth/me")) {
       return jsonOk({ user, workspaces: [workspace] })
     }
@@ -744,6 +745,118 @@ test("多代理切换、会话级能力透传（session-state/elicitation/mode/c
       if (fallbackSend.ok) assert.equal(fallbackSend.value.status, "accepted")
     }
     await minimalIpc.dispose()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("显式原生选择本机文件与本机目录可作为 ACP resource_link 发送，未授权路径及登出后立即失效", async () => {
+  const { realpath, writeFile } = await import("node:fs/promises")
+  const { pathToFileURL } = await import("node:url")
+  const root = await mkdtemp(join(tmpdir(), "local-attach-grants-"))
+  try {
+    const workdir = join(root, "ws")
+    const outsideDir = join(root, "outside-dir")
+    const outsideFile = join(root, "outside-note.md")
+    const ungrantedFile = join(root, "ungranted.txt")
+    await Promise.all([mkdir(workdir, { recursive: true }), mkdir(outsideDir, { recursive: true })])
+    await Promise.all([
+      writeFile(outsideFile, "# external note\n", "utf8"),
+      writeFile(ungrantedFile, "secret\n", "utf8"),
+    ])
+
+    const identity = await createSignedInState(USER_A)
+    const { window } = createFakeWindow()
+    const sentPrompts: Array<{ blocks: unknown }> = []
+    let turnCounter = 0
+    const runtime: LocalExecutionRuntime = {
+      host: {
+        bind: async () => ({
+          getAvailability: () => ({ available: true as const }),
+          send: () => ({ status: "accepted" as const, turnId: `turn-${++turnCounter}` }),
+          sendPrompt: (blocks: unknown) => {
+            sentPrompts.push({ blocks })
+            return { status: "accepted" as const, turnId: `turn-${++turnCounter}` }
+          },
+          cancel: () => true,
+          answerPermission: () => true,
+          subscribe: () => () => {},
+          close: async () => {},
+        }) as unknown as BoundSession,
+        subscribeDiagnostics: () => () => {},
+        close: async () => {},
+      },
+    }
+
+    const ipc = createLocalExecutionCoordinator(window, identity, null, runtime)
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    await ipc.captureDirectorySelection()(workdir)
+    const prep1 = await ipc.prepare(scope, workdir)
+    assert.equal(prep1.ok, true)
+    if (!prep1.ok) return
+
+    // 未经过原生选择器授权的外部绝对路径必须被拒绝
+    const rejectedUngranted = await ipc.send(scope, prep1.value.bindingId, REQ_ID, "未授权文件", [], [ungrantedFile])
+    assert.equal(rejectedUngranted.ok, false)
+
+    // 通过选择器授权本机文件与本机目录
+    const grantedFiles = await ipc.captureAttachmentSelections("file")([outsideFile])
+    const grantedDirs = await ipc.captureAttachmentSelections("directory")([outsideDir])
+    assert.equal(grantedFiles.length, 1)
+    assert.equal(grantedDirs.length, 1)
+    assert.equal(grantedDirs[0]?.endsWith("/"), true)
+
+    const sentOk = await ipc.send(
+      scope,
+      prep1.value.bindingId,
+      REQ_ID,
+      "对照外部材料分析",
+      [],
+      [...grantedFiles, ...grantedDirs],
+    )
+    assert.equal(sentOk.ok, true)
+    assert.equal(sentPrompts.length, 1)
+
+    const canonicalOutsideFile = await realpath(outsideFile)
+    const canonicalOutsideDir = await realpath(outsideDir)
+    assert.deepEqual(sentPrompts[0]?.blocks, [
+      { type: "text", text: "对照外部材料分析" },
+      {
+        type: "resource_link",
+        uri: pathToFileURL(canonicalOutsideFile).href,
+        name: "outside-note.md",
+        title: canonicalOutsideFile,
+        size: Buffer.byteLength("# external note\n"),
+      },
+      {
+        type: "resource_link",
+        uri: pathToFileURL(canonicalOutsideDir).href,
+        name: "outside-dir/",
+        title: canonicalOutsideDir,
+        mimeType: "inode/directory",
+      },
+    ])
+
+    // 登出后重新登录同账号，先前会话的本机附件授权必须立即失效
+    await identity.signOut()
+    const relogin = await identity.signIn("80000001")
+    assert.equal(relogin.ok, true)
+    await ipc.captureDirectorySelection()(workdir)
+    const prep2 = await ipc.prepare(scope, workdir)
+    assert.equal(prep2.ok, true)
+    if (!prep2.ok) return
+
+    const afterSignOut = await ipc.send(
+      scope,
+      prep2.value.bindingId,
+      REQ_ID,
+      "尝试复用旧授权",
+      [],
+      [...grantedFiles, ...grantedDirs],
+    )
+    assert.equal(afterSignOut.ok, false)
+
+    await ipc.dispose()
   } finally {
     await rm(root, { recursive: true, force: true })
   }

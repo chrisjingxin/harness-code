@@ -688,7 +688,7 @@ export function useLocalExecution(
     async send(input) {
       const attachments = extractFileAttachments(input.text, input.attachmentIds)
       if (input.attachmentIds.length > attachments.length && attachments.length === 0) {
-        return { status: "rejected", message: "仅支持添加当前工作区内的相对路径文件附件。" }
+        return { status: "rejected", message: "仅支持添加有效的本机文件或目录附件。" }
       }
       const source = current.current.target
       const scope = source?.scope

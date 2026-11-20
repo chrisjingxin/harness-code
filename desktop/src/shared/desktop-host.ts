@@ -16,6 +16,10 @@ export interface WindowState {
 export interface DesktopHost {
   /** 单选目录；取消返回 null，路径仅用于显示，不构成后续文件授权。 */
   chooseDirectory(): Promise<string | null>
+  /** 多选本机文件作为上下文附件；取消返回空数组。 */
+  chooseFiles(): Promise<readonly string[]>
+  /** 多选本机目录作为上下文附件（不切换工作目录）；取消返回空数组。 */
+  chooseContextDirectories(): Promise<readonly string[]>
   getWindowState(): Promise<WindowState>
   setThemeMode(mode: ThemeMode): Promise<WindowState>
   /** 按动作调整实际窗口缩放，主进程限制 80%～150%。 */

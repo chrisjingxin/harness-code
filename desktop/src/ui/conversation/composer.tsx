@@ -6,14 +6,12 @@
 import {
   IconAlertTriangle,
   IconApps,
-  IconArrowLeft,
   IconArrowUp,
   IconAt,
   IconBook,
   IconCheck,
   IconChecklist,
   IconChevronDown,
-  IconChevronRight,
   IconCpu,
   IconFolder,
   IconGitBranch,
@@ -40,8 +38,9 @@ import {
   extractMentionToken,
   insertMentionTrigger,
   mentionWindow,
+  removeLeadingCommandOnBackspace,
   replaceMentionToken,
-  toggleAttachmentPath,
+  splitComposerHighlightSegments,
 } from "./mention-policy.js"
 import type {
   ConversationActions,
@@ -60,8 +59,7 @@ import type {
 } from "./types.js"
 
 type BrowseState = { targetKey: string; tokenStart: number; baseQuery: string; directory: string }
-type FilePickerState = { readonly mode: "files" | "folder"; readonly query: string; readonly directory: string }
-type ComposerPopover = null | "context-menu" | "file-picker" | "directory" | "git" | "command" | "agent-model" | `control:${string}`
+type ComposerPopover = null | "context-menu" | "directory" | "git" | "command" | "agent-model" | `control:${string}`
 type CandidateState<T> = { key: string; result?: T }
 type MentionCandidate = ConversationFileCandidate | ConversationCollaborationCandidate
 type MentionGroup = "file" | "knowledge" | "conversation" | "task" | "member"
@@ -132,13 +130,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const addWrapRef = useRef<HTMLDivElement | null>(null)
   const addTriggerRef = useRef<HTMLButtonElement | null>(null)
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
-  const filePickerRef = useRef<HTMLDivElement | null>(null)
-  const filePickerInputRef = useRef<HTMLInputElement | null>(null)
   const composing = useRef(false)
   const [isComposing, setIsComposing] = useState(false)
   const pendingCaret = useRef<number | null>(null)
   const wasEditableRef = useRef(false)
-  // 单一互斥浮层状态：同时只允许打开一个弹出层，避免顶部菜单、+ 菜单、文件选择器、@ 与 / 彼此遮挡。
+  // 单一互斥浮层状态：同时只允许打开一个弹出层，避免顶部菜单、+ 菜单、@ 与 / 彼此遮挡。
   const [openPopover, setOpenPopover] = useState<ComposerPopover>(null)
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -148,13 +144,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const [collaborationState, setCollaborationState] = useState<CandidateState<ConversationCollaborationCandidateResult> | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [windowStart, setWindowStart] = useState(0)
-  const [filePicker, setFilePicker] = useState<FilePickerState | null>(null)
-  const [filePickerState, setFilePickerState] = useState<CandidateState<ConversationFileCandidateResult> | null>(null)
-  const [filePickerSelected, setFilePickerSelected] = useState<string | null>(null)
-  const [filePickerWindowStart, setFilePickerWindowStart] = useState(0)
   const [hint, setHint] = useState("")
   const requestSequence = useRef(0)
-  const filePickerSequence = useRef(0)
   const requestFiles = useRef(actions.onRequestFileCandidates)
   requestFiles.current = actions.onRequestFileCandidates
   const requestCollaboration = useRef(actions.onRequestCollaborationCandidates)
@@ -162,7 +153,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const commandOpen = openPopover === "command"
   const contextMenuOpen = openPopover === "context-menu"
-  const filePickerOpen = openPopover === "file-picker" && filePicker !== null
   const directoryOpen = openPopover === "directory"
   const gitOpen = openPopover === "git"
 
@@ -175,27 +165,17 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const query = token ? token.query.slice(validBrowse?.baseQuery.length ?? 0) : ""
   const tokenText = token ? draft.text.slice(token.start, token.end) : ""
   const showCollaboration = Boolean(target && !directory && actions.onRequestCollaborationCandidates && actions.onSelectCollaborationCandidate)
-  const mentionVisible = Boolean(visible && !commandOpen && !filePickerOpen && token && dismissed !== tokenKey && actions.onPersonalChange)
+  const mentionVisible = Boolean(visible && !commandOpen && token && dismissed !== tokenKey && actions.onPersonalChange)
   const requestKey = mentionVisible && token
     ? JSON.stringify([targetKey, draft.revision, token.start, token.end, tokenText, query, directory, showCollaboration, Boolean(actions.onRequestFileCandidates)])
     : ""
   const currentRequest = useRef(requestKey)
   currentRequest.current = requestKey
-  const filePickerRequestKey = visible && filePickerOpen && filePicker && target && actions.onRequestFileCandidates
-    ? JSON.stringify([targetKey, filePicker.mode, filePicker.directory, filePicker.query])
-    : ""
-  const currentFilePickerRequest = useRef(filePickerRequestKey)
-  currentFilePickerRequest.current = filePickerRequestKey
   const matchedCommands = filterCommands(model.commands, draft.text)
   const fileResult = fileState?.key === requestKey ? fileState.result : undefined
   const collaborationResult = showCollaboration && collaborationState?.key === requestKey ? collaborationState.result : undefined
   const files = fileResult?.status === "ready" ? fileResult.items.slice(0, 1000) : []
   const collaborationItems = collaborationResult?.status === "ready" ? collaborationResult.items.slice(0, 1000) : []
-  const filePickerResult = filePickerState?.key === filePickerRequestKey ? filePickerState.result : undefined
-  const filePickerItems = filePickerResult?.status === "ready" ? filePickerResult.items.slice(0, 1000) : []
-  const filePickerIndex = Math.max(0, filePickerItems.findIndex(item => item.relativePath === filePickerSelected))
-  const filePickerWindow = mentionWindow(filePickerIndex, filePickerWindowStart, filePickerItems.length)
-  const visibleFilePickerItems = filePickerItems.slice(filePickerWindow.start, filePickerWindow.end)
 
   // 将所有候选按语义分组排列（文件 → 知识库 → 会话 → 任务 → 成员），确保视觉分组与键盘上下键顺序完全一致。
   const knowledgeItems = collaborationItems.filter(item => item.kind === "knowledge")
@@ -258,11 +238,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const openExclusivePopover = (next: ComposerPopover) => {
     setOpenPopover(next)
-    if (next !== "file-picker") {
-      filePickerSequence.current += 1
-      setFilePicker(null)
-      setFilePickerState(null)
-    }
     if (next !== null && token) {
       setDismissed(tokenKey)
       invalidateCandidates()
@@ -291,9 +266,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   useEffect(() => {
     setOpenPopover(null)
-    filePickerSequence.current += 1
-    setFilePicker(null)
-    setFilePickerState(null)
   }, [targetKey])
 
   useEffect(() => {
@@ -334,37 +306,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }, [requestKey])
 
   useEffect(() => {
-    if (!filePickerRequestKey || !filePicker || !target) return
-    const requestId = ++filePickerSequence.current
-    let active = true
-    setFilePickerSelected(null)
-    setFilePickerWindowStart(0)
-    const isCurrent = () => active && filePickerSequence.current === requestId && currentFilePickerRequest.current === filePickerRequestKey
-    const loadFiles = requestFiles.current
-    setFilePickerState({ key: filePickerRequestKey })
-    if (loadFiles) {
-      void Promise.resolve().then(() => {
-        if (isCurrent()) return loadFiles(scope, target, {
-          requestId, draftRevision: draft.revision, tokenStart: 0, tokenEnd: 0, query: filePicker.query, directory: filePicker.directory,
-        })
-      }).then(result => {
-        if (result && isCurrent()) setFilePickerState({ key: filePickerRequestKey, result })
-      }).catch(() => {
-        if (isCurrent()) setFilePickerState({ key: filePickerRequestKey, result: { status: "error", items: [], truncated: false, message: "文件候选暂不可用。" } })
-      })
-    }
-    return () => { active = false }
-  }, [filePickerRequestKey])
-
-  useEffect(() => {
     if (visible) return
     requestSequence.current += 1
-    filePickerSequence.current += 1
     setFileState(null)
     setCollaborationState(null)
     setOpenPopover(null)
-    setFilePicker(null)
-    setFilePickerState(null)
     setBrowse(null)
     setMentionTab("all")
     setDismissed(null)
@@ -378,8 +324,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       gitPopoverRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
     } else if (openPopover === "context-menu") {
       contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
-    } else if (openPopover === "file-picker") {
-      filePickerInputRef.current?.focus()
     }
   }, [openPopover])
 
@@ -397,12 +341,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       }
       if (openPopover === "context-menu") {
         if (!addWrapRef.current?.contains(targetNode)) setOpenPopover(null)
-        return
-      }
-      if (openPopover === "file-picker") {
-        if (!filePickerRef.current?.contains(targetNode) && !addWrapRef.current?.contains(targetNode)) {
-          openExclusivePopover(null)
-        }
         return
       }
       if (rootRef.current?.contains(targetNode)) return
@@ -503,6 +441,22 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     setWindowStart(mentionWindow(next, candidateWindow.start, filteredEntries.length).start)
   }
 
+  const insertDirectoryMention = (item: ConversationFileCandidate) => {
+    if (!token || !mentionVisible || !actions.onPersonalChange || item.kind !== "directory") return
+    const dirPath = `${item.relativePath.replace(/\/+$/, "")}/`
+    const next = replaceMentionToken(draft.text, token, dirPath)
+    invalidateCandidates()
+    setDismissed(null)
+    setBrowse(null)
+    pendingCaret.current = next.cursor
+    actions.onPersonalChange(scope, {
+      kind: "draft-text",
+      text: next.text,
+      selectionStart: next.cursor,
+      selectionEnd: next.cursor,
+    })
+  }
+
   const selectCommand = (item: ConversationMenuItemView | undefined) => {
     if (!item || !item.availability.enabled || !actions.onCommand) return
     setOpenPopover(null)
@@ -510,86 +464,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     textareaRef.current?.focus()
   }
 
-  const closeFilePicker = () => {
-    filePickerSequence.current += 1
-    setOpenPopover(null)
-    setFilePicker(null)
-    setFilePickerState(null)
-    textareaRef.current?.focus()
-  }
-
-  const selectFilePickerCandidate = (item: ConversationFileCandidate) => {
-    if (item.kind === "directory") {
-      setFilePicker(prev => prev ? { ...prev, directory: item.relativePath, query: "" } : prev)
-      setFilePickerSelected(null)
-      setFilePickerWindowStart(0)
-      return
-    }
-    if (!canEdit || !actions.onPersonalChange) return
-    actions.onPersonalChange(scope, {
-      kind: "draft-attachments",
-      attachmentIds: toggleAttachmentPath(draft.attachmentIds, item.relativePath),
-    })
-    closeFilePicker()
-  }
-
-  const moveFilePickerCandidate = (delta: number) => {
-    const next = clamp(filePickerIndex + delta, filePickerItems.length)
-    setFilePickerSelected(filePickerItems[next] ? filePickerItems[next].relativePath : null)
-    setFilePickerWindowStart(mentionWindow(next, filePickerWindow.start, filePickerItems.length).start)
-  }
-
-  const handleFilePickerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) return
-    if (event.key === "Escape") {
-      event.preventDefault()
-      event.stopPropagation()
-      closeFilePicker()
-      return
-    }
-    if (["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(event.key)) {
-      event.preventDefault()
-      event.stopPropagation()
-      moveFilePickerCandidate(event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : event.key === "PageDown" ? 8 : -8)
-      return
-    }
-    if (event.key === "ArrowLeft" && filePicker?.directory && !filePicker.query) {
-      event.preventDefault()
-      event.stopPropagation()
-      setFilePicker(prev => prev ? { ...prev, directory: parentDirectory(prev.directory), query: "" } : prev)
-      return
-    }
-    const activeItem = filePickerItems[filePickerIndex]
-    if (event.key === "ArrowRight" && activeItem?.kind === "directory" && !filePicker?.query) {
-      event.preventDefault()
-      event.stopPropagation()
-      selectFilePickerCandidate(activeItem)
-      return
-    }
-    if (event.key === "Enter") {
-      event.preventDefault()
-      event.stopPropagation()
-      if (activeItem) selectFilePickerCandidate(activeItem)
-    }
-  }
-
   const handleContextMenuSelect = (item: ConversationContextMenuItem) => {
     if (!item.availability.enabled) return
-    if (item.behavior === "files") {
-      openExclusivePopover("file-picker")
-      setFilePicker({ mode: "files", query: "", directory: "" })
-      return
-    }
-    if (item.behavior === "folder") {
-      if (actions.onRequestFileCandidates && target) {
-        openExclusivePopover("file-picker")
-        setFilePicker({ mode: "folder", query: "", directory: "" })
-      } else {
-        openExclusivePopover(null)
-        actions.onContextMenuAction?.(scope, item.id)
-      }
-      return
-    }
     if (item.behavior === "mention") {
       openExclusivePopover(null)
       if (!actions.onPersonalChange) return
@@ -619,6 +495,33 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) return
     if (event.key === "Tab" && (event.ctrlKey || event.metaKey || event.altKey)) return
+    if (
+      event.key === "Backspace"
+      && !event.shiftKey
+      && !event.metaKey
+      && !event.ctrlKey
+      && !event.altKey
+      && !commandOpen
+      && !mentionVisible
+      && actions.onPersonalChange
+    ) {
+      const removed = removeLeadingCommandOnBackspace(draft.text, draft.selectionStart, draft.selectionEnd)
+      if (removed) {
+        event.preventDefault()
+        event.stopPropagation()
+        invalidateCandidates()
+        setDismissed(null)
+        setHint("")
+        pendingCaret.current = removed.cursor
+        actions.onPersonalChange(scope, {
+          kind: "draft-text",
+          text: removed.text,
+          selectionStart: removed.cursor,
+          selectionEnd: removed.cursor,
+        })
+        return
+      }
+    }
     if (commandOpen && !event.shiftKey) {
       if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Tab", "Escape"].includes(event.key)) {
         event.preventDefault()
@@ -710,8 +613,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const fullAccess = model.controls.some(control => control.kind === "permission"
     && control.items.some(item => item.id === control.selectedId && item.permissionKind === "full"))
 
-  const highlightSegments = !isComposing ? splitComposerHighlightSegments(draft.text) : null
-  const showHighlight = Boolean(highlightSegments?.some(segment => segment.kind === "mention"))
+  const commandHighlightIds = !commandOpen ? model.commands.map(item => item.id) : undefined
+  const highlightSegments = !isComposing
+    ? splitComposerHighlightSegments(draft.text, commandHighlightIds ? { commandIds: commandHighlightIds } : undefined)
+    : null
+  const showHighlight = Boolean(highlightSegments?.some(segment => segment.kind !== "plain"))
 
   const showCategoryEmpty = () => {
     if (activeTab === "file") {
@@ -924,9 +830,13 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         const item = model.attachments.find(attachment => attachment.id === id)
         if (!item) return <span key={id}>附件资料暂不可用</span>
         return (
-          <span key={item.id} title={item.path ?? item.label}>
+          <span key={item.id} data-kind={item.kind ?? "file"} title={item.path ?? item.label}>
             <span className="wb-composer-attachment-icon" aria-hidden="true">
-              {item.path ? <FileTypeIcon name={item.label} size={13} /> : <IconPaperclip size={13} />}
+              {item.kind === "directory"
+                ? <IconFolder size={13} />
+                : item.path
+                  ? <FileTypeIcon name={item.label} size={13} />
+                  : <IconPaperclip size={13} />}
             </span>
             <span className="wb-composer-attachment-label">{item.label}</span>
             <button
@@ -965,9 +875,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         {showHighlight && highlightSegments ? (
           <div ref={backdropRef} className="wb-composer-backdrop" aria-hidden="true">
             {highlightSegments.map((segment, index) => (
-              segment.kind === "mention"
-                ? <mark key={index} className="wb-composer-inline-mention">{segment.text}</mark>
-                : <span key={index}>{segment.text}</span>
+              segment.kind === "command"
+                ? <mark key={index} className="wb-composer-inline-command">{segment.text}</mark>
+                : segment.kind === "mention"
+                  ? <mark key={index} className="wb-composer-inline-mention">{segment.text}</mark>
+                  : <span key={index}>{segment.text}</span>
             ))}
             {draft.text.endsWith("\n") ? " " : null}
           </div>
@@ -1146,112 +1058,6 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             ))}
           </div>
         ) : null}
-        {filePickerOpen && filePicker ? (
-          <div
-            ref={filePickerRef}
-            className="wb-file-picker-menu"
-            role="dialog"
-            aria-label={filePicker.mode === "folder" ? "浏览目录添加文件" : "添加工作区文件"}
-            onKeyDown={handleFilePickerKeyDown}
-            onWheel={event => {
-              if (!filePickerItems.length) return
-              event.preventDefault()
-              moveFilePickerCandidate(event.deltaY >= 0 ? 1 : -1)
-            }}
-          >
-            <div className="wb-file-picker-head">
-              {filePicker.directory ? (
-                <button
-                  type="button"
-                  className="wb-file-picker-back"
-                  aria-label="返回上级目录"
-                  title="返回上级目录"
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={() => setFilePicker(prev => prev ? { ...prev, directory: parentDirectory(prev.directory), query: "" } : prev)}
-                >
-                  <IconArrowLeft size={13} aria-hidden="true" />
-                  <span>上级</span>
-                </button>
-              ) : null}
-              <label className="wb-file-picker-search">
-                <IconSearch size={14} aria-hidden="true" />
-                <input
-                  ref={filePickerInputRef}
-                  type="search"
-                  aria-label="搜索工作区文件"
-                  placeholder={filePicker.mode === "folder" ? "筛选当前目录或搜索文件…" : "搜索工作区文件…"}
-                  value={filePicker.query}
-                  onChange={event => {
-                    const nextQuery = event.currentTarget.value
-                    setFilePicker(prev => prev ? { ...prev, query: nextQuery } : prev)
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                className="wb-file-picker-close"
-                aria-label="关闭文件选择器"
-                onMouseDown={event => event.preventDefault()}
-                onClick={closeFilePicker}
-              >
-                <IconX size={14} aria-hidden="true" />
-              </button>
-            </div>
-            {filePicker.directory ? (
-              <div className="wb-file-picker-crumb" onMouseDown={event => event.preventDefault()}>
-                <IconFolder size={12} aria-hidden="true" />
-                <span>{filePicker.directory}</span>
-              </div>
-            ) : null}
-            <div className="wb-mention-list" role="listbox" aria-label="工作区文件列表">
-              {!target || !actions.onRequestFileCandidates ? (
-                <p className="wb-composer-menu-empty">当前会话没有可用的工作区目录。</p>
-              ) : !filePickerResult ? (
-                <p className="wb-composer-menu-empty">正在查找工作区文件…</p>
-              ) : filePickerResult.status !== "ready" ? (
-                <p className="wb-composer-menu-empty">{filePickerResult.message || "文件候选不可用"}</p>
-              ) : filePickerItems.length === 0 ? (
-                <p className="wb-composer-menu-empty">{filePicker.query ? "没有匹配的工作区文件" : "当前目录为空"}</p>
-              ) : visibleFilePickerItems.map((item, localIndex) => {
-                const index = filePickerWindow.start + localIndex
-                const isSelected = index === filePickerIndex
-                const attached = item.kind !== "directory" && draft.attachmentIds.includes(item.relativePath)
-                return (
-                  <button
-                    key={item.relativePath}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    data-selected={isSelected}
-                    className="wb-mention-item"
-                    title={item.relativePath}
-                    onMouseDown={event => event.preventDefault()}
-                    onMouseEnter={() => setFilePickerSelected(item.relativePath)}
-                    onClick={() => selectFilePickerCandidate(item)}
-                  >
-                    <span className="wb-mention-icon" aria-hidden="true">
-                      {item.kind === "directory"
-                        ? <IconFolder size={14} />
-                        : <FileTypeIcon name={item.relativePath.split("/").at(-1) ?? item.relativePath} size={14} />}
-                    </span>
-                    <HighlightedPath item={item} />
-                    {item.kind === "directory" ? (
-                      <IconChevronRight size={13} className="wb-file-picker-dir-arrow" aria-hidden="true" />
-                    ) : attached ? (
-                      <IconCheck size={13} className="wb-file-picker-attached" aria-hidden="true" />
-                    ) : null}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="wb-mention-footer">
-              <span>
-                {filePickerItems.length ? `${filePickerIndex + 1}/${filePickerResult?.total ?? filePickerItems.length}` : "添加文件附件"}
-              </span>
-              <span className="wb-mention-footer-hint">↵ 附加文件 · ↑↓ 选择 · Esc 关闭</span>
-            </div>
-          </div>
-        ) : null}
         {mentionVisible && token ? (
           <div className="wb-mention-menu" aria-label={showCollaboration ? "提及与引用菜单" : "文件提及菜单"} onWheel={event => { event.preventDefault(); moveCandidate(event.deltaY >= 0 ? 1 : -1) }}>
             {showCollaboration && !directory ? (
@@ -1309,7 +1115,19 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                             </span>
                             <HighlightedPath item={item} />
                           </button>
-                          {item.kind !== "directory" ? (
+                          {item.kind === "directory" ? (
+                            <span className="wb-mention-open">
+                              <button
+                                type="button"
+                                title={`插入目录提及 @${item.relativePath.replace(/\/+$/, "")}/`}
+                                aria-label={`引用目录 ${item.relativePath}`}
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => insertDirectoryMention(item)}
+                              >
+                                引用目录
+                              </button>
+                            </span>
+                          ) : (
                             <span className="wb-mention-open">
                               <button
                                 type="button"
@@ -1322,7 +1140,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                                 分屏查看
                               </button>
                             </span>
-                          ) : null}
+                          )}
                         </>
                       ) : (
                         <button
@@ -1351,7 +1169,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             </div>
             <div className="wb-mention-footer">
               <span>@ /{directory ? ` ${directory}` : ""}{filteredEntries.length ? ` · ${candidateIndex + 1}/${candidateTotal}` : ""}</span>
-              <span className="wb-mention-footer-hint">↵ 插入引用 · ↑↓ 选择 · Esc 关闭</span>
+              <span className="wb-mention-footer-hint">↵ 展开目录/插入 · ↑↓ 选择 · Esc 关闭</span>
               {fileResult?.truncated || (fileResult?.items.length ?? 0) > 1000 ? <span> · 结果已截断（最多 1000 项）</span> : null}
             </div>
           </div>
@@ -1607,30 +1425,3 @@ function filterCommands(items: readonly ConversationMenuItemView[], text: string
 
 function clamp(index: number, count: number): number { return count ? Math.max(0, Math.min(count - 1, index)) : 0 }
 function parentDirectory(path: string): string { const index = path.lastIndexOf("/"); return index < 0 ? "" : path.slice(0, index) }
-
-type ComposerHighlightSegment = { readonly kind: "plain" | "mention"; readonly text: string }
-
-/** 将输入文本切分为普通文本与 `@引用` 词元，避免误伤邮箱等内部 `@`。 */
-function splitComposerHighlightSegments(text: string): ComposerHighlightSegment[] {
-  if (!text.includes("@")) return [{ kind: "plain", text }]
-  const segments: ComposerHighlightSegment[] = []
-  const pattern = /(^|\s)(@"(?:[^"\n]*)"|@[^\s@]+)/g
-  let cursor = 0
-  for (const match of text.matchAll(pattern)) {
-    const start = match.index ?? 0
-    const leadingSpace = match[1] ?? ""
-    const mention = match[2] ?? ""
-    const mentionStart = start + leadingSpace.length
-    if (mentionStart > cursor) {
-      segments.push({ kind: "plain", text: text.slice(cursor, mentionStart) })
-    }
-    if (mention) {
-      segments.push({ kind: "mention", text: mention })
-    }
-    cursor = mentionStart + mention.length
-  }
-  if (cursor < text.length) {
-    segments.push({ kind: "plain", text: text.slice(cursor) })
-  }
-  return segments
-}

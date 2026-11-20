@@ -19,9 +19,13 @@ export {
   parseAnnotatedUserMessage,
 } from "./annotations-codec.js"
 export {
+  applyLeadingSlashCommand,
   insertMentionTrigger,
-  toggleAttachmentPath,
+  mergeAttachmentPaths,
+  removeLeadingCommandOnBackspace,
+  splitComposerHighlightSegments,
 } from "./mention-policy.js"
+export type { ComposerHighlightSegment } from "./mention-policy.js"
 export type {
   ConversationActions,
   ConversationAvailability,

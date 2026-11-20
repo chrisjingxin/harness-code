@@ -55,6 +55,7 @@ import {
   type QueuedPrompt,
 } from "../shared/index.js"
 import {
+  createLocalAttachmentGrantStore,
   createLocalDirectoryGrantStore,
   inspectDirectory,
   resolveAttachmentBlocks,
@@ -339,6 +340,7 @@ export function createLocalExecutionCoordinator(
   }
 
   const grantStore = createLocalDirectoryGrantStore(options?.grantsDir, isCurrent, options?.origin ?? "")
+  const attachmentGrantStore = createLocalAttachmentGrantStore(isCurrent)
 
   function enqueue<T>(action: () => Promise<T>): Promise<T> {
     const result = tail.then(action)
@@ -377,6 +379,7 @@ export function createLocalExecutionCoordinator(
 
   function reset(): Promise<void> {
     grantStore.clearMemory()
+    attachmentGrantStore.clearMemory()
     return enqueue(async () => { await Promise.all([...bindings].map(([key, binding]) => release(key, binding))) })
   }
 
@@ -460,7 +463,11 @@ export function createLocalExecutionCoordinator(
     const { requestId, text, referenceIds: ids, attachments } = item
     let attachmentBlocks: readonly LocalAcpPromptBlock[] = []
     if (attachments.length > 0) {
-      const resolvedAttachments = await resolveAttachmentBlocks(binding.directory, attachments)
+      const resolvedAttachments = await resolveAttachmentBlocks(
+        binding.directory,
+        attachments,
+        rawPath => attachmentGrantStore.getGrant(login, rawPath),
+      )
       if ("rejectedReason" in resolvedAttachments) {
         return ok({ status: "rejected", reason: resolvedAttachments.rejectedReason })
       }
@@ -868,6 +875,12 @@ export function createLocalExecutionCoordinator(
     captureDirectorySelection() {
       const login = identity.personalIdentity()
       return (path: string) => grantStore.captureSelection(login, path)
+    },
+
+    /** 在弹出本机文件/目录选择器前捕获登录身份，授权所选路径供当前登录周期内随消息附带。 */
+    captureAttachmentSelections(kind: "file" | "directory") {
+      const login = identity.personalIdentity()
+      return (paths: readonly string[]) => attachmentGrantStore.captureSelections(login, paths, kind)
     },
 
     /** 旧记录只提供显示路径。用户在原生窗口确认后才建立可以恢复的本机依据。 */

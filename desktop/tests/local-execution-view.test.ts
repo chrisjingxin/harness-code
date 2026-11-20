@@ -651,3 +651,11 @@ test("extractFileAttachments 对带注释消息跳过引用与批注里的 @ 包
   ])
   assert.deepEqual(extractFileAttachments(slashComposed), ["src/only-this.ts"])
 })
+
+test("extractFileAttachments 允许显式本机文件与本机目录附件，同时保持正文越界令牌拦截", () => {
+  const extracted = extractFileAttachments(
+    "检查 @/etc/passwd、@../secret.txt 和 @src/ 后对照外部资料",
+    ["/Users/dev/spec.md", "/Users/dev/refs/", "/Users/dev/refs/"],
+  )
+  assert.deepEqual(extracted, ["/Users/dev/spec.md", "/Users/dev/refs/"])
+})

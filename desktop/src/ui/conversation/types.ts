@@ -261,7 +261,7 @@ export interface ConversationContextMenuItem {
   readonly id: string
   readonly label: string
   readonly icon: ConversationContextMenuIcon
-  readonly behavior: "files" | "folder" | "mention" | "command" | "custom"
+  readonly behavior: "mention" | "command" | "custom"
   readonly badge?: string
   readonly badgeTone?: "default" | "accent" | "danger"
   readonly availability: ConversationAvailability
@@ -300,6 +300,7 @@ export interface ConversationComposerView {
     readonly id: string
     readonly label: string
     readonly path?: string
+    readonly kind?: "file" | "directory"
     readonly availability: ConversationAvailability
   }[]
   readonly contextBar?: ConversationComposerContextBar
