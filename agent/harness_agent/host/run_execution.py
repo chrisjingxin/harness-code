@@ -48,6 +48,7 @@ from harness_agent.runtime.execution_stream import (
     resolve_tool_stream_id,
 )
 from harness_agent.runtime.managed_agent_executor import (
+    FinalOutputGateDecision,
     ManagedAgentExecutionError,
     ManagedAgentExecutor,
     ManagedAgentRequest,
@@ -267,7 +268,10 @@ class BuildRunAdapter:
 
         async def acquire_runtime():
             """将 Host runtime provider 收敛到 Managed executor 的唯一入口。"""
-            return await port.resolve_runtime(run)
+            runtime = await port.resolve_runtime(run)
+            if steering is not None and runtime.agent is not None:
+                steering.record = record_steer
+            return runtime
 
         async def start_execution(_execution_ref: str) -> None:
             """由 executor 触发 root registry 进入 running，adapter 不接触 registry。"""
@@ -288,6 +292,25 @@ class BuildRunAdapter:
             await port.commit_staged_approval_rules(run)
 
         stream_input: object = run.message
+        steering = getattr(getattr(run.start, "input", None), "steering", None)
+
+        async def record_steer(request_id: str, text: str) -> None:
+            """在同一 Run 的 transcript 中追加追发，保留用户原文。"""
+            _flush_assistant_transcript(run)
+            port.append_transcript(run, TranscriptAppend(
+                thread_id=run.ref.thread_id,
+                record_id=f"run:{run.ref.run_id}:steer:{request_id}",
+                kind="user",
+                content=text,
+                run_id=run.ref.run_id,
+                execution_id=run.root_execution_ref.execution_id,
+            ))
+            await port.flush_transcript(run)
+
+        async def continue_if_steered(_output: object) -> FinalOutputGateDecision:
+            text = await steering.consume(closing_if_empty=True)
+            return FinalOutputGateDecision("continue", text) if text is not None else FinalOutputGateDecision("allow")
+
         goal_binding = run.preparation.goal_binding
         if goal_binding is not None and goal_binding.goal_backed:
             from langchain_core.messages import HumanMessage
@@ -320,6 +343,7 @@ class BuildRunAdapter:
             diagnostic_log=getattr(run, "diagnostic_log", None),
             timing=getattr(run, "timing", None),
             on_resume_consumed=on_resume_consumed,
+            final_output_gate=continue_if_steered if steering is not None else None,
             usage_ledger=getattr(run, "usage_ledger", None),
             model_profile_id=(
                 run.execution_binding.actual_primary.profile_id
@@ -333,6 +357,9 @@ class BuildRunAdapter:
             if exc.code == "RUN_CANCELLED":
                 raise asyncio.CancelledError from exc
             raise _run_error(exc.code, exc.message, retryable=exc.retryable) from exc
+        finally:
+            if steering is not None:
+                steering.close()
 
 
 class DirectShellRunAdapter:

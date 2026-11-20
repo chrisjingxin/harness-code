@@ -272,6 +272,7 @@ export class AcpAgentRegistry {
           : {}),
         restorePolicy: descriptor.hostHints.restorePolicy ?? "fallback-new",
         extraClientCapabilitiesMeta: descriptor.hostHints.extraClientCapabilitiesMeta,
+        promptTurnIdMetaKey: descriptor.hostHints.promptTurnIdMetaKey,
         sessionLoadReplayIdleMs: descriptor.hostHints.sessionLoadReplayIdleMs,
       }
       host = new LocalAcpHost(resolution.command, hostOptions)

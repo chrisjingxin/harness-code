@@ -33,6 +33,7 @@ import {
   type FinalizedTurn,
 } from "@workbench/collaboration-client"
 import {
+  isSteerText,
   localExecutionKey,
   MAX_QUEUED_PROMPTS,
   parseFixedReference,
@@ -47,6 +48,7 @@ import {
   type LocalExecutionReceipt,
   type LocalExecutionScope,
   type LocalExecutionSessionState,
+  type LocalSteerInput,
   type PromptQueueAction,
   type PromptQueueRecord,
   type PromptQueueView,
@@ -60,7 +62,7 @@ import {
   type DirectoryGrant,
 } from "./local-directory-grants.js"
 import {
-  parseHarnessAgentCapabilitiesMeta, parseHarnessApprovalMeta, parseHarnessCommandMeta,
+  extractHarnessWorkflowOption, parseHarnessAgentCapabilitiesMeta, parseHarnessApprovalMeta, parseHarnessCommandMeta,
   parseHarnessParentMeta, parseHarnessRunMeta,
 } from "@workbench/harness-acp"
 import type { PersonalStore } from "./personal-store.js"
@@ -101,6 +103,8 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
   needsSegmentBreak?: boolean
   checkpoint?: CheckpointStart
   ephemeral?: boolean
+  steering?: Promise<"accepted" | "rejected" | "unknown">
+  steerKind?: "harness" | "kiro"
   toolStates: Map<string, LocalAcpTool>
   finalizedTools: Map<string, FinalizedToolSummary>
 }
@@ -111,6 +115,7 @@ type Binding = {
   readonly directory: DirectoryGrant
   readonly providerId: string
   readonly providerReason?: string
+  readonly clientMeta?: LocalAcpMeta
   readonly session: LocalAcpSession
   readonly unsubscribe: () => void
   readonly unsubscribeSession?: () => void
@@ -119,6 +124,7 @@ type Binding = {
   checkpointUnsafe?: boolean
   queueArmed?: boolean
   queuePause?: true | string
+  shareTail?: Promise<void>
 }
 
 const unavailableMessages: Record<UnavailableReason | "empty-text", string> = {
@@ -162,6 +168,25 @@ const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号自己�
 
 const MAX_FINALIZED_TOOLS = 50
 const MAX_TRACKED_TOOL_STATES = 200
+const slashCommand = /^\/[a-z][\w-]*(?:\s|$)/i
+
+function steeringKind(binding: Binding, prompt: string): ActiveTurn["steerKind"] {
+  if (!binding.session.requestDuringTurn || slashCommand.test(prompt.trimStart())) return
+  const state = binding.session.getState?.()
+  if (!state) return
+  if (binding.providerId === "harness"
+    && parseHarnessAgentCapabilitiesMeta(binding.clientMeta)?.capabilities.includes("steering")
+    && parseHarnessAgentCapabilitiesMeta(state.agentCapabilities)?.capabilities.includes("steering")
+    && extractHarnessWorkflowOption(state.configOptions)?.currentValue !== "compose") return "harness"
+  if (state.agentInfo?.name === "Kiro CLI Agent" && /^3\./.test(state.agentInfo.version)) return "kiro"
+}
+
+function kiroInsertionId(update: unknown): string | undefined {
+  const value = update as { sessionUpdate?: unknown; _meta?: { kiro?: { kind?: unknown; messageId?: unknown } } } | null
+  const known = value?._meta?.kiro
+  return value?.sessionUpdate === "session_info_update" && known?.kind === "steering_injected" && typeof known.messageId === "string"
+    ? known.messageId : undefined
+}
 
 function toExecutionSessionState(providerId: string, state: LocalAcpSessionState): LocalExecutionSessionState {
   const { connected, modes, currentModeId, models, configOptions, availableCommands, plans, usage, restoreStatus, sessionInfo } = state
@@ -306,6 +331,7 @@ export function createLocalExecutionCoordinator(
   let tail: Promise<void> = Promise.resolve()
   let disposed = false
   let queueRevision = 0
+  const steeringQueueItems = new Map<string, string>()
 
   function isCurrent(login: { accountId: string; generation: number }): boolean {
     const current = identity.personalIdentity()
@@ -461,7 +487,7 @@ export function createLocalExecutionCoordinator(
       }
     }
 
-    const history = !/^\/[a-z][\w-]*(?:\s|$)/i.test(text.trimStart()) && options?.personal
+    const history = !slashCommand.test(text.trimStart()) && options?.personal
       ? previousPrompt(await options.personal.load({ kind: "conversation", workspaceId: scope.workspaceId,
           projectId: scope.projectId, conversationId: scope.conversationId,
         }).then(result => result.ok ? result.value.data as ConversationPersonal | null : null).catch(() => null))
@@ -490,6 +516,7 @@ export function createLocalExecutionCoordinator(
       reply: "",
       acceptedAtMs: Date.now(),
       checkpoint,
+      steerKind: steeringKind(binding, text),
       sequence: 0,
       toolStates: new Map(),
       finalizedTools: new Map(),
@@ -497,9 +524,10 @@ export function createLocalExecutionCoordinator(
     if (!queued) binding.queuePause = undefined
     // 受理与正文共用一个推送通道。即使 invoke 的回包较晚，页面也先收到受理。
     publish(login, { scope, bindingId: binding.id, kind: "accepted", turnId: result.turnId, requestId, text,
+      ...(binding.activeTurn.steerKind ? { canSteer: true } : {}),
       ...(queued ? { queued: true, referenceIds: ids } : {}),
     })
-    return ok(result)
+    return ok(binding.activeTurn.steerKind ? { ...result, canSteer: true } : result)
   }
 
   function queueSnapshot(scope: LocalExecutionScope, record: PromptQueueRecord, login: Login, binding?: Binding) {
@@ -578,6 +606,92 @@ export function createLocalExecutionCoordinator(
   }
 
   return {
+    async steer(scope: LocalExecutionScope, bindingId: string, turnId: string, input: LocalSteerInput): Promise<CollaborationResult<null>> {
+      const key = localExecutionKey(scope)
+      const store = options?.personal
+      const work = await enqueue(async () => {
+        const binding = bindings.get(key)
+        const login = identity.personalIdentity()
+        if (!login || !binding || binding.id !== bindingId || binding.login.generation !== login.generation || !isCurrent(login)) return forbidden()
+        const authorized = await authorize(scope, login)
+        if (!authorized.ok) return authorized
+        const turn = binding.activeTurn
+        if (!turn?.steerKind || turn.turnId !== turnId || turn.steering || (turn.followUps?.length ?? 0) >= 8) {
+          return identityError("INVALID_REQUEST", "当前轮次无法接收更多追发消息。")
+        }
+        const directory = await inspectDirectory(binding.selectedPath).catch(() => null)
+        if (!directory || !sameDirectory(binding.directory, directory) || !isCurrent(login)) return forbidden()
+        const current = input.kind === "queued" && store ? await store.conversationPromptQueue(scope) : undefined
+        const record = current?.ok ? current.value : undefined
+        const queued = record?.items.find(item => item.requestId === input.requestId)
+        const text = input.kind === "draft" ? input.text : queued?.text
+        if (!text || !isSteerText(text) || queued?.referenceIds.length || queued?.attachments.length
+          || (input.kind === "queued" && (!queued || !record || record.starting || !store))) {
+          return identityError("INVALID_REQUEST", "追发仅支持无引用和附件的普通文本。")
+        }
+        if (!isCurrent(login) || binding.activeTurn !== turn) return identityError("INVALID_REQUEST", "当前轮已结束，消息已保留。")
+        if (record && store) {
+          const saved = await store.conversationPromptQueue(scope, { ...record, starting: input.requestId })
+          if (!saved.ok) return identityError("INTERNAL_ERROR", saved.message)
+          steeringQueueItems.set(key, input.requestId)
+        }
+        const result = (async (): Promise<"accepted" | "rejected" | "unknown"> => {
+          if (binding.activeTurn !== turn || !isCurrent(login)) return "rejected"
+          try {
+            if (turn.steerKind === "harness") {
+              const response = await binding.session.requestDuringTurn(turnId, "_harnessCode/steer", {
+                turnId, requestId: input.requestId, text,
+              })
+              if (response.requestId !== input.requestId) return "unknown"
+            } else {
+              await binding.session.requestDuringTurn(turnId, "_session/steer", { message: text }, {
+                receiptId: value => value.queued === true && typeof value.messageId === "string" ? value.messageId : undefined,
+                updateId: kiroInsertionId,
+              })
+            }
+            turn.followUps = [...(turn.followUps ?? []), { text, occurredAtMs: Date.now() }]
+            turn.needsSegmentBreak = true
+            publish(login, { kind: "steered", scope, bindingId, turnId, requestId: input.requestId, text })
+            return "accepted"
+          } catch (error) {
+            return typeof (error as { code?: unknown } | null)?.code === "number" ? "rejected" : "unknown"
+          }
+        })()
+        turn.steering = result
+        return ok({ login, binding, turn, result })
+      })
+      if (!work.ok) return work
+      const { login, binding, turn, result } = work.value
+      const outcome = await result
+      return enqueue(async () => {
+        if (turn.steering === result) turn.steering = undefined
+        if (input.kind === "queued" && store) {
+          steeringQueueItems.delete(key)
+          if (!isCurrent(login)) return forbidden()
+          const current = await store.conversationPromptQueue(scope)
+          if (!current.ok) return identityError("INTERNAL_ERROR", current.message)
+          let record = current.value
+          if (record.starting === input.requestId && outcome !== "unknown") {
+            const saved = await store.conversationPromptQueue(scope, {
+              items: outcome === "accepted" ? record.items.filter(item => item.requestId !== input.requestId) : record.items,
+            })
+            if (!saved.ok) return identityError("INTERNAL_ERROR", saved.message)
+            record = saved.value
+          }
+          const currentBinding = bindings.get(key)
+          if (currentBinding === binding && (!record.items.length || (outcome !== "accepted" && !binding.activeTurn))) {
+            binding.queueArmed = false
+          }
+          queueSnapshot(scope, record, login, currentBinding)
+          if (outcome === "accepted" && currentBinding === binding && !binding.activeTurn) settlePromptQueue(scope, binding, true)
+        }
+        return outcome === "accepted" ? ok(null)
+          : identityError("INVALID_REQUEST", outcome === "unknown"
+            ? "追发结果待确认，消息已保留。请核对后再试。"
+            : "当前轮未接收追发，消息已保留。")
+      })
+    },
+
     promptQueue(scope: LocalExecutionScope, action: PromptQueueAction): Promise<CollaborationResult<PromptQueueView>> {
       const login = identity.personalIdentity()
       const store = options?.personal
@@ -609,6 +723,9 @@ export function createLocalExecutionCoordinator(
           }
           record = await sendQueueHead(scope, binding, record)
         } else {
+          if (steeringQueueItems.get(localExecutionKey(scope)) === action.requestId) {
+            return identityError("INVALID_REQUEST", "这条消息还在等待 Agent 确认。")
+          }
           const item = record.items.find(item => item.requestId === action.requestId)
           if (!item) return identityError("INVALID_REQUEST", "待发消息已经送出或移除。")
           if (action.kind === "edit" && (record.starting === item.requestId
@@ -902,6 +1019,7 @@ export function createLocalExecutionCoordinator(
             selectedPath: path,
             directory,
             providerId: resolvedProviderId,
+            clientMeta,
             providerReason,
             session,
             unsubscribe: session.subscribe(event => {
@@ -976,15 +1094,22 @@ export function createLocalExecutionCoordinator(
               // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
               if (event.type === "completed" && event.shareable && !turn.ephemeral && isCurrent(login)) {
                 const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
-                void uploads?.enqueue(scope, {
-                  turnId: turn.turnId,
-                  userText: turn.userText,
-                  referenceIds: turn.referenceIds,
-                  ...(tools ? { tools } : {}),
-                  reply: turn.reply,
-                  acceptedAtMs: turn.acceptedAtMs,
-                  completedAtMs: Date.now(),
-                })
+                const completedAtMs = Date.now()
+                const steering = turn.steering
+                if (uploads) binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
+                  await steering
+                  if (!isCurrent(login)) return
+                  await uploads.enqueue(scope, {
+                    turnId: turn.turnId,
+                    userText: turn.userText,
+                    referenceIds: turn.referenceIds,
+                    ...(tools ? { tools } : {}),
+                    reply: turn.reply,
+                    acceptedAtMs: turn.acceptedAtMs,
+                    followUps: turn.followUps,
+                    completedAtMs,
+                  })
+                }).catch(() => {})
               }
               settlePromptQueue(scope, binding, event.type === "completed" && event.shareable)
             }),

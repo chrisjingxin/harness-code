@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import sys
+from uuid import uuid4
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -35,6 +36,7 @@ from acp.schema import (
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
+    UserMessageChunk,
 )
 
 AGENT_ROOT = Path(__file__).resolve().parents[3]
@@ -593,6 +595,52 @@ async def test_sdk_client_negotiates_extension(tmp_path: Path) -> None:
     assert response.field_meta is not None
     run_summary = response.field_meta["harnessCode"]["run"]
     assert isinstance(run_summary.get("duration_ms"), int)
+
+
+@pytest.mark.parametrize(("scenario", "cancel"), [("steering", False), ("steering-tool", False), ("steering", True)])
+async def test_sdk_client_steers_the_active_harness_model(tmp_path: Path, scenario: str, cancel: bool) -> None:
+    """官方 SDK 追发经真实 Harness 图交给同一轮模型，错误轮次拒绝。"""
+    client = _RecordingClient()
+    capabilities = ClientCapabilities(field_meta={"harnessCode": {"version": 1, "capabilities": ["steering"]}})
+    async with _scenario_session(scenario, tmp_path, client, capabilities=capabilities) as (
+        connection, session, _workspace, root,
+    ):
+        turn_id, request_id = str(uuid4()), str(uuid4())
+        params = {"sessionId": session.session_id, "turnId": turn_id, "requestId": request_id, "text": "追加要求"}
+        async with asyncio.timeout(20):
+            prompt = asyncio.create_task(connection.prompt(
+                session_id=session.session_id, prompt=[TextContentBlock(type="text", text="原始要求")],
+                workbenchTurnId=turn_id,
+            ))
+            while not (root / "model-running").exists():
+                await asyncio.sleep(0.01)
+            with pytest.raises(RequestError):
+                await connection.ext_method("harnessCode/steer", {**params, "turnId": str(uuid4())})
+            steer = asyncio.create_task(connection.ext_method("harnessCode/steer", params))
+            await asyncio.sleep(0.05)
+            assert not steer.done()
+            if cancel:
+                await connection.cancel(session_id=session.session_id)
+                with pytest.raises(RequestError):
+                    await steer
+                assert (await prompt).stop_reason == "cancelled"
+                return
+            (root / "release-model").touch()
+            assert await steer == {"requestId": request_id}
+            assert (await prompt).stop_reason == "end_turn"
+            with pytest.raises(RequestError):
+                await connection.ext_method("harnessCode/steer", params)
+        assert "原始要求 / 追加要求" in "".join(
+            update.content.text for update in client.updates if isinstance(update, AgentMessageChunk)
+        )
+        client.updates.clear()
+        await connection.load_session(cwd=str(root), session_id=session.session_id, mcp_servers=[])
+        assert [update.content.text for update in client.updates if isinstance(update, UserMessageChunk)] == [
+            "原始要求", "追加要求",
+        ]
+    assert [json.loads(line) for line in (root / "model-inputs.jsonl").read_text().splitlines()] == [
+        ["原始要求"], ["原始要求", "追加要求"],
+    ]
 
 
 def _form_capabilities() -> ClientCapabilities:

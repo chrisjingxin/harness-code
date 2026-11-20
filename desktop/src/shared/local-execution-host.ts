@@ -56,7 +56,7 @@ export type LocalExecutionSessionState = Pick<
 }
 
 export type LocalExecutionReceipt =
-  | { readonly status: "accepted"; readonly turnId: string }
+  | { readonly status: "accepted"; readonly turnId: string; readonly canSteer?: boolean }
   | { readonly status: "rejected"; readonly reason: string; readonly unavailableReferenceId?: string }
 
 /** 待发项保存用户原文及引用标识，实际发送时重新解析材料。 */
@@ -76,6 +76,16 @@ export type PromptQueueAction =
   | { readonly kind: "edit"; readonly requestId: string; readonly text: string }
   | { readonly kind: "remove"; readonly requestId: string }
   | { readonly kind: "resume"; readonly bindingId: string }
+
+/** 草稿或已排队的纯文本；绑定发起操作时的当前轮。 */
+export type LocalSteerInput =
+  | { readonly kind: "draft"; readonly requestId: string; readonly text: string }
+  | { readonly kind: "queued"; readonly requestId: string }
+
+/** 在运行轮次中追发普通文本，斜杠命令仍走完整的新轮次流程。 */
+export function isSteerText(text: string): boolean {
+  return Boolean(text.trim()) && !/^\/[a-z][\w-]*(?:\s|$)/i.test(text.trimStart())
+}
 
 export const MAX_QUEUED_PROMPTS = 20
 export const MAX_PROMPT_QUEUE_BYTES = 256 * 1024
@@ -119,12 +129,13 @@ export type LocalExecutionNotice =
   | LocalExecutionSessionStateNotice
   | LocalExecutionElicitationNotice
   | { readonly scope: LocalExecutionScope; readonly kind: "prompt-queue"; readonly queue: PromptQueueView }
+  | { readonly scope: LocalExecutionScope; readonly bindingId: string; readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string }
   | ({
       readonly scope: LocalExecutionScope
       readonly bindingId: string
       readonly turnId: string
     } & (
-      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly referenceIds?: readonly string[] }
+      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly canSteer?: boolean; readonly referenceIds?: readonly string[] }
       | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
       | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
@@ -159,6 +170,7 @@ export type CodeCheckpointReply =
 export interface DesktopLocalExecutionHost {
   listProviders(): Promise<CollaborationResult<AcpAgentList>>
   promptQueue(scope: LocalExecutionScope, action: PromptQueueAction): Promise<CollaborationResult<PromptQueueView>>
+  steer(scope: LocalExecutionScope, bindingId: string, turnId: string, input: LocalSteerInput): Promise<CollaborationResult<null>>
   prepare(scope: LocalExecutionScope, directory: string, providerId?: string): Promise<LocalExecutionPreparation>
   /** 从该会话的本机个人记录取路径，经原生确认窗口记住旧目录。 */
   confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>>

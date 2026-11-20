@@ -156,7 +156,7 @@ function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState
   const emit = (event: AcpEvent) => {
     for (const listener of listeners) listener(event)
   }
-  return { runtime, emit, sent }
+  return { runtime, session, emit, sent }
 }
 
 // ConversationUploads 成功上传一批后会进入 2,000ms 冷却定时器，需预留充足等待窗口。
@@ -1025,6 +1025,63 @@ test("待发项在换绑定及重启后暂停，提交结果不确定时禁止�
     assert.deepEqual(sent, ["首轮"])
     const removed = await coordinator.promptQueue(scope, { kind: "remove", requestId: item.requestId })
     assert.ok(removed.ok && !removed.value.starting && removed.value.items.length === 0)
+  } finally {
+    await coordinator.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("支持追发时只移除已确认的待发项，其余仍按原顺序发送", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc236-steering-"))
+  const identity = await createSignedInState(USER_A)
+  const { window, notices } = createFakeWindow()
+  const meta = { harnessCode: { version: 1, capabilities: ["steering"] } }
+  const { runtime, session, emit, sent } = createMockRuntime({ _meta: meta })
+  const selected = "55555555-5555-4555-8555-555555555555"
+  let confirm: ((value: Record<string, unknown>) => void) | undefined
+  session.requestDuringTurn = async (turnId, method, params) => {
+    assert.equal(turnId, "turn-1")
+    assert.equal(method, "_harnessCode/steer")
+    if (params.requestId !== selected) throw Object.assign(new Error("rejected"), { code: -32002 })
+    assert.equal(params.text, "先追发这一条")
+    return new Promise(resolve => { confirm = resolve })
+  }
+  const coordinator = createLocalExecutionCoordinator(window, identity, null, { registry: {
+    listProviders: () => ({ providers: [], defaultProviderId: "harness" }),
+    getHost: providerId => ({ providerId: providerId ?? "harness", host: runtime.host, available: true, clientMeta: meta }),
+    close: async () => {},
+  } }, { personal: new PersonalStore(identity, ORIGIN, root) })
+  try {
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    await coordinator.captureDirectorySelection()(root)
+    const ready = await coordinator.prepare(scope, root, "harness")
+    assert.ok(ready.ok)
+    const { bindingId } = ready.value
+    const receipt = await coordinator.send(scope, bindingId, REQ_ID, "首轮", [])
+    assert.ok(receipt.ok && receipt.value.status === "accepted" && receipt.value.canSteer)
+    const { turnId } = receipt.value
+    for (const [requestId, text] of [[REQ_ID, "下一轮"], [selected, "先追发这一条"]]) {
+      assert.ok((await coordinator.promptQueue(scope, { kind: "add", bindingId,
+        item: { requestId, text, attachments: [], referenceIds: [] },
+      })).ok)
+    }
+    const rejected = await coordinator.steer(scope, bindingId, turnId, { kind: "queued", requestId: REQ_ID })
+    assert.equal(rejected.ok, false)
+    const pending = coordinator.steer(scope, bindingId, turnId, { kind: "queued", requestId: selected })
+    await waitFor(() => Boolean(confirm))
+    const awaiting = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(awaiting.ok && awaiting.value.items.length === 2 && awaiting.value.starting === selected)
+    assert.deepEqual(sent, ["首轮"])
+    confirm!({ requestId: selected })
+    assert.ok((await pending).ok)
+    const remaining = await coordinator.promptQueue(scope, { kind: "read" })
+    assert.ok(remaining.ok)
+    assert.deepEqual(remaining.value.items.map(item => item.requestId), [REQ_ID])
+    assert.ok((notices as LocalExecutionNotice[]).some(event =>
+      event.kind === "steered" && event.turnId === turnId && event.requestId === selected))
+    emit({ type: "completed", turnId, sequence: 1, shareable: true })
+    await coordinator.promptQueue(scope, { kind: "read" })
+    assert.deepEqual(sent, ["首轮", "下一轮"])
   } finally {
     await coordinator.dispose()
     await rm(root, { recursive: true, force: true })

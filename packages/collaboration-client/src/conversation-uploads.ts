@@ -38,6 +38,7 @@ export type FinalizedTurn = {
   turnId: string
   userText: string
   referenceIds?: readonly string[]
+  followUps?: readonly { readonly text: string; readonly occurredAtMs: number }[]
   tools?: readonly FinalizedToolSummary[]
   reply: string | undefined
   acceptedAtMs: number
@@ -166,7 +167,15 @@ export class ConversationUploads {
       this.#report(scope, turnId, "本轮正文超出单条共享消息的 32 KiB 上限。")
       return
     }
-    let remainingBatchBytes = BATCH_PAYLOAD_BUDGET - userBytes - assistantBytes
+    const followUps: Omit<SyncMessage, "sequence">[] = (turn.followUps ?? []).map(({ text, occurredAtMs }) => ({
+      type: "user", occurredAtMs, payload: JSON.stringify({ text }),
+    }))
+    const followUpBytes = followUps.map(message => Buffer.byteLength(message.payload, "utf8"))
+    let remainingBatchBytes = BATCH_PAYLOAD_BUDGET - userBytes - assistantBytes - followUpBytes.reduce((a, b) => a + b, 0)
+    if (followUpBytes.some(bytes => bytes > syncPayloadLimit) || remainingBatchBytes < 0) {
+      this.#report(scope, turnId, "本轮追发消息超出共享载荷上限。")
+      return
+    }
     const toolMessages: Omit<SyncMessage, "sequence">[] = []
     for (const tool of (turn.tools ?? []).slice(0, MAX_TOOL_SUMMARIES)) {
       if (remainingBatchBytes <= 0) break
@@ -178,7 +187,7 @@ export class ConversationUploads {
       toolMessages.push({ type: "tool_summary", occurredAtMs, payload })
       remainingBatchBytes -= Buffer.byteLength(payload, "utf8")
     }
-    const messages: WaitingTurn["messages"] = [userMessage, ...toolMessages, assistantMessage]
+    const messages: WaitingTurn["messages"] = [userMessage, ...followUps, ...toolMessages, assistantMessage]
     const path = join(this.root, scope.accountId, scope.conversationId + ".json")
     try {
       await this.#mutate(async () => {

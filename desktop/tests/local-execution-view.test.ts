@@ -20,6 +20,19 @@ const accepted = (text = "请处理") => applyLocalExecutionUpdate(emptyLocalExe
 
 const tool = (id: string, overrides: Partial<LocalAcpTool> = {}): LocalAcpTool => ({ id, ...overrides })
 
+test("追发在原轮插入用户消息，后续正文另起一条且确认可去重", () => {
+  const turnId = "t-1"
+  const ack = { kind: "steered" as const, turnId, requestId: "request", text: "补充要求", author }
+  let state = applyLocalExecutionUpdate(accepted(), { kind: "assistant-text", turnId, text: "先回复", messageId: "assistant" })
+  state = applyLocalExecutionUpdate(state, ack)
+  assert.equal(applyLocalExecutionUpdate(state, ack), state)
+  state = applyLocalExecutionUpdate(state, { kind: "assistant-text", turnId, text: "继续回复", messageId: "assistant" })
+  assert.equal(state.activeTurnId, turnId)
+  assert.deepEqual(state.entries.flatMap(entry => entry.kind === "message" ? [[entry.role, entry.text]] : []), [
+    ["user", "请处理"], ["assistant", "先回复"], ["user", "补充要求"], ["assistant", "继续回复"],
+  ])
+})
+
 test("工具更新合并：后到的状态+输出不丢先到参数", () => {
   let state = applyLocalExecutionUpdate(accepted(), { kind: "tool", turnId: "t-1", tool: tool("c-1", { title: "编辑", kind: "edit", input: "参数", status: "in_progress" }) })
   state = applyLocalExecutionUpdate(state, { kind: "tool", turnId: "t-1", tool: tool("c-1", { status: "completed", output: "完成" }) })

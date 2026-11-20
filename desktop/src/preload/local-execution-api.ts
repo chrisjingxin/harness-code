@@ -15,6 +15,8 @@ export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutio
       attachments.length === 0
         ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds)
         : ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds, attachments),
+    steer: (scope, bindingId, turnId, input) =>
+      ipc.invoke("workbench:local-execution:steer", scope, bindingId, turnId, input),
     cancel: (scope, bindingId, turnId) => ipc.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),
     answerPermission: (scope, bindingId, turnId, requestId, optionId) =>
       ipc.invoke("workbench:local-execution:answer-permission", scope, bindingId, turnId, requestId, optionId),

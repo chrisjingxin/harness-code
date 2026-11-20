@@ -15,6 +15,7 @@ import type {
   LocalAcpElicitationRequest,
 } from "@workbench/acp-runtime/types"
 import {
+  isSteerText,
   localExecutionKey,
   type DesktopLocalExecutionHost,
   type LocalDirectoryStatus,
@@ -189,13 +190,14 @@ export function useLocalExecution(
     }
   }
 
-  function accept(screen: Screen, flight: Flight, conversationId: string, turnId: string, text: string): void {
+  function accept(screen: Screen, flight: Flight, conversationId: string, turnId: string, text: string, canSteer?: boolean): void {
     if (flight.turnId !== undefined) return
     flight.turnId = turnId
     screen.timeline = applyLocalExecutionUpdate(screen.timeline, {
       kind: "accepted",
       turnId,
       text,
+      canSteer,
       referenceIds: flight.referenceIds,
       author: { id: flight.scope.accountId, displayName: current.current.ownerName },
     })
@@ -234,6 +236,14 @@ export function useLocalExecution(
         applyQueue(screen, notice.queue)
         return
       }
+      if (notice.kind === "steered") {
+        if (screen.binding?.bindingId === notice.bindingId) {
+          screen.timeline = applyLocalExecutionUpdate(screen.timeline, { ...notice,
+            author: { id: notice.scope.accountId, displayName: current.current.ownerName } })
+          refresh()
+        }
+        return
+      }
 
       if (notice.kind === "session-state") {
         if (screen.binding?.bindingId === notice.bindingId) {
@@ -268,7 +278,7 @@ export function useLocalExecution(
           lastSequence: 0, unknown: false,
         }
         screen.flight = flight
-        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text)
+        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer)
         return
       }
       const flight = screen.flight
@@ -286,7 +296,7 @@ export function useLocalExecution(
       }
       if (flight.bindingId !== notice.bindingId) return
       if (notice.kind === "accepted") {
-        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text)
+        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer)
         return
       }
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
@@ -469,6 +479,13 @@ export function useLocalExecution(
     },
     getView: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.timeline : undefined,
     getPromptQueue: id => target?.scope.conversationId === id ? screens.current.get(target.key)?.queue : undefined,
+    async steerQueued(id, requestId) {
+      const source = current.current.target
+      const flight = source && screens.current.get(source.key)?.flight
+      if (!source || source.scope.conversationId !== id || !flight?.turnId) throw new Error("当前轮已结束，消息已保留。")
+      const result = await host.steer(source.scope, flight.bindingId, flight.turnId, { kind: "queued", requestId })
+      if (!result.ok) throw new Error(result.error.message)
+    },
     async promptQueue(id, action) {
       const source = current.current.target
       const screen = source && screens.current.get(source.key)
@@ -682,6 +699,22 @@ export function useLocalExecution(
       const screen = screens.current.get(source.key)
       const status = readAvailability(source, input.conversationId)
       if (!screen?.binding) return { status: "rejected", message: status.reason ?? "当前无法发送。" }
+      if (input.steer) {
+        const turnId = screen.flight?.turnId
+        if (!turnId || !screen.timeline.activeCanSteer || !isSteerText(input.text) || input.referenceIds.length || input.attachmentIds.length) {
+          return { status: "rejected", message: "当前轮无法追发这条消息，草稿已保留。" }
+        }
+        try {
+          const result = await host.steer(scope, screen.binding.bindingId, turnId, {
+            kind: "draft", requestId: crypto.randomUUID(), text: input.text,
+          })
+          if (!result.ok) return { status: "rejected", message: result.error.message }
+          if (mounted.current) current.current.onAccepted(input.scope, input.conversationId, input.draftRevision)
+          return { status: "accepted" }
+        } catch {
+          return { status: "rejected", message: "追发结果待确认，草稿已保留。请核对会话后再试。" }
+        }
+      }
       if (input.queue) {
         try {
           const result = await host.promptQueue(scope, { kind: "add", bindingId: screen.binding.bindingId, item: {
@@ -716,7 +749,7 @@ export function useLocalExecution(
         const receipt = result.ok ? result.value : { status: "rejected" as const, reason: result.error.message }
         if (receipt.status === "accepted") {
           if (mounted.current && screens.current.get(source.key) === screen && screen.flight === flight) {
-            accept(screen, flight, scope.conversationId, receipt.turnId, input.text)
+            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer)
           }
           return { status: "accepted" }
         }

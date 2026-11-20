@@ -303,6 +303,8 @@ export type LocalAcpSessionSetup = {
 
 export type LocalAcpHostOptions = LocalAcpSessionSetup & {
   readonly extraClientCapabilitiesMeta?: LocalAcpMeta
+  /** 由 Agent 描述符为其已协商的 prompt 扩展填写客户端轮次标识。 */
+  readonly promptTurnIdMetaKey?: string
   /** 启用后从第一条有效回放帧计时，静默超时仍视为恢复失败。 */
   readonly sessionLoadReplayIdleMs?: number
   readonly bindingDirectory?: string

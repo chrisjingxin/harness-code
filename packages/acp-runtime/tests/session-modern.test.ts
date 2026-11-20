@@ -10,6 +10,7 @@ const fixture = `
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
 const sessionId = "new-"+process.pid;
+let activePrompt;
 const write = event => process.stdout.write(JSON.stringify({jsonrpc:"2.0",...event})+"\\n");
 const config = value => [{id:"execution",name:"执行模式",type:"select",category:"mode",currentValue:value,
   options:[{value:"work",name:"执行"},{value:"plan",name:"计划"}]}];
@@ -32,8 +33,24 @@ createInterface({input:process.stdin}).on("line",line=>{
     return write({id,result:{configOptions:config(params.value)}});
   }
   if(method==="session/prompt") {
+    if(params.prompt[0]?.text==="steering") {
+      activePrompt = { id, turnId: params._meta?.workbenchTurnId };
+      return chunk(params.sessionId,"running");
+    }
     chunk(params.sessionId,"ok");
     return write({id,result:{stopReason:"end_turn"}});
+  }
+  if(method==="_session/steer") {
+    if(params.sessionId!==sessionId || params.turnId!==activePrompt?.turnId) {
+      return write({id,error:{code:-32602,message:"wrong turn"}});
+    }
+    const update = messageId => write({method:"session/update",params:{sessionId,update:{
+      sessionUpdate:"session_info_update",_meta:{kiro:{kind:"steering_injected",messageId}},
+    }}});
+    update("unrelated");
+    if(params.message==="accepted") update("confirm");
+    write({id,result:{queued:true,messageId:"confirm"}});
+    if(params.message!=="accepted") write({id:activePrompt.id,result:{stopReason:"end_turn"}});
   }
 });
 `
@@ -111,6 +128,40 @@ test("配置型模式、协商参数、回放静默重建及历史只注入一�
     }), /不得包含登录信息/)
   } finally {
     await Promise.all(hosts.map(instance => instance.close()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("扩展绑定活动轮，只认原生会话对应的插入确认", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc236-acp-"))
+  const host = new LocalAcpHost({
+    executable: process.execPath, args: ["-e", fixture], env: { TRACE: join(root, "trace") },
+  }, { promptTurnIdMetaKey: "workbenchTurnId" })
+  try {
+    const session = await host.bind(scope, root)
+    const running = new Promise<void>(resolve => {
+      const unsubscribe = session.subscribe(event => {
+        if (event.type === "text-delta") { unsubscribe(); resolve() }
+      })
+    })
+    const receipt = session.send("steering")
+    assert.equal(receipt.status, "accepted")
+    if (receipt.status !== "accepted") return
+    const { turnId } = receipt
+    await running
+    const insertion = {
+      receiptId: (result: { messageId?: unknown }) => typeof result.messageId === "string" ? result.messageId : undefined,
+      updateId: (update: unknown) => (update as { _meta?: { kiro?: { messageId: string } } })._meta?.kiro?.messageId,
+    }
+    await assert.rejects(session.requestDuringTurn("outdated", "_session/steer", { turnId }, insertion))
+    assert.equal((await session.requestDuringTurn(turnId, "_session/steer", {
+      turnId, message: "accepted",
+    }, insertion)).messageId, "confirm")
+    await assert.rejects(session.requestDuringTurn(turnId, "_session/steer", {
+      turnId, message: "queued-only",
+    }, insertion), /未确认/)
+  } finally {
+    await host.close()
     await rm(root, { recursive: true, force: true })
   }
 })

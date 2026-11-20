@@ -7,7 +7,7 @@
  */
 import type { BrowserWindow } from "electron"
 import type { LocalAcpElicitationAnswer } from "@workbench/acp-runtime"
-import { parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope, type PromptQueueAction, type QueuedPrompt } from "../shared/index.js"
+import { isSteerText, parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope, type LocalSteerInput, type PromptQueueAction, type QueuedPrompt } from "../shared/index.js"
 import {
   createCollaborationIpcRegistrar,
   formatIpcError,
@@ -54,6 +54,13 @@ function isValidAttachments(value: unknown): value is string[] | undefined {
 
 function isPromptText(value: unknown): value is string {
   return typeof value === "string" && value.length <= 16_384 && Buffer.byteLength(value, "utf8") <= 32_768
+}
+
+function isSteerInput(value: unknown): value is LocalSteerInput {
+  if (!isPlainObject(value) || !isUuid(value.requestId)) return false
+  const keys = Object.keys(value).sort().join(",")
+  return value.kind === "queued" ? keys === "kind,requestId"
+    : value.kind === "draft" && keys === "kind,requestId,text" && isPromptText(value.text) && isSteerText(value.text)
 }
 
 function isPromptContent(text: unknown, referenceIds: unknown, attachments: unknown): boolean {
@@ -141,6 +148,10 @@ export function bindLocalExecutionIpc(
       && isPromptContent(text, referenceIds, attachments)
       ? execution.send(scope, bindingId, requestId, text as string, referenceIds as string[], (attachments as string[] | undefined) ?? [])
       : formatIpcError("INVALID_REQUEST", "请输入有效的文本消息、固定引用或工作区文件附件。文字最长 16,384 字符且不超过 32 KiB。"))
+  ipc.handle("workbench:local-execution:steer", 4, (scope, bindingId, turnId, input) =>
+    isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(turnId) && isSteerInput(input)
+      ? execution.steer(scope, bindingId, turnId, input)
+      : formatIpcError("INVALID_REQUEST", "追发仅支持普通文本。"))
   ipc.handle("workbench:local-execution:cancel", 3, (scope, bindingId, turnId) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(turnId)
       ? execution.cancel(scope, bindingId, turnId)

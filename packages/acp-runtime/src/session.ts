@@ -57,6 +57,7 @@ import type {
   LocalAcpElicitationAnswer,
   LocalAcpEvent,
   LocalAcpHostOptions,
+  LocalAcpMeta,
   LocalAcpPromptBlock,
   LocalAcpModesState,
   LocalAcpReplayFrame,
@@ -75,6 +76,8 @@ type Turn = {
   cancelling?: boolean
   denied?: boolean
   cancelTimer?: ReturnType<typeof setTimeout>
+  extensionUpdate?: (update: unknown) => void
+  endExtension?: () => void
 }
 type Permission = {
   turn: Turn
@@ -255,6 +258,47 @@ export class BoundSession implements LocalAcpSession {
     void agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => this.abortUnconfirmed(turn, agent))
     turn.cancelTimer = setTimeout(() => this.abortUnconfirmed(turn, agent), 10_000)
     return true
+  }
+
+  async requestDuringTurn(
+    turnId: string, method: string, params: LocalAcpMeta,
+    insertion?: Parameters<LocalAcpSession["requestDuringTurn"]>[3],
+  ): Promise<LocalAcpMeta> {
+    const turn = this.#active
+    const agent = this.#agent
+    if (!turn?.prompting || turn.id !== turnId || turn.cancelling || this.#closing
+      || !agent?.sessionId || agent.disconnected || !method.startsWith("_")) {
+      throw new Error("当前轮次无法接收追发。")
+    }
+    const seen = new Set<string>()
+    let receiptId: string | undefined
+    let settle: (ok: boolean) => void = () => {}
+    const confirmed = new Promise<boolean>(resolve => { settle = resolve })
+    if (insertion) {
+      if (turn.extensionUpdate) throw new Error("上一条追发仍在确认。")
+      turn.extensionUpdate = update => {
+        const id = insertion.updateId(update)
+        if (!id) return
+        if (id === receiptId) settle(true)
+        if (seen.size < 32) seen.add(id)
+      }
+      turn.endExtension = () => settle(false)
+    }
+    try {
+      const result = await within(agent.connection.extMethod(method, { ...params, sessionId: agent.sessionId }), 30_000)
+      if (insertion) {
+        receiptId = insertion.receiptId(result)
+        if (!receiptId || (!seen.has(receiptId) && !await within(confirmed, 30_000))) {
+          throw new Error("Agent 未确认追发已进入当前轮。")
+        }
+      }
+      return result
+    } finally {
+      if (insertion) {
+        turn.extensionUpdate = undefined
+        turn.endExtension = undefined
+      }
+    }
   }
 
   private abortUnconfirmed(turn: Turn, agent: Agent): void {
@@ -555,7 +599,11 @@ export class BoundSession implements LocalAcpSession {
       // 重建时只交接一次。RPC 发出后即算消费，避免回复丢失时重复注入。
       const prompt = this.#needsHistory ? [...historyOnReset, ...blocks] : blocks
       this.#needsHistory = false
-      const result = await agent.connection.prompt({ sessionId: agent.sessionId!, prompt: toSdkPromptBlocks(prompt) })
+      const metaKey = this.options.promptTurnIdMetaKey
+      const result = await agent.connection.prompt({
+        sessionId: agent.sessionId!, prompt: toSdkPromptBlocks(prompt),
+        ...(metaKey ? { _meta: { [metaKey]: turn.id } } : {}),
+      })
       this.finish(turn, result.stopReason === "end_turn"
         ? { type: "completed", shareable: !turn.cancelling && !turn.denied && this.#permission?.turn !== turn, ...metadata(result._meta) }
         : result.stopReason === "cancelled" ? { type: "cancelled" }
@@ -801,6 +849,7 @@ export class BoundSession implements LocalAcpSession {
     }
 
     if (agent.sessionId !== sessionId) return
+    this.#active?.extensionUpdate?.(update)
 
     // 3) 已建会话上的会话级更新：无论是否处于 prompting，一律刷新状态并推送到 subscribeSession()。
     if (this.isSessionLevelUpdate(update)) {
@@ -935,6 +984,7 @@ export class BoundSession implements LocalAcpSession {
   private finish(turn: Turn, event: EventData): void {
     if (this.#active !== turn) return
     clearTimeout(turn.cancelTimer)
+    turn.endExtension?.()
     this.resolvePermission(turn, declined)
     this.resolveElicitation({ action: "cancel" }, turn)
     if (this.#agent) void this.#agent.capabilities.cleanupTerminals().catch(() => {})

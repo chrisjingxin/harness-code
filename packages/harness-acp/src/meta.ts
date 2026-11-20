@@ -13,7 +13,7 @@ export const HARNESS_EXT_VERSION = 1 as const
 /** 客户端声明的 `_meta.harnessCode` 能力列表，与 Python 侧 `ext.py` 对齐。 */
 export const HARNESS_CLIENT_EXTENSION_CAPABILITIES = {
   version: HARNESS_EXT_VERSION,
-  capabilities: ["approval", "runSummary", "sessionSummary", "subagent", "goal", "commands"] as const,
+  capabilities: ["approval", "runSummary", "sessionSummary", "subagent", "goal", "commands", "steering"] as const,
 } as const
 
 /** Harness 推荐开启的宿主客户端能力提示：表单交互、工作区文件与自动新建兜底恢复。 */
@@ -21,6 +21,7 @@ export const HARNESS_HOST_HINTS: AcpAgentHostHints = {
   enableElicitation: true,
   extraClientCapabilitiesMeta: { [HARNESS_EXT_KEY]: HARNESS_CLIENT_EXTENSION_CAPABILITIES },
   enableClientFs: true,
+  promptTurnIdMetaKey: "workbenchTurnId",
   restorePolicy: "fallback-new",
 }
 

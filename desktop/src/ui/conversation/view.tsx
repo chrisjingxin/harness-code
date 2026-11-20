@@ -76,8 +76,8 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
     }
   }, [composer.cancel.enabled, composer.primaryActions, currentCancel, key])
 
-  const send = async (): Promise<void> => {
-    const onSend = actions.onSend
+  const send = async (steer = false): Promise<void> => {
+    const onSend = steer ? actions.onSteer : actions.onSend
     const hasContent = personal.draft.text.trim().length > 0 || personal.draft.referenceIds.length > 0 || personal.draft.attachmentIds.length > 0
     if (!visible || (composer.primaryActions !== "send" && composer.primaryActions !== "both") || !onSend || !actions.onPersonalChange || !composer.send.enabled || !hasContent || sending.current.has(key) || currentSend?.phase === "unknown") return
     const request = Symbol("send")
@@ -175,6 +175,7 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
         localStatus={currentSend?.message ?? currentCancel?.message}
         aboveComposer={slots?.aboveComposer}
         onSend={() => { void send() }}
+        onSteer={actions.onSteer ? () => { void send(true) } : undefined}
         onCancel={() => { void cancel() }}
       >{slots?.composer}</ConversationComposer>
     </section>

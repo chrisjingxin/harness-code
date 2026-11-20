@@ -6656,6 +6656,7 @@ class AgentHost:
             diagnostic_log=run.diagnostic_log,
             usage_ledger=getattr(run, "usage_ledger", None),
             goal_binding=run.preparation.goal_binding,
+            steering=run.start.input.steering if isinstance(run.start.input, UserRunInput) else None,
             code_index_query_lease=run.preparation.code_index_lease,
             goal_store=(
                 run.persistence.goal_store()

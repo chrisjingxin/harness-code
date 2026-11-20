@@ -48,6 +48,7 @@ export type SyncedTurnRange = {
 /** 同一账号、项目、设备和会话的本机增量视图。 */
 export type LocalExecutionView = {
   readonly activeTurnId: string | null
+  readonly activeCanSteer?: boolean
   readonly activeTurnAssistantMessageId?: string
   /** 记录上一条正文之后是否出现过工具或审批；仅夹杂思考时不切分新正文段。 */
   readonly activeTurnAssistantBreak?: boolean
@@ -78,7 +79,8 @@ export const emptyLocalExecutionView: LocalExecutionView = {
 
 /** 仅供桌面装配使用的显示更新。已明确受理后才追加用户消息。 */
 export type LocalExecutionViewUpdate =
-  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[] }
+  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly canSteer?: boolean }
+  | { readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string; readonly author: Message["author"] }
   | { readonly kind: "tool"; readonly turnId: string; readonly tool: LocalAcpTool }
   | { readonly kind: "assistant-text"; readonly turnId: string; readonly text: string; readonly messageId?: string }
   | { readonly kind: "thought"; readonly turnId: string; readonly text: string }
@@ -215,6 +217,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     return {
       ...state,
       activeTurnId: update.turnId,
+      activeCanSteer: update.canSteer,
       activeTurnAssistantMessageId: undefined,
       activeTurnAssistantBreak: undefined,
       settledPermissionAnchors: undefined,
@@ -225,6 +228,18 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       failure: null,
       referenceFailure: undefined,
     }
+  }
+
+  if (update.kind === "steered") {
+    const id = `${entryPrefix}:steer:${update.requestId}`
+    const active = state.activeTurnId === update.turnId
+    let last = state.entries.length - 1
+    while (last >= 0 && !state.entries[last]!.id.startsWith(`${entryPrefix}:`)) last -= 1
+    if (last < 0 || state.entries.some(entry => entry.id === id)) return state
+    const entries = [...(active ? finishStreamingAssistant(finishActiveReasoning(state.entries, entryPrefix), entryPrefix) : state.entries)]
+    entries.splice(last + 1, 0, { kind: "message", id, role: "user", text: update.text,
+      author: update.author, createdAtMs: Date.now() })
+    return { ...state, entries, activeTurnAssistantBreak: active || state.activeTurnAssistantBreak, revision: state.revision + 1 }
   }
 
   // permission-decision 可能在 permission:null 清屏甚至 finished 结束本轮之后才从 IPC 调用返回。
@@ -447,6 +462,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
   return {
     ...state,
     activeTurnId: null,
+    activeCanSteer: undefined,
     activeTurnAssistantMessageId: undefined,
     activeTurnAssistantBreak: undefined,
     permission: null,

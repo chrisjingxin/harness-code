@@ -171,9 +171,11 @@ from harness_agent.host.service_types import (
     StartRunRequest,
 )
 from harness_agent.threads.thread_persistence import ThreadPersistenceError
+from harness_agent.runtime.steering import RunSteering
 
 PROTOCOL_VERSION = 1
 """S1 只支持 ACP 协议版本 1；客户端请求其它版本也回 1，由客户端决定是否断开。"""
+_STEERING_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 MAX_PROMPT_SUMMARY_CHARS = 2000
 """错误响应里回显的 message 上限，避免把整段模型输出塞进错误帧。"""
@@ -225,6 +227,7 @@ class _ActiveRun:
     session_id: str
     translator: RunTranslator
     done: asyncio.Future[RunOutcome] = field(default=None)  # type: ignore[assignment]
+    steering: RunSteering | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -865,10 +868,16 @@ class AcpServer:
             else:
                 user_text = plan_follow.prompt_text if plan_follow is not None else text
                 model_message = join_model_message(pieces, user_text) if pieces else None
+                turn_id = kwargs.get("workbenchTurnId")
+                steering = RunSteering(turn_id) if (
+                    self._ext.steering and workflow == "build" and builtin is None
+                    and isinstance(turn_id, str) and _STEERING_ID.fullmatch(turn_id)
+                ) else None
                 run_input = UserRunInput(
                     user_text,
                     requested_skill=self._commands.match(user_text),
                     model_message=model_message,
+                    steering=steering,
                 )
             outcome = await self._await_host_run(
                 connection,
@@ -917,6 +926,26 @@ class AcpServer:
             merged = merge_harness_meta(response.field_meta, command_meta(command_meta_payload))
             response = response.model_copy(update={"field_meta": merged})
         return response
+
+    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """已协商的追发只可投递给发起请求时对应的活动轮次。"""
+        if method != "harnessCode/steer" or not self._ext.steering:
+            raise RequestError.method_not_found(method)
+        session_id, turn_id, request_id, text = (params.get(key) for key in ("sessionId", "turnId", "requestId", "text"))
+        if (not isinstance(session_id, str) or not isinstance(turn_id, str)
+            or not isinstance(request_id, str) or not _STEERING_ID.fullmatch(request_id)
+            or not isinstance(text, str) or len(text) > 16_384 or not text.strip()
+            or re.search(r"[\ud800-\udfff]", text)
+            or len(text.encode("utf-8")) > 32_768
+            or re.match(r"/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)", text.lstrip())):
+            raise RequestError(-32602, "INVALID_STEERING_MESSAGE")
+        await self._ready()
+        session = self._sessions.get(session_id)
+        active = session.run if session is not None and not session.cancel_requested else None
+        steering = active.steering if active is not None else None
+        if steering is None or steering.turn_id != turn_id or not await steering.submit(request_id, text):
+            raise RequestError(-32002, "STEERING_TURN_UNAVAILABLE")
+        return {"requestId": request_id}
 
     async def set_session_mode(
         self, session_id: str, mode_id: str, **kwargs: object
@@ -1595,6 +1624,7 @@ class AcpServer:
             session_id=session_id,
             translator=RunTranslator(run_id, PathLocator(self._host.resolve_display_path), subagent=self._ext.subagent),
             done=asyncio.get_running_loop().create_future(),
+            steering=run_input.steering if isinstance(run_input, UserRunInput) else None,
         )
 
         async def on_accepted(_accepted: object) -> None:
@@ -1628,7 +1658,11 @@ class AcpServer:
             ),
             on_accepted=on_accepted,
         )
-        return await active.done
+        try:
+            return await active.done
+        finally:
+            if active.steering is not None:
+                active.steering.close()
 
     async def _follow_goal_continuations(
         self,
@@ -1910,6 +1944,8 @@ class AcpServer:
 
     async def _cancel_active(self, active: _ActiveRun) -> None:
         """取消一个已受理的 Run；已结束或不属于本连接时吞掉错误。"""
+        if active.steering is not None:
+            active.steering.close()
         connection = self._connection
         if connection is None:
             return

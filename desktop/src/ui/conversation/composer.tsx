@@ -5,6 +5,7 @@
  */
 import {
   IconAlertTriangle,
+  IconArrowRight,
   IconArrowUp,
   IconPlaylistAdd,
   IconBook,
@@ -75,6 +76,7 @@ interface ComposerProps {
   readonly cancelBlocked: boolean
   readonly localStatus?: string
   readonly onSend: () => void
+  readonly onSteer?: () => void
   readonly onCancel: () => void
   /** 新建准备页使用 Enter 换行，提交仍由该页的明确开始动作处理。 */
   readonly submitOnEnter?: boolean
@@ -731,6 +733,10 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                 <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "⏎ 发送"}</span>
               )}
               {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
+              {props.onSteer ? (
+                <button type="button" className="wb-composer-steer" aria-label="立即发送" title="立即发送，引导当前轮"
+                  disabled={!canSend || cancelBlocked} onClick={props.onSteer}><IconArrowRight size={16} aria-hidden="true" /></button>
+              ) : null}
               {showSend ? (
                 <button type="submit" className="wb-composer-send" aria-label={model.sendLabel ?? "发送消息"}
                   disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : model.sendLabel ?? "发送消息")}>

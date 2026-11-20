@@ -15,6 +15,7 @@ import type {
   LocalAcpElicitationAnswer,
   LocalAcpEvent,
   LocalAcpHostOptions,
+  LocalAcpMeta,
   LocalAcpPromptBlock,
   LocalAcpScope,
   LocalAcpSendResult,
@@ -53,6 +54,11 @@ export interface LocalAcpSession {
   send(text: string): LocalAcpSendResult
   /** 发送结构化内容块（支持 text / resource / resource_link / image）。 */
   sendPrompt(blocks: readonly LocalAcpPromptBlock[], historyOnReset?: readonly LocalAcpPromptBlock[]): LocalAcpSendResult
+  /** 仅受信任宿主可在已匹配的活动轮中调用扩展。可同时等待 Agent 的插入通知。 */
+  requestDuringTurn(turnId: string, method: string, params: LocalAcpMeta, insertion?: {
+    receiptId: (result: LocalAcpMeta) => string | undefined
+    updateId: (update: unknown) => string | undefined
+  }): Promise<LocalAcpMeta>
   /** 停止当前轮。返回表示已匹配轮次，实际结果由终态事件交付。 */
   cancel(turnId: string): boolean
   /** 仅回答匹配的待处理审批。 */

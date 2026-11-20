@@ -17,13 +17,14 @@ from typing import Any, Mapping
 from typing import TYPE_CHECKING
 
 from langchain.agents.middleware.types import AgentMiddleware, ExtendedModelResponse, ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from harness_agent.policy.approval_mode import ApprovalMode
 from harness_agent.policy.approval_policy import approval_mode_prompt
 from harness_agent.runtime.approval_presentation import ApprovalPresentationStore
 from harness_agent.runtime.approval_tool_calls import ToolCallIdStore
 from harness_agent.runtime.execution_binding import ExecutionMode
+from harness_agent.runtime.steering import RunSteering
 from harness_agent.threads.context_lifecycle import RunContextSnapshot
 from harness_agent.threads.context_pressure import ModelCallLifecycle
 
@@ -182,6 +183,7 @@ class RunContext:
     usage_ledger: Any | None = field(default=None, repr=False)
     # Goal-backed Run 冻结的目标身份与独立验收依赖；普通 Run 为 None。
     goal_binding: Any | None = field(default=None, repr=False)
+    steering: RunSteering | None = field(default=None, repr=False)
     code_index_query_lease: Any | None = field(default=None, repr=False)
     goal_store: Any | None = field(default=None, repr=False)
     verification_registry: Any | None = field(default=None, repr=False)
@@ -262,6 +264,14 @@ def thread_id_for_runtime(runtime: object) -> str | None:
 
 class RunContextSnapshotMiddleware(AgentMiddleware):
     """在模型调用边界注入本 Run 冻结的 system prompt。"""
+
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        """只在根模型调用前加入当前 Run 已受理的追发。"""
+        context = require_run_context(runtime)
+        if context.steering is None:
+            return None
+        text = await context.steering.consume()
+        return {"messages": [HumanMessage(content=text)]} if text is not None else None
 
     async def awrap_model_call(
         self,

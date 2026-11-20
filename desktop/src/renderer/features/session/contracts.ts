@@ -86,6 +86,7 @@ export interface LocalSessionExecutionPort {
   getView?(conversationId: string): LocalExecutionView | undefined
   getPromptQueue?(conversationId: string): PromptQueueView | undefined
   promptQueue?(conversationId: string, action: Exclude<PromptQueueAction, { kind: "add" | "resume" }> | { kind: "resume" }): Promise<void>
+  steerQueued?(conversationId: string, requestId: string): Promise<void>
   getProviders?(): AcpAgentList | undefined
   getSelectedProviderId?(conversationId: string): string | undefined
   selectProvider?(conversationId: string, providerId: string): Promise<void>
@@ -101,6 +102,7 @@ export interface LocalSessionExecutionPort {
     readonly referenceIds: readonly string[]
     readonly attachmentIds: readonly string[]
     readonly queue?: boolean
+    readonly steer?: boolean
   }): Promise<{ readonly status: "accepted" } | { readonly status: "rejected" | "unknown"; readonly message: string }>
   cancel?(scope: ProjectNavigationScope, conversationId: string): Promise<void>
   answerPermission?(conversationId: string, id: string, optionId: string): Promise<void>

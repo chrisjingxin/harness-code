@@ -59,10 +59,12 @@ CAP_GOAL: Final = "goal"
 CAP_COMMANDS: Final = "commands"
 """能力名：命令来源与内置命令结果上的 `_meta.harnessCode.command`。"""
 
-KNOWN_CAPABILITIES: Final = frozenset({CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS})
+CAP_STEERING: Final = "steering"
+
+KNOWN_CAPABILITIES: Final = frozenset({CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS, CAP_STEERING})
 """认识的能力名；其余名字忽略，方便以后加能力而不破坏老客户端。"""
 
-_CAPABILITY_ORDER: Final[tuple[str, ...]] = (CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS)
+_CAPABILITY_ORDER: Final[tuple[str, ...]] = (CAP_APPROVAL, CAP_RUN_SUMMARY, CAP_SESSION_SUMMARY, CAP_SUBAGENT, CAP_GOAL, CAP_COMMANDS, CAP_STEERING)
 """回报顺序固定，客户端可以按顺序展示。"""
 
 
@@ -77,6 +79,7 @@ class Negotiation:
     subagent: bool = False
     goal: bool = False
     commands: bool = False
+    steering: bool = False
 
     @property
     def capabilities(self) -> tuple[str, ...]:
@@ -94,6 +97,8 @@ class Negotiation:
             enabled.append(CAP_GOAL)
         if self.commands:
             enabled.append(CAP_COMMANDS)
+        if self.steering:
+            enabled.append(CAP_STEERING)
         return tuple(enabled)
 
 
@@ -125,6 +130,7 @@ def negotiate(client_capabilities: object | None) -> Negotiation:
         subagent=CAP_SUBAGENT in enabled,
         goal=CAP_GOAL in enabled,
         commands=CAP_COMMANDS in enabled,
+        steering=CAP_STEERING in enabled,
     )
 
 

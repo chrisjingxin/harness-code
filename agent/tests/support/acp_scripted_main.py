@@ -206,7 +206,7 @@ async def _run(scenario: str, fds: ProtocolFds, grace: float) -> int:
 
 
 _HOST_SCENARIOS = frozenset(
-    {"host", "tools", "commands", "approval", "trust", "diff", "history", "journey"}
+    {"host", "tools", "commands", "approval", "trust", "diff", "history", "journey", "steering", "steering-tool"}
 )
 """用真实 Host 跑的场景名；其余走传输层 stub。"""
 
@@ -424,6 +424,40 @@ async def _run_host(streams: AcpStreams, grace: float, scenario: str) -> int:
             host._run_coordinator._directory_trust_already_granted = (  # type: ignore[method-assign]
                 lambda _presentation, *, run_id: False
             )
+    elif scenario in {"steering", "steering-tool"}:
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from harness_agent.extensions.providers import harness_gateway
+
+        class SteeringModel(FakeMessagesListChatModel):
+            def bind_tools(self, *_args: Any, **_kwargs: Any):
+                return self
+
+            async def _agenerate(self, messages: list[Any], *args: Any, **kwargs: Any):
+                human = [message.content for message in messages if isinstance(message, HumanMessage)]
+                with (root / "model-inputs.jsonl").open("a", encoding="utf-8") as log:
+                    log.write(json.dumps(human) + "\n")
+                if len(human) == 1 and not any(isinstance(message, ToolMessage) for message in messages):
+                    (root / "model-running").touch()
+                    async with asyncio.timeout(10):
+                        while not (root / "release-model").exists():
+                            await asyncio.sleep(0.01)
+                    if scenario == "steering-tool":
+                        tool = {"name": "ls", "args": {"path": "/"}, "id": "read-directory"}
+                        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="", tool_calls=[tool]))])
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=" / ".join(human)))])
+
+        model = SteeringModel(responses=[AIMessage(content="first response")])
+        model.profile = {"max_input_tokens": 200_000}
+        _write_journey_models(home)
+        harness_gateway.create_openai_compatible_model = lambda *_args, **_kwargs: model
+        host = AgentHost(config_home=home, workspace=root)
+
+        async def fixed_title(**_kwargs: Any) -> str:
+            return "Steering fixture"
+
+        host._draft_thread_title = fixed_title  # type: ignore[method-assign]
     elif scenario == "journey":
         from tests.support.acp_harness import JourneyAgent
 

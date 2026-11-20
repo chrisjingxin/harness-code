@@ -1,15 +1,16 @@
 /** 显示本机待发消息和暂停状态，编辑时保留原有引用与附件。 */
 import { useId, useRef, useState } from "react"
 import { IconArrowRight, IconCheck, IconChevronDown, IconPencil, IconTrash, IconX } from "@tabler/icons-react"
-import type { PromptQueueView } from "../../../shared/index.js"
+import { isSteerText, type PromptQueueView } from "../../../shared/index.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
 
 export function PromptQueuePanel({
-  queue, canResume, onAction,
+  queue, canResume, onAction, onSteer,
 }: {
   readonly queue: PromptQueueView
   readonly canResume: boolean
   readonly onAction: (action: Parameters<NonNullable<LocalSessionExecutionPort["promptQueue"]>>[1]) => Promise<void>
+  readonly onSteer?: (requestId: string) => Promise<void>
 }) {
   const [edit, setEdit] = useState<{ requestId: string; text: string }>()
   const [expanded, setExpanded] = useState(true)
@@ -18,13 +19,14 @@ export function PromptQueuePanel({
   const working = useRef(false)
   const listId = useId()
 
-  async function apply(action: Parameters<typeof onAction>[0]) {
+  async function apply(action: Parameters<typeof onAction>[0] | { kind: "steer"; requestId: string }) {
     if (working.current) return
     working.current = true
     setBusy(true)
     setError("")
     try {
-      await onAction(action)
+      if (action.kind === "steer") await onSteer?.(action.requestId)
+      else await onAction(action)
       if (action.kind === "edit" || action.kind === "remove") setEdit(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "待发队列操作失败，请重试。")
@@ -89,6 +91,12 @@ export function PromptQueuePanel({
                   </>
                 ) : (
                   <>
+                    {onSteer && !queue.starting && isSteerText(item.text) && !item.referenceIds.length && !item.attachments.length ? (
+                      <button type="button" title="立即发送，引导当前轮" aria-label={`立即发送第 ${index + 1} 条待发消息`}
+                        disabled={busy} onClick={() => void apply({ kind: "steer", requestId: item.requestId })}>
+                        <IconArrowRight size={15} aria-hidden="true" />
+                      </button>
+                    ) : null}
                     <button type="button" title="编辑" aria-label={`编辑第 ${index + 1} 条待发消息`}
                       disabled={busy || queue.starting === item.requestId} onClick={() => setEdit({ requestId: item.requestId, text: item.text })}>
                       <IconPencil size={14} aria-hidden="true" />

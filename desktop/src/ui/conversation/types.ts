@@ -297,6 +297,7 @@ export type ConversationFileLineRange = {
 export interface ConversationActions {
   readonly onPersonalChange?: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onSend?: (scope: ConversationScope, revision: number, text: string, referenceIds: readonly string[], attachmentIds: readonly string[]) => Promise<ConversationSendResult>
+  readonly onSteer?: ConversationActions["onSend"]
   readonly onCancel?: (scope: ConversationScope) => Promise<void>
   /**
    * 只上报回答意图。装配方在提交时按 scope 和请求 ID 锁定，卸载后仍保存等待状态；

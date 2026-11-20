@@ -19,6 +19,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { ConversationToolBlocks, ConversationView, Markdown } from "../../../ui/index.js"
+import { isSteerText } from "../../../shared/index.js"
 import type {
   ConversationActions,
   ConversationComposerView,
@@ -166,6 +167,24 @@ export function LocalSessionPage({
   const queue = execution.getPromptQueue?.(conversation.conversationId)
   const queueMode = Boolean(execution.promptQueue && (canCancel || queue?.items.length))
   const canEnqueue = queueMode && (canCancel || availability.available) && !directoryNeedsAction
+  const canSteer = Boolean(activeExecution?.activeCanSteer && !directoryNeedsAction)
+  const onSend = (steer: boolean): NonNullable<ConversationActions["onSend"]> =>
+    (targetScope, draftRevision, text, referenceIds, attachmentIds) => execution.send!({
+      scope: {
+        namespace: targetScope.namespace,
+        accountId: targetScope.accountId,
+        workspaceId: targetScope.workspaceId,
+        projectId: conversation.projectId,
+      },
+      conversationId: conversation.conversationId,
+      directoryPath,
+      draftRevision,
+      text,
+      referenceIds,
+      attachmentIds,
+      queue: queueMode,
+      steer,
+    })
   const capabilities = buildComposerCapabilities({
     providers,
     selectedProviderId,
@@ -446,6 +465,7 @@ export function LocalSessionPage({
 
   const queueSlot = queue?.items.length && execution.promptQueue
     ? <PromptQueuePanel key={scope.conversationId} queue={queue} canResume={availability.available && !canCancel}
+        onSteer={canSteer && execution.steerQueued ? requestId => execution.steerQueued!(conversation.conversationId, requestId) : undefined}
         onAction={action => execution.promptQueue!(conversation.conversationId, action)} />
     : undefined
   const slots = aboveTimelineSlot || queueSlot || composerSlot
@@ -472,26 +492,10 @@ export function LocalSessionPage({
                 onPersonalChange: (targetScope, change) => {
                   if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
                 },
-                ...(execution.send
-                  ? {
-                      onSend: async (targetScope, draftRevision, text, referenceIds, attachmentIds) =>
-                        execution.send!({
-                          scope: {
-                            namespace: targetScope.namespace,
-                            accountId: targetScope.accountId,
-                            workspaceId: targetScope.workspaceId,
-                            projectId: conversation.projectId,
-                          },
-                          conversationId: conversation.conversationId,
-                          directoryPath,
-                          draftRevision,
-                          text,
-                          referenceIds,
-                          attachmentIds,
-                          queue: queueMode,
-                        }),
-                    }
-                  : {}),
+                ...(execution.send ? { onSend: onSend(false),
+                  ...(canSteer && isSteerText(personal.draft.text) && !personal.draft.referenceIds.length && !personal.draft.attachmentIds.length
+                    ? { onSteer: onSend(true) } : {}),
+                } : {}),
                 ...(execution.cancel
                   ? {
                       onCancel: async targetScope =>

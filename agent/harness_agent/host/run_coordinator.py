@@ -127,6 +127,7 @@ from harness_agent.runtime.run_context import (
     RunCancellationToken,
     RunContext,
 )
+from harness_agent.runtime.steering import RunSteering
 from harness_agent.extensions.plugin_skills import LoadedSkill
 from harness_agent.protocol.generated import PROTOCOL_MINOR
 from harness_agent.threads.thread_persistence import (
@@ -314,6 +315,7 @@ class UserRunInput:
     requested_skill: RequestedSkill | None = None
     # 给模型看的正文。Transcript 与标题仍用 `message`，避免把内联文件写进历史。
     model_message: str | None = None
+    steering: RunSteering | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -639,6 +641,7 @@ class RunState:
     assistant_buffer: list[str] = field(default_factory=list)
     assistant_turn_count: int = 0
     pending_transcript: list[TranscriptAppend] = field(default_factory=list)
+    transcript_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     started_at: float = field(default_factory=time.monotonic)
     timing: RunTimingLedger | None = None
     diagnostic_log: DiagnosticLog | None = None
@@ -1801,13 +1804,18 @@ class RunCoordinator:
 
     async def _flush_transcript(self, run: RunState) -> None:
         """原子追加当前已完成的助手和工具语义边界。"""
-        if run.persistence is None or not run.pending_transcript:
+        if run.persistence is None:
             return
-        append = getattr(run.persistence, "append_transcript_batch", None)
-        if not callable(append):
-            raise RunError("TRANSCRIPT_LIFECYCLE_UNAVAILABLE")
-        await append(tuple(run.pending_transcript))
-        run.pending_transcript.clear()
+        async with run.transcript_lock:
+            if not run.pending_transcript:
+                return
+            append = getattr(run.persistence, "append_transcript_batch", None)
+            if not callable(append):
+                raise RunError("TRANSCRIPT_LIFECYCLE_UNAVAILABLE")
+            # 模型边界可在工具结果落盘期间追加追发，只移除已写入的部分。
+            batch = tuple(run.pending_transcript)
+            await append(batch)
+            del run.pending_transcript[:len(batch)]
 
     @staticmethod
     async def _release_snapshot_reservation(preparation: RunPreparation) -> None:
