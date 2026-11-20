@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 
+import { composeAnnotatedPrompt } from "./annotations-codec.js"
 import { ConversationComposer } from "./composer.js"
 import { ConversationInteraction } from "./interaction.js"
 import { ConversationTimeline } from "./timeline.js"
@@ -78,16 +79,21 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
 
   const send = async (steer = false): Promise<void> => {
     const onSend = steer ? actions.onSteer : actions.onSend
-    const hasContent = personal.draft.text.trim().length > 0 || personal.draft.referenceIds.length > 0 || personal.draft.attachmentIds.length > 0
+    const annotations = personal.draft.annotations ?? []
+    const hasContent = personal.draft.text.trim().length > 0
+      || personal.draft.referenceIds.length > 0
+      || personal.draft.attachmentIds.length > 0
+      || annotations.length > 0
     if (!visible || (composer.primaryActions !== "send" && composer.primaryActions !== "both") || !onSend || !actions.onPersonalChange || !composer.send.enabled || !hasContent || sending.current.has(key) || currentSend?.phase === "unknown") return
     const request = Symbol("send")
     const sourceScope = { ...scope }
     const sourceIdentity = identity.current.revision
     const { revision, text, referenceIds, attachmentIds } = personal.draft
+    const composedText = composeAnnotatedPrompt(text, annotations)
     sending.current.set(key, request)
     setSendStates(previous => ({ ...previous, [key]: { phase: "sending", message: "正在提交…", identity: sourceIdentity, sawDisabled: false } }))
     try {
-      const result = await onSend(sourceScope, revision, text, [...referenceIds], [...attachmentIds])
+      const result = await onSend(sourceScope, revision, composedText, [...referenceIds], [...attachmentIds])
       if (!mounted.current || identity.current.revision !== sourceIdentity || sending.current.get(key) !== request) return
       if (result.status === "accepted") {
         actionsRef.current.onPersonalChange?.(sourceScope, { kind: "clear-draft", expectedRevision: revision })
@@ -160,7 +166,17 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
   return (
     <section className="wb-conversation-view" hidden={!visible} inert={!visible} aria-label="对话">
       {slots?.aboveTimeline}
-      <ConversationTimeline scope={scope} visible={visible} entries={interaction ? entries.filter(entry => entry.kind !== "interaction-history" || entry.id !== interaction.id) : entries} contentRevision={contentRevision} activity={activity} personal={personal} onPersonalChange={actions.onPersonalChange} rendering={actions.rendering} />
+      <ConversationTimeline
+        scope={scope}
+        visible={visible}
+        entries={interaction ? entries.filter(entry => entry.kind !== "interaction-history" || entry.id !== interaction.id) : entries}
+        contentRevision={contentRevision}
+        activity={activity}
+        personal={personal}
+        onPersonalChange={actions.onPersonalChange}
+        onAddSelectionToChat={actions.onAddSelectionToChat ? selection => actions.onAddSelectionToChat?.(scope, selection) : undefined}
+        rendering={actions.rendering}
+      />
       {interaction ? <ConversationInteraction key={interactionKey} scope={scope} interaction={interaction} personal={personal} actions={actions} blocked={interactionBlocked} status={interactionRetryable ? undefined : currentInteraction?.message} onSubmit={answer => { void submitInteraction(answer) }} /> : null}
       <ConversationComposer
         key={key}

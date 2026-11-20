@@ -9,8 +9,16 @@
  */
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
-import { FileTypeIcon, ProjectDock, ProjectFilePanel, ProjectFileTab } from "../../../ui/index.js"
+import {
+  FileTypeIcon,
+  ProjectDock,
+  ProjectFilePanel,
+  ProjectFileTab,
+  SelectionToolbar,
+  resolveFileSelectionSource,
+} from "../../../ui/index.js"
 import type {
+  ConversationSelectionAnnotation,
   ProjectActionAvailability,
   ProjectChangesView,
   ProjectDockProps,
@@ -183,7 +191,7 @@ function CentralDiffContent({
   if (diff && diff.path === path && diff.text) {
     const lines = diff.text.split("\n")
     return (
-      <div className="filepane-diff-scroll">
+      <div className="filepane-diff-scroll" data-selection-file-path={path} data-selection-file-kind="diff">
         <pre className="code">
           {lines.map((line, i) => {
             const cls = line.startsWith("@@")
@@ -212,7 +220,7 @@ function CentralDiffContent({
   if ((changed?.status === "??" || changed?.status === "U" || changed?.status === "A") && fileView?.status === "ready") {
     const lines = fileView.file.content.split("\n")
     return (
-      <div className="filepane-diff-scroll">
+      <div className="filepane-diff-scroll" data-selection-file-path={path} data-selection-file-kind="diff">
         <pre className="code">
           {lines.map((line, i) => (
             <Fragment key={i}>
@@ -240,12 +248,15 @@ export function SessionCentralFilePanels({
   state,
   maximized = false,
   onToggleMaximized,
+  onAddSelectionToChat,
 }: {
   readonly state: SessionCentralFilesState
   readonly maximized?: boolean
   readonly onToggleMaximized?: () => void
+  readonly onAddSelectionToChat?: (selection: ConversationSelectionAnnotation) => void
 }): ReactElement | null {
   const paneRef = useRef<HTMLElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [mdPreviewByPath, setMdPreviewByPath] = useState<Record<string, boolean>>({})
   const [syncedTargetSeq, setSyncedTargetSeq] = useState<number | null>(null)
 
@@ -426,7 +437,7 @@ export function SessionCentralFilePanels({
         )}
       </div>
 
-      <div className="filepane-body">
+      <div ref={bodyRef} className="filepane-body">
         {mode === "diff" ? (
           <CentralDiffContent path={activePath} state={state} />
         ) : (
@@ -434,6 +445,12 @@ export function SessionCentralFilePanels({
             <CentralFilePanelWithScroll key={tab.path} tab={tab} state={state} preview={mdPreviewByPath[tab.path] ?? true} />
           ))
         )}
+        <SelectionToolbar
+          containerRef={bodyRef}
+          enabled={Boolean(onAddSelectionToChat)}
+          resolveSource={resolveFileSelectionSource}
+          onAddToChat={selection => onAddSelectionToChat?.(selection)}
+        />
       </div>
     </section>
   )

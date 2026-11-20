@@ -25,13 +25,30 @@ export type {
   ProjectTreeRow, ProjectTreeView, ProjectFileContent, ProjectFileTargetLine, ProjectFileView, ProjectChangedFile, ProjectChangesView,
   ProjectGates, ProjectPersonalView, ProjectActions, ProjectDockProps, ProjectGitCommitItem,
 } from "./project/index.js"
-export { ConversationComposer, ConversationView, ConversationToolBlocks } from "./conversation/index.js"
+export {
+  ConversationComposer,
+  ConversationView,
+  ConversationToolBlocks,
+  SelectionToolbar,
+  MAX_DRAFT_ANNOTATIONS,
+  MAX_DRAFT_ANNOTATION_COMMENT_CHARS,
+  MAX_DRAFT_ANNOTATION_SOURCE_CHARS,
+  MAX_DRAFT_ANNOTATION_TEXT_CHARS,
+  MAX_QUEUED_PROMPT_CHARS,
+  composeAnnotatedPrompt,
+  computeLineRangeFromOffsets,
+  normalizeAnnotationComment,
+  normalizeAnnotationSelectedText,
+  normalizeAnnotationSourceLabel,
+  parseAnnotatedUserMessage,
+  resolveFileSelectionSource,
+} from "./conversation/index.js"
 export type {
-  ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft,
+  ConversationActions, ConversationAvailability, ConversationComposerView, ConversationDraft, ConversationDraftAnnotation,
   ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,
   ConversationFileLineRange, ConversationInteractionAnswer, ConversationInteractionView,
   ConversationMentionOrigin, ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
-  ConversationReferenceView, ConversationScope, ConversationSendResult, ConversationCollaborationCandidate, ConversationCollaborationCandidateResult,
+  ConversationReferenceView, ConversationScope, ConversationSelectionAnnotation, ConversationSendResult, ConversationCollaborationCandidate, ConversationCollaborationCandidateResult,
   ConversationTimelineActivity,
   ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,
   ConversationViewProps,

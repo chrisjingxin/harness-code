@@ -1,7 +1,8 @@
 /** 显示本机待发消息和暂停状态，编辑时保留原有引用与附件。 */
 import { useId, useRef, useState } from "react"
-import { IconArrowRight, IconCheck, IconChevronDown, IconPencil, IconTrash, IconX } from "@tabler/icons-react"
+import { IconArrowRight, IconCheck, IconChevronDown, IconPencil, IconQuote, IconTrash, IconX } from "@tabler/icons-react"
 import { isSteerText, type PromptQueueView } from "../../../shared/index.js"
+import { parseAnnotatedUserMessage } from "../../../ui/index.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
 
 export function PromptQueuePanel({
@@ -74,13 +75,24 @@ export function PromptQueuePanel({
                       void apply({ kind: "edit", ...edit })
                     }
                   }} />
-              ) : (
-                <span className="session-prompt-queue-text" title={item.text}>
-                  {item.text || "引用或附件"}
-                  {item.referenceIds.length || item.attachments.length
-                    ? <small> · {item.referenceIds.length + item.attachments.length} 个引用或附件</small> : null}
-                </span>
-              )}
+              ) : (() => {
+                const parsed = parseAnnotatedUserMessage(item.text)
+                const summaryText = parsed ? parsed.body : item.text
+                const annotationCount = parsed?.annotations.length ?? 0
+                const refCount = item.referenceIds.length + item.attachments.length
+                return (
+                  <span className="session-prompt-queue-text" title={item.text}>
+                    {summaryText || (!annotationCount ? "引用或附件" : null)}
+                    {annotationCount > 0 ? (
+                      <small style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: summaryText ? 6 : 0 }}>
+                        <IconQuote size={12} aria-hidden="true" />
+                        <span>{annotationCount}</span>
+                      </small>
+                    ) : null}
+                    {refCount ? <small> · {refCount} 个引用或附件</small> : null}
+                  </span>
+                )
+              })()}
               <span className="session-queue-actions">
                 {editing ? (
                   <>

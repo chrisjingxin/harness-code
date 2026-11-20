@@ -26,6 +26,7 @@ import {
   type LocalExecutionSessionState,
   type PromptQueueView,
 } from "../../../shared/index.js"
+import { MAX_QUEUED_PROMPT_CHARS } from "../../../ui/conversation/annotations-codec.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
 import { toConversationInteraction } from "./elicitation-form.js"
@@ -716,6 +717,9 @@ export function useLocalExecution(
         }
       }
       if (input.queue) {
+        if (input.text.length > MAX_QUEUED_PROMPT_CHARS) {
+          return { status: "rejected", message: "待发消息超过 16,384 字上限，请精简后再加入队列。" }
+        }
         try {
           const result = await host.promptQueue(scope, { kind: "add", bindingId: screen.binding.bindingId, item: {
             requestId: crypto.randomUUID(), text: input.text, referenceIds: [...input.referenceIds], attachments,

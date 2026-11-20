@@ -26,6 +26,7 @@ import type {
   ConversationToolDetailView,
   ConversationViewProps,
 } from "../../../ui/index.js"
+import { parseAnnotatedUserMessage } from "../../../ui/conversation/annotations-codec.js"
 
 type Message = Extract<ConversationTimelineEntry, { kind: "message" }>
 type Tool = Extract<ConversationTimelineEntry, { kind: "tool" }>
@@ -701,8 +702,10 @@ export function extractFileAttachments(text: string, explicitAttachmentIds: read
   }
 
   for (const id of explicitAttachmentIds) pushIfSafe(id, true)
+  const parsed = parseAnnotatedUserMessage(text)
+  const scanText = parsed ? parsed.body : text
   const pattern = /(?:^|[\s(（[【])@(?:"([^"\n]+)"|([^\s"'，。；：！？、）)】》”’]+))/g
-  for (const match of text.matchAll(pattern)) {
+  for (const match of scanText.matchAll(pattern)) {
     const quoted = match[1] !== undefined
     const raw = quoted ? match[1]! : (match[2] ?? "").replace(/[),.;:!?]+$/, "")
     pushIfSafe(raw, quoted)

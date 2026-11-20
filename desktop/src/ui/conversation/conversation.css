@@ -262,7 +262,8 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   .wb-conversation-shimmer { animation: none; -webkit-mask-image: none; mask-image: none; }
   .wb-conversation-tool-details-disclosure[data-open="true"],
   .wb-conversation-to-bottom,
-  .wb-interaction-form { animation: none; }
+  .wb-interaction-form,
+  .wb-selection-toolbar { animation: none; }
   /* 锚定列：预览只淡入不平移，高亮环改为静态描边。 */
   .wb-conversation-minimap-popover { animation-name: wb-conversation-enter-fade; }
   .wb-conversation-minimap-tick::after { transition: none; }
@@ -593,3 +594,360 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   color: var(--muted);
   margin-top: 4px;
 }
+
+/* 划选浮动工具条：锚定在选区上方或下方，浅深主题复用表面与浮层投影令牌。 */
+.wb-selection-toolbar {
+  position: fixed;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--elev-pop);
+  animation: wb-selection-toolbar-in 120ms var(--ease-out-expo, ease);
+}
+@keyframes wb-selection-toolbar-in {
+  from { opacity: 0; transform: translateY(3px); }
+}
+.wb-selection-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.wb-selection-toolbar-btn svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.wb-selection-toolbar-btn:hover {
+  background: var(--surface-2);
+}
+.wb-selection-toolbar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 输入框内的行内引用块列表与上方编辑浮层。 */
+.wb-composer-quotes {
+  position: relative;
+  padding: 2px 2px 6px;
+}
+.wb-composer-quote-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.wb-composer-quote-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(360px, 100%);
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--accent);
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+.wb-composer-quote-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+}
+.wb-composer-quote-chip[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.wb-composer-quote-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 4px 4px 4px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-composer-quote-trigger:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.wb-composer-quote-mark,
+.wb-composer-quote-comment-icon,
+.wb-composer-quote-edit-icon {
+  flex: 0 0 auto;
+}
+.wb-composer-quote-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-composer-quote-edit-icon {
+  opacity: .8;
+}
+.wb-composer-quote-remove {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 7px 7px 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.wb-composer-quote-remove:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+.wb-composer-quote-remove:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.wb-composer-quote-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 25;
+  display: grid;
+  gap: 8px;
+  width: min(460px, 100%);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--elev-pop);
+}
+.wb-composer-quote-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 7px;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.wb-composer-quote-source svg {
+  flex: 0 0 auto;
+}
+.wb-composer-quote-source span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-composer-quote-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.wb-composer-quote-field-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.wb-composer-quote-field textarea {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 50px;
+  max-height: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  scrollbar-width: thin;
+}
+.wb-composer-quote-field textarea:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.wb-composer-quote-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+.wb-composer-quote-footer-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wb-composer-quote-icon-btn,
+.wb-composer-quote-cancel-btn,
+.wb-composer-quote-save-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+.wb-composer-quote-icon-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.wb-composer-quote-icon-btn.is-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.wb-composer-quote-cancel-btn {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text-soft);
+}
+.wb-composer-quote-cancel-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.wb-composer-quote-save-btn {
+  border: 1px solid var(--action);
+  background: var(--action);
+  color: var(--action-text);
+}
+.wb-composer-quote-save-btn:hover:not(:disabled) {
+  border-color: var(--action-hover);
+  background: var(--action-hover);
+}
+.wb-composer-quote-icon-btn:disabled,
+.wb-composer-quote-cancel-btn:disabled,
+.wb-composer-quote-save-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* 用户消息气泡内的紧凑行内引用块与点击展开详情。 */
+.wb-message-annotated {
+  white-space: normal;
+}
+.wb-message-quotes {
+  white-space: normal;
+}
+.wb-message-quote-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.wb-message-quote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(320px, 100%);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.wb-message-quote-chip:hover,
+.wb-message-quote-chip[aria-expanded="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border-strong);
+}
+.wb-message-quote-mark,
+.wb-message-quote-comment-icon {
+  flex: 0 0 auto;
+}
+.wb-message-quote-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-message-quote-detail {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.wb-message-quote-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.wb-message-quote-detail-row svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.wb-message-quote-detail-row.is-source {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.wb-message-quote-detail-row.is-source span {
+  overflow-wrap: anywhere;
+}
+.wb-message-quote-detail-row.is-comment svg {
+  color: var(--accent);
+}
+.wb-message-quote-detail-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wb-message-annotated-body {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+

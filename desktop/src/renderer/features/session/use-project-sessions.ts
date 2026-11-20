@@ -122,7 +122,10 @@ function personalFromSaved(saved: ConversationPersonal | null): ConversationPers
     scroll: saved.scroll,
     expandedTools: [...saved.expandedTools],
     expandedOutputs: [...saved.expandedOutputs],
-    draft: { ...saved.draft },
+    draft: {
+      ...saved.draft,
+      annotations: Array.isArray(saved.draft.annotations) ? [...saved.draft.annotations] : [],
+    },
     interactions: {},
   }
 }

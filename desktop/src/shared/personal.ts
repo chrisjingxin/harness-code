@@ -60,6 +60,20 @@ export interface PersonalTimelineScroll {
   readonly seenContentRevision: number | null
 }
 
+/** 单条草稿划选注释的数量、正文长度、批注长度与来源长度上限。 */
+export const MAX_DRAFT_ANNOTATIONS = 20
+export const MAX_DRAFT_ANNOTATION_TEXT_CHARS = 4000
+export const MAX_DRAFT_ANNOTATION_COMMENT_CHARS = 2000
+export const MAX_DRAFT_ANNOTATION_SOURCE_CHARS = 512
+
+/** 会话草稿中保存的一条划选摘录注释。 */
+export interface PersonalDraftAnnotation {
+  readonly id: string
+  readonly selectedText: string
+  readonly comment?: string
+  readonly sourceLabel?: string
+}
+
 /** 会话输入草稿（纯数据形状）。 */
 export interface PersonalConversationDraft {
   readonly text: string
@@ -68,6 +82,7 @@ export interface PersonalConversationDraft {
   readonly revision: number
   readonly referenceIds: readonly string[]
   readonly attachmentIds: readonly string[]
+  readonly annotations?: readonly PersonalDraftAnnotation[]
 }
 
 /** 单条会话的个人阅读态、草稿、工作目录与主动拉取缓存。 */
@@ -87,7 +102,7 @@ export const EMPTY_CONVERSATION_PERSONAL: ConversationPersonal = {
   scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
   expandedTools: [],
   expandedOutputs: [],
-  draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: 0, referenceIds: [], attachmentIds: [] },
+  draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: 0, referenceIds: [], attachmentIds: [], annotations: [] },
   localDirectoryPath: null,
   syncCache: null,
 }

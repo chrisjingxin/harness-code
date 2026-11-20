@@ -13,7 +13,9 @@ import type { ReactElement } from "react"
 import { formatElapsed } from "../common/formatters.js"
 import { Markdown } from "../rendering/markdown.js"
 import type { RenderingActions } from "../rendering/types.js"
+import { AnnotatedUserMessage } from "./annotations.js"
 import { Disclosure } from "./disclosure.js"
+import { SelectionToolbar } from "./selection-toolbar.js"
 import { deriveMinimapItems, splitTurnProcess, type ProcessSummary, type TimelineSegment } from "./timeline-model.js"
 import { TimelineMinimap } from "./timeline-minimap.js"
 import { ConversationToolCard } from "./tool-card.js"
@@ -58,13 +60,14 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
   const toggleOutput = (id: string) => {
     onPersonalChange?.(scope, { kind: "output", entryId: id, expanded: !personal.expandedOutputs.includes(id) })
   }
+  const timelineRef = useRef<HTMLDivElement | null>(null)
 
   return (
     <div className="wb-conversation" hidden={!visible} inert={!visible}>
       <div ref={scroll.scrollerRef} className="wb-conversation-scroll" onScroll={scroll.onScroll}>
-        <div className="wb-conversation-timeline" role="log" aria-relevant="additions" aria-label="对话与工具时间线">
+        <div ref={timelineRef} className="wb-conversation-timeline" role="log" aria-relevant="additions" aria-label="对话与工具时间线">
           {visibleEntries.length === 0 ? (
-            <div className="wb-conversation-empty" role="status">发送第一条消息后，这里会显示 Agent 的回答、工具调用与审批记录。</div>
+            <div className="wb-conversation-empty" data-selection-ignore="true" role="status">发送第一条消息后，这里会显示 Agent 的回答、工具调用与审批记录。</div>
           ) : groups.map((group, index) => (
             <TimelineGroup
               key={group[0].id}
@@ -87,12 +90,13 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
             </div>
           ) : null}
           {scroll.anchorUnavailable ? (
-            <p className="wb-conversation-anchor-notice" role="status">原阅读位置暂不可用，已定位到可见内容。</p>
+            <p className="wb-conversation-anchor-notice" data-selection-ignore="true" role="status">原阅读位置暂不可用，已定位到可见内容。</p>
           ) : null}
           {scroll.showBottomButton ? (
             <button
               type="button"
               className="wb-conversation-to-bottom"
+              data-selection-ignore="true"
               data-new={scroll.hasNewOutput}
               aria-label={scroll.hasNewOutput ? "跳到最新输出" : "回到底部"}
               onClick={scroll.scrollToBottom}
@@ -104,6 +108,11 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
         </div>
       </div>
       <TimelineMinimap scrollerRef={scroll.scrollerRef} items={minimapItems} onJump={scroll.scrollToEntry} />
+      <SelectionToolbar
+        containerRef={timelineRef}
+        enabled={Boolean(visible && props.onAddSelectionToChat)}
+        onAddToChat={selection => props.onAddSelectionToChat?.(selection)}
+      />
     </div>
   )
 }
@@ -536,7 +545,7 @@ function TimelineRow({
                 : isStreaming
                   ? <span className="wb-conversation-streaming-cursor" aria-hidden="true" />
                   : null
-              : entry.text}
+              : <AnnotatedUserMessage text={entry.text} />}
           </div>
         </div>
         {entry.ephemeral && <small className="wb-conversation-enrichment">旁路问答 · 仅本机</small>}
@@ -635,7 +644,7 @@ function MessageActions({ text, copyText, sentAt, role }: {
     }
   }
   return (
-    <div className="wb-conversation-message-actions">
+    <div className="wb-conversation-message-actions" data-selection-ignore="true">
       {copyText ? <button type="button" className="wb-conversation-message-copy" data-copied={copied || undefined}
         aria-label={copyLabel} title={copyLabel} onClick={() => { void copy() }}>
         {copied ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}

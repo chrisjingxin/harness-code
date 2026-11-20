@@ -7,10 +7,16 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import type { ThemeMode, WindowState } from "../../shared/index.js"
-import { ConversationView } from "../../ui/index.js"
+import {
+  ConversationView,
+  MAX_DRAFT_ANNOTATIONS,
+  normalizeAnnotationSelectedText,
+  normalizeAnnotationSourceLabel,
+} from "../../ui/index.js"
 import type {
   ConversationActions,
   ConversationComposerView,
+  ConversationDraftAnnotation,
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,
@@ -288,10 +294,23 @@ function TimelinePreview() {
         if (draft[field].length === next.length && draft[field].every((id, index) => id === next[index])) return previous
         return { ...previous, [key]: { ...current, draft: { ...draft, [field]: [...next], revision: draft.revision + 1 } } }
       }
+      if (change.kind === "draft-annotations") {
+        return {
+          ...previous,
+          [key]: {
+            ...current,
+            draft: {
+              ...draft,
+              annotations: change.annotations.slice(0, MAX_DRAFT_ANNOTATIONS),
+              revision: draft.revision + 1,
+            },
+          },
+        }
+      }
       // 旧发送结果只能条件清空原账号的原修订，不能覆盖当前账号或后续编辑。
       if (change.kind === "clear-draft") {
         if (identityKey(scope) !== currentIdentity.current.key || draft.revision !== change.expectedRevision) return previous
-        return { ...previous, [key]: { ...current, draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: draft.revision + 1, referenceIds: [], attachmentIds: [] } } }
+        return { ...previous, [key]: { ...current, draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: draft.revision + 1, referenceIds: [], attachmentIds: [], annotations: [] } } }
       }
       return previous
     })
@@ -378,6 +397,20 @@ function TimelinePreview() {
     onReferenceAction: (sourceScope, id, action) => {
       record(sourceScope, `引用意图：${action} · ${id}`)
       if (action === "remove") updatePersonal(sourceScope, { kind: "draft-references", referenceIds: personal.draft.referenceIds.filter(item => item !== id) })
+    },
+    onAddSelectionToChat: (sourceScope, selection) => {
+      const normalized = normalizeAnnotationSelectedText(selection.selectedText)
+      if (!normalized) return
+      const current = personal.draft.annotations ?? []
+      if (current.length >= MAX_DRAFT_ANNOTATIONS) return
+      const sourceLabel = normalizeAnnotationSourceLabel(selection.sourceLabel)
+      const nextItem: ConversationDraftAnnotation = {
+        id: crypto.randomUUID(),
+        selectedText: normalized.text,
+        ...(sourceLabel ? { sourceLabel } : {}),
+      }
+      updatePersonal(sourceScope, { kind: "draft-annotations", annotations: [...current, nextItem] })
+      record(sourceScope, `添加到对话：${normalized.text.slice(0, 32)}`)
     },
     rendering,
   }

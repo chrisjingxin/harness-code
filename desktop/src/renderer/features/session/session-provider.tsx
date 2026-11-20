@@ -9,7 +9,6 @@
  */
 import type { ReactElement, ReactNode } from "react"
 import type { UserSummary } from "@workbench/collaboration-client/types"
-import { EMPTY_CONVERSATION_PERSONAL } from "../../../shared/personal.js"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -29,6 +28,8 @@ import { NewSessionPage } from "./new-session-page.js"
 import { RemoteSessionPage } from "./remote-session-page.js"
 import "./session.css"
 import {
+  EMPTY_PERSONAL_STATE,
+  applyConversationPersonalChange,
   classifyConversation,
   decodeHistoryToTimelineEntries,
   deriveSyncStatus,
@@ -36,70 +37,7 @@ import {
   emptySyncState,
 } from "./session-model.js"
 
-export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {
-  scroll: EMPTY_CONVERSATION_PERSONAL.scroll,
-  expandedTools: EMPTY_CONVERSATION_PERSONAL.expandedTools,
-  expandedOutputs: EMPTY_CONVERSATION_PERSONAL.expandedOutputs,
-  draft: EMPTY_CONVERSATION_PERSONAL.draft,
-  interactions: {},
-}
-
-export function applyConversationPersonalChange(
-  previous: ConversationPersonalState,
-  change: ConversationPersonalChange,
-): ConversationPersonalState {
-  switch (change.kind) {
-    case "scroll":
-      return { ...previous, scroll: change.value }
-    case "tool":
-      return {
-        ...previous,
-        expandedTools: change.expanded
-          ? (previous.expandedTools.includes(change.entryId) ? previous.expandedTools : [...previous.expandedTools, change.entryId])
-          : previous.expandedTools.filter(id => id !== change.entryId),
-      }
-    case "output":
-      return {
-        ...previous,
-        expandedOutputs: change.expanded
-          ? (previous.expandedOutputs.includes(change.entryId) ? previous.expandedOutputs : [...previous.expandedOutputs, change.entryId])
-          : previous.expandedOutputs.filter(id => id !== change.entryId),
-      }
-    case "draft-text":
-      return {
-        ...previous,
-        draft: {
-          ...previous.draft,
-          text: change.text,
-          selectionStart: change.selectionStart,
-          selectionEnd: change.selectionEnd,
-          revision: previous.draft.revision + 1,
-        },
-      }
-    case "draft-references":
-      return {
-        ...previous,
-        draft: { ...previous.draft, referenceIds: [...change.referenceIds], revision: previous.draft.revision + 1 },
-      }
-    case "draft-attachments":
-      return {
-        ...previous,
-        draft: { ...previous.draft, attachmentIds: [...change.attachmentIds], revision: previous.draft.revision + 1 },
-      }
-    case "clear-draft":
-      if (previous.draft.revision !== change.expectedRevision) return previous
-      return {
-        ...previous,
-        draft: { ...EMPTY_PERSONAL_STATE.draft, revision: previous.draft.revision + 1 },
-      }
-    case "interaction": {
-      const nextInteractions = { ...previous.interactions }
-      if (change.answer === null) delete nextInteractions[change.interactionId]
-      else nextInteractions[change.interactionId] = change.answer
-      return { ...previous, interactions: nextInteractions }
-    }
-  }
-}
+export { EMPTY_PERSONAL_STATE, applyConversationPersonalChange }
 
 export type SessionPageController = {
   readonly projectName: string

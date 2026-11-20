@@ -98,6 +98,20 @@ export type ConversationTimelineChange =
   | { readonly kind: "scroll"; readonly value: ConversationTimelineScroll }
   | { readonly kind: "tool" | "output"; readonly entryId: string; readonly expanded: boolean }
 
+/** 输入区草稿中暂存的一条划选摘录注释。 */
+export interface ConversationDraftAnnotation {
+  readonly id: string
+  readonly selectedText: string
+  readonly comment?: string
+  readonly sourceLabel?: string
+}
+
+/** 划选浮窗点击「添加到对话」时上报的选区负载。 */
+export interface ConversationSelectionAnnotation {
+  readonly selectedText: string
+  readonly sourceLabel?: string
+}
+
 /**
  * 时间线只消费调用方投影后的条目和个人状态。
  *
@@ -115,6 +129,7 @@ export interface ConversationTimelineProps {
   readonly activity?: ConversationTimelineActivity | null
   readonly personal: ConversationTimelineState
   readonly onPersonalChange?: (scope: ConversationScope, change: ConversationTimelineChange) => void
+  readonly onAddSelectionToChat?: (selection: ConversationSelectionAnnotation) => void
   readonly rendering?: RenderingActions
 }
 
@@ -214,7 +229,7 @@ export interface ConversationComposerView {
   readonly attachments: readonly { readonly id: string; readonly label: string; readonly availability: ConversationAvailability }[]
 }
 
-/** 草稿由装配方按完整 scope 保存；修订只在文字、引用或附件选择变化时递增。 */
+/** 草稿由装配方按完整 scope 保存；修订只在文字、引用、注释或附件选择变化时递增。 */
 export interface ConversationDraft {
   readonly text: string
   readonly selectionStart: number
@@ -222,6 +237,7 @@ export interface ConversationDraft {
   readonly revision: number
   readonly referenceIds: readonly string[]
   readonly attachmentIds: readonly string[]
+  readonly annotations?: readonly ConversationDraftAnnotation[]
 }
 
 export interface ConversationPersonalState extends ConversationTimelineState {
@@ -234,6 +250,7 @@ export type ConversationPersonalChange = ConversationTimelineChange
   | { readonly kind: "draft-text"; readonly text: string; readonly selectionStart: number; readonly selectionEnd: number }
   | { readonly kind: "draft-references"; readonly referenceIds: readonly string[] }
   | { readonly kind: "draft-attachments"; readonly attachmentIds: readonly string[] }
+  | { readonly kind: "draft-annotations"; readonly annotations: readonly ConversationDraftAnnotation[] }
   | { readonly kind: "clear-draft"; readonly expectedRevision: number }
   | { readonly kind: "interaction"; readonly interactionId: string; readonly answer: ConversationInteractionAnswer | null }
 
@@ -316,6 +333,7 @@ export interface ConversationActions {
   readonly onSelectCollaborationCandidate?: (scope: ConversationScope, target: ConversationProjectTarget, candidate: ConversationCollaborationCandidate, origin: ConversationMentionOrigin) => void
   readonly onOpenFile?: (scope: ConversationScope, target: ConversationProjectTarget, relativePath: string, destination: "preview" | "central", lineRange?: ConversationFileLineRange) => void
   readonly onReferenceAction?: (scope: ConversationScope, id: string, action: "open" | "refresh" | "remove") => void
+  readonly onAddSelectionToChat?: (scope: ConversationScope, selection: ConversationSelectionAnnotation) => void
   readonly rendering?: RenderingActions
 }
 

@@ -8,6 +8,10 @@ import { isAbsolute, join } from "node:path"
 import { Ajv2020 } from "ajv/dist/2020.js"
 import { EMPTY_CONVERSATION_PERSONAL } from "../shared/personal.js"
 import {
+  MAX_DRAFT_ANNOTATIONS,
+  MAX_DRAFT_ANNOTATION_COMMENT_CHARS,
+  MAX_DRAFT_ANNOTATION_SOURCE_CHARS,
+  MAX_DRAFT_ANNOTATION_TEXT_CHARS,
   MAX_PROMPT_QUEUE_BYTES, MAX_QUEUED_PROMPTS,
   type ConversationPersonal, type LocalExecutionScope, type PersonalKey, type PersonalRead, type PersonalResult, type PersonalValue,
   type PromptQueueRecord,
@@ -106,6 +110,21 @@ const schemas: Record<PersonalKey["kind"], object> = {
       revision: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
       referenceIds: strings,
       attachmentIds: strings,
+      annotations: {
+        type: "array",
+        maxItems: MAX_DRAFT_ANNOTATIONS,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "selectedText"],
+          properties: {
+            id: { type: "string", minLength: 1, maxLength: 128 },
+            selectedText: { type: "string", minLength: 1, maxLength: MAX_DRAFT_ANNOTATION_TEXT_CHARS },
+            comment: { type: "string", minLength: 1, maxLength: MAX_DRAFT_ANNOTATION_COMMENT_CHARS },
+            sourceLabel: { type: "string", minLength: 1, maxLength: MAX_DRAFT_ANNOTATION_SOURCE_CHARS },
+          },
+        },
+      },
     }),
     localDirectoryPath: nullableText,
     customTitle: { type: "string", minLength: 1, maxLength: 80 },

@@ -183,7 +183,7 @@ function ProjectFileContentView({ path, view: rawView, preview, rendering, activ
   if (!view || view.status === "loading") return <div className="project-file-code-view"><p className="project-file-code-status">加载中…</p></div>
   if (view.status === "ready") {
     const { file } = view
-    if (preview) return <div className="project-file-markdown-view"><Markdown text={file.content} actions={rendering} /></div>
+    if (preview) return <div className="project-file-markdown-view" data-selection-file-path={path} data-selection-file-kind="markdown"><Markdown text={file.content} actions={rendering} /></div>
     const hasHighlight = hlStart !== null && hlEnd !== null
     return <div ref={codeViewRef} className="project-file-code-view">
       <div className="project-line-numbers" aria-hidden="true">
@@ -194,6 +194,8 @@ function ProjectFileContentView({ path, view: rawView, preview, rendering, activ
         })}
       </div>
       <pre
+        data-selection-file-path={path}
+        data-selection-file-kind="code"
         className={hasHighlight ? "project-file-code-pre has-target-line" : "project-file-code-pre"}
         style={hasHighlight ? { ["--hl-offset" as string]: String(hlStart - 1), ["--hl-span" as string]: String(hlEnd - hlStart + 1) } : undefined}
       ><code data-language={file.language ?? undefined}>

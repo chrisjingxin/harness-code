@@ -27,6 +27,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
 import { FileTypeIcon } from "../common/file-type-icon.js"
+import { ComposerAnnotationsBar } from "./annotations.js"
 import { extractMentionToken, mentionWindow, replaceMentionToken } from "./mention-policy.js"
 import type {
   ConversationActions,
@@ -186,7 +187,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       ? collaborationItems.length + fileResult.total
       : filteredEntries.length
   const canEdit = Boolean(actions.onPersonalChange)
-  const hasContent = draft.text.trim().length > 0 || draft.referenceIds.length > 0 || draft.attachmentIds.length > 0
+  const annotations = draft.annotations ?? []
+  const hasContent = draft.text.trim().length > 0
+    || draft.referenceIds.length > 0
+    || draft.attachmentIds.length > 0
+    || annotations.length > 0
   const allowsSend = model.primaryActions === "send" || model.primaryActions === "both"
   const allowsCancel = model.primaryActions === "cancel" || model.primaryActions === "both"
   const showStop = allowsCancel && (!allowsSend || !hasContent)
@@ -644,6 +649,26 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             if (!item) return <span key={id}>附件资料暂不可用</span>
             return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><IconX aria-hidden="true" /></button></span>
           })}</div> : null}
+          <ComposerAnnotationsBar
+            annotations={annotations}
+            canEdit={canEdit && visible}
+            onUpdate={(id, patch) => {
+              const next = annotations.map(item => {
+                if (item.id !== id) return item
+                return {
+                  id: item.id,
+                  selectedText: patch.selectedText,
+                  ...(patch.comment ? { comment: patch.comment } : {}),
+                  ...(item.sourceLabel ? { sourceLabel: item.sourceLabel } : {}),
+                }
+              })
+              actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
+            }}
+            onRemove={id => {
+              const next = annotations.filter(item => item.id !== id)
+              actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
+            }}
+          />
           <div className="wb-composer-editor" data-highlighted={showHighlight || undefined}>
             {showHighlight && highlightSegments ? (
               <div ref={backdropRef} className="wb-composer-backdrop" aria-hidden="true">

@@ -434,3 +434,74 @@ test("先改名的空记录以原修订接收首份个人视图，改名写入�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("HC-237 draft.annotations 支持可选保存恢复并校验数量与长度边界", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc237-personal-annotations-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    assert.equal((await store.load(convKey)).ok, true)
+
+    // 不含 annotations 的旧结构仍可正常保存
+    assert.equal((await store.save(convKey, 1, sampleConversation)).ok, true)
+
+    // 带 annotations（含可选 comment 与 sourceLabel）保存并重启恢复
+    const withAnnotations: ConversationPersonal = {
+      ...sampleConversation,
+      draft: {
+        ...sampleConversation.draft,
+        revision: 2,
+        annotations: [
+          {
+            id: "ann-1",
+            selectedText: "const x = 1",
+            comment: "这里需要确认边界",
+            sourceLabel: "src/app.ts:L10-L12",
+          },
+          {
+            id: "ann-2",
+            selectedText: "时间线片段",
+          },
+        ],
+      },
+    }
+    assert.equal((await store.save(convKey, 2, withAnnotations)).ok, true)
+
+    const reopened = new PersonalStore(mock.state, ORIGIN, dir)
+    const loaded = await reopened.load(convKey)
+    assert.equal(loaded.ok, true)
+    if (loaded.ok) {
+      assert.deepEqual((loaded.value.data as ConversationPersonal).draft.annotations, withAnnotations.draft.annotations)
+    }
+
+    // 超出数量上限、单条长度上限或非法多余字段必须被拒绝
+    const tooMany = Array.from({ length: 21 }, (_, idx) => ({ id: `a-${idx}`, selectedText: "x" }))
+    assert.equal((await reopened.save(convKey, 3, {
+      ...sampleConversation,
+      draft: { ...sampleConversation.draft, annotations: tooMany },
+    })).ok, false)
+
+    assert.equal((await reopened.save(convKey, 3, {
+      ...sampleConversation,
+      draft: { ...sampleConversation.draft, annotations: [{ id: "a", selectedText: "字".repeat(4001) }] },
+    })).ok, false)
+
+    assert.equal((await reopened.save(convKey, 3, {
+      ...sampleConversation,
+      draft: { ...sampleConversation.draft, annotations: [{ id: "a", selectedText: "ok", comment: "" }] },
+    })).ok, false)
+
+    assert.equal((await reopened.save(convKey, 3, {
+      ...sampleConversation,
+      draft: { ...sampleConversation.draft, annotations: [{ id: "a", selectedText: "ok", comment: "评".repeat(2001) }] },
+    })).ok, false)
+
+    assert.equal((await reopened.save(convKey, 3, {
+      ...sampleConversation,
+      draft: { ...sampleConversation.draft, annotations: [{ id: "a", selectedText: "ok", extra: true } as unknown as { id: string; selectedText: string }] },
+    })).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

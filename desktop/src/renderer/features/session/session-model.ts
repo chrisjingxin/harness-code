@@ -5,8 +5,13 @@
  * 把服务端的 ConversationSummary / HistoryMessage 与本地缓存水位组合成可供左栏和中央页展示的
  * 确定性数据结构，不持有网络、React 状态或磁盘读写。
  */
-import { parseFixedReference } from "../../../shared/index.js"
-import type { ConversationTimelineEntry, NavigationSessionEntry } from "../../../ui/index.js"
+import { EMPTY_CONVERSATION_PERSONAL, MAX_DRAFT_ANNOTATIONS, parseFixedReference } from "../../../shared/index.js"
+import type {
+  ConversationPersonalChange,
+  ConversationPersonalState,
+  ConversationTimelineEntry,
+  NavigationSessionEntry,
+} from "../../../ui/index.js"
 import type {
   ProjectConversationSummary,
   ProjectHistoryMessage,
@@ -286,4 +291,78 @@ function pickString(record: Record<string, unknown> | null, keys: readonly strin
     if (typeof value === "string" && value.length > 0) return value
   }
   return null
+}
+
+export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {
+  scroll: EMPTY_CONVERSATION_PERSONAL.scroll,
+  expandedTools: EMPTY_CONVERSATION_PERSONAL.expandedTools,
+  expandedOutputs: EMPTY_CONVERSATION_PERSONAL.expandedOutputs,
+  draft: EMPTY_CONVERSATION_PERSONAL.draft,
+  interactions: {},
+}
+
+export function applyConversationPersonalChange(
+  previous: ConversationPersonalState,
+  change: ConversationPersonalChange,
+): ConversationPersonalState {
+  switch (change.kind) {
+    case "scroll":
+      return { ...previous, scroll: change.value }
+    case "tool":
+      return {
+        ...previous,
+        expandedTools: change.expanded
+          ? (previous.expandedTools.includes(change.entryId) ? previous.expandedTools : [...previous.expandedTools, change.entryId])
+          : previous.expandedTools.filter(id => id !== change.entryId),
+      }
+    case "output":
+      return {
+        ...previous,
+        expandedOutputs: change.expanded
+          ? (previous.expandedOutputs.includes(change.entryId) ? previous.expandedOutputs : [...previous.expandedOutputs, change.entryId])
+          : previous.expandedOutputs.filter(id => id !== change.entryId),
+      }
+    case "draft-text":
+      return {
+        ...previous,
+        draft: {
+          ...previous.draft,
+          text: change.text,
+          selectionStart: change.selectionStart,
+          selectionEnd: change.selectionEnd,
+          revision: previous.draft.revision + 1,
+        },
+      }
+    case "draft-references":
+      return {
+        ...previous,
+        draft: { ...previous.draft, referenceIds: [...change.referenceIds], revision: previous.draft.revision + 1 },
+      }
+    case "draft-attachments":
+      return {
+        ...previous,
+        draft: { ...previous.draft, attachmentIds: [...change.attachmentIds], revision: previous.draft.revision + 1 },
+      }
+    case "draft-annotations":
+      return {
+        ...previous,
+        draft: {
+          ...previous.draft,
+          annotations: change.annotations.slice(0, MAX_DRAFT_ANNOTATIONS),
+          revision: previous.draft.revision + 1,
+        },
+      }
+    case "clear-draft":
+      if (previous.draft.revision !== change.expectedRevision) return previous
+      return {
+        ...previous,
+        draft: { ...EMPTY_PERSONAL_STATE.draft, annotations: [], revision: previous.draft.revision + 1 },
+      }
+    case "interaction": {
+      const nextInteractions = { ...previous.interactions }
+      if (change.answer === null) delete nextInteractions[change.interactionId]
+      else nextInteractions[change.interactionId] = change.answer
+      return { ...previous, interactions: nextInteractions }
+    }
+  }
 }

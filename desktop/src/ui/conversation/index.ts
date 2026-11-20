@@ -2,11 +2,28 @@
 export { ConversationView } from "./view.js"
 export { ConversationComposer } from "./composer.js"
 export { ConversationToolBlocks } from "./tool-blocks.js"
+export { SelectionToolbar, resolveFileSelectionSource } from "./selection-toolbar.js"
+export {
+  ANNOTATION_BLOCK_HEADER,
+  ANNOTATION_SECTION_SEPARATOR,
+  MAX_DRAFT_ANNOTATIONS,
+  MAX_DRAFT_ANNOTATION_COMMENT_CHARS,
+  MAX_DRAFT_ANNOTATION_SOURCE_CHARS,
+  MAX_DRAFT_ANNOTATION_TEXT_CHARS,
+  MAX_QUEUED_PROMPT_CHARS,
+  composeAnnotatedPrompt,
+  computeLineRangeFromOffsets,
+  normalizeAnnotationComment,
+  normalizeAnnotationSelectedText,
+  normalizeAnnotationSourceLabel,
+  parseAnnotatedUserMessage,
+} from "./annotations-codec.js"
 export type {
   ConversationActions,
   ConversationAvailability,
   ConversationComposerView,
   ConversationDraft,
+  ConversationDraftAnnotation,
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,
@@ -20,6 +37,7 @@ export type {
   ConversationProjectTarget,
   ConversationReferenceView,
   ConversationScope,
+  ConversationSelectionAnnotation,
   ConversationSendResult,
   ConversationCollaborationCandidate,
   ConversationCollaborationCandidateResult,

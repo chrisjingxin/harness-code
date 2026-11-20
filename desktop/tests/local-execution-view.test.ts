@@ -15,6 +15,7 @@ import {
 import type { LocalAcpPermission, LocalAcpTool } from "@workbench/acp-runtime/types"
 import type { LocalExecutionSessionState } from "../src/shared/index.ts"
 import type { ConversationComposerView } from "../src/ui/conversation/types.ts"
+import { composeAnnotatedPrompt } from "../src/ui/conversation/annotations-codec.ts"
 
 const author = { id: "u-1", displayName: "我" }
 
@@ -628,4 +629,25 @@ test("extractFileAttachments 从发送文本提取工作区 @file 令牌并拦�
     ["extra/item.ts"],
   )
   assert.deepEqual(extracted, ["extra/item.ts", "src/main.ts", "docs/design doc.md", "README.md"])
+})
+
+test("extractFileAttachments 对带注释消息跳过引用与批注里的 @ 包名/假路径，只提取提问正文中的 @file", () => {
+  const composed = composeAnnotatedPrompt("请结合引用检查 @src/real-target.ts", [
+    {
+      id: "ann-1",
+      selectedText: 'import { foo } from "@workbench/acp-runtime"\n// 参考 @missing/old-file.ts',
+      comment: "别把这里当成 @fake/comment.ts 附件",
+      sourceLabel: "src/example.ts:L1-L2",
+    },
+  ])
+  assert.deepEqual(extractFileAttachments(composed), ["src/real-target.ts"])
+
+  // 斜杠命令带注释时同样只扫描正文，不误抓注释里的 @ 令牌
+  const slashComposed = composeAnnotatedPrompt("/review @src/only-this.ts", [
+    {
+      id: "ann-2",
+      selectedText: "see @not/a/file.ts",
+    },
+  ])
+  assert.deepEqual(extractFileAttachments(slashComposed), ["src/only-this.ts"])
 })

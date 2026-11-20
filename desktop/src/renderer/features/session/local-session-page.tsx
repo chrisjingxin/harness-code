@@ -18,14 +18,25 @@ import {
   IconLoader2,
   IconX,
 } from "@tabler/icons-react"
-import { ConversationToolBlocks, ConversationView, Markdown } from "../../../ui/index.js"
+import {
+  ConversationToolBlocks,
+  ConversationView,
+  MAX_DRAFT_ANNOTATIONS,
+  Markdown,
+  SelectionToolbar,
+  composeAnnotatedPrompt,
+  normalizeAnnotationSelectedText,
+  normalizeAnnotationSourceLabel,
+} from "../../../ui/index.js"
 import { isSteerText } from "../../../shared/index.js"
 import type {
   ConversationActions,
   ConversationComposerView,
+  ConversationDraftAnnotation,
   ConversationPersonalChange,
   ConversationPersonalState,
   ConversationScope,
+  ConversationSelectionAnnotation,
   ConversationTimelineEntry,
   RenderingActions,
 } from "../../../ui/index.js"
@@ -97,6 +108,27 @@ export function LocalSessionPage({
     readonly subtitle?: string
     readonly markdown: string
   } | null>(null)
+  const planBodyRef = useRef<HTMLDivElement | null>(null)
+  const elicitationPlanRef = useRef<HTMLDivElement | null>(null)
+  const expandedPlanBodyRef = useRef<HTMLDivElement | null>(null)
+  const annotationsRef = useRef<readonly ConversationDraftAnnotation[]>(personal.draft.annotations ?? [])
+  annotationsRef.current = personal.draft.annotations ?? []
+
+  const handleAddSelectionToChat = (selection: ConversationSelectionAnnotation) => {
+    const normalized = normalizeAnnotationSelectedText(selection.selectedText)
+    if (!normalized) return
+    const current = annotationsRef.current
+    if (current.length >= MAX_DRAFT_ANNOTATIONS) return
+    const sourceLabel = normalizeAnnotationSourceLabel(selection.sourceLabel)
+    const nextItem: ConversationDraftAnnotation = {
+      id: crypto.randomUUID(),
+      selectedText: normalized.text,
+      ...(sourceLabel ? { sourceLabel } : {}),
+    }
+    const nextAnnotations = [...current, nextItem]
+    annotationsRef.current = nextAnnotations
+    onPersonalChange(scope, { kind: "draft-annotations", annotations: nextAnnotations })
+  }
 
   useEffect(() => {
     if (!viewingFile) setPvMax(false)
@@ -242,8 +274,13 @@ export function LocalSessionPage({
                 <span>放大查看</span>
               </button>
             </div>
-            <div className="session-plan-elicitation-markdown">
+            <div ref={elicitationPlanRef} className="session-plan-elicitation-markdown">
               <Markdown text={planForm.markdown} actions={messageRendering} />
+              <SelectionToolbar
+                containerRef={elicitationPlanRef}
+                enabled={visible && !(viewingFile && pvMax)}
+                onAddToChat={handleAddSelectionToChat}
+              />
             </div>
           </div>
         ),
@@ -353,7 +390,7 @@ export function LocalSessionPage({
             </span>
           </button>
           {!planCollapsed ? (
-            <div className="session-plan-body">
+            <div ref={planBodyRef} className="session-plan-body">
               {activePlans.map((plan, planIdx) => {
                 if (plan.kind === "entries") {
                   return (
@@ -419,6 +456,11 @@ export function LocalSessionPage({
                   </div>
                 )
               })}
+              <SelectionToolbar
+                containerRef={planBodyRef}
+                enabled={visible && !(viewingFile && pvMax)}
+                onAddToChat={handleAddSelectionToChat}
+              />
             </div>
           ) : null}
         </div>
@@ -493,7 +535,10 @@ export function LocalSessionPage({
                   if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
                 },
                 ...(execution.send ? { onSend: onSend(false),
-                  ...(canSteer && isSteerText(personal.draft.text) && !personal.draft.referenceIds.length && !personal.draft.attachmentIds.length
+                  ...(canSteer
+                    && isSteerText(composeAnnotatedPrompt(personal.draft.text, personal.draft.annotations ?? []))
+                    && !personal.draft.referenceIds.length
+                    && !personal.draft.attachmentIds.length
                     ? { onSteer: onSend(true) } : {}),
                 } : {}),
                 ...(execution.cancel
@@ -578,6 +623,11 @@ export function LocalSessionPage({
                 onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
                 onRequestFileCandidates,
                 onOpenFile,
+                onAddSelectionToChat: (targetScope, selection) => {
+                  if (targetScope.conversationId === scope.conversationId) {
+                    handleAddSelectionToChat(selection)
+                  }
+                },
                 rendering: messageRendering,
               }}
               slots={slots}
@@ -590,6 +640,7 @@ export function LocalSessionPage({
               state={centralFiles}
               maximized={pvMax}
               onToggleMaximized={() => setPvMax(value => !value)}
+              onAddSelectionToChat={handleAddSelectionToChat}
             />
           </div>
         ) : null}
@@ -617,8 +668,13 @@ export function LocalSessionPage({
                 <IconX size={16} stroke={1.8} aria-hidden="true" />
               </button>
             </div>
-            <div className="session-plan-zoom-body">
+            <div ref={expandedPlanBodyRef} className="session-plan-zoom-body">
               <Markdown text={expandedPlan.markdown} actions={messageRendering} />
+              <SelectionToolbar
+                containerRef={expandedPlanBodyRef}
+                enabled={visible}
+                onAddToChat={handleAddSelectionToChat}
+              />
             </div>
           </div>
         </div>
