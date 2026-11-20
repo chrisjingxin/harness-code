@@ -26,7 +26,7 @@ export type ConversationTimelineEntry =
       readonly createdAtMs?: number
       readonly streaming?: boolean
       readonly ephemeral?: boolean
-      readonly runSummary?: { readonly durationMs?: number; readonly cachedTokens?: number }
+      readonly runSummary?: { readonly durationMs?: number; readonly cachedTokens?: number; readonly agentName?: string }
       /** 消息只持有固定材料标识，装配方经当前权限读取正文。 */
       readonly referenceIds?: readonly string[]
     }

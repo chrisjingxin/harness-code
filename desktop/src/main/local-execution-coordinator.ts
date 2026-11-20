@@ -1069,6 +1069,9 @@ export function createLocalExecutionCoordinator(
               }
               if (event.type === "completed" && enabled("commands") && parseHarnessCommandMeta(event.rawMeta)?.ephemeral === true) turn.ephemeral = true
               const metrics = event.type === "completed" && enabled("runSummary") ? parseHarnessRunMeta(event.rawMeta) : undefined
+              const completedAtMs = Date.now()
+              const agentInfo = event.type === "completed" ? session.getState?.()?.agentInfo : undefined
+              const agentName = binding.providerId === "harness" ? "Harness Code" : agentInfo?.title?.trim() || agentInfo?.name
               binding.activeTurn = undefined
               if (checkpoints && turn.checkpoint) {
                 const stopped = event.type !== "failed" || event.reason === "agent-stopped"
@@ -1083,7 +1086,12 @@ export function createLocalExecutionCoordinator(
                 ...source,
                 kind: "finished",
                 ...(turn.ephemeral ? { ephemeral: true } : {}),
-                ...(metrics ? { runSummary: { durationMs: metrics.durationMs, cachedTokens: metrics.usage?.cachedTokens } } : {}),
+                ...(event.type === "completed" ? { runSummary: {
+                  agentName,
+                  completedAtMs,
+                  durationMs: metrics?.durationMs ?? Math.max(0, completedAtMs - turn.acceptedAtMs),
+                  cachedTokens: metrics?.usage?.cachedTokens,
+                } } : {}),
                 availability: event.type === "failed" && event.reason === "directory-unavailable"
                   ? { available: false, reason: failureMessages[event.reason], directoryStatus: "invalid" }
                   : availability(session, binding.providerReason),
@@ -1094,7 +1102,6 @@ export function createLocalExecutionCoordinator(
               // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
               if (event.type === "completed" && event.shareable && !turn.ephemeral && isCurrent(login)) {
                 const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
-                const completedAtMs = Date.now()
                 const steering = turn.steering
                 if (uploads) binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
                   await steering

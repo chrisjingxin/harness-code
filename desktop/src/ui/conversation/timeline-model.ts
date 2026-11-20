@@ -52,13 +52,16 @@ export function isTurnActive(entries: readonly ConversationTimelineEntry[], acti
   )
 }
 
-/** 一轮正文前的可执行/思考过程摘要；仅在过程跨越多个片段时用于总览折叠。 */
+/** 一轮正文前的过程摘要，完成后可带真实耗时与完成时间。 */
 export type ProcessSummary = {
   readonly id: string
   readonly label: string
   readonly failedCount: number
   readonly hasThought: boolean
   readonly running: boolean
+  readonly completedAtMs?: number
+  readonly durationMs?: number
+  readonly agentName?: string
 }
 
 export type TurnProcessSplit = {
@@ -67,10 +70,11 @@ export type TurnProcessSplit = {
   readonly finalEntry?: Extract<ConversationTimelineEntry, { kind: "message" | "extension" }>
 }
 
-/** 拆分一轮的“过程片段”与末尾正文；过程达到 ≥2 段时收进外层总览折叠组。 */
+/** 过程有多段或已有完成信息时收成一行，最终正文留在折叠组外。 */
 export function splitTurnProcess(
   entries: readonly ConversationTimelineEntry[],
   activity?: ConversationTimelineActivity | null,
+  startedAtMs?: number,
 ): TurnProcessSplit {
   // 若末尾只跟着追尾思考（reasoning），回溯跳过它们：只要紧邻一条助手回复或扩展交互卡片且其后无工具/审批，
   // 仍把它当作 finalEntry 留在折叠区外，避免最终回答或选择题卡片被吞进“思考过程”。
@@ -90,7 +94,15 @@ export function splitTurnProcess(
     ? [...entries.slice(0, finalIndex), ...entries.slice(finalIndex + 1)]
     : entries
   const processSegments = segmentAgentEntries(processEntries)
-  if (processSegments.length < 2) {
+  const turnActive = isTurnActive(entries, activity)
+  const completedReply = !turnActive && finalEntry?.kind === "message" ? finalEntry : undefined
+  const recordedAtMs = completedReply?.createdAtMs
+  const completedAtMs = recordedAtMs !== undefined && Number.isFinite(new Date(recordedAtMs).getTime()) ? recordedAtMs : undefined
+  // 历史回复已经记录完成时间，能和紧邻的提问配对时补算耗时。
+  const elapsedMs = completedAtMs !== undefined && startedAtMs !== undefined && startedAtMs >= 0 && completedAtMs >= startedAtMs
+    ? completedAtMs - startedAtMs : undefined
+  const durationMs = completedReply?.runSummary?.durationMs ?? elapsedMs
+  if (processSegments.length === 0 || (processSegments.length < 2 && completedAtMs === undefined && durationMs === undefined)) {
     return { processSummary: null, processSegments, finalEntry }
   }
   let thoughtCount = 0
@@ -116,7 +128,6 @@ export function splitTurnProcess(
   if (thoughtCount > 0) parts.push(thoughtCount === 1 ? "思考过程" : `思考 ${thoughtCount} 次`)
   if (toolCount > 0) parts.push(`${toolCount} 个操作`)
   if (interactionCount > 0) parts.push(`${interactionCount} 次审批`)
-  const turnActive = isTurnActive(entries, activity)
   return {
     processSummary: {
       id: `process:${processEntries[0]!.id}`,
@@ -124,6 +135,9 @@ export function splitTurnProcess(
       failedCount,
       hasThought: thoughtCount > 0,
       running: turnActive && (!finalEntry || stepRunning),
+      completedAtMs,
+      durationMs,
+      agentName: completedReply?.runSummary?.agentName,
     },
     processSegments,
     finalEntry,

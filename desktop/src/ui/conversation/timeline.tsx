@@ -77,12 +77,12 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               onToggleOutput={onPersonalChange ? toggleOutput : undefined}
               rendering={rendering}
               activity={index === groups.length - 1 ? activity : null}
+              previousEntry={groups[index - 1]?.at(-1)}
             />
           ))}
-          {/* 末组不是 Agent 组时（如刚发出提问），状态行落在一个只有名称行和状态行的占位组里。 */}
+          {/* 刚发出提问时，状态行先显示在提问下方。 */}
           {activity && !groups.at(-1)?.some(isAgentGroupEntry) ? (
             <div className="wb-conversation-agent-group">
-              <MessageMeta role="assistant" />
               <ActivityStatus activity={activity} />
             </div>
           ) : null}
@@ -168,6 +168,7 @@ function TimelineGroup({
   onToggleOutput,
   rendering,
   activity,
+  previousEntry,
 }: {
   entries: readonly ConversationTimelineEntry[]
   lastId: string | null
@@ -178,6 +179,7 @@ function TimelineGroup({
   onToggleOutput?: (id: string) => void
   rendering?: RenderingActions
   activity?: ConversationTimelineActivity | null
+  previousEntry?: ConversationTimelineEntry
 }): ReactElement {
   const agentGroup = entries.some(entry => isAgentContinuation(entry))
   const assistant = entries.find(isAssistant)
@@ -188,11 +190,11 @@ function TimelineGroup({
   }
   /* 整组同时出现时只播一次组级动效；组已存在、后续追加的单条仍各自播进入。 */
   const groupIsNew = entries.every(entry => isNewEntry(entry.id))
-  const { processSummary, processSegments, finalEntry } = splitTurnProcess(entries, activity)
+  const startedAtMs = previousEntry?.kind === "message" && previousEntry.role === "user" ? previousEntry.createdAtMs : undefined
+  const { processSummary, processSegments, finalEntry } = splitTurnProcess(entries, activity, startedAtMs)
   const segmentProps = { groupIsNew, lastId, isNewEntry, expandedTools, expandedOutputs, onToggleTool, onToggleOutput, rendering }
   return (
     <div className="wb-conversation-agent-group" data-enter={groupIsNew || undefined}>
-      <MessageMeta role="assistant" author={assistant?.author?.displayName} createdAtMs={assistant?.createdAtMs} />
       {processSummary ? (
         <ProcessGroupRows summary={processSummary} segments={processSegments} {...segmentProps} />
       ) : processSegments.map(segment => renderTimelineSegment({ segment, ...segmentProps }))}
@@ -200,7 +202,7 @@ function TimelineGroup({
         <TimelineRow
           key={finalEntry.id}
           entry={finalEntry}
-          grouped
+          hideDuration={processSummary?.durationMs !== undefined}
           enter={!groupIsNew && isNewEntry(finalEntry.id)}
           lastId={lastId}
           expandedTools={expandedTools}
@@ -252,7 +254,6 @@ function renderTimelineSegment({
     <TimelineRow
       key={segment.entry.id}
       entry={segment.entry}
-      grouped
       enter={!groupIsNew && isNewEntry(segment.entry.id)}
       lastId={lastId}
       expandedTools={expandedTools}
@@ -291,17 +292,27 @@ function ProcessGroupRows({
   const forced = summary.running
   const expanded = forced || expandedTools.includes(summary.id)
   const detailsId = `${summary.id}:body`.replaceAll(":", "-")
+  const completedAt = messageDate(summary.completedAtMs)
+  const completed = summary.durationMs !== undefined || completedAt !== undefined
   const Icon = forced ? IconLoader2 : summary.hasThought ? IconBrain : IconTool
   const iconClass = forced ? "wb-conversation-tool-icon wb-conversation-spin" : "wb-conversation-tool-icon"
+  const label = summary.durationMs !== undefined
+    ? `${summary.agentName ? summary.agentName + " " : ""}用时 ${formatElapsed(summary.durationMs)}`
+    : completed ? "执行过程" : summary.label
   const labelNode = (
     <span className="wb-conversation-process-label">
-      {summary.label}
+      {label}
       {forced ? <span className="wb-conversation-process-progress"> · 正在执行</span> : null}
-      {summary.failedCount > 0 ? <span className="wb-conversation-process-failures"> · 含 {summary.failedCount} 个失败</span> : null}
+      {!completed && summary.failedCount > 0 ? <span className="wb-conversation-process-failures"> · 含 {summary.failedCount} 个失败</span> : null}
     </span>
   )
+  const time = completedAt ? (
+    <time className="wb-conversation-time wb-conversation-process-time" dateTime={completedAt.toISOString()}>
+      {formatMessageTime(completedAt)}
+    </time>
+  ) : null
   return (
-    <div className="wb-conversation-process">
+    <div className="wb-conversation-process" data-completed={completed || undefined}>
       {onToggleTool ? (
         <button
           type="button"
@@ -311,14 +322,16 @@ function ProcessGroupRows({
           aria-disabled={forced || undefined}
           onClick={() => { if (!forced) onToggleTool(summary.id) }}
         >
-          <Icon aria-hidden="true" className={iconClass} />
+          {completed ? null : <Icon aria-hidden="true" className={iconClass} />}
           {labelNode}
           <IconChevronRight aria-hidden="true" focusable="false" className={expanded ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
+          {time}
         </button>
       ) : (
-        <div className="wb-conversation-process-header">
-          <Icon aria-hidden="true" className={iconClass} />
+        <div className="wb-conversation-process-header" tabIndex={completedAt ? 0 : undefined}>
+          {completed ? null : <Icon aria-hidden="true" className={iconClass} />}
           {labelNode}
+          {time}
         </div>
       )}
       <Disclosure open={expanded} className="wb-conversation-process-disclosure">
@@ -483,7 +496,7 @@ type ToolEntry = Extract<ConversationTimelineEntry, { kind: "tool" }>
 
 function TimelineRow({
   entry,
-  grouped = false,
+  hideDuration = false,
   enter = false,
   lastId,
   expandedTools,
@@ -493,7 +506,7 @@ function TimelineRow({
   rendering,
 }: {
   entry: ConversationTimelineEntry
-  grouped?: boolean
+  hideDuration?: boolean
   enter?: boolean
   lastId: string | null
   expandedTools: readonly string[]
@@ -509,10 +522,12 @@ function TimelineRow({
     const isStreaming = entry.role === "assistant" && Boolean(entry.streaming && entry.id === lastId)
     const copyText = !entry.streaming && entry.text.trim() ? rendering?.copyText : undefined
     const sentAt = entry.role === "user" ? messageDate(entry.createdAtMs) : undefined
+    const duration = hideDuration ? undefined : entry.runSummary?.durationMs
+    const cachedTokens = entry.runSummary?.cachedTokens
     return (
-      <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className={`wb-conversation-message wb-conversation-message-${entry.role}`}>
-        {grouped && entry.role === "assistant" ? null : <MessageMeta role={entry.role} author={entry.author?.displayName}
-          createdAtMs={entry.role === "assistant" ? entry.createdAtMs : undefined} />}
+      <div data-conversation-entry-id={entry.id} data-enter={enter || undefined}
+        className={`wb-conversation-message wb-conversation-message-${entry.role}`}
+        role="group" aria-label={entry.role === "user" ? "用户消息" : "回复"}>
         <div className="wb-conversation-message-body">
           <div className="wb-conversation-message-content" data-streaming={isStreaming || undefined}>
             {entry.role === "assistant"
@@ -525,9 +540,9 @@ function TimelineRow({
           </div>
         </div>
         {entry.ephemeral && <small className="wb-conversation-enrichment">旁路问答 · 仅本机</small>}
-        {entry.runSummary && <small className="wb-conversation-enrichment">
-          {[entry.runSummary.durationMs === undefined ? "" : (entry.runSummary.durationMs / 1000).toFixed(1) + " 秒",
-            entry.runSummary.cachedTokens === undefined ? "" : "缓存 " + entry.runSummary.cachedTokens + " Token"].filter(Boolean).join(" · ")}
+        {(duration !== undefined || cachedTokens !== undefined) && <small className="wb-conversation-enrichment">
+          {[duration === undefined ? "" : (duration / 1000).toFixed(1) + " 秒",
+            cachedTokens === undefined ? "" : "缓存 " + cachedTokens + " Token"].filter(Boolean).join(" · ")}
         </small>}
         {copyText || sentAt ? (
           <MessageActions text={entry.text} copyText={copyText} sentAt={sentAt} role={entry.role} />
@@ -590,17 +605,6 @@ function formatMessageTime(date: Date): string {
   if (sameYear && month === today.getMonth() && day === today.getDate()) return time
   const monthDay = `${pad(month + 1)}-${pad(day)}`
   return `${sameYear ? "" : String(year).padStart(4, "0") + "-"}${monthDay} ${time}`
-}
-
-/** 保留消息作者，Agent 的回答时间显示在组头。 */
-function MessageMeta({ role, author, createdAtMs }: { role: "user" | "assistant"; author?: string; createdAtMs?: number }): ReactElement {
-  const validDate = messageDate(createdAtMs)
-  return (
-    <div className="wb-conversation-message-meta">
-      <span className="wb-conversation-author">{author || (role === "assistant" ? "Agent" : "用户")}</span>
-      {validDate ? <><span aria-hidden="true"> · </span><time className="wb-conversation-time" dateTime={validDate.toISOString()}>{validDate.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></> : null}
-    </div>
-  )
 }
 
 /** 用户消息与已完成回答共用复制反馈；用户消息底栏同时展示本机时间。 */

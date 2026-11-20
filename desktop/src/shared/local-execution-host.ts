@@ -122,7 +122,12 @@ export type LocalExecutionPermission = Omit<LocalAcpPermission, "rawMeta" | "too
     readonly scope?: "once" | "thread" | "project"
   })[]
 }
-export type LocalExecutionRunSummary = { readonly durationMs?: number; readonly cachedTokens?: number }
+export type LocalExecutionRunSummary = {
+  readonly durationMs?: number
+  readonly cachedTokens?: number
+  readonly agentName?: string
+  readonly completedAtMs?: number
+}
 
 export type LocalExecutionNotice =
   | LocalExecutionUploadNotice

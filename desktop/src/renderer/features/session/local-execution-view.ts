@@ -423,7 +423,10 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       return {
         ...entry, streaming: false,
         ...(entry === lastAssistant && update.ephemeral ? { ephemeral: true } : {}),
-        ...(entry === lastAssistant && update.runSummary ? { runSummary: update.runSummary } : {}),
+        ...(entry === lastAssistant && update.runSummary ? {
+          runSummary: update.runSummary,
+          createdAtMs: update.runSummary.completedAtMs ?? entry.createdAtMs,
+        } : {}),
       }
     }
     if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running") {
@@ -934,7 +937,7 @@ export function projectLocalExecution(
   return {
     entries,
     contentRevision: base.contentRevision + execution.revision,
-    activity: running ? { active: true, label: "Agent 正在回复" } : null,
+    activity: running ? { active: true, label: "正在回复" } : null,
     composer: {
       ...base.composer,
       send: running && !base.composer.queue ? { enabled: false, reason: "等待当前回复完成" } : base.composer.send,

@@ -175,7 +175,7 @@ test("thought-delta 不向定稿正文插入空行，且工具/messageId 换行�
     const uploadsDir = join(root, "uploads")
     await mkdir(workdir, { recursive: true })
     const identity = await createSignedInState(USER_A)
-    const { window } = createFakeWindow()
+    const { window, notices } = createFakeWindow()
     const { runtime, emit } = createMockRuntime()
     const uploadedBatches: ConversationSyncRequest[] = []
     let watermark = 0
@@ -214,6 +214,9 @@ test("thought-delta 不向定稿正文插入空行，且工具/messageId 换行�
     const batch1 = uploadedBatches[0]!
     assert.deepEqual(batch1.messages.map(m => m.type), ["user", "assistant"])
     assert.equal(JSON.parse(batch1.messages[1]!.payload).text, "`wc -l pi-probe.txt`")
+    const finished = (notices as LocalExecutionNotice[]).find(notice => notice.kind === "finished" && notice.turnId === turn1)
+    assert.equal(finished?.runSummary?.completedAtMs, batch1.messages[1]!.occurredAtMs)
+    assert.equal(finished?.runSummary?.durationMs, batch1.messages[1]!.occurredAtMs - batch1.messages[0]!.occurredAtMs)
 
     // 轮次 2：已有尾部 \n + 工具打断 + 前导 \n，合并成恰好 \n\n；以及 messageId 切换合并
     const sent2 = await ipc.send(scope, prepared.value.bindingId, REQ_ID, "继续", [])

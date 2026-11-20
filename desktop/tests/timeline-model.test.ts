@@ -45,6 +45,38 @@ const userMessage = (id: string, text: string, createdAtMs?: number): Conversati
   kind: "message", id, role: "user", text, createdAtMs,
 })
 
+test("已完成的过程用一行展示 Agent 实际名称、耗时和完成时间，正文无独立名称栏", () => {
+  const now = new Date()
+  const finishedAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 52).getTime()
+  const html = renderToStaticMarkup(createElement(ConversationTimeline, {
+    scope: { namespace: "test", accountId: "a", workspaceId: "w", conversationId: "c" },
+    visible: true,
+    contentRevision: 1,
+    entries: [
+      { ...userMessage("prompt", "问题", finishedAt - 60_000), author: { id: "a", displayName: "测试用户" } },
+      tool("completed-tool"),
+      { ...message("reply"), createdAtMs: finishedAt, runSummary: { durationMs: 15_000, agentName: "Harness Code" } },
+    ],
+    personal: { expandedTools: [], expandedOutputs: [], scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null } },
+    onPersonalChange() {},
+  }))
+  assert.match(html, /class="wb-conversation-process-header"[^>]*aria-expanded="false"/)
+  assert.match(html, /Harness Code 用时 15s/)
+  assert.match(html, /class="wb-conversation-time wb-conversation-process-time"[^>]*>10:52<\/time>/)
+  assert.doesNotMatch(html, /测试用户|wb-conversation-message-meta|>Agent<|15\.0 秒/)
+})
+
+test("历史回复按相邻提问时间补算耗时，未结束时不显示完成信息", () => {
+  const startedAt = 1_700_000_000_000
+  const entries: ConversationTimelineEntry[] = [tool("a"), { ...message("reply"), createdAtMs: startedAt + 15_000 }]
+  const finished = splitTurnProcess(entries, null, startedAt).processSummary
+  assert.equal(finished?.durationMs, 15_000)
+  assert.equal(finished?.completedAtMs, startedAt + 15_000)
+  assert.equal(finished?.agentName, undefined)
+  assert.equal(splitTurnProcess(entries, { label: "正在回复", active: true }, startedAt).processSummary, null)
+  assert.equal(splitTurnProcess(entries, null, startedAt + 20_000).processSummary?.durationMs, undefined)
+})
+
 test("用户消息底栏可复制，按本机日期逐级补齐时间", () => {
   const now = new Date()
   const year = now.getFullYear()

@@ -56,3 +56,8 @@
 - [x] `npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`node --experimental-strip-types scripts/workbench/smoke-file-rendering.mjs` 通过；受控项目／会话预览中检查了双入口切换、浅／深色和箭头跳转。
 - 限制：Markdown 图片显示替代文字，相对链接不打开；未扩展本机文件读取接口。原停点 3 的其余验收继续按原清单处理。
 - [x] 本机会话中的文件引用与工具详情路径支持打开只读预览；同名选择与目录外拒绝已在受控会话中冒烟。
+
+## 完成轮次折叠行
+
+- [x] 复用既有折叠和时间格式，展示完成耗时，并移除独立名称栏。
+- [x] 验证运行到完成、悬停和再次展开。49 项定向测试与本地受控会话验证通过。
