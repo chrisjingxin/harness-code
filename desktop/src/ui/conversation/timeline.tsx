@@ -63,6 +63,9 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
   const runningTool = liveEntries.find(entry => entry.kind === "tool" && entry.status === "running")
   const activeThought = liveEntries.find(entry => entry.kind === "reasoning" && entry.active)
   const shimmerEntryId = (runningTool ?? activeThought)?.id
+  // 工具已结束、下一步还没到达时，整轮仍在执行；正文开始流式输出后由光标提示。
+  const shimmerStatus = visible && activity?.active === true && !shimmerEntryId
+    && !liveEntries.some(entry => isAssistant(entry) && entry.streaming)
   const minimapItems = deriveMinimapItems(visibleEntries)
   const toggleTool = (id: string) => {
     onPersonalChange?.(scope, { kind: "tool", entryId: id, expanded: !personal.expandedTools.includes(id) })
@@ -91,6 +94,7 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               onResolveImagePreview={onResolveImagePreview}
               rendering={rendering}
               activity={index === groups.length - 1 ? activity : null}
+              shimmerStatus={index === groups.length - 1 && shimmerStatus}
               shimmerEntryId={shimmerEntryId}
               previousEntry={groups[index - 1]?.at(-1)}
             />
@@ -98,7 +102,7 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
           {/* 刚发出提问时，状态行先显示在提问下方。 */}
           {activity && !groups.at(-1)?.some(isAgentGroupEntry) ? (
             <div className="wb-conversation-agent-group">
-              <ActivityStatus activity={activity} />
+              <ActivityStatus activity={activity} shimmer={shimmerStatus} />
             </div>
           ) : null}
           {scroll.anchorUnavailable ? (
@@ -191,6 +195,7 @@ function TimelineGroup({
   onResolveImagePreview,
   rendering,
   activity,
+  shimmerStatus,
   previousEntry,
 }: {
   entries: readonly ConversationTimelineEntry[]
@@ -204,6 +209,7 @@ function TimelineGroup({
   onResolveImagePreview?: (imageId: string) => Promise<string | null>
   rendering?: RenderingActions
   activity?: ConversationTimelineActivity | null
+  shimmerStatus: boolean
   previousEntry?: ConversationTimelineEntry
 }): ReactElement {
   const agentGroup = entries.some(entry => isAgentContinuation(entry))
@@ -211,17 +217,18 @@ function TimelineGroup({
   if (!agentGroup && entries.length === 1) {
     const row = <TimelineRow entry={entries[0]} enter={isNewEntry(entries[0].id)} lastId={lastId} expandedTools={expandedTools} expandedOutputs={expandedOutputs} onToggleTool={onToggleTool} onToggleOutput={onToggleOutput} onResolveImagePreview={onResolveImagePreview} rendering={rendering} />
     if (!activity || !assistant) return row
-    return <div className="wb-conversation-agent-group">{row}<ActivityStatus activity={activity} /></div>
+    return <div className="wb-conversation-agent-group">{row}<ActivityStatus activity={activity} shimmer={shimmerStatus} /></div>
   }
   /* 整组同时出现时只播一次组级动效；组已存在、后续追加的单条仍各自播进入。 */
   const groupIsNew = entries.every(entry => isNewEntry(entry.id))
   const startedAtMs = previousEntry?.kind === "message" && previousEntry.role === "user" ? previousEntry.createdAtMs : undefined
   const { processSummary, processSegments, finalEntry } = splitTurnProcess(entries, activity, startedAtMs)
   const segmentProps = { groupIsNew, lastId, isNewEntry, expandedTools, expandedOutputs, onToggleTool, onToggleOutput, rendering, shimmerEntryId }
+  const shimmerProcess = shimmerStatus && processSummary?.running === true
   return (
     <div className="wb-conversation-agent-group" data-enter={groupIsNew || undefined}>
       {processSummary ? (
-        <ProcessGroupRows summary={processSummary} segments={processSegments} {...segmentProps} />
+        <ProcessGroupRows summary={processSummary} segments={processSegments} shimmer={shimmerProcess} {...segmentProps} />
       ) : processSegments.map(segment => renderTimelineSegment({ segment, ...segmentProps }))}
       {finalEntry ? (
         <TimelineRow
@@ -237,7 +244,7 @@ function TimelineGroup({
           rendering={rendering}
         />
       ) : null}
-      {activity ? <ActivityStatus activity={activity} /> : null}
+      {activity ? <ActivityStatus activity={activity} shimmer={shimmerStatus && !shimmerProcess} /> : null}
     </div>
   )
 }
@@ -298,6 +305,7 @@ function renderTimelineSegment({
 function ProcessGroupRows({
   summary,
   segments,
+  shimmer,
   groupIsNew,
   lastId,
   isNewEntry,
@@ -310,6 +318,7 @@ function ProcessGroupRows({
 }: {
   summary: ProcessSummary
   segments: readonly TimelineSegment[]
+  shimmer: boolean
   groupIsNew: boolean
   lastId: string | null
   isNewEntry: (id: string) => boolean
@@ -333,7 +342,12 @@ function ProcessGroupRows({
   const labelNode = (
     <span className="wb-conversation-process-label">
       {label}
-      {forced ? <span className="wb-conversation-process-progress"> · 正在执行</span> : null}
+      {forced ? (
+        <span
+          ref={shimmer ? observeShimmer : undefined}
+          className={shimmer ? "wb-conversation-process-progress wb-conversation-shimmer" : "wb-conversation-process-progress"}
+        > · 正在执行</span>
+      ) : null}
       {!completed && summary.failedCount > 0 ? <span className="wb-conversation-process-failures"> · 含 {summary.failedCount} 个失败</span> : null}
     </span>
   )
@@ -698,14 +712,14 @@ function MessageActions({ text, copyText, sentAt, role }: {
 }
 
 /** 计时只刷新状态行，避免每秒重复计算整个会话的内容。 */
-function ActivityStatus({ activity }: { activity?: ConversationTimelineActivity | null }): ReactElement {
+function ActivityStatus({ activity, shimmer }: { activity?: ConversationTimelineActivity | null; shimmer: boolean }): ReactElement {
   const elapsed = useElapsed(activity?.active === true, activity?.elapsedMs)
   return (
     <div className="wb-conversation-live" aria-live="polite">
       {activity ? (
         <div className="wb-conversation-progress" role="status">
           {activity.active ? <IconLoader2 aria-hidden="true" className="wb-conversation-progress-icon wb-conversation-spin" /> : null}
-          <span>
+          <span ref={shimmer ? observeShimmer : undefined} className={shimmer ? "wb-conversation-shimmer" : undefined}>
             {[activity.label, activity.phaseLabel, activity.elapsedMs === undefined ? undefined : `已运行 ${formatElapsed(elapsed)}`].filter(Boolean).join(" · ")}
           </span>
         </div>
