@@ -1,6 +1,9 @@
 /** HC-222 Part A：本机执行视图的工具细节合并、色调映射与思考条目归并测试。 */
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { ConversationComposer } from "../src/ui/conversation/composer.tsx"
 import {
   applyLocalExecutionUpdate,
   buildComposerCapabilities,
@@ -11,11 +14,49 @@ import {
 } from "../src/renderer/features/session/local-execution-view.ts"
 import type { LocalAcpPermission, LocalAcpTool } from "@workbench/acp-runtime/types"
 import type { LocalExecutionSessionState } from "../src/shared/index.ts"
+import type { ConversationComposerView } from "../src/ui/conversation/types.ts"
 
 const author = { id: "u-1", displayName: "我" }
 
 const accepted = (text = "请处理") => applyLocalExecutionUpdate(emptyLocalExecutionView, {
   kind: "accepted", turnId: "t-1", text, author,
+})
+
+test("输入框只渲染一个主按钮，运行中有草稿则发送，草稿清空则停止", () => {
+  const render = (text: string, running: boolean, referenceIds: string[] = [], controls: ConversationComposerView["controls"] = []) =>
+    renderToStaticMarkup(createElement(ConversationComposer, {
+      scope: { namespace: "test", accountId: "a", workspaceId: "w", conversationId: "c" },
+      visible: true,
+      model: {
+        primaryActions: running ? "both" : "send",
+        queue: running,
+        send: { enabled: true },
+        cancel: { enabled: running },
+        commands: [], controls, projectTarget: null, references: [], attachments: [],
+      },
+      draft: { text, revision: 0, selectionStart: 0, selectionEnd: 0, referenceIds, attachmentIds: [] },
+      actions: { onPersonalChange() {}, onSend: async () => ({ status: "accepted" }), onCancel: async () => ({ status: "accepted" }) },
+      sendBlocked: false, cancelBlocked: false, onSend() {}, onCancel() {},
+    }))
+  const buttons = (html: string) => html.match(/<button[^>]*class="wb-composer-(?:send|cancel)"[^>]*>/g) ?? []
+
+  assert.match(buttons(render("", true)).join(), /type="button".*aria-label="取消当前任务"/)
+  assert.equal(buttons(render(" \n", true)).length, 1)
+  for (const html of [render("下一条", true), render("", true, ["reference"])]) {
+    const [button] = buttons(html)
+    assert.equal(buttons(html).length, 1)
+    assert.match(button, /type="submit".*aria-label="发送消息".*title="发送到待发队列"/)
+  }
+  assert.match(buttons(render("", false)).join(), /type="submit".*disabled/)
+  assert.match(render("", false), /placeholder="输入消息 · @ 引用 · \/ 命令"/)
+  const permission = {
+    id: "mode", kind: "permission", label: "权限", selectedId: "yolo",
+    availability: { enabled: true },
+    items: [{ id: "yolo", label: "全部放行", permissionKind: "full", availability: { enabled: true } }],
+  } as const
+  assert.match(render("", false, [], [permission]), /data-full-access="true"/)
+  assert.match(render("", false, [], [permission]), /完全访问已开启，部分操作无需确认。/)
+  assert.doesNotMatch(render("", false, [], [{ ...permission, selectedId: "default" }]), /完全访问已开启/)
 })
 
 const tool = (id: string, overrides: Partial<LocalAcpTool> = {}): LocalAcpTool => ({ id, ...overrides })
@@ -494,13 +535,19 @@ test("session-state 与 elicitation 状态流转及交互历史记录", () => {
   assert.ok(state.entries.some(e => e.kind === "interaction-history" && e.id === "local-execution:t-el:elicitation:el-1"))
 })
 
-test("buildComposerCapabilities 生成多代理/模式/配置控件、workflow tabCycle、斜杠命令、用量与回退提示", () => {
+test("输入区合并 Agent、模型和推理强度，只单列权限，仍提供斜杠命令", () => {
   const sessionState: LocalExecutionSessionState = {
     providerId: "harness",
     connected: true,
     modes: {
       currentModeId: "default",
-      availableModes: [{ id: "default", name: "逐项确认" }, { id: "plan", name: "先出计划" }],
+      availableModes: [
+        { id: "default", name: "逐项确认" },
+        { id: "plan", name: "先出计划" },
+        { id: "auto-edit", name: "自动批准编辑" },
+        { id: "auto", name: "自动判断" },
+        { id: "yolo", name: "全部放行" },
+      ],
     },
     currentModeId: "default",
     configOptions: [
@@ -550,25 +597,29 @@ test("buildComposerCapabilities 生成多代理/模式/配置控件、workflow t
 
   assert.deepEqual(caps.commands.map(c => c.id), ["compact", "btw"])
   assert.equal(caps.commands[0]?.label, "/compact")
-  assert.deepEqual(caps.controls.map(c => c.id), ["agent", "mode", "config:model", "config:workflow", "config:thought_level"])
-  assert.equal(caps.controls[0]?.selectedId, "harness")
-  assert.equal(caps.controls[0]?.items[1]?.availability.enabled, false)
-  // 存在多模式时 tabCycle 优先绑定 mode（模式轮转）
-  assert.deepEqual(caps.tabCycle, { controlId: "mode", itemIds: ["default", "plan"] })
+  assert.deepEqual(caps.agentModel.map(c => c.id), ["agent", "config:model", "config:thought_level"])
+  assert.equal(caps.agentModel[0]?.selectedId, "harness")
+  assert.equal(caps.agentModel[0]?.items[1]?.availability.enabled, false)
+  assert.equal(caps.agentModel[1]?.selectedId, "m-1")
+  assert.deepEqual(caps.controls.map(c => [c.id, c.label]), [["mode", "权限"]])
+  assert.deepEqual(caps.controls[0]?.items.map(item => item.permissionKind), ["supervised", "read", "edit", "auto", "full"])
   assert.equal(caps.usageBadge, "1.5k/100k")
   assert.ok(caps.restoreNotice?.includes("不支持恢复"))
 
-  // 仅单一模式时 tabCycle 回落到工作流配置项
-  const withSingleMode = buildComposerCapabilities({
+  const withModernPermission = buildComposerCapabilities({
     sessionState: {
       ...sessionState,
-      modes: { currentModeId: "default", availableModes: [{ id: "default", name: "逐项确认" }] },
+      modes: undefined,
+      configOptions: [...sessionState.configOptions, {
+        id: "approval", category: "mode", name: "Permission", type: "select", currentValue: "read",
+        options: [{ value: "read", name: "只读" }, { value: "write", name: "允许写入" }],
+      }],
     },
     availability: { available: true },
     directoryPath: "/tmp/ws",
     running: false,
   })
-  assert.deepEqual(withSingleMode.tabCycle, { controlId: "config:workflow", itemIds: ["build", "compose"] })
+  assert.deepEqual(withModernPermission.controls.map(c => [c.id, c.selectedId]), [["config:approval", "read"]])
 })
 
 test("extractFileAttachments 从发送文本提取工作区 @file 令牌并拦截越界路径与邮箱", () => {

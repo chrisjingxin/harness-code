@@ -19,7 +19,7 @@ completed_at: -
 
 # HC-236 Agent运行中追发
 
-用户可以把下一条指令留给下一轮，也可以在当前轮进行时马上补充要求。「加入队列」和「立即发送」应在界面里分开。支持追发时，输入区和每条待发项可提供「立即发送」图标。
+用户可以把下一条指令留给下一轮，也可以在当前轮进行时马上补充要求。常规发送和排队共用一个发送箭头。支持追发时，草稿可用 Command / Ctrl + Enter，每条待发项可用右侧箭头。
 
 - **排队**沿用 HC-235。当前轮正常结束后再按顺序发送。
 - **立即发送**绑定发起时的会话和当前轮。Agent 确认受理后才清草稿或移除该条待发项。当前轮结束、绑定变化、Agent 拒绝或确认超时都要保留原消息，避免自动重发。
@@ -32,5 +32,7 @@ T3 Code 使用 Kiro 已有的 ACP 追发扩展，并用 Codex App Server 的 `tu
 - Harness 普通 Build 轮通过 ACP 扩展接收追发，在下一次模型调用时获知补充要求。若模型已经结束当前一步，Harness 在原 Run 继续处理已接收的消息。
 - 桌面按已协商的能力显示箭头。等待确认时保留待发项。某条消息追发成功后，其余消息保持原顺序。
 - 官方 ACP SDK 使用真实 Harness 执行图和离线模型验证同轮接收、取消以及历史回放。工作台 ACP 注册表至 Harness 子进程的冒烟同样通过。外部扩展使用 stdio 测试进程验证入轮通知与确认关联。Kiro 3.x 的已登录真机轮次待验收。
+- 输入框以同一入口展示 Agent 和模型，权限单列。通过本机页面夹具操作验证菜单切换、键入引用和斜杠命令、运行中发送和停止互切、点击与回车排队，以及追发。
+- 本机页面夹具验证左侧切换 Agent 后刷新右侧模型、模型搜索、长模型名下两个入口间距为 6 px，以及选中完全访问后显示琥珀色警示。
 
 [HC-235](HC-235-本机会话消息排队.md) · [T3 Code Kiro 实现](https://github.com/pingdotgg/t3code/blob/d7373c44feaa85f561c0f1e829ea1c31918acbeb/packages/provider-kiro/src/server/adapter.ts#L135) · [ACP v2 提案](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#prompts-during-active-work)

@@ -204,13 +204,13 @@ export function LocalSessionPage({
     cancel: canCancel
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
-    ...(queueMode ? { sendLabel: "加入队列" } : {}),
+    queue: queueMode,
     primaryActions: canCancel ? (queueMode ? "both" : "cancel") : "send",
     statusText: hasUnsupportedMaterial ? attachmentUnavailableReason
-      : availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
+      : canEnqueue || availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: capabilities.commands,
+    agentModel: capabilities.agentModel,
     controls: capabilities.controls,
-    ...(capabilities.tabCycle ? { tabCycle: capabilities.tabCycle } : {}),
     projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
       ? { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
       : null,

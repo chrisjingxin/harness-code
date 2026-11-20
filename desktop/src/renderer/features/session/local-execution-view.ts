@@ -4,7 +4,7 @@
  * 【功能定义】
  * 1. 归并本机轮次流事件（用户消息、思考、工具、审批/表单交互历史与终态）；
  * 2. 持有并更新会话级 ACP 快照（Provider、模式、模型、配置项、斜杠命令、计划、用量、回退提示与挂起表单）；
- * 3. 提供纯函数构造输入区控件（`controls`/`commands`/`tabCycle`）与 `@relative/path` 文件附件提取。
+ * 3. 提供纯函数构造输入区控件、斜杠命令与 `@relative/path` 文件附件提取。
  * 【协作边界】不消费 Electron/Node API 或直接触发 IPC，便于在 Node 单测与渲染层复用。
  */
 import type {
@@ -711,7 +711,23 @@ function isWorkflowOption(option: LocalExecutionSessionState["configOptions"][nu
   return option.id === "workflow" || option.category === "harness.workflow"
 }
 
-/** 根据实时 ACP 会话能力与已注册代理列表构造输入区命令、能力下拉、Tab 轮转、用量徽标与回退提示。 */
+/** 只标记已知权限档位。未知档位使用通用图标，权限仍由 Agent 解释。 */
+function permissionKind(id: string): NonNullable<ConversationMenuItemView["permissionKind"]> {
+  switch (id.toLowerCase().replace(/[-_]/g, "")) {
+    case "plan":
+    case "readonly": return "read"
+    case "autoedit":
+    case "acceptedits": return "edit"
+    case "auto": return "auto"
+    case "yolo":
+    case "fullaccess":
+    case "dangerfullaccess":
+    case "bypasspermissions": return "full"
+    default: return "supervised"
+  }
+}
+
+/** 根据实时 ACP 能力构造 Agent／模型菜单、权限菜单、命令、用量与回退提示。 */
 export function buildComposerCapabilities(input: {
   readonly providers?: AcpAgentList
   readonly selectedProviderId?: string
@@ -722,17 +738,15 @@ export function buildComposerCapabilities(input: {
   readonly textOnly?: boolean
 }): {
   readonly commands: readonly ConversationMenuItemView[]
+  readonly agentModel: ConversationComposerView["controls"]
   readonly controls: ConversationComposerView["controls"]
-  readonly tabCycle?: ConversationComposerView["tabCycle"]
   readonly usageBadge?: string
   readonly restoreNotice?: string
 } {
   const { providers, selectedProviderId, sessionState, availability, directoryPath, running, textOnly } = input
-  const controlBlockedReason = running
-    ? "等待当前回复完成"
-    : !availability.available
-      ? availability.reason
-      : undefined
+  const configAvailability = running
+    ? { enabled: false, reason: "等待当前回复完成" }
+    : { enabled: availability.available, reason: availability.reason }
 
   const commands: ConversationMenuItemView[] = (sessionState?.availableCommands ?? []).map(cmd => ({
     id: cmd.name,
@@ -742,9 +756,10 @@ export function buildComposerCapabilities(input: {
   }))
 
   const controls: ConversationComposerView["controls"][number][] = []
+  const agentModel: ConversationComposerView["controls"][number][] = []
   const currentProviderId = sessionState?.providerId ?? selectedProviderId ?? providers?.defaultProviderId ?? undefined
   if (providers && providers.providers.length > 0) {
-    controls.push({
+    agentModel.push({
       id: "agent",
       label: "Agent",
       ...(currentProviderId ? { selectedId: currentProviderId } : {}),
@@ -756,12 +771,11 @@ export function buildComposerCapabilities(input: {
       items: providers.providers.map(p => ({
         id: p.id,
         label: p.label,
-        ...(p.available ? (p.description ? { description: p.description } : {}) : { description: p.reason }),
         availability: p.available ? { enabled: true } : { enabled: false, reason: p.reason ?? "当前不可用" },
       })),
     })
   } else {
-    controls.push({
+    agentModel.push({
       id: "agent",
       label: "Agent",
       selectedId: "default",
@@ -776,63 +790,50 @@ export function buildComposerCapabilities(input: {
     })
   }
 
-  if (sessionState?.modes && sessionState.modes.availableModes.length > 0) {
+  const approvalModes = sessionState?.modes?.availableModes.filter(mode => !/^(build|compose)$/i.test(mode.id))
+  if (approvalModes?.length) {
     controls.push({
       id: "mode",
-      label: "模式",
-      selectedId: sessionState.currentModeId ?? sessionState.modes.currentModeId,
-      availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
-      items: sessionState.modes.availableModes.map(mode => ({
+      label: "权限",
+      kind: "permission",
+      selectedId: sessionState?.currentModeId ?? sessionState?.modes?.currentModeId,
+      availability: configAvailability,
+      items: approvalModes.map(mode => ({
         id: mode.id,
         label: mode.name,
+        permissionKind: permissionKind(mode.id),
         ...(mode.description ? { description: mode.description } : {}),
         availability: { enabled: true },
       })),
     })
   }
 
+  // 模型列表只使用当前 Agent 握手后公布的可选项，切换 Agent 后由新会话刷新。
   for (const opt of sessionState?.configOptions ?? []) {
-    if (sessionState?.modes && opt.category === "mode" && opt.type === "select"
-      && opt.options.some(item => item.value === opt.currentValue)) continue
-    if (opt.type === "select" && opt.options.length > 0) {
-      controls.push({
-        id: `config:${opt.id}`,
-        label: opt.name,
-        selectedId: opt.currentValue,
-        availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
-        items: opt.options.map(choice => {
-          const desc = [choice.groupName, choice.description].filter(Boolean).join(" · ")
-          return {
-            id: choice.value,
-            label: choice.name,
-            ...(desc ? { description: desc } : {}),
-            availability: { enabled: true },
-          }
-        }),
-      })
-    } else if (opt.type === "boolean") {
-      controls.push({
-        id: `config:${opt.id}`,
-        label: opt.name,
-        selectedId: String(opt.currentValue),
-        availability: controlBlockedReason ? { enabled: false, reason: controlBlockedReason } : { enabled: true },
-        items: [
-          { id: "true", label: "开启", availability: { enabled: true } },
-          { id: "false", label: "关闭", availability: { enabled: true } },
-        ],
-      })
-    }
-  }
-
-  let tabCycle: ConversationComposerView["tabCycle"] | undefined
-  // 优先用 Tab / Shift+Tab 轮转模式（如 自动判断 / 先出计划）；仅在代理未提供多模式时回退到工作流选项。
-  if (sessionState?.modes && sessionState.modes.availableModes.length >= 2) {
-    tabCycle = { controlId: "mode", itemIds: sessionState.modes.availableModes.map(m => m.id) }
-  } else {
-    const workflowOpt = sessionState?.configOptions.find(opt => opt.type === "select" && opt.options.length >= 2 && isWorkflowOption(opt))
-    if (workflowOpt && workflowOpt.type === "select") {
-      tabCycle = { controlId: `config:${workflowOpt.id}`, itemIds: workflowOpt.options.map(o => o.value) }
-    }
+    if (isWorkflowOption(opt)) continue
+    const model = opt.category === "model" || opt.id === "model"
+    const effort = opt.category === "thought_level" || opt.id === "thought_level" || opt.id === "thinking"
+    const permission = opt.category === "mode" || opt.category === "permission" || opt.id === "approval"
+    if (!model && !effort && (!permission || controls.length)) continue
+    const choices = opt.type === "select"
+      ? opt.options.filter(choice => !permission || !/^(build|compose)$/i.test(choice.value))
+      : [{ value: "true", name: "开启" }, { value: "false", name: "关闭" }]
+    if (!choices.length) continue
+    const target = model || effort ? agentModel : controls
+    target.push({
+      id: `config:${opt.id}`,
+      label: model ? "模型" : effort ? "推理强度" : "权限",
+      kind: model ? "model" : effort ? "effort" : "permission",
+      selectedId: String(opt.currentValue),
+      availability: configAvailability,
+      items: choices.map(choice => ({
+        id: choice.value,
+        label: choice.name,
+        description: "description" in choice ? choice.description : undefined,
+        ...(permission ? { permissionKind: permissionKind(choice.value) } : {}),
+        availability: { enabled: true },
+      })),
+    })
   }
 
   let usageBadge: string | undefined
@@ -852,8 +853,8 @@ export function buildComposerCapabilities(input: {
 
   return {
     commands,
+    agentModel,
     controls,
-    ...(tabCycle ? { tabCycle } : {}),
     ...(usageBadge ? { usageBadge } : {}),
     ...(restoreNotice ? { restoreNotice } : {}),
   }
@@ -936,8 +937,8 @@ export function projectLocalExecution(
     activity: running ? { active: true, label: "Agent 正在回复" } : null,
     composer: {
       ...base.composer,
-      send: running && !base.composer.sendLabel ? { enabled: false, reason: "等待当前回复完成" } : base.composer.send,
-      primaryActions: running && canCancel && !base.composer.sendLabel ? "cancel" : base.composer.primaryActions,
+      send: running && !base.composer.queue ? { enabled: false, reason: "等待当前回复完成" } : base.composer.send,
+      primaryActions: running && canCancel && !base.composer.queue ? "cancel" : base.composer.primaryActions,
       statusText: execution.failure ?? execution.uploadFailures?.values().next().value ?? base.composer.statusText,
     },
   }

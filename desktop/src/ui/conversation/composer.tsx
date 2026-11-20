@@ -5,16 +5,21 @@
  */
 import {
   IconAlertTriangle,
-  IconArrowRight,
   IconArrowUp,
-  IconPlaylistAdd,
   IconBook,
   IconCheck,
   IconChecklist,
   IconChevronDown,
+  IconCpu,
   IconFolder,
+  IconLock,
   IconMessages,
+  IconPencil,
   IconPlayerStopFilled,
+  IconSearch,
+  IconShield,
+  IconShieldExclamation,
+  IconSparkles,
   IconUser,
   IconX,
 } from "@tabler/icons-react"
@@ -43,6 +48,14 @@ type MentionGroup = "file" | "knowledge" | "conversation" | "task" | "member"
 type MentionTab = "all" | MentionGroup
 type MentionEntry = { readonly key: string; readonly group: MentionGroup; readonly item: MentionCandidate }
 type Control = ConversationComposerView["controls"][number]
+
+const permissionIcons = {
+  read: IconLock,
+  supervised: IconShield,
+  edit: IconPencil,
+  auto: IconSparkles,
+  full: IconShieldExclamation,
+} as const
 
 function candidateKey(item: MentionCandidate): string {
   return `${item.kind}:${"relativePath" in item ? item.relativePath : item.id}`
@@ -174,9 +187,11 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       : filteredEntries.length
   const canEdit = Boolean(actions.onPersonalChange)
   const hasContent = draft.text.trim().length > 0 || draft.referenceIds.length > 0 || draft.attachmentIds.length > 0
-  const showSend = model.primaryActions === "send" || model.primaryActions === "both"
-  const showCancel = model.primaryActions === "cancel" || model.primaryActions === "both"
-  const canSend = Boolean(showSend && visible && canEdit && actions.onSend && model.send.enabled && !sendBlocked && hasContent)
+  const allowsSend = model.primaryActions === "send" || model.primaryActions === "both"
+  const allowsCancel = model.primaryActions === "cancel" || model.primaryActions === "both"
+  const showStop = allowsCancel && (!allowsSend || !hasContent)
+  const canSend = Boolean(allowsSend && visible && canEdit && actions.onSend && model.send.enabled && !sendBlocked && hasContent)
+  const canStop = Boolean(visible && actions.onCancel && model.cancel.enabled && !cancelBlocked)
 
   const invalidateCandidates = () => {
     requestSequence.current += 1
@@ -394,11 +409,20 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         return
       }
     }
-    if (event.key === "Enter" && !event.shiftKey && props.submitOnEnter !== false) { event.preventDefault(); event.stopPropagation(); if (canSend) onSend(); return }
-    if (event.key === "Escape" && (activity?.active || showCancel)) {
+    if (event.key === "Enter" && !event.shiftKey && props.submitOnEnter !== false) {
       event.preventDefault()
       event.stopPropagation()
-      setHint(actions.onCancel && model.cancel.enabled ? "可使用停止按钮请求中断。" : model.cancel.reason || "当前没有可用的停止操作。")
+      if (canSend) {
+        if (props.onSteer && (event.metaKey || event.ctrlKey)) {
+          if (!cancelBlocked) props.onSteer()
+        } else onSend()
+      }
+      return
+    }
+    if (event.key === "Escape" && (activity?.active || allowsCancel)) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (showStop) setHint(canStop ? "可使用停止按钮请求中断。" : model.cancel.reason || "当前没有可用的停止操作。")
       return
     }
     // 支持“空输入按 Tab”以及“任意编辑态按 Shift+Tab”快速轮转模式（或配置项）。
@@ -407,7 +431,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       && visible
       && canEdit
       && !activity?.active
-      && !showCancel
+      && !allowsCancel
       && !sendBlocked
       && !cancelBlocked
       && model.tabCycle
@@ -428,43 +452,9 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (canSend) onSend() }
-  const insertMention = () => {
-    if (!canEdit || !visible || !actions.onPersonalChange) return
-    const start = Math.max(0, Math.min(draft.text.length, draft.selectionStart))
-    const end = Math.max(start, Math.min(draft.text.length, draft.selectionEnd))
-    const before = draft.text.slice(0, start)
-    const prefix = before.length > 0 && !/\s$/.test(before) ? " @" : "@"
-    const nextText = `${before}${prefix}${draft.text.slice(end)}`
-    const cursor = before.length + prefix.length
-    invalidateCandidates()
-    setDismissed(null)
-    setCommandOpen(false)
-    setHint("")
-    pendingCaret.current = cursor
-    actions.onPersonalChange(scope, { kind: "draft-text", text: nextText, selectionStart: cursor, selectionEnd: cursor })
-    textareaRef.current?.focus()
-  }
-  const toggleCommandMenu = () => {
-    if (!canEdit || !visible || !actions.onPersonalChange) return
-    invalidateCandidates()
-    setHint("")
-    if (commandOpen) {
-      setCommandOpen(false)
-      textareaRef.current?.focus()
-      return
-    }
-    if (!draft.text.trim()) {
-      setCommandIndex(0)
-      setCommandOpen(true)
-      pendingCaret.current = 1
-      actions.onPersonalChange(scope, { kind: "draft-text", text: "/", selectionStart: 1, selectionEnd: 1 })
-    } else {
-      setCommandIndex(0)
-      setCommandOpen(true)
-      textareaRef.current?.focus()
-    }
-  }
   const displayStatus = localStatus || hint || model.statusText
+  const fullAccess = model.controls.some(control => control.kind === "permission"
+    && control.items.some(item => item.id === control.selectedId && item.permissionKind === "full"))
 
   const highlightSegments = !isComposing ? splitComposerHighlightSegments(draft.text) : null
   const showHighlight = Boolean(highlightSegments?.some(segment => segment.kind === "mention"))
@@ -625,7 +615,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           </div>
         ) : null}
         {props.aboveComposer}
-        <div className="wb-composer-box" data-queue-mode={model.sendLabel ? "" : undefined}>
+        <div className="wb-composer-box" data-queue-mode={model.queue ? "" : undefined}>
           {draft.referenceIds.length ? <div className="wb-composer-references" aria-label="引用材料">{draft.referenceIds.map(id => {
             const reference = model.references.find(item => item.id === id)
             if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
@@ -671,7 +661,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               rows={1}
               value={draft.text}
               disabled={!canEdit}
-              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息…") : "当前无法编辑草稿"}
+              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息 · @ 引用 · / 命令") : "当前无法编辑草稿"}
               aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
               onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
               onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
@@ -692,36 +682,14 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           </div>
           <div className="wb-composer-rail">
             <div className="wb-composer-rail-left">
-              <button
-                type="button"
-                className="wb-composer-tool"
-                disabled={!canEdit || !visible}
-                title={props.submitOnEnter === false ? "输入 @ 引用项目会话或团队知识" : "输入 @ 引用工作区文件、团队知识或项目会话"}
-                onMouseDown={event => event.preventDefault()}
-                onClick={insertMention}
-              >
-                <span className="wb-composer-kbd" aria-hidden="true">@</span>
-                <span>{props.submitOnEnter === false ? "引用会话" : "引用"}</span>
-              </button>
-              {props.submitOnEnter !== false ? (
-                <button
-                  type="button"
-                  className="wb-composer-tool"
-                  disabled={!canEdit || !visible}
-                  aria-expanded={commandOpen}
-                  title="输入 / 或点击查看可用斜杠命令"
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={toggleCommandMenu}
-                >
-                  <span className="wb-composer-kbd" aria-hidden="true">/</span>
-                  <span>命令</span>
-                </button>
-              ) : null}
+              {model.agentModel?.length ? <CapabilityMenu scope={scope} controls={model.agentModel}
+                label="Agent 和模型" split onSelect={actions.onCapabilitySelect} /> : null}
               {model.controls.map(control => (
                 <CapabilityMenu
                   key={control.id}
                   scope={scope}
-                  control={control}
+                  controls={[control]}
+                  label={control.label}
                   isTabCycle={model.tabCycle?.controlId === control.id}
                   onSelect={actions.onCapabilitySelect}
                 />
@@ -729,24 +697,23 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
               {children}
             </div>
             <div className="wb-composer-rail-right">
-              {model.sendLabel ? null : (
-                <span className="wb-composer-hint">{props.submitOnEnter === false ? "Enter 换行" : "⏎ 发送"}</span>
-              )}
-              {showCancel ? <button type="button" className="wb-composer-cancel" aria-label="取消当前任务" disabled={!visible || !actions.onCancel || !model.cancel.enabled || cancelBlocked} title={model.cancel.reason || (!actions.onCancel ? "当前无法停止" : "请求停止")} onClick={onCancel}><IconPlayerStopFilled size={14} aria-hidden="true" /></button> : null}
-              {props.onSteer ? (
-                <button type="button" className="wb-composer-steer" aria-label="立即发送" title="立即发送，引导当前轮"
-                  disabled={!canSend || cancelBlocked} onClick={props.onSteer}><IconArrowRight size={16} aria-hidden="true" /></button>
-              ) : null}
-              {showSend ? (
-                <button type="submit" className="wb-composer-send" aria-label={model.sendLabel ?? "发送消息"}
-                  disabled={!canSend} title={model.send.reason || (!actions.onSend ? "当前无法发送" : model.sendLabel ?? "发送消息")}>
-                  {model.sendLabel ? <IconPlaylistAdd aria-hidden="true" /> : <IconArrowUp aria-hidden="true" />}
+              {allowsSend || allowsCancel ? (
+                <button type={showStop ? "button" : "submit"}
+                  className={showStop ? "wb-composer-cancel" : "wb-composer-send"}
+                  aria-label={showStop ? "取消当前任务" : "发送消息"}
+                  disabled={showStop ? !canStop : !canSend}
+                  title={showStop
+                    ? model.cancel.reason || (actions.onCancel ? "请求停止" : "当前无法停止")
+                    : model.send.reason || (!actions.onSend ? "当前无法发送" : model.queue ? "发送到待发队列" : "发送消息")}
+                  onClick={showStop ? onCancel : undefined}>
+                  {showStop ? <IconPlayerStopFilled size={14} aria-hidden="true" /> : <IconArrowUp aria-hidden="true" />}
                 </button>
               ) : null}
             </div>
           </div>
         </div>
         {displayStatus ? <p className="wb-composer-status" role="status"><IconAlertTriangle aria-hidden="true" />{displayStatus}</p> : null}
+        {fullAccess ? <p className="wb-composer-permission-warning" role="status"><IconShieldExclamation aria-hidden="true" />完全访问已开启，部分操作无需确认。</p> : null}
       </form>
     </div>
   )
@@ -761,37 +728,51 @@ function renderCollaborationIcon(kind: ConversationCollaborationCandidate["kind"
   }
 }
 
-function CapabilityMenu({ scope, control, isTabCycle, onSelect }: {
+/** Agent 切换保留分栏打开，新会话公布模型后立即更新右侧。 */
+function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }: {
   scope: ConversationScope
-  control: Control
-  isTabCycle: boolean
+  controls: readonly Control[]
+  label: string
+  split?: boolean
+  isTabCycle?: boolean
   onSelect?: ConversationActions["onCapabilitySelect"]
 }): ReactElement {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const root = useRef<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
   const menu = useRef<HTMLDivElement | null>(null)
-  const selected = control.items.find(item => item.id === control.selectedId)
-  const displayLabel = selected ? selected.label : control.label
-  const tooltip = control.availability.reason
-    || (!onSelect
-      ? "当前不可切换"
-      : `${control.label}：${displayLabel}${isTabCycle ? "（按 Tab 或 Shift+Tab 轮转）" : ""}`)
+  const firstControl = controls[0]
+  const selectedItem = firstControl?.items.find(item => item.id === firstControl.selectedId)
+  const permission = firstControl?.kind === "permission"
+  const TriggerIcon = split ? IconCpu : permission ? permissionIcons[selectedItem?.permissionKind ?? "supervised"] : null
+  const enabled = Boolean(onSelect && controls.some(control => control.availability.enabled))
+  const displayLabel = controls.filter(control => control.kind !== "effort")
+    .map(control => control.items.find(item => item.id === control.selectedId)?.label)
+    .filter(Boolean).join(" · ") || label
+  const tooltip = enabled ? `${label}：${displayLabel}${isTabCycle ? "（按 Tab 或 Shift+Tab 轮转）" : ""}`
+    : controls[0]?.availability.reason ?? "当前不可切换"
 
   useEffect(() => {
     if (!open) return
+    const searchField = menu.current?.querySelector<HTMLInputElement>('input:not(:disabled)')
     const current = menu.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)')
-    const first = menu.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)')
-    ;(current ?? first)?.focus()
+    const first = menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    ;(searchField ?? current ?? first)?.focus()
     const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
     document.addEventListener("pointerdown", close)
     return () => document.removeEventListener("pointerdown", close)
   }, [open])
 
-  useEffect(() => { if (!control.availability.enabled || !onSelect) setOpen(false) }, [control.availability.enabled, onSelect])
+  useEffect(() => { if (!enabled) setOpen(false) }, [enabled])
 
   const onMenuKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); return }
+    if (split) {
+      // 搜索框在消息表单内。回车只留在搜索，避免误发原来的草稿。
+      if (event.key === "Enter" && event.target instanceof HTMLInputElement) event.preventDefault()
+      return
+    }
     const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)'))
     if (!items.length) return
     const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement))
@@ -803,7 +784,37 @@ function CapabilityMenu({ scope, control, isTabCycle, onSelect }: {
     if (next !== null) { event.preventDefault(); event.stopPropagation(); items[next]?.focus() }
   }
 
-  return <div ref={root} className="wb-composer-control" onBlur={event => {
+  const modelControls = split ? controls.slice(1) : controls
+  const modelControl = modelControls.find(control => control.kind === "model")
+  const query = search.trim().toLowerCase()
+  const renderOptions = (control: Control) => {
+    const items = query && control.kind === "model"
+      ? control.items.filter(item => `${item.label} ${item.id}`.toLowerCase().includes(query))
+      : control.items
+    return <div className="wb-capability-group" role="group" aria-label={control.label} key={control.id}>
+      {split && control.kind === "effort" ? <div className="wb-capability-heading">{control.label}</div> : null}
+      {items.length === 0 ? <p className="wb-composer-menu-empty">{query && control.kind === "model" ? "没有匹配的模型" : "暂无可用选项"}</p> : items.map(item => {
+        const selected = item.id === control.selectedId
+        const PermissionIcon = item.permissionKind ? permissionIcons[item.permissionKind] : null
+        return (
+          <button key={item.id} type="button"
+            role={split ? undefined : "menuitemradio"} tabIndex={split ? undefined : -1}
+            aria-checked={split ? undefined : selected} aria-pressed={split ? selected : undefined}
+            data-model-option={control.kind === "model" || undefined}
+            data-full-access={item.permissionKind === "full" || undefined}
+            disabled={!control.availability.enabled || !item.availability.enabled}
+            title={item.availability.reason ?? control.availability.reason ?? (control.kind === "model" ? item.label : undefined)}
+            onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}>
+            {PermissionIcon ? <PermissionIcon className="wb-permission-icon" size={15} aria-hidden="true" /> : null}
+            <span>{item.label}{item.description || item.availability.reason ? <small>{item.description ?? item.availability.reason}</small> : null}</span>
+            {selected ? <IconCheck size={13} aria-hidden="true" /> : null}
+          </button>
+        )
+      })}
+    </div>
+  }
+
+  return <div ref={root} className="wb-composer-control" data-agent-model={split || undefined} onBlur={event => {
     // 焦点在触发按钮与菜单选项之间移动时保持打开；离开整个控件后及时收起。
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
   }}>
@@ -811,19 +822,45 @@ function CapabilityMenu({ scope, control, isTabCycle, onSelect }: {
       ref={trigger}
       type="button"
       className={`wb-composer-chip${isTabCycle ? " is-tab-cycle" : ""}`}
-      disabled={!control.availability.enabled || !onSelect}
+      data-full-access={permission && selectedItem?.permissionKind === "full" || undefined}
+      disabled={!enabled}
       title={tooltip}
-      aria-label={`${control.label}：${displayLabel}`}
-      aria-haspopup="menu"
+      aria-label={`${label}：${displayLabel}`}
+      aria-haspopup={split ? "dialog" : "menu"}
       aria-expanded={open}
-      onClick={() => setOpen(value => !value)}
+      onClick={() => { setSearch(""); setOpen(value => !value) }}
     >
+      {TriggerIcon ? <TriggerIcon className={permission ? "wb-permission-icon" : undefined} aria-hidden="true" /> : null}
       <span className="wb-composer-chip-label">{displayLabel}</span>
       {isTabCycle ? <kbd className="wb-composer-tab-badge" aria-hidden="true">Tab</kbd> : null}
       <IconChevronDown aria-hidden="true" />
     </button>
-    {open ? <div ref={menu} className="wb-capability-menu" role="menu" aria-label={control.label} onKeyDown={onMenuKey}>
-      {control.items.length === 0 ? <p className="wb-composer-menu-empty">暂无可用选项</p> : control.items.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === control.selectedId} disabled={!item.availability.enabled} title={item.availability.reason} onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}><span>{item.label}{item.description ? <small>{item.description}</small> : null}{!item.availability.enabled && item.availability.reason ? <small>{item.availability.reason}</small> : null}</span>{item.id === control.selectedId ? <IconCheck size={13} aria-hidden="true" /> : null}</button>)}
+    {open ? <div ref={menu} className="wb-capability-menu" role={split ? "dialog" : "menu"} aria-label={label} onKeyDown={onMenuKey}>
+      {split && firstControl ? <>
+        <div className="wb-agent-picker-list" role="group" aria-label="Agent">
+          {firstControl.items.map(agent => <button key={agent.id} type="button"
+            aria-pressed={agent.id === firstControl.selectedId}
+            aria-label={agent.label}
+            disabled={!firstControl.availability.enabled || !agent.availability.enabled}
+            title={agent.availability.reason ? `${agent.label} · ${agent.availability.reason}` : agent.label}
+            onClick={() => {
+              if (agent.id === firstControl.selectedId) return
+              setSearch("")
+              onSelect?.(scope, firstControl.id, agent.id)
+            }}>
+            {agent.id === "harness" ? <IconCpu size={16} aria-hidden="true" /> : <span aria-hidden="true">{agent.label.slice(0, 2)}</span>}
+          </button>)}
+        </div>
+        <div className="wb-agent-picker-models">
+          <label className="wb-agent-picker-search">
+            <IconSearch size={14} aria-hidden="true" />
+            <input type="search" aria-label="搜索模型" placeholder="搜索模型" value={search}
+              disabled={!modelControl?.items.length} onChange={event => setSearch(event.currentTarget.value)} />
+          </label>
+          {modelControl ? renderOptions(modelControl) : <p className="wb-composer-menu-empty">暂无可选模型</p>}
+          {modelControls.filter(control => control !== modelControl).map(renderOptions)}
+        </div>
+      </> : controls.map(renderOptions)}
     </div> : null}
   </div>
 }

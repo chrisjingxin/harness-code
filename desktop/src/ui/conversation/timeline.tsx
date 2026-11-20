@@ -507,9 +507,12 @@ function TimelineRow({
       return <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className="wb-conversation-system" role="status">{entry.text}</div>
     }
     const isStreaming = entry.role === "assistant" && Boolean(entry.streaming && entry.id === lastId)
+    const copyText = !entry.streaming && entry.text.trim() ? rendering?.copyText : undefined
+    const sentAt = entry.role === "user" ? messageDate(entry.createdAtMs) : undefined
     return (
       <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className={`wb-conversation-message wb-conversation-message-${entry.role}`}>
-        {grouped && entry.role === "assistant" ? null : <MessageMeta role={entry.role} author={entry.author?.displayName} createdAtMs={entry.createdAtMs} />}
+        {grouped && entry.role === "assistant" ? null : <MessageMeta role={entry.role} author={entry.author?.displayName}
+          createdAtMs={entry.role === "assistant" ? entry.createdAtMs : undefined} />}
         <div className="wb-conversation-message-body">
           <div className="wb-conversation-message-content" data-streaming={isStreaming || undefined}>
             {entry.role === "assistant"
@@ -526,8 +529,8 @@ function TimelineRow({
           {[entry.runSummary.durationMs === undefined ? "" : (entry.runSummary.durationMs / 1000).toFixed(1) + " 秒",
             entry.runSummary.cachedTokens === undefined ? "" : "缓存 " + entry.runSummary.cachedTokens + " Token"].filter(Boolean).join(" · ")}
         </small>}
-        {entry.role === "assistant" && !entry.streaming && entry.text.trim().length > 0 && typeof rendering?.copyText === "function" ? (
-          <ReplyFooter text={entry.text} rendering={rendering} />
+        {copyText || sentAt ? (
+          <MessageActions text={entry.text} copyText={copyText} sentAt={sentAt} role={entry.role} />
         ) : null}
       </div>
     )
@@ -569,10 +572,29 @@ function TimelineRow({
   )
 }
 
-/** “名称 · 时间”一行小字：用户消息靠右、Agent 组靠左；头像已取消，时间无效时只留名称。 */
+function messageDate(createdAtMs: number | undefined): Date | undefined {
+  if (typeof createdAtMs !== "number") return
+  const date = new Date(createdAtMs)
+  return Number.isFinite(date.getTime()) ? date : undefined
+}
+
+/** 按本机日历比较日期，当天只显示时分，跨天和跨年逐级补齐日期。 */
+function formatMessageTime(date: Date): string {
+  const today = new Date()
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const day = date.getDate()
+  const sameYear = year === today.getFullYear()
+  const pad = (value: number) => String(value).padStart(2, "0")
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (sameYear && month === today.getMonth() && day === today.getDate()) return time
+  const monthDay = `${pad(month + 1)}-${pad(day)}`
+  return `${sameYear ? "" : String(year).padStart(4, "0") + "-"}${monthDay} ${time}`
+}
+
+/** 保留消息作者，Agent 的回答时间显示在组头。 */
 function MessageMeta({ role, author, createdAtMs }: { role: "user" | "assistant"; author?: string; createdAtMs?: number }): ReactElement {
-  const date = typeof createdAtMs === "number" && Number.isFinite(createdAtMs) ? new Date(createdAtMs) : null
-  const validDate = date && !Number.isNaN(date.getTime()) ? date : null
+  const validDate = messageDate(createdAtMs)
   return (
     <div className="wb-conversation-message-meta">
       <span className="wb-conversation-author">{author || (role === "assistant" ? "Agent" : "用户")}</span>
@@ -581,18 +603,24 @@ function MessageMeta({ role, author, createdAtMs }: { role: "user" | "assistant"
   )
 }
 
-/** 回复底栏：落定回答的悬停复制入口；成败只在本组件内播报与回弹，不写入个人状态。 */
-function ReplyFooter({ text, rendering }: { text: string; rendering: RenderingActions }): ReactElement {
+/** 用户消息与已完成回答共用复制反馈；用户消息底栏同时展示本机时间。 */
+function MessageActions({ text, copyText, sentAt, role }: {
+  text: string
+  copyText?: RenderingActions["copyText"]
+  sentAt?: Date
+  role: "user" | "assistant"
+}): ReactElement {
   const [copied, setCopied] = useState(false)
   const [announce, setAnnounce] = useState("")
   const resetTimer = useRef<number | null>(null)
   useEffect(() => () => {
     if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
   }, [])
+  const copyLabel = role === "user" ? "复制消息" : "复制回答"
   const copy = async () => {
-    if (!rendering.copyText) return
+    if (!copyText) return
     try {
-      await rendering.copyText(text)
+      await copyText(text)
       setCopied(true)
       setAnnounce("已复制")
       if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
@@ -603,17 +631,14 @@ function ReplyFooter({ text, rendering }: { text: string; rendering: RenderingAc
     }
   }
   return (
-    <div className="wb-conversation-reply-actions">
-      <button
-        type="button"
-        className="wb-conversation-reply-copy"
-        data-copied={copied || undefined}
-        aria-label="复制回答"
-        title="复制回答"
-        onClick={() => { void copy() }}
-      >
+    <div className="wb-conversation-message-actions">
+      {copyText ? <button type="button" className="wb-conversation-message-copy" data-copied={copied || undefined}
+        aria-label={copyLabel} title={copyLabel} onClick={() => { void copy() }}>
         {copied ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}
-      </button>
+      </button> : null}
+      {sentAt ? <time className="wb-conversation-time" dateTime={sentAt.toISOString()} tabIndex={copyText ? undefined : 0}>
+        {formatMessageTime(sentAt)}
+      </time> : null}
       <span className="sr" role="status">{announce}</span>
     </div>
   )

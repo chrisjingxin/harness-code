@@ -135,6 +135,7 @@ export interface ConversationMenuItemView {
   readonly label: string
   readonly description?: string
   readonly availability: ConversationAvailability
+  readonly permissionKind?: "read" | "supervised" | "edit" | "auto" | "full"
 }
 
 /** 待处理请求的显示模型；可用性、期限和实际处理结果均由装配方提供。 */
@@ -191,14 +192,17 @@ export interface ConversationReferenceView {
 /** 输入区只展示调用方明确提供的命令、能力和状态，不解释 Agent 类型。 */
 export interface ConversationComposerView {
   readonly send: ConversationAvailability
-  readonly sendLabel?: string
+  readonly queue?: boolean
   readonly cancel: ConversationAvailability
   readonly primaryActions: "send" | "cancel" | "both" | "none"
   readonly statusText?: string
   readonly commands: readonly ConversationMenuItemView[]
+  /** Agent、模型和推理强度共享一个菜单，各组仍使用自身的选择动作。 */
+  readonly agentModel?: ConversationComposerView["controls"]
   readonly controls: readonly {
     readonly id: string
     readonly label: string
+    readonly kind?: "model" | "effort" | "permission"
     readonly selectedId?: string
     readonly availability: ConversationAvailability
     readonly items: readonly ConversationMenuItemView[]

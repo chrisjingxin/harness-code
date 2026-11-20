@@ -1,6 +1,9 @@
 /** HC-222 停点 2：工具分组分段与一轮进行中判定的纯函数测试。 */
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { ConversationTimeline } from "../src/ui/conversation/timeline.tsx"
 import { deriveMinimapItems, isTurnActive, segmentAgentEntries, splitTurnProcess } from "../src/ui/conversation/timeline-model.ts"
 import type { ConversationTimelineEntry } from "../src/ui/index.ts"
 
@@ -40,6 +43,34 @@ test("进行中的判定覆盖推理、流式回答、运行工具与末组活�
 
 const userMessage = (id: string, text: string, createdAtMs?: number): ConversationTimelineEntry => ({
   kind: "message", id, role: "user", text, createdAtMs,
+})
+
+test("用户消息底栏可复制，按本机日期逐级补齐时间", () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const sameYearMonth = now.getMonth() === 1 && now.getDate() === 17 ? 2 : 1
+  const today = new Date(year, now.getMonth(), now.getDate(), 10, 52)
+  const otherDay = new Date(year, sameYearMonth, 17, 10, 52)
+  const otherYear = new Date(year - 1, 1, 17, 10, 52)
+  const html = renderToStaticMarkup(createElement(ConversationTimeline, {
+    scope: { namespace: "test", accountId: "a", workspaceId: "w", conversationId: "c" },
+    visible: true,
+    contentRevision: 1,
+    entries: [
+      userMessage("today", "第一条", today.getTime()),
+      userMessage("other-day", "第二条", otherDay.getTime()),
+      userMessage("other-year", "第三条", otherYear.getTime()),
+      userMessage("undated", "没有时间", Number.MAX_VALUE),
+      message("reply"),
+    ],
+    personal: { expandedTools: [], expandedOutputs: [], scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null } },
+    rendering: { copyText: async () => {} },
+  }))
+  assert.equal((html.match(/aria-label="复制消息"/g) ?? []).length, 4)
+  assert.deepEqual([...html.matchAll(/<time[^>]*>([^<]*)<\/time>/g)].map(match => match[1]), [
+    "10:52", `0${sameYearMonth + 1}-17 10:52`, `${year - 1}-02-17 10:52`,
+  ])
+  assert.match(html, /aria-label="复制回答"/)
 })
 
 test("锚点只取用户提问：折叠空白、跳过空提问、透传时间", () => {
