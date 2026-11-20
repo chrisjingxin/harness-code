@@ -34,10 +34,17 @@ export type FinalizedToolSummary = {
   readonly occurredAtMs: number
 }
 
+export type FinalizedAttachmentSummary = {
+  readonly label: string
+  readonly kind: "file" | "directory"
+  readonly path?: string
+}
+
 export type FinalizedTurn = {
   turnId: string
   userText: string
   referenceIds?: readonly string[]
+  attachments?: readonly FinalizedAttachmentSummary[]
   followUps?: readonly { readonly text: string; readonly occurredAtMs: number }[]
   tools?: readonly FinalizedToolSummary[]
   reply: string | undefined
@@ -154,7 +161,11 @@ export class ConversationUploads {
     const userMessage: Omit<SyncMessage, "sequence"> = {
       type: "user",
       occurredAtMs: acceptedAtMs,
-      payload: JSON.stringify({ text: userText, ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}) }),
+      payload: JSON.stringify({
+        text: userText,
+        ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}),
+        ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
+      }),
     }
     const assistantMessage: Omit<SyncMessage, "sequence"> = {
       type: "assistant",
@@ -194,7 +205,10 @@ export class ConversationUploads {
         const pending = await this.#read(path) ?? { scope, turns: [] }
         if (collaborationConversationKey(pending.scope) !== collaborationConversationKey(scope)) throw new Error("会话范围不一致")
         if (pending.turns.some(item => item.turnId === turnId)) return
-        pending.turns.push({ turnId, messages, briefText: `诉求：${briefExcerpt(userText)}\n回复：${briefExcerpt(reply)}` })
+        const requestPreview = userText.trim()
+          ? userText
+          : (turn.attachments?.length ? turn.attachments.map(item => item.label).join(" ") : userText)
+        pending.turns.push({ turnId, messages, briefText: `诉求：${briefExcerpt(requestPreview)}\n回复：${briefExcerpt(reply)}` })
         await this.#write(path, pending)
       })
       this.#wake()

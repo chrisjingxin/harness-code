@@ -1220,7 +1220,44 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   cursor: not-allowed;
 }
 
-/* 用户消息气泡内的紧凑行内引用块与点击展开详情。 */
+/* 用户消息气泡内的紧凑行内引用块、附件胶囊与点击展开详情。 */
+.wb-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  white-space: normal;
+}
+.wb-message-attachments:not(:last-child) {
+  margin-bottom: 6px;
+}
+.wb-message-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(260px, 100%);
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+  color: var(--fg-2, var(--text-soft));
+  font-family: var(--font-mono);
+  font-size: var(--text-xs, 12px);
+  font-weight: 500;
+  line-height: 1;
+}
+.wb-message-attachment-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.wb-message-attachment-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .wb-message-annotated {
   white-space: normal;
 }

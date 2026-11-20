@@ -29,6 +29,7 @@ import {
   syncPayloadLimit,
   type CollaborationState,
   type ConversationUploads,
+  type FinalizedAttachmentSummary,
   type FinalizedToolSummary,
   type FinalizedTurn,
 } from "@workbench/collaboration-client"
@@ -40,6 +41,7 @@ import {
   type CodeCheckpointAction,
   type CodeCheckpointReply,
   type ConversationPersonal,
+  type LocalExecutionAttachment,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
   type LocalExecutionPermission,
@@ -326,6 +328,48 @@ function previousPrompt(record: ConversationPersonal | null): LocalAcpPromptBloc
   return history.length ? [{ type: "text", text: header + history.join("") }] : []
 }
 
+/** 提取本次发送附件的展示摘要：去重已出现在行内 `@file` 中的工作区文件，并为云端定稿隐藏本机绝对路径。 */
+function summarizeDisplayAttachments(
+  text: string,
+  blocks: readonly LocalAcpPromptBlock[],
+): { readonly local: LocalExecutionAttachment[]; readonly shareable: FinalizedAttachmentSummary[] } {
+  const inlineMentioned = new Set<string>()
+  const mentionPattern = /(?:^|[\s(（[【])@(?:"([^"\n]+)"|([^\s"'，。；：！？、）)】》”’]+))/g
+  for (const match of text.matchAll(mentionPattern)) {
+    const quoted = match[1] !== undefined
+    const raw = quoted ? match[1]! : (match[2] ?? "").replace(/[),.;:!?]+$/, "")
+    const cleaned = raw.trim().replace(/^(?:\.\/)+/, "")
+    if (cleaned) inlineMentioned.add(cleaned)
+  }
+
+  const local: LocalExecutionAttachment[] = []
+  const shareable: FinalizedAttachmentSummary[] = []
+  for (const block of blocks) {
+    if (block.type !== "resource_link") continue
+    const isDir = block.mimeType === "inode/directory" || block.name.endsWith("/")
+    const kind: "file" | "directory" = isDir ? "directory" : "file"
+    if (kind === "file" && inlineMentioned.has(block.name)) continue
+
+    const cleanName = block.name.replace(/[/\\]+$/, "")
+    const base = cleanName.split(/[/\\]/).at(-1) || cleanName || block.name
+    const label = isDir
+      ? (block.name === "/" ? "/" : `${base}/`)
+      : base
+    const isSafeRelPath = Boolean(cleanName)
+      && !cleanName.startsWith("/")
+      && !cleanName.startsWith("\\")
+      && !/^[a-zA-Z]:/.test(cleanName)
+      && cleanName.includes("/")
+      && (isDir ? `${cleanName}/` !== label : cleanName !== label)
+    const relPath = isSafeRelPath ? (isDir ? `${cleanName}/` : cleanName) : undefined
+    const localPath = block.title || block.name
+
+    local.push({ label, kind, ...(localPath ? { path: localPath } : {}) })
+    shareable.push({ label, kind, ...(relPath ? { path: relPath } : {}) })
+  }
+  return { local, shareable }
+}
+
 /** 窗口绑定独占订阅，应用级 ACP 宿主可在新窗口打开时继续接受新的绑定。 */
 export function createLocalExecutionCoordinator(
   window: BrowserWindow,
@@ -545,10 +589,12 @@ export function createLocalExecutionCoordinator(
           : unavailableMessages[result.reason],
       })
     }
+    const displayAttachments = summarizeDisplayAttachments(text, attachmentBlocks)
     binding.activeTurn = {
       turnId: result.turnId,
       userText: text,
       referenceIds: ids,
+      ...(displayAttachments.shareable.length ? { attachments: displayAttachments.shareable } : {}),
       ...(claimedImages.length ? { images: claimedImages } : {}),
       reply: "",
       acceptedAtMs: Date.now(),
@@ -563,9 +609,14 @@ export function createLocalExecutionCoordinator(
     publish(login, { scope, bindingId: binding.id, kind: "accepted", turnId: result.turnId, requestId, text,
       ...(binding.activeTurn.steerKind ? { canSteer: true } : {}),
       ...(queued ? { queued: true, referenceIds: ids } : {}),
+      ...(displayAttachments.local.length ? { attachments: displayAttachments.local } : {}),
       ...(claimedImages.length ? { images: claimedImages } : {}),
     })
-    return ok(binding.activeTurn.steerKind ? { ...result, canSteer: true } : result)
+    return ok({
+      ...result,
+      ...(binding.activeTurn.steerKind ? { canSteer: true } : {}),
+      ...(displayAttachments.local.length ? { attachments: displayAttachments.local } : {}),
+    })
   }
 
   function queueSnapshot(scope: LocalExecutionScope, record: PromptQueueRecord, login: Login, binding?: Binding) {
@@ -1159,6 +1210,7 @@ export function createLocalExecutionCoordinator(
                     turnId: turn.turnId,
                     userText: uploadUserText,
                     referenceIds: turn.referenceIds,
+                    ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
                     ...(tools ? { tools } : {}),
                     reply: turn.reply,
                     acceptedAtMs: turn.acceptedAtMs,

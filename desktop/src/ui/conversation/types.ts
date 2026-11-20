@@ -15,6 +15,13 @@ export interface ConversationScope {
   readonly conversationId: string
 }
 
+/** 已发送用户消息随附的文件或目录展示摘要（仅展示，不触发磁盘读取）。 */
+export interface ConversationMessageAttachment {
+  readonly label: string
+  readonly kind: "file" | "directory"
+  readonly path?: string
+}
+
 /** 时间线条目 ID 在当前会话的所有条目中唯一，更新同一条目时保持不变。 */
 export type ConversationTimelineEntry =
   | {
@@ -29,6 +36,8 @@ export type ConversationTimelineEntry =
       readonly runSummary?: { readonly durationMs?: number; readonly cachedTokens?: number; readonly agentName?: string }
       /** 消息只持有固定材料标识，装配方经当前权限读取正文。 */
       readonly referenceIds?: readonly string[]
+      /** 用户发送时附带的文件或目录展示摘要。 */
+      readonly attachments?: readonly ConversationMessageAttachment[]
       /** 本机发送附带的图片元数据（仅作本机时间线与重开会话后的缩略图/放大回显）。 */
       readonly images?: readonly ConversationDraftImage[]
     }

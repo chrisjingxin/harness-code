@@ -71,8 +71,14 @@ export type ReadLocalImageResult = {
   readonly mimeType: string
 }
 
+export type LocalExecutionAttachment = {
+  readonly label: string
+  readonly kind: "file" | "directory"
+  readonly path?: string
+}
+
 export type LocalExecutionReceipt =
-  | { readonly status: "accepted"; readonly turnId: string; readonly canSteer?: boolean }
+  | { readonly status: "accepted"; readonly turnId: string; readonly canSteer?: boolean; readonly attachments?: readonly LocalExecutionAttachment[] }
   | { readonly status: "rejected"; readonly reason: string; readonly unavailableReferenceId?: string }
 
 /** 待发项保存用户原文及引用标识，实际发送时重新解析材料。 */
@@ -157,7 +163,7 @@ export type LocalExecutionNotice =
       readonly bindingId: string
       readonly turnId: string
     } & (
-      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly canSteer?: boolean; readonly referenceIds?: readonly string[]; readonly images?: readonly PersonalDraftImage[] }
+      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly canSteer?: boolean; readonly referenceIds?: readonly string[]; readonly attachments?: readonly LocalExecutionAttachment[]; readonly images?: readonly PersonalDraftImage[] }
       | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
       | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }

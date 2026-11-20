@@ -82,9 +82,24 @@ test("decodeHistoryToTimelineEntries 防御性解析四类消息并在非法 JSO
     { sequence: 2, type: "assistant", occurredAtMs: 20, payload: "纯文本降级" },
     { sequence: 3, type: "tool_summary", occurredAtMs: 30, payload: '{"label":"检索","name":"grep","summary":"3处","status":"completed","tone":"read"}' },
     { sequence: 4, type: "status", occurredAtMs: 40, payload: '{"text":"已完成校验"}' },
+    {
+      sequence: 5,
+      type: "user",
+      occurredAtMs: 50,
+      payload: JSON.stringify({
+        text: "",
+        attachments: [
+          { label: "README.md", kind: "file" },
+          { label: "docs/", kind: "directory", path: "docs/" },
+          { label: "", kind: "file" },
+          { label: "bad-kind", kind: "other" },
+          "invalid",
+        ],
+      }),
+    },
   ], { userId: "u-1", displayName: "张景新" })
 
-  assert.equal(entries.length, 4)
+  assert.equal(entries.length, 5)
   assert.equal(entries[0]?.kind, "message")
   if (entries[0]?.kind === "message") assert.equal(entries[0].text, "问题")
   if (entries[1]?.kind === "message") assert.equal(entries[1].text, "纯文本降级")
@@ -95,6 +110,14 @@ test("decodeHistoryToTimelineEntries 防御性解析四类消息并在非法 JSO
     assert.equal(entries[2].tone, "read")
   }
   if (entries[3]?.kind === "message") assert.equal(entries[3].text, "状态更新：已完成校验")
+  assert.equal(entries[4]?.kind, "message")
+  if (entries[4]?.kind === "message") {
+    assert.equal(entries[4].text, "")
+    assert.deepEqual(entries[4].attachments, [
+      { label: "README.md", kind: "file" },
+      { label: "docs/", kind: "directory", path: "docs/" },
+    ])
+  }
 })
 
 test("boundCachedMessages 超限时从头裁剪最早消息并标明 cacheTruncated", () => {

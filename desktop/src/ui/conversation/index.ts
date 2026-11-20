@@ -57,6 +57,7 @@ export type {
   ConversationInteractionView,
   ConversationMentionOrigin,
   ConversationMenuItemView,
+  ConversationMessageAttachment,
   ConversationPersonalChange,
   ConversationPersonalState,
   ConversationProjectTarget,

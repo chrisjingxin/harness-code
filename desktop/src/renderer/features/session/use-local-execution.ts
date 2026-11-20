@@ -19,6 +19,7 @@ import {
   localExecutionKey,
   type DesktopLocalExecutionHost,
   type LocalDirectoryStatus,
+  type LocalExecutionAttachment,
   type LocalExecutionAvailability,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
@@ -202,6 +203,7 @@ export function useLocalExecution(
     text: string,
     canSteer?: boolean,
     images?: readonly PersonalDraftImage[],
+    attachments?: readonly LocalExecutionAttachment[],
   ): void {
     if (flight.turnId !== undefined) return
     flight.turnId = turnId
@@ -213,6 +215,7 @@ export function useLocalExecution(
       canSteer,
       referenceIds: flight.referenceIds,
       ...(finalImages?.length ? { images: finalImages } : {}),
+      ...(attachments?.length ? { attachments } : {}),
       author: { id: flight.scope.accountId, displayName: current.current.ownerName },
     })
     if (flight.draftRevision !== undefined) current.current.onAccepted(flight.scope, conversationId, flight.draftRevision)
@@ -309,7 +312,7 @@ export function useLocalExecution(
           lastSequence: 0, unknown: false,
         }
         screen.flight = flight
-        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images)
+        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments)
         return
       }
       const flight = screen.flight
@@ -327,7 +330,7 @@ export function useLocalExecution(
       }
       if (flight.bindingId !== notice.bindingId) return
       if (notice.kind === "accepted") {
-        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images)
+        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments)
         return
       }
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
@@ -813,7 +816,7 @@ export function useLocalExecution(
         const receipt = result.ok ? result.value : { status: "rejected" as const, reason: result.error.message }
         if (receipt.status === "accepted") {
           if (mounted.current && screens.current.get(source.key) === screen && screen.flight === flight) {
-            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer, images)
+            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer, images, receipt.attachments)
           }
           return { status: "accepted" }
         }

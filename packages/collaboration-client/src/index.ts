@@ -21,6 +21,7 @@ export {
   ConversationUploads,
   syncPayloadLimit,
   type ConversationUploadPort,
+  type FinalizedAttachmentSummary,
   type FinalizedToolSummary,
   type FinalizedTurn,
 } from "./conversation-uploads.js"

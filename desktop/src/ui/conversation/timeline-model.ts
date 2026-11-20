@@ -151,11 +151,12 @@ export type MinimapItem = {
   readonly createdAtMs?: number
 }
 
-/** 每条用户提问产出一个锚点；空白提问没有跳转价值，直接跳过。 */
+/** 每条用户提问产出一个锚点；空白提问没有跳转价值，直接跳过（仅附件时取附件名摘要）。 */
 export function deriveMinimapItems(entries: readonly ConversationTimelineEntry[]): MinimapItem[] {
   return entries.flatMap(entry => {
     if (entry.kind !== "message" || entry.role !== "user") return []
     const text = entry.text.replace(/\s+/g, " ").trim()
+      || (entry.attachments?.length ? entry.attachments.map(item => item.label).join(" · ") : "")
     return text ? [{ entryId: entry.id, text, createdAtMs: entry.createdAtMs }] : []
   })
 }

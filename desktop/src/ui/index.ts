@@ -63,7 +63,7 @@ export type {
   ConversationDirectoryContextView, ConversationDraft, ConversationDraftAnnotation, ConversationDraftImage,
   ConversationFileCandidate, ConversationFileCandidateRequest, ConversationFileCandidateResult,
   ConversationFileLineRange, ConversationGitContextView, ConversationInteractionAnswer, ConversationInteractionView,
-  ConversationMentionOrigin, ConversationMenuItemView, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
+  ConversationMentionOrigin, ConversationMenuItemView, ConversationMessageAttachment, ConversationPersonalChange, ConversationPersonalState, ConversationProjectTarget,
   ConversationReferenceView, ConversationScope, ConversationSelectionAnnotation, ConversationSendResult, ConversationCollaborationCandidate, ConversationCollaborationCandidateResult,
   ConversationTimelineActivity,
   ConversationTimelineEntry, ConversationTimelineScroll, ConversationToolBlock, ConversationToolDetailView,

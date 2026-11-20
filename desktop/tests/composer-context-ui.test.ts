@@ -8,6 +8,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { AnnotatedUserMessage } from "../src/ui/conversation/annotations.tsx"
 import { ConversationComposer } from "../src/ui/conversation/composer.tsx"
+import { ConversationTimeline } from "../src/ui/conversation/timeline.tsx"
 import {
   applyLeadingSlashCommand,
   insertMentionTrigger,
@@ -262,4 +263,44 @@ test("AnnotatedUserMessage 同步渲染行首 /命令 与 @引用 块状样式�
   assert.doesNotMatch(pathHtml, /wb-message-inline-command/)
   assert.doesNotMatch(pathHtml, /wb-message-inline-mention/)
   assert.equal(pathHtml, "/Users/dev/a.ts")
+})
+
+test("ConversationTimeline 用户消息气泡保留并渲染文件与目录附件胶囊（含仅附件无正文场景）", () => {
+  const htmlWithBody = renderToStaticMarkup(createElement(ConversationTimeline, {
+    scope: testScope,
+    visible: true,
+    contentRevision: 1,
+    entries: [
+      {
+        kind: "message",
+        id: "user-with-attachments",
+        role: "user",
+        text: "这是什么？",
+        attachments: [
+          { label: "README.md", kind: "file", path: "/Users/dev/Agent-Reach/README.md" },
+          { label: "docs/", kind: "directory", path: "/Users/dev/Agent-Reach/docs" },
+        ],
+      },
+      {
+        kind: "message",
+        id: "user-attachments-only",
+        role: "user",
+        text: "",
+        attachments: [{ label: "spec.md", kind: "file", path: "spec.md" }],
+      },
+    ],
+    personal: {
+      expandedTools: [],
+      expandedOutputs: [],
+      scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
+    },
+  }))
+
+  assert.match(htmlWithBody, /class="wb-message-attachments"/)
+  assert.match(htmlWithBody, /class="wb-message-attachment-chip" data-kind="file" title="\/Users\/dev\/Agent-Reach\/README\.md"/)
+  assert.match(htmlWithBody, /class="wb-message-attachment-label">README\.md<\/span>/)
+  assert.match(htmlWithBody, /class="wb-message-attachment-chip" data-kind="directory" title="\/Users\/dev\/Agent-Reach\/docs"/)
+  assert.match(htmlWithBody, /class="wb-message-attachment-label">docs\/<\/span>/)
+  assert.match(htmlWithBody, /这是什么？/)
+  assert.match(htmlWithBody, /class="wb-message-attachment-label">spec\.md<\/span>/)
 })

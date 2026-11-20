@@ -22,6 +22,7 @@ import type {
 import type {
   ConversationComposerView,
   ConversationMenuItemView,
+  ConversationMessageAttachment,
   ConversationTimelineEntry,
   ConversationToolBlock,
   ConversationToolDetailView,
@@ -82,7 +83,7 @@ export const emptyLocalExecutionView: LocalExecutionView = {
 
 /** 仅供桌面装配使用的显示更新。已明确受理后才追加用户消息。 */
 export type LocalExecutionViewUpdate =
-  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly images?: readonly PersonalDraftImage[]; readonly canSteer?: boolean }
+  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly attachments?: readonly ConversationMessageAttachment[]; readonly images?: readonly PersonalDraftImage[]; readonly canSteer?: boolean }
   | { readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string; readonly author: Message["author"] }
   | { readonly kind: "tool"; readonly turnId: string; readonly tool: LocalAcpTool }
   | { readonly kind: "assistant-text"; readonly turnId: string; readonly text: string; readonly messageId?: string }
@@ -235,6 +236,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
         text: update.text,
         author: update.author,
         referenceIds: update.referenceIds,
+        ...(update.attachments?.length ? { attachments: update.attachments } : {}),
         ...(update.images?.length ? { images: update.images } : {}),
         createdAtMs: Date.now(),
       }],

@@ -6,10 +6,11 @@
  *
  * 显示条目 → 按相邻 Agent 内容分组 → 渲染消息/工具 → 按个人锚点恢复或跟随滚动。
  */
-import { IconArrowDown, IconBrain, IconCheck, IconChevronRight, IconCopy, IconLoader2, IconTool } from "@tabler/icons-react"
+import { IconArrowDown, IconBrain, IconCheck, IconChevronRight, IconCopy, IconFolder, IconLoader2, IconTool } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
 import type { ReactElement } from "react"
 
+import { FileTypeIcon } from "../common/file-type-icon.js"
 import { formatElapsed } from "../common/formatters.js"
 import { Markdown } from "../rendering/markdown.js"
 import type { RenderingActions } from "../rendering/types.js"
@@ -597,7 +598,28 @@ function TimelineRow({
                 : isStreaming
                   ? <span className="wb-conversation-streaming-cursor" aria-hidden="true" />
                   : null
-              : <AnnotatedUserMessage text={entry.text} />}
+              : (
+                <>
+                  {entry.attachments?.length ? (
+                    <div className="wb-message-attachments" data-selection-ignore="true" aria-label="附件">
+                      {entry.attachments.map((item, idx) => (
+                        <span
+                          key={`${item.kind}:${item.path ?? item.label}:${idx}`}
+                          className="wb-message-attachment-chip"
+                          data-kind={item.kind}
+                          title={item.path ?? item.label}
+                        >
+                          <span className="wb-message-attachment-icon" aria-hidden="true">
+                            {item.kind === "directory" ? <IconFolder size={13} /> : <FileTypeIcon name={item.label} size={13} />}
+                          </span>
+                          <span className="wb-message-attachment-label">{item.label}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {entry.text || !entry.attachments?.length ? <AnnotatedUserMessage text={entry.text} /> : null}
+                </>
+              )}
           </div>
         </div>
         {entry.ephemeral && <small className="wb-conversation-enrichment">旁路问答 · 仅本机</small>}

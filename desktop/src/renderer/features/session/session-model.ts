@@ -16,6 +16,7 @@ import type {
   ConversationAvailability,
   ConversationContextActionItem,
   ConversationDirectoryContextView,
+  ConversationMessageAttachment,
   ConversationPersonalChange,
   ConversationPersonalState,
   ConversationTimelineEntry,
@@ -185,14 +186,33 @@ export function decodeHistoryToTimelineEntries(
       const ids = parsed?.referenceIds
       const referenceIds = Array.isArray(ids) ? ids.filter((id): id is string => parseFixedReference(id) !== null) : []
       const images = sentImages?.[String(message.sequence)]
+      const rawAttachments = parsed?.attachments
+      const attachments: ConversationMessageAttachment[] = Array.isArray(rawAttachments)
+        ? rawAttachments.flatMap(item => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return []
+            const record = item as Record<string, unknown>
+            if (typeof record.label !== "string" || record.label.length === 0) return []
+            if (record.kind !== "file" && record.kind !== "directory") return []
+            return [{
+              label: record.label,
+              kind: record.kind,
+              ...(typeof record.path === "string" && record.path.length > 0 ? { path: record.path } : {}),
+            }]
+          })
+        : []
+      const rawText = typeof parsed?.text === "string" ? parsed.text : null
+      const text = rawText !== null && (rawText.length > 0 || attachments.length > 0 || referenceIds.length > 0 || (images?.length ?? 0) > 0)
+        ? rawText
+        : pickString(parsed, ["text", "content", "message"]) ?? message.payload
       return {
         kind: "message",
         id,
         role: "user",
         author: { id: owner.userId, displayName: owner.displayName },
         createdAtMs: message.occurredAtMs,
-        text: pickString(parsed, ["text", "content", "message"]) ?? message.payload,
+        text,
         ...(referenceIds.length ? { referenceIds } : {}),
+        ...(attachments.length ? { attachments } : {}),
         ...(images?.length ? { images } : {}),
       }
     }

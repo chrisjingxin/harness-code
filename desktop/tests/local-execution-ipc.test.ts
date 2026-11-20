@@ -760,18 +760,22 @@ test("显式原生选择本机文件与本机目录可作为 ACP resource_link �
   const root = await mkdtemp(join(tmpdir(), "local-attach-grants-"))
   try {
     const workdir = join(root, "ws")
+    const wsSrc = join(workdir, "src")
     const outsideDir = join(root, "outside-dir")
     const outsideFile = join(root, "outside-note.md")
     const ungrantedFile = join(root, "ungranted.txt")
-    await Promise.all([mkdir(workdir, { recursive: true }), mkdir(outsideDir, { recursive: true })])
+    const inlineWsFile = join(wsSrc, "app file.ts")
+    await Promise.all([mkdir(wsSrc, { recursive: true }), mkdir(outsideDir, { recursive: true })])
     await Promise.all([
+      writeFile(inlineWsFile, "export const y = 2\n", "utf8"),
       writeFile(outsideFile, "# external note\n", "utf8"),
       writeFile(ungrantedFile, "secret\n", "utf8"),
     ])
 
     const identity = await createSignedInState(USER_A)
-    const { window } = createFakeWindow()
+    const { window, notices } = createFakeWindow()
     const sentPrompts: Array<{ blocks: unknown }> = []
+    const listeners = new Set<AcpListener>()
     let turnCounter = 0
     const runtime: LocalExecutionRuntime = {
       host: {
@@ -784,8 +788,11 @@ test("显式原生选择本机文件与本机目录可作为 ACP resource_link �
           },
           cancel: () => true,
           answerPermission: () => true,
-          subscribe: () => () => {},
-          close: async () => {},
+          subscribe: (listener: AcpListener) => {
+            listeners.add(listener)
+            return () => { listeners.delete(listener) }
+          },
+          close: async () => { listeners.clear() },
         }) as unknown as BoundSession,
         subscribeDiagnostics: () => () => {},
         close: async () => {},
@@ -823,6 +830,22 @@ test("显式原生选择本机文件与本机目录可作为 ACP resource_link �
 
     const canonicalOutsideFile = await realpath(outsideFile)
     const canonicalOutsideDir = await realpath(outsideDir)
+    const expectedDisplayAttachments = [
+      { label: "outside-note.md", kind: "file" as const, path: canonicalOutsideFile },
+      { label: "outside-dir/", kind: "directory" as const, path: canonicalOutsideDir },
+    ]
+    assert.equal(sentOk.value.status, "accepted")
+    if (sentOk.value.status === "accepted") {
+      assert.deepEqual(sentOk.value.attachments, expectedDisplayAttachments)
+      for (const listener of listeners) {
+        listener({ type: "completed", turnId: sentOk.value.turnId, sequence: 1, shareable: false })
+      }
+    }
+    const acceptedNotice = (notices as LocalExecutionNotice[]).find(
+      item => item.kind === "accepted" && item.requestId === REQ_ID,
+    )
+    assert.ok(acceptedNotice && acceptedNotice.kind === "accepted")
+    assert.deepEqual(acceptedNotice.attachments, expectedDisplayAttachments)
     assert.deepEqual(sentPrompts[0]?.blocks, [
       { type: "text", text: "对照外部材料分析" },
       {
@@ -840,6 +863,22 @@ test("显式原生选择本机文件与本机目录可作为 ACP resource_link �
         mimeType: "inode/directory",
       },
     ])
+
+    // 行内已有 @file 时，展示摘要自动去重该工作区文件，只保留未出现在正文中的附加文件
+    const sentInlineAndExternal = await ipc.send(
+      scope,
+      prep1.value.bindingId,
+      REQ_ID,
+      '请看 @"src/app file.ts" 并对照外部笔记',
+      [],
+      ["src/app file.ts", ...grantedFiles],
+    )
+    assert.equal(sentInlineAndExternal.ok, true)
+    if (sentInlineAndExternal.ok && sentInlineAndExternal.value.status === "accepted") {
+      assert.deepEqual(sentInlineAndExternal.value.attachments, [
+        { label: "outside-note.md", kind: "file", path: canonicalOutsideFile },
+      ])
+    }
 
     // 登出后重新登录同账号，先前会话的本机附件授权必须立即失效
     await identity.signOut()
