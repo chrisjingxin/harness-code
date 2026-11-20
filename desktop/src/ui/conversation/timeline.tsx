@@ -53,6 +53,15 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
   })
   const lastId = visibleEntries.at(-1)?.id ?? null
   const groups = groupEntries(visibleEntries)
+  const turnPrefix = lastId && localExecutionTurnPrefix(lastId)
+  // 本轮追加的用户指令会另起一组，但此前仍在运行的工具可以继续扫光。
+  const liveEntries = !visible ? [] : turnPrefix
+    ? visibleEntries.filter(entry => entry.id.startsWith(`${turnPrefix}:`))
+    : groups.at(-1) ?? []
+  // 按工具出现顺序选中第一个运行项，后启动的并行工具不抢焦点。
+  const runningTool = liveEntries.find(entry => entry.kind === "tool" && entry.status === "running")
+  const activeThought = liveEntries.find(entry => entry.kind === "reasoning" && entry.active)
+  const shimmerEntryId = (runningTool ?? activeThought)?.id
   const minimapItems = deriveMinimapItems(visibleEntries)
   const toggleTool = (id: string) => {
     onPersonalChange?.(scope, { kind: "tool", entryId: id, expanded: !personal.expandedTools.includes(id) })
@@ -80,6 +89,7 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               onToggleOutput={onPersonalChange ? toggleOutput : undefined}
               rendering={rendering}
               activity={index === groups.length - 1 ? activity : null}
+              shimmerEntryId={shimmerEntryId}
               previousEntry={groups[index - 1]?.at(-1)}
             />
           ))}
@@ -171,6 +181,7 @@ function TimelineGroup({
   entries,
   lastId,
   isNewEntry,
+  shimmerEntryId,
   expandedTools,
   expandedOutputs,
   onToggleTool,
@@ -182,6 +193,7 @@ function TimelineGroup({
   entries: readonly ConversationTimelineEntry[]
   lastId: string | null
   isNewEntry: (id: string) => boolean
+  shimmerEntryId?: string
   expandedTools: readonly string[]
   expandedOutputs: readonly string[]
   onToggleTool?: (id: string) => void
@@ -201,7 +213,7 @@ function TimelineGroup({
   const groupIsNew = entries.every(entry => isNewEntry(entry.id))
   const startedAtMs = previousEntry?.kind === "message" && previousEntry.role === "user" ? previousEntry.createdAtMs : undefined
   const { processSummary, processSegments, finalEntry } = splitTurnProcess(entries, activity, startedAtMs)
-  const segmentProps = { groupIsNew, lastId, isNewEntry, expandedTools, expandedOutputs, onToggleTool, onToggleOutput, rendering }
+  const segmentProps = { groupIsNew, lastId, isNewEntry, expandedTools, expandedOutputs, onToggleTool, onToggleOutput, rendering, shimmerEntryId }
   return (
     <div className="wb-conversation-agent-group" data-enter={groupIsNew || undefined}>
       {processSummary ? (
@@ -231,6 +243,7 @@ function renderTimelineSegment({
   groupIsNew,
   lastId,
   isNewEntry,
+  shimmerEntryId,
   expandedTools,
   expandedOutputs,
   onToggleTool,
@@ -241,6 +254,7 @@ function renderTimelineSegment({
   groupIsNew: boolean
   lastId: string | null
   isNewEntry: (id: string) => boolean
+  shimmerEntryId?: string
   expandedTools: readonly string[]
   expandedOutputs: readonly string[]
   onToggleTool?: (id: string) => void
@@ -252,6 +266,7 @@ function renderTimelineSegment({
       key={segment.id}
       groupId={segment.id}
       tools={segment.tools}
+      shimmerEntryId={shimmerEntryId}
       enter={!groupIsNew && segment.tools.every(tool => isNewEntry(tool.id))}
       expandedTools={expandedTools}
       expandedOutputs={expandedOutputs}
@@ -263,6 +278,7 @@ function renderTimelineSegment({
     <TimelineRow
       key={segment.entry.id}
       entry={segment.entry}
+      shimmer={segment.entry.id === shimmerEntryId}
       enter={!groupIsNew && isNewEntry(segment.entry.id)}
       lastId={lastId}
       expandedTools={expandedTools}
@@ -281,6 +297,7 @@ function ProcessGroupRows({
   groupIsNew,
   lastId,
   isNewEntry,
+  shimmerEntryId,
   expandedTools,
   expandedOutputs,
   onToggleTool,
@@ -292,6 +309,7 @@ function ProcessGroupRows({
   groupIsNew: boolean
   lastId: string | null
   isNewEntry: (id: string) => boolean
+  shimmerEntryId?: string
   expandedTools: readonly string[]
   expandedOutputs: readonly string[]
   onToggleTool?: (id: string) => void
@@ -350,6 +368,7 @@ function ProcessGroupRows({
             groupIsNew,
             lastId,
             isNewEntry,
+            shimmerEntryId,
             expandedTools,
             expandedOutputs,
             onToggleTool,
@@ -366,6 +385,7 @@ function ProcessGroupRows({
 function ToolGroupRows({
   groupId,
   tools,
+  shimmerEntryId,
   enter,
   expandedTools,
   expandedOutputs,
@@ -375,6 +395,7 @@ function ToolGroupRows({
 }: {
   groupId: string
   tools: readonly ToolEntry[]
+  shimmerEntryId?: string
   enter: boolean
   expandedTools: readonly string[]
   expandedOutputs: readonly string[]
@@ -449,6 +470,7 @@ function ToolGroupRows({
             <ConversationToolCard
               key={tool.id}
               tool={tool}
+              shimmerRef={tool.id === shimmerEntryId ? observeShimmer : undefined}
               expanded={expandedTools.includes(tool.id)}
               outputExpanded={expandedOutputs.includes(tool.id)}
               onToggle={onToggleTool ? () => onToggleTool(tool.id) : undefined}
@@ -465,11 +487,13 @@ function ToolGroupRows({
 /** 思考行：进行中默认展开（收起只记组件本地），结束后按个人展开状态折叠。 */
 function ReasoningRow({
   entry,
+  shimmer,
   enter,
   expanded,
   onToggle,
 }: {
   entry: Extract<ConversationTimelineEntry, { kind: "reasoning" }>
+  shimmer: boolean
   enter: boolean
   expanded: boolean
   onToggle?: () => void
@@ -487,7 +511,10 @@ function ReasoningRow({
         onClick={() => { entry.active ? setLocalCollapsed(value => !value) : onToggle?.() }}
       >
         <IconBrain aria-hidden="true" className="wb-conversation-tool-icon" />
-        <span className={entry.active ? "wb-conversation-reasoning-label wb-conversation-shimmer" : "wb-conversation-reasoning-label"}>
+        <span
+          ref={shimmer ? observeShimmer : undefined}
+          className={shimmer ? "wb-conversation-reasoning-label wb-conversation-shimmer" : "wb-conversation-reasoning-label"}
+        >
           {entry.active ? "思考中" : "思考过程"}
         </span>
         <IconChevronRight aria-hidden="true" focusable="false" className={open ? "wb-conversation-chevron is-expanded" : "wb-conversation-chevron"} />
@@ -506,6 +533,7 @@ type ToolEntry = Extract<ConversationTimelineEntry, { kind: "tool" }>
 function TimelineRow({
   entry,
   hideDuration = false,
+  shimmer = false,
   enter = false,
   lastId,
   expandedTools,
@@ -516,6 +544,7 @@ function TimelineRow({
 }: {
   entry: ConversationTimelineEntry
   hideDuration?: boolean
+  shimmer?: boolean
   enter?: boolean
   lastId: string | null
   expandedTools: readonly string[]
@@ -564,6 +593,7 @@ function TimelineRow({
       <div data-conversation-entry-id={entry.id} data-enter={enter || undefined} className="wb-conversation-tool">
         <ConversationToolCard
           tool={entry}
+          shimmerRef={shimmer ? observeShimmer : undefined}
           expanded={expandedTools.includes(entry.id)}
           outputExpanded={expandedOutputs.includes(entry.id)}
           onToggle={onToggleTool ? () => onToggleTool(entry.id) : undefined}
@@ -577,6 +607,7 @@ function TimelineRow({
     return (
       <ReasoningRow
         entry={entry}
+        shimmer={shimmer}
         enter={enter}
         expanded={expandedTools.includes(entry.id)}
         onToggle={onToggleTool ? () => onToggleTool(entry.id) : undefined}
@@ -660,14 +691,12 @@ function MessageActions({ text, copyText, sentAt, role }: {
 /** 计时只刷新状态行，避免每秒重复计算整个会话的内容。 */
 function ActivityStatus({ activity }: { activity?: ConversationTimelineActivity | null }): ReactElement {
   const elapsed = useElapsed(activity?.active === true, activity?.elapsedMs)
-  const rowRef = useRef<HTMLDivElement | null>(null)
-  const paused = useShimmerPaused(rowRef)
   return (
-    <div ref={rowRef} className="wb-conversation-live" aria-live="polite" data-paused={paused || undefined}>
+    <div className="wb-conversation-live" aria-live="polite">
       {activity ? (
         <div className="wb-conversation-progress" role="status">
           {activity.active ? <IconLoader2 aria-hidden="true" className="wb-conversation-progress-icon wb-conversation-spin" /> : null}
-          <span className={activity.active ? "wb-conversation-shimmer" : undefined}>
+          <span>
             {[activity.label, activity.phaseLabel, activity.elapsedMs === undefined ? undefined : `已运行 ${formatElapsed(elapsed)}`].filter(Boolean).join(" · ")}
           </span>
         </div>
@@ -676,27 +705,23 @@ function ActivityStatus({ activity }: { activity?: ConversationTimelineActivity 
   )
 }
 
-/** 扫光只在行可见且页面在前台时运行；离屏或切到后台即暂停。 */
-function useShimmerPaused(ref: { readonly current: HTMLElement | null }): boolean {
-  const [paused, setPaused] = useState(false)
-  useEffect(() => {
-    const element = ref.current
-    if (!element) return
-    let inView = true
-    const update = () => setPaused(!inView || document.visibilityState === "hidden")
-    const observer = new IntersectionObserver(entries => {
-      inView = entries.some(entry => entry.isIntersecting)
-      update()
-    })
-    observer.observe(element)
-    document.addEventListener("visibilitychange", update)
+/** 只观察带扫光的标题。滚出对话或工具组的滚动区域、切到后台时暂停。 */
+function observeShimmer(label: HTMLSpanElement | null): (() => void) | undefined {
+  if (!label) return
+  let inView = false
+  const update = () => label.toggleAttribute("data-paused", !inView || document.visibilityState === "hidden")
+  const observer = new IntersectionObserver(entries => {
+    inView = entries.at(-1)?.isIntersecting ?? false
     update()
-    return () => {
-      observer.disconnect()
-      document.removeEventListener("visibilitychange", update)
-    }
-  }, [ref])
-  return paused
+  })
+  observer.observe(label)
+  document.addEventListener("visibilitychange", update)
+  update()
+  return () => {
+    observer.disconnect()
+    document.removeEventListener("visibilitychange", update)
+    label.removeAttribute("data-paused")
+  }
 }
 
 /** 只按调用方给出的活动事实计时；结束后停止更新。 */

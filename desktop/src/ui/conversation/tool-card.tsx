@@ -6,7 +6,7 @@
  */
 import { IconCheck, IconChevronRight, IconCopy, IconFilePencil, IconFileText, IconLoader2, IconTool } from "@tabler/icons-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { ReactElement, ReactNode } from "react"
+import type { ReactElement, ReactNode, Ref } from "react"
 
 import type { RenderingActions } from "../rendering/types.js"
 import { Disclosure } from "./disclosure.js"
@@ -34,6 +34,7 @@ function PathSummary({ text }: { text: string }): ReactNode {
 /** 单个工具的展开选择由对话视图持有者按会话保存。 */
 export function ConversationToolCard({
   tool,
+  shimmerRef,
   expanded,
   outputExpanded,
   onToggle,
@@ -41,6 +42,7 @@ export function ConversationToolCard({
   rendering,
 }: {
   tool: ConversationTextTool
+  shimmerRef?: Ref<HTMLSpanElement>
   expanded: boolean
   outputExpanded: boolean
   onToggle?: () => void
@@ -63,7 +65,13 @@ export function ConversationToolCard({
   const head = (
     <>
       <Icon aria-hidden="true" focusable="false" className="wb-conversation-tool-icon" data-failed={failed || undefined} />
-      <span className="wb-conversation-tool-label" title={tool.originalName ?? tool.label}>{tool.label}</span>
+      <span
+        ref={shimmerRef}
+        className={shimmerRef ? "wb-conversation-tool-label wb-conversation-shimmer" : "wb-conversation-tool-label"}
+        title={tool.originalName ?? tool.label}
+      >
+        {tool.label}
+      </span>
       {tool.summary ? <PathSummary text={tool.summary} /> : null}
       <span className="wb-conversation-tool-status" role="img" aria-label={statusLabel} title={statusLabel}>
         {tool.status === "running" ? <IconLoader2 aria-hidden="true" className="wb-conversation-spin" />

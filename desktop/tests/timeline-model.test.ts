@@ -66,6 +66,30 @@ test("已完成的过程用一行展示 Agent 实际名称、耗时和完成时�
   assert.doesNotMatch(html, /测试用户|wb-conversation-message-meta|>Agent<|15\.0 秒/)
 })
 
+test("扫光只跟随最新一轮的思考或第一个运行中的工具", () => {
+  const render = (entries: readonly ConversationTimelineEntry[], visible = true) =>
+    renderToStaticMarkup(createElement(ConversationTimeline, {
+      scope: { namespace: "test", accountId: "a", workspaceId: "w", conversationId: "c" },
+      visible,
+      contentRevision: 1,
+      entries: [reasoning("old", true), userMessage("prompt", "问题"), ...entries],
+      personal: { expandedTools: [], expandedOutputs: [], scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null } },
+      activity: { active: true, label: "正在回复" },
+    }))
+  const lit = (html: string) => [...html.matchAll(/<span class="[^"]*wb-conversation-shimmer"[^>]*>([^<]+)<\/span>/g)].map(match => match[1])
+  assert.deepEqual(lit(render([reasoning("r", true)])), ["思考中"])
+  assert.deepEqual(lit(render([tool("read", "running")])), ["read"])
+  assert.deepEqual(lit(render([reasoning("r", true), tool("read", "running"), tool("edit", "running")])), ["read"])
+  assert.deepEqual(lit(render([tool("read", "failed"), tool("edit", "running")])), ["edit"])
+  assert.deepEqual(lit(render([tool("edit"), message("reply", true)])), [])
+  assert.deepEqual(lit(render([tool("edit", "running")], false)), [])
+  assert.deepEqual(lit(render([
+    tool("local-execution:turn:tool:read", "running"),
+    userMessage("local-execution:turn:steer:request", "补充要求"),
+    tool("local-execution:turn:tool:edit", "running"),
+  ])), ["local-execution:turn:tool:read"])
+})
+
 test("历史回复按相邻提问时间补算耗时，未结束时不显示完成信息", () => {
   const startedAt = 1_700_000_000_000
   const entries: ConversationTimelineEntry[] = [tool("a"), { ...message("reply"), createdAtMs: startedAt + 15_000 }]

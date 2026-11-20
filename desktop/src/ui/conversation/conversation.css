@@ -108,16 +108,26 @@
 .wb-conversation-reasoning-body { margin: 0 0 4px 6.5px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); }
 .wb-conversation-reasoning-text { color: var(--text-soft); font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* 文字扫光：仅在元素可见且页面在前台时运行（行内 data-paused 暂停）。 */
-.wb-conversation-shimmer {
-  -webkit-mask-image: linear-gradient(100deg, #000 40%, rgba(0, 0, 0, .45) 50%, #000 60%);
-  mask-image: linear-gradient(100deg, #000 40%, rgba(0, 0, 0, .45) 50%, #000 60%);
-  -webkit-mask-size: 220% 100%;
-  mask-size: 220% 100%;
-  animation: wb-conversation-shimmer 2.2s linear infinite;
+/* 等待表单出现时，把反馈留给当前请求，避免工具与「正在回复」继续提示工作中。 */
+.wb-conversation-view:has(> .wb-interaction-dock) .wb-conversation-live { display: none; }
+.wb-conversation-view:has(> .wb-interaction-dock) .wb-conversation-spin { animation: none; }
+
+/* 亮带只提高局部对比度，静止阶段保留主题文字色。 */
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .wb-conversation-shimmer:not(:where(.wb-conversation-view:has(> .wb-interaction-dock) *)) {
+    background-image: linear-gradient(100deg, currentColor 44%, color-mix(in srgb, var(--fg) 85%, currentColor) 50%, currentColor 56%);
+    background-size: 240% 100%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: wb-conversation-shimmer 2.4s linear infinite;
+  }
+  .wb-conversation-shimmer[data-paused] { animation-play-state: paused; }
+  @keyframes wb-conversation-shimmer {
+    from { background-position: 100% 0; }
+    68%, to { background-position: 0 0; }
+  }
 }
-@keyframes wb-conversation-shimmer { from { mask-position: 180% 0; -webkit-mask-position: 180% 0; } to { mask-position: -80% 0; -webkit-mask-position: -80% 0; } }
-[data-paused="true"] .wb-conversation-shimmer { animation-play-state: paused; }
 
 .wb-conversation-tool-row { border-radius: var(--radius-control); }
 .wb-conversation-tool-header { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
@@ -256,10 +266,9 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   .wb-conversation-message-content[data-streaming="true"] .markdown::after { animation: none; }
   /* 减少动态效果时进场只保留 ≤120ms 的透明度淡入，去掉位移。 */
   .wb-conversation-timeline [data-enter="true"] { animation-name: wb-conversation-enter-fade !important; animation-duration: 120ms !important; }
-  /* 折叠容器不做高度过渡、文字不扫光、详情不位移动画。 */
+  /* 折叠容器不做高度过渡，详情不做位移动画。 */
   .wb-disclosure,
   .wb-conversation-process-disclosure { transition: none; }
-  .wb-conversation-shimmer { animation: none; -webkit-mask-image: none; mask-image: none; }
   .wb-conversation-tool-details-disclosure[data-open="true"],
   .wb-conversation-to-bottom,
   .wb-interaction-form,
