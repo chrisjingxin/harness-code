@@ -17,6 +17,7 @@ import type {
   LocalExecutionTool as LocalAcpTool,
   LocalExecutionPermission as LocalAcpPermission,
   LocalExecutionSessionState,
+  PersonalDraftImage,
 } from "../../../shared/index.js"
 import type {
   ConversationComposerView,
@@ -60,6 +61,7 @@ export type LocalExecutionView = {
   readonly elicitation?: LocalAcpElicitationRequest | null
   readonly elicitationRetryRevision?: number
   readonly sessionState?: LocalExecutionSessionState
+  readonly supportsImagePrompt?: boolean
   readonly failure: string | null
   readonly referenceFailure?: { readonly id: string; readonly message: string }
   readonly uploadFailures?: ReadonlyMap<string, string>
@@ -80,7 +82,7 @@ export const emptyLocalExecutionView: LocalExecutionView = {
 
 /** 仅供桌面装配使用的显示更新。已明确受理后才追加用户消息。 */
 export type LocalExecutionViewUpdate =
-  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly canSteer?: boolean }
+  | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly images?: readonly PersonalDraftImage[]; readonly canSteer?: boolean }
   | { readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string; readonly author: Message["author"] }
   | { readonly kind: "tool"; readonly turnId: string; readonly tool: LocalAcpTool }
   | { readonly kind: "assistant-text"; readonly turnId: string; readonly text: string; readonly messageId?: string }
@@ -162,7 +164,11 @@ function splitToolTitle(
 
 export function applyLocalExecutionUpdate(state: LocalExecutionView, update: LocalExecutionViewUpdate): LocalExecutionView {
   if (update.kind === "session-state") {
-    return { ...state, sessionState: update.state }
+    return {
+      ...state,
+      sessionState: update.state,
+      supportsImagePrompt: update.state.supportsImagePrompt,
+    }
   }
   if (update.kind === "elicitation") {
     return {
@@ -223,7 +229,14 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
       activeTurnAssistantBreak: undefined,
       settledPermissionAnchors: undefined,
       entries: [...state.entries, {
-        kind: "message", id, role: "user", text: update.text, author: update.author, referenceIds: update.referenceIds, createdAtMs: Date.now(),
+        kind: "message",
+        id,
+        role: "user",
+        text: update.text,
+        author: update.author,
+        referenceIds: update.referenceIds,
+        ...(update.images?.length ? { images: update.images } : {}),
+        createdAtMs: Date.now(),
       }],
       revision: state.revision + 1,
       failure: null,

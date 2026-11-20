@@ -1,6 +1,6 @@
 /** 显示本机待发消息和暂停状态，编辑时保留原有引用与附件。 */
 import { useId, useRef, useState } from "react"
-import { IconArrowRight, IconCheck, IconChevronDown, IconPencil, IconQuote, IconTrash, IconX } from "@tabler/icons-react"
+import { IconArrowRight, IconCheck, IconChevronDown, IconPencil, IconPhoto, IconQuote, IconTrash, IconX } from "@tabler/icons-react"
 import { isSteerText, type PromptQueueView } from "../../../shared/index.js"
 import { parseAnnotatedUserMessage } from "../../../ui/index.js"
 import type { LocalSessionExecutionPort } from "./contracts.js"
@@ -79,14 +79,21 @@ export function PromptQueuePanel({
                 const parsed = parseAnnotatedUserMessage(item.text)
                 const summaryText = parsed ? parsed.body : item.text
                 const annotationCount = parsed?.annotations.length ?? 0
+                const imageCount = item.images?.length ?? 0
                 const refCount = item.referenceIds.length + item.attachments.length
                 return (
                   <span className="session-prompt-queue-text" title={item.text}>
-                    {summaryText || (!annotationCount ? "引用或附件" : null)}
+                    {summaryText || (!annotationCount && !imageCount ? "引用或附件" : null)}
                     {annotationCount > 0 ? (
                       <small style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: summaryText ? 6 : 0 }}>
                         <IconQuote size={12} aria-hidden="true" />
                         <span>{annotationCount}</span>
+                      </small>
+                    ) : null}
+                    {imageCount > 0 ? (
+                      <small style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: (summaryText || annotationCount) ? 6 : 0 }}>
+                        <IconPhoto size={12} aria-hidden="true" />
+                        <span>{imageCount}</span>
                       </small>
                     ) : null}
                     {refCount ? <small> · {refCount} 个引用或附件</small> : null}
@@ -103,7 +110,7 @@ export function PromptQueuePanel({
                   </>
                 ) : (
                   <>
-                    {onSteer && !queue.starting && isSteerText(item.text) && !item.referenceIds.length && !item.attachments.length ? (
+                    {onSteer && !queue.starting && isSteerText(item.text) && !item.referenceIds.length && !item.attachments.length && !item.images?.length ? (
                       <button type="button" title="立即发送，引导当前轮" aria-label={`立即发送第 ${index + 1} 条待发消息`}
                         disabled={busy} onClick={() => void apply({ kind: "steer", requestId: item.requestId })}>
                         <IconArrowRight size={15} aria-hidden="true" />

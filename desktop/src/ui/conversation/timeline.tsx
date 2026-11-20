@@ -15,6 +15,7 @@ import { Markdown } from "../rendering/markdown.js"
 import type { RenderingActions } from "../rendering/types.js"
 import { AnnotatedUserMessage } from "./annotations.js"
 import { Disclosure } from "./disclosure.js"
+import { MessageImagesBar } from "./image-attachments.js"
 import { SelectionToolbar } from "./selection-toolbar.js"
 import { deriveMinimapItems, splitTurnProcess, type ProcessSummary, type TimelineSegment } from "./timeline-model.js"
 import { TimelineMinimap } from "./timeline-minimap.js"
@@ -32,7 +33,7 @@ export function ConversationTimeline(props: ConversationTimelineProps): ReactEle
 }
 
 function ConversationTimelineInstance(props: ConversationTimelineProps): ReactElement {
-  const { entries, visible, scope, personal, onPersonalChange, rendering, activity, contentRevision } = props
+  const { entries, visible, scope, personal, onPersonalChange, onResolveImagePreview, rendering, activity, contentRevision } = props
   // 已结束的推理保留在时间线里渲染成可折叠行；空回答仍不显示。
   const visibleEntries = entries.filter(entry =>
     !(entry.kind === "message" && entry.role === "assistant" && !entry.streaming && entry.text.trim().length === 0),
@@ -87,6 +88,7 @@ function ConversationTimelineInstance(props: ConversationTimelineProps): ReactEl
               expandedOutputs={personal.expandedOutputs}
               onToggleTool={onPersonalChange ? toggleTool : undefined}
               onToggleOutput={onPersonalChange ? toggleOutput : undefined}
+              onResolveImagePreview={onResolveImagePreview}
               rendering={rendering}
               activity={index === groups.length - 1 ? activity : null}
               shimmerEntryId={shimmerEntryId}
@@ -186,6 +188,7 @@ function TimelineGroup({
   expandedOutputs,
   onToggleTool,
   onToggleOutput,
+  onResolveImagePreview,
   rendering,
   activity,
   previousEntry,
@@ -198,6 +201,7 @@ function TimelineGroup({
   expandedOutputs: readonly string[]
   onToggleTool?: (id: string) => void
   onToggleOutput?: (id: string) => void
+  onResolveImagePreview?: (imageId: string) => Promise<string | null>
   rendering?: RenderingActions
   activity?: ConversationTimelineActivity | null
   previousEntry?: ConversationTimelineEntry
@@ -205,7 +209,7 @@ function TimelineGroup({
   const agentGroup = entries.some(entry => isAgentContinuation(entry))
   const assistant = entries.find(isAssistant)
   if (!agentGroup && entries.length === 1) {
-    const row = <TimelineRow entry={entries[0]} enter={isNewEntry(entries[0].id)} lastId={lastId} expandedTools={expandedTools} expandedOutputs={expandedOutputs} onToggleTool={onToggleTool} onToggleOutput={onToggleOutput} rendering={rendering} />
+    const row = <TimelineRow entry={entries[0]} enter={isNewEntry(entries[0].id)} lastId={lastId} expandedTools={expandedTools} expandedOutputs={expandedOutputs} onToggleTool={onToggleTool} onToggleOutput={onToggleOutput} onResolveImagePreview={onResolveImagePreview} rendering={rendering} />
     if (!activity || !assistant) return row
     return <div className="wb-conversation-agent-group">{row}<ActivityStatus activity={activity} /></div>
   }
@@ -540,6 +544,7 @@ function TimelineRow({
   expandedOutputs,
   onToggleTool,
   onToggleOutput,
+  onResolveImagePreview,
   rendering,
 }: {
   entry: ConversationTimelineEntry
@@ -551,6 +556,7 @@ function TimelineRow({
   expandedOutputs: readonly string[]
   onToggleTool?: (id: string) => void
   onToggleOutput?: (id: string) => void
+  onResolveImagePreview?: (imageId: string) => Promise<string | null>
   rendering?: RenderingActions
 }): ReactElement {
   if (entry.kind === "message") {
@@ -568,6 +574,9 @@ function TimelineRow({
         role="group" aria-label={entry.role === "user" ? "用户消息" : "回复"}>
         <div className="wb-conversation-message-body">
           <div className="wb-conversation-message-content" data-streaming={isStreaming || undefined}>
+            {entry.role === "user" && entry.images?.length ? (
+              <MessageImagesBar images={entry.images} onResolvePreview={onResolveImagePreview} />
+            ) : null}
             {entry.role === "assistant"
               ? entry.text
                 ? <Markdown text={entry.text} actions={rendering} />

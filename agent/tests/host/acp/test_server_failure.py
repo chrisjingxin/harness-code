@@ -226,7 +226,7 @@ async def test_broken_config_reports_configuration_error(tmp_path: Path) -> None
 
 
 async def test_unsupported_content_block_is_invalid_params(tmp_path: Path) -> None:
-    """图片块（能力声明为不支持）回 -32602 并说明类型。"""
+    """音频块（能力声明为不支持）回 -32602 并说明类型。"""
     async with InProcessAcp(make_host(tmp_path, echo=True)) as acp:
         await _initialize(acp.client)
         session_id = await _new_session(acp.client, acp.host.workspace)
@@ -235,12 +235,12 @@ async def test_unsupported_content_block_is_invalid_params(tmp_path: Path) -> No
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "image", "data": "aGk=", "mimeType": "image/png"}],
+                "prompt": [{"type": "audio", "data": "aGk=", "mimeType": "audio/wav"}],
             },
         )
         assert response["error"]["code"] == -32602
         assert response["error"]["data"]["code"] == "UNSUPPORTED_CONTENT_BLOCK"
-        assert response["error"]["data"]["type"] == "image"
+        assert response["error"]["data"]["type"] == "audio"
 
 
 async def test_blank_prompt_is_rejected(tmp_path: Path) -> None:

@@ -26,14 +26,18 @@ import {
   SelectionToolbar,
   applyLeadingSlashCommand,
   composeAnnotatedPrompt,
+  inferImageMimeFromName,
   normalizeAnnotationSelectedText,
   normalizeAnnotationSourceLabel,
+  preparePastedImage,
 } from "../../../ui/index.js"
-import { isSteerText } from "../../../shared/index.js"
+import { MAX_DRAFT_IMAGES, MAX_TOTAL_IMAGE_BYTES, isSteerText } from "../../../shared/index.js"
+import type { PersonalDraftImage } from "../../../shared/index.js"
 import type {
   ConversationActions,
   ConversationComposerView,
   ConversationDraftAnnotation,
+  ConversationDraftImage,
   ConversationPersonalChange,
   ConversationPersonalState,
   ConversationScope,
@@ -43,6 +47,7 @@ import type {
 } from "../../../ui/index.js"
 import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
 import { toConversationInteraction, toElicitationAnswer } from "./elicitation-form.js"
+import { createImagePreviewCache } from "./image-preview-cache.js"
 import { SessionCentralFilePanels } from "./session-center.js"
 import type { SessionCentralFilesState } from "./session-center.js"
 import {
@@ -130,6 +135,16 @@ export function LocalSessionPage({
   const expandedPlanBodyRef = useRef<HTMLDivElement | null>(null)
   const annotationsRef = useRef<readonly ConversationDraftAnnotation[]>(personal.draft.annotations ?? [])
   annotationsRef.current = personal.draft.annotations ?? []
+  const draftImagesRef = useRef<readonly ConversationDraftImage[]>(personal.draft.images ?? [])
+  draftImagesRef.current = personal.draft.images ?? []
+  const [imageNotice, setImageNotice] = useState<string | null>(null)
+  const imagePreviewCacheRef = useRef<ReturnType<typeof createImagePreviewCache> | null>(null)
+  if (!imagePreviewCacheRef.current) imagePreviewCacheRef.current = createImagePreviewCache()
+  const imagePreviewCache = imagePreviewCacheRef.current
+
+  useEffect(() => () => {
+    imagePreviewCache.revokeAll()
+  }, [imagePreviewCache])
 
   const handleAddSelectionToChat = (selection: ConversationSelectionAnnotation) => {
     const normalized = normalizeAnnotationSelectedText(selection.selectedText)
@@ -153,6 +168,7 @@ export function LocalSessionPage({
 
   useEffect(() => {
     setCapabilityError(null)
+    setImageNotice(null)
     setExpandedPlan(null)
   }, [conversation.conversationId])
 
@@ -180,6 +196,119 @@ export function LocalSessionPage({
     activeReference.current.visible = visible
     return () => { activeReference.current.visible = false; referenceRequest.current += 1 }
   }, [referenceKey, visible])
+
+  const revokeTempUrl = (url?: string) => {
+    if (url && url.startsWith("blob:") && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // 忽略重复释放错误。
+      }
+    }
+  }
+
+  const handlePasteImages = (targetScope: ConversationScope, files: readonly File[]) => {
+    if (!files.length || !execution.stageImage) return
+    const current = draftImagesRef.current
+    const remaining = MAX_DRAFT_IMAGES - current.length
+    if (remaining <= 0) {
+      setImageNotice(`最多只能附带 ${MAX_DRAFT_IMAGES} 张图片，请先移除部分图片。`)
+      return
+    }
+    const accepted = files.slice(0, remaining)
+    const skippedCount = files.length - accepted.length
+    const sourceScope = { ...targetScope }
+    const sourceRefKey = referenceKey
+    const tasks = accepted.map(file => {
+      const placeholderId = `preparing-${crypto.randomUUID()}`
+      const tempUrl = typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(file)
+        : undefined
+      const guessedMime = inferImageMimeFromName(file.name) ?? "image/png"
+      const placeholder: ConversationDraftImage = {
+        id: placeholderId,
+        name: file.name || "pasted-image.png",
+        mimeType: guessedMime,
+        sizeBytes: file.size || 0,
+        status: "preparing",
+        ...(tempUrl ? { previewUrl: tempUrl } : {}),
+      }
+      return { file, placeholderId, tempUrl, placeholder }
+    })
+
+    const withPlaceholders = [...current, ...tasks.map(t => t.placeholder)]
+    draftImagesRef.current = withPlaceholders
+    onPersonalChange(sourceScope, { kind: "draft-images", images: withPlaceholders })
+    setImageNotice(skippedCount > 0 ? `单轮最多 ${MAX_DRAFT_IMAGES} 张图片，已跳过多余的 ${skippedCount} 张。` : null)
+
+    void (async () => {
+      let firstError: string | null = null
+      for (const task of tasks) {
+        const stillSameScope = () => activeReference.current.key === sourceRefKey
+        const hasPlaceholder = () => draftImagesRef.current.some(item => item.id === task.placeholderId)
+        if (!stillSameScope() || !hasPlaceholder()) {
+          revokeTempUrl(task.tempUrl)
+          continue
+        }
+        try {
+          const prepared = await preparePastedImage(task.file)
+          const usedBytes = draftImagesRef.current
+            .filter(item => item.status !== "preparing")
+            .reduce((sum, item) => sum + item.sizeBytes, 0)
+          if (usedBytes + prepared.bytes.byteLength > MAX_TOTAL_IMAGE_BYTES) {
+            throw new Error("单轮图片总大小不能超过 5 MiB，请移除部分图片后再试。")
+          }
+          if (!stillSameScope() || !hasPlaceholder()) {
+            revokeTempUrl(task.tempUrl)
+            continue
+          }
+          const staged = await execution.stageImage!({
+            name: prepared.name,
+            mimeType: prepared.mimeType,
+            bytes: prepared.bytes,
+            ...(prepared.width !== undefined ? { width: prepared.width } : {}),
+            ...(prepared.height !== undefined ? { height: prepared.height } : {}),
+          })
+          if (!stillSameScope() || !hasPlaceholder()) {
+            revokeTempUrl(task.tempUrl)
+            void execution.removeStagedImage?.(staged.id).catch(() => {})
+            continue
+          }
+          let stagedPreviewUrl = task.tempUrl
+          if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+            const copy = new Uint8Array(prepared.bytes.byteLength)
+            copy.set(prepared.bytes)
+            stagedPreviewUrl = URL.createObjectURL(new Blob([copy], { type: staged.mimeType }))
+            revokeTempUrl(task.tempUrl)
+          }
+          if (stagedPreviewUrl) {
+            imagePreviewCache.prime(sourceScope.accountId, staged.id, stagedPreviewUrl)
+          }
+          const readyItem: ConversationDraftImage = {
+            ...staged,
+            status: "ready",
+            ...(stagedPreviewUrl ? { previewUrl: stagedPreviewUrl } : {}),
+          }
+          const nextImages = draftImagesRef.current.map(item => (item.id === task.placeholderId ? readyItem : item))
+          draftImagesRef.current = nextImages
+          onPersonalChange(sourceScope, { kind: "draft-images", images: nextImages })
+        } catch (error) {
+          revokeTempUrl(task.tempUrl)
+          if (!firstError) {
+            firstError = error instanceof Error ? error.message : "粘贴图片处理失败。"
+          }
+          if (stillSameScope() && hasPlaceholder()) {
+            const nextImages = draftImagesRef.current.filter(item => item.id !== task.placeholderId)
+            draftImagesRef.current = nextImages
+            onPersonalChange(sourceScope, { kind: "draft-images", images: nextImages })
+          }
+        }
+      }
+      if (firstError && activeReference.current.key === sourceRefKey) {
+        setImageNotice(firstError)
+      }
+    })()
+  }
 
   const messageRendering: RenderingActions = {
     ...rendering,
@@ -210,6 +339,9 @@ export function LocalSessionPage({
 
   const activeExecution = execution.getView?.(conversation.conversationId)
   const sessionState = activeExecution?.sessionState
+  const draftImages = personal.draft.images ?? []
+  const imageUnsupported = draftImages.length > 0 && activeExecution?.supportsImagePrompt === false
+  const imageUnsupportedReason = "当前 Agent 不支持发送图片，请移除图片或切换支持多模态的 Agent。"
   const providers = execution.getProviders?.()
   const selectedProviderId = execution.getSelectedProviderId?.(conversation.conversationId)
   const canCancel = Boolean(activeExecution?.activeTurnId && execution.cancel)
@@ -218,22 +350,35 @@ export function LocalSessionPage({
   const canEnqueue = queueMode && (canCancel || availability.available) && !directoryNeedsAction
   const canSteer = Boolean(activeExecution?.activeCanSteer && !directoryNeedsAction)
   const onSend = (steer: boolean): NonNullable<ConversationActions["onSend"]> =>
-    (targetScope, draftRevision, text, referenceIds, attachmentIds) => execution.send!({
-      scope: {
-        namespace: targetScope.namespace,
-        accountId: targetScope.accountId,
-        workspaceId: targetScope.workspaceId,
-        projectId: conversation.projectId,
-      },
-      conversationId: conversation.conversationId,
-      directoryPath,
-      draftRevision,
-      text,
-      referenceIds,
-      attachmentIds,
-      queue: queueMode,
-      steer,
-    })
+    (targetScope, draftRevision, text, referenceIds, attachmentIds, images) => {
+      const persistedImages: PersonalDraftImage[] | undefined = images?.length
+        ? images.map(({ id, name, mimeType, sizeBytes, width, height }) => ({
+            id,
+            name,
+            mimeType,
+            sizeBytes,
+            ...(width !== undefined ? { width } : {}),
+            ...(height !== undefined ? { height } : {}),
+          }))
+        : undefined
+      return execution.send!({
+        scope: {
+          namespace: targetScope.namespace,
+          accountId: targetScope.accountId,
+          workspaceId: targetScope.workspaceId,
+          projectId: conversation.projectId,
+        },
+        conversationId: conversation.conversationId,
+        directoryPath,
+        draftRevision,
+        text,
+        referenceIds,
+        attachmentIds,
+        ...(persistedImages?.length ? { images: persistedImages } : {}),
+        queue: queueMode,
+        steer,
+      })
+    }
   const isRunning = Boolean(activeExecution?.activeTurnId)
   const capabilities = buildComposerCapabilities({
     providers,
@@ -376,16 +521,23 @@ export function LocalSessionPage({
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
       ? { enabled: false, reason: attachmentUnavailableReason }
-      : canEnqueue || availability.available
-      ? { enabled: true }
-      : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
+      : imageUnsupported
+        ? { enabled: false, reason: imageUnsupportedReason }
+        : canEnqueue || availability.available
+          ? { enabled: true }
+          : { enabled: false, reason: availability.reason ?? "本机 Agent 与执行链路尚未接入" },
     cancel: canCancel
       ? { enabled: true }
       : { enabled: false, reason: availability.reason ?? "当前没有可取消的执行" },
     queue: queueMode,
     primaryActions: canCancel ? (queueMode ? "both" : "cancel") : "send",
-    statusText: hasUnsupportedMaterial ? attachmentUnavailableReason
-      : canEnqueue || availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
+    statusText: hasUnsupportedMaterial
+      ? attachmentUnavailableReason
+      : imageUnsupported
+        ? imageUnsupportedReason
+        : imageNotice
+          ? imageNotice
+          : canEnqueue || availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: capabilities.commands,
     agentModel: capabilities.agentModel,
     controls: capabilities.controls,
@@ -668,6 +820,23 @@ export function LocalSessionPage({
               personal={personal}
               actions={{
                 onPersonalChange: (targetScope, change) => {
+                  if (change.kind === "draft-images") {
+                    const nextIds = new Set(change.images.map(item => item.id))
+                    for (const prevItem of draftImagesRef.current) {
+                      if (!nextIds.has(prevItem.id)) {
+                        if (prevItem.id.startsWith("preparing-")) {
+                          revokeTempUrl(prevItem.previewUrl)
+                        } else {
+                          imagePreviewCache.revoke(targetScope.accountId, prevItem.id)
+                          if (prevItem.id.startsWith("pending-")) {
+                            void execution.removeStagedImage?.(prevItem.id).catch(() => {})
+                          }
+                        }
+                      }
+                    }
+                    draftImagesRef.current = change.images
+                    if (change.images.length === 0) setImageNotice(null)
+                  }
                   if (!execution.commitsAcceptedDraft || change.kind !== "clear-draft") onPersonalChange(targetScope, change)
                 },
                 ...(execution.send ? { onSend: onSend(false),
@@ -675,6 +844,7 @@ export function LocalSessionPage({
                     && isSteerText(composeAnnotatedPrompt(personal.draft.text, personal.draft.annotations ?? []))
                     && !personal.draft.referenceIds.length
                     && !personal.draft.attachmentIds.length
+                    && !draftImages.length
                     ? { onSteer: onSend(true) } : {}),
                 } : {}),
                 ...(execution.cancel
@@ -779,6 +949,17 @@ export function LocalSessionPage({
                   if (itemId === "files") onChooseLocalFiles?.()
                   else if (itemId === "folder") onChooseLocalDirectories?.()
                 },
+                ...(execution.stageImage ? {
+                  onPasteImages: (targetScope, files) => {
+                    if (targetScope.conversationId === scope.conversationId) {
+                      handlePasteImages(targetScope, files)
+                    }
+                  },
+                } : {}),
+                ...(execution.readImage ? {
+                  onResolveImagePreview: (targetScope, imageId) =>
+                    imagePreviewCache.resolve(targetScope.accountId, imageId, id => execution.readImage!(id)),
+                } : {}),
                 rendering: messageRendering,
               }}
               slots={slots}

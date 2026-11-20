@@ -5,6 +5,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  EMPTY_PERSONAL_STATE,
+  applyConversationPersonalChange,
   applyConversationTitleOverrides,
   boundCachedMessages,
   buildSessionBadge,
@@ -16,6 +18,7 @@ import {
   resolveConversationTitle,
   toNavigationSessionEntries,
 } from "../src/renderer/features/session/session-model.ts"
+import { MAX_DRAFT_IMAGES } from "../src/shared/personal.ts"
 import type { ProjectConversationSummary, ProjectHistoryMessage } from "../src/renderer/features/session/contracts.ts"
 
 const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {}): ProjectConversationSummary => ({
@@ -162,3 +165,52 @@ test("resolveConversationTitle 与 applyConversationTitleOverrides 优先显示�
   assert.equal(updated[0]?.title, "重构标题")
   assert.equal(updated[1]?.title, "他人标题")
 })
+
+test("HC-238 draft-images 维护草稿图片与 clear-draft 重置，历史解码回填对应序号 sentImages", () => {
+  const makeImage = (idx: number) => ({
+    id: `pending-${String(idx).repeat(8).slice(0, 8)}-1111-4111-8111-111111111111`,
+    name: `img-${idx}.png`,
+    mimeType: "image/png" as const,
+    sizeBytes: 1024 + idx,
+  })
+  const overLimit = Array.from({ length: MAX_DRAFT_IMAGES + 2 }, (_, idx) => makeImage(idx + 1))
+  const withImages = applyConversationPersonalChange(EMPTY_PERSONAL_STATE, {
+    kind: "draft-images",
+    images: overLimit,
+  })
+  assert.equal(withImages.draft.images?.length, MAX_DRAFT_IMAGES)
+  assert.equal(withImages.draft.revision, EMPTY_PERSONAL_STATE.draft.revision + 1)
+
+  const cleared = applyConversationPersonalChange(withImages, {
+    kind: "clear-draft",
+    expectedRevision: withImages.draft.revision,
+  })
+  assert.deepEqual(cleared.draft.images, [])
+  assert.equal(cleared.draft.revision, withImages.draft.revision + 1)
+
+  const sentImg = {
+    id: "sent-99999999-9999-4999-8999-999999999999",
+    name: "sent.png",
+    mimeType: "image/png" as const,
+    sizeBytes: 2048,
+  }
+  const historyMessages: ProjectHistoryMessage[] = [
+    { sequence: 1, type: "user", occurredAtMs: 1_700_000_001_000, payload: JSON.stringify({ text: "带图问题" }) },
+    { sequence: 2, type: "assistant", occurredAtMs: 1_700_000_002_000, payload: JSON.stringify({ text: "收到" }) },
+    { sequence: 3, type: "user", occurredAtMs: 1_700_000_003_000, payload: JSON.stringify({ text: "纯文字" }) },
+  ]
+  const entries = decodeHistoryToTimelineEntries(
+    historyMessages,
+    { userId: "user-self", displayName: "我" },
+    { "1": [sentImg] },
+  )
+  assert.equal(entries[0]?.kind, "message")
+  if (entries[0]?.kind === "message") {
+    assert.deepEqual(entries[0].images, [sentImg])
+  }
+  assert.equal(entries[2]?.kind, "message")
+  if (entries[2]?.kind === "message") {
+    assert.equal(entries[2].images, undefined)
+  }
+})
+

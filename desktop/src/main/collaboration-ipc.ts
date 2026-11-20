@@ -41,6 +41,7 @@ import {
 } from "./ipc-guard.js"
 import { LocalDirectoryService } from "./local-directory-host.js"
 import { createLocalExecutionCoordinator, type LocalExecutionRuntime } from "./local-execution-coordinator.js"
+import { LocalImageStore } from "./local-image-store.js"
 import { bindLocalExecutionIpc } from "./local-execution-ipc.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
 import { PersonalStore } from "./personal-store.js"
@@ -197,9 +198,11 @@ export function bindCollaborationIpc(
         },
       )
     : null
+  const localImages = new LocalImageStore(join(app.getPath("userData"), "local-images"))
   const execution = createLocalExecutionCoordinator(window, identity, uploads, runtime, {
     grantsDir: join(app.getPath("userData"), "local-execution-grants"),
     checkpointsDir: join(app.getPath("userData"), "local-checkpoints"),
+    images: localImages,
     confirmCheckpointRestore: async path => {
       const result = await dialog.showMessageBox(window, {
         type: "warning",

@@ -10,9 +10,10 @@ import { join } from "node:path"
 import { test } from "node:test"
 import type { ConversationSyncRequest } from "@workbench/collaboration-client/types"
 import type { CollaborationState as CollaborationStateType, ConversationUploads as ConversationUploadsType } from "@workbench/collaboration-client"
-import type { LocalExecutionNotice } from "../src/shared/index.ts"
+import type { LocalExecutionNotice, PersonalDraftImage } from "../src/shared/index.ts"
 import type { LocalExecutionCoordinator, LocalExecutionRuntime, createLocalExecutionCoordinator as createCoordinatorFn } from "../src/main/local-execution-coordinator.ts"
 import type { bindLocalExecutionIpc as bindLocalExecutionIpcFn } from "../src/main/local-execution-ipc.ts"
+import type { LocalImageStore as LocalImageStoreType } from "../src/main/local-image-store.ts"
 import type { PersonalStore as PersonalStoreType } from "../src/main/personal-store.ts"
 
 if (!("bun" in process.versions)) {
@@ -44,6 +45,9 @@ const { createLocalExecutionCoordinator } = await import("../src/main/local-exec
 }
 const { bindLocalExecutionIpc } = await import("../src/main/local-execution-ipc.ts") as {
   bindLocalExecutionIpc: typeof bindLocalExecutionIpcFn
+}
+const { LocalImageStore } = await import("../src/main/local-image-store.ts") as {
+  LocalImageStore: typeof LocalImageStoreType
 }
 const { PersonalStore } = await import("../src/main/personal-store.ts") as {
   PersonalStore: typeof PersonalStoreType
@@ -1203,3 +1207,250 @@ test("支持追发时只移除已确认的待发项，其余仍按原顺序发�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+const PNG_TEST_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+
+test("HC-238 本机执行图片协商：Fail-Closed 阻断不支持图片的 Agent、冻结 sent-* 发送标准 image 块并上传文本摘要", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc238-coord-image-"))
+  try {
+    const workdir = join(root, "work")
+    const uploadsDir = join(root, "uploads")
+    const imagesDir = join(root, "images")
+    await mkdir(workdir, { recursive: true })
+
+    const identity = await createSignedInState(USER_A)
+    const { window, notices } = createFakeWindow()
+    const uploadedBatches: ConversationSyncRequest[] = []
+    let watermark = 0
+    const uploads = new ConversationUploads(
+      uploadsDir,
+      {
+        watermark: async () => ({ ok: true, value: watermark }),
+        upload: async (_scope, req) => {
+          uploadedBatches.push(req)
+          watermark = req.messages.at(-1)?.sequence ?? watermark
+          return { ok: true, value: { syncedSequence: watermark } }
+        },
+      },
+      () => {},
+    )
+    uploads.useAccount(USER_A)
+
+    const listeners = new Map<string, AcpListener>()
+    const sentPromptCalls: { provider: string; blocks: unknown[] }[] = []
+    let turnCounter = 0
+
+    const coordinator = createLocalExecutionCoordinator(window, identity, uploads, {
+      registry: {
+        listProviders: () => ({
+          providers: [
+            { id: "text-only", label: "Text Only", available: true },
+            { id: "vision", label: "Vision Agent", available: true },
+          ],
+          defaultProviderId: "text-only",
+        }),
+        getHost: providerId => {
+          const id = providerId ?? "text-only"
+          const supportsImage = id === "vision"
+          return {
+            providerId: id,
+            available: true,
+            clientMeta: { harnessCode: { version: 1, capabilities: ["steering"] } },
+            host: {
+              bind: async () => ({
+                getState: () => ({
+                  connected: true,
+                  authMethods: [],
+                  configOptions: [],
+                  availableCommands: [],
+                  plans: [],
+                  restoreStatus: { kind: "none" as const },
+                  agentCapabilities: {
+                    promptCapabilities: { image: supportsImage },
+                    _meta: { harnessCode: { version: 1, capabilities: ["steering"] } },
+                  },
+                }),
+                getAvailability: () => ({ available: true }),
+                send: () => ({ status: "accepted" as const, turnId: `turn-${++turnCounter}` }),
+                sendPrompt: blocks => {
+                  sentPromptCalls.push({ provider: id, blocks: [...blocks] })
+                  return { status: "accepted" as const, turnId: `turn-${++turnCounter}` }
+                },
+                cancel: () => true,
+                answerPermission: () => true,
+                requestDuringTurn: async () => ({ ok: true }),
+                subscribe: listener => {
+                  listeners.set(id, listener)
+                  return () => { listeners.delete(id) }
+                },
+                close: async () => { listeners.delete(id) },
+              }),
+              subscribeDiagnostics: () => () => {},
+              close: async () => {},
+            } as unknown as IpcRuntime["host"],
+          }
+        },
+        close: async () => {},
+      },
+    }, {
+      personal: new PersonalStore(identity, ORIGIN, root),
+      images: new LocalImageStore(imagesDir),
+    })
+
+    try {
+      const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+      await coordinator.captureDirectorySelection()(workdir)
+
+      const staged = await coordinator.stageImage(scope, {
+        name: "bug.png",
+        mimeType: "image/png",
+        bytes: PNG_TEST_BYTES,
+        width: 320,
+        height: 240,
+      })
+      assert.ok(staged.ok && staged.value.id.startsWith("pending-"))
+      if (!staged.ok) return
+
+      // 1. 不支持图片的 Agent 广播 supportsImagePrompt: false 并 Fail-Closed 拒绝发送
+      const textOnlyPrep = await coordinator.prepare(scope, workdir, "text-only")
+      assert.ok(textOnlyPrep.ok)
+      const typedNotices = notices as LocalExecutionNotice[]
+      const textOnlyState = [...typedNotices].reverse().find(n => n.kind === "session-state")
+      assert.ok(textOnlyState?.kind === "session-state" && textOnlyState.state.supportsImagePrompt === false)
+
+      const rejectedSend = await coordinator.send(scope, textOnlyPrep.value.bindingId, REQ_ID, "", [], [], [staged.value])
+      assert.ok(rejectedSend.ok && rejectedSend.value.status === "rejected")
+      assert.match(rejectedSend.value.reason, /不支持图片/)
+      assert.equal(sentPromptCalls.length, 0)
+      assert.equal((await coordinator.readImage(scope, staged.value.id)).ok, true)
+
+      // 2. 切换支持多模态的 Agent，仅图片无文字也可发送，并推送 sent-* 副本和标准 ACP image block
+      const visionPrep = await coordinator.prepare(scope, workdir, "vision")
+      assert.ok(visionPrep.ok)
+      const visionState = [...typedNotices].reverse().find(n => n.kind === "session-state")
+      assert.ok(visionState?.kind === "session-state" && visionState.state.supportsImagePrompt === true)
+
+      const acceptedSend = await coordinator.send(scope, visionPrep.value.bindingId, REQ_ID, "", [], [], [staged.value])
+      assert.ok(acceptedSend.ok && acceptedSend.value.status === "accepted")
+      assert.equal(sentPromptCalls.length, 1)
+      assert.deepEqual(sentPromptCalls[0]?.blocks, [{
+        type: "image",
+        data: Buffer.from(PNG_TEST_BYTES).toString("base64"),
+        mimeType: "image/png",
+      }])
+      const acceptedNotice = typedNotices.find(n => n.kind === "accepted" && n.requestId === REQ_ID)
+      assert.ok(acceptedNotice?.kind === "accepted" && acceptedNotice.images?.length === 1)
+      assert.ok(acceptedNotice.images[0]!.id.startsWith("sent-"))
+
+      // 3. 含图片的待发队列禁止 Steer 追发
+      const queuedReqId = "66666666-6666-4666-8666-666666666666"
+      const queuedRes = await coordinator.promptQueue(scope, {
+        kind: "add",
+        bindingId: visionPrep.value.bindingId,
+        item: {
+          requestId: queuedReqId,
+          text: "",
+          referenceIds: [],
+          attachments: [],
+          images: [staged.value],
+        },
+      })
+      assert.equal(queuedRes.ok, true)
+      const turnId = acceptedSend.ok && acceptedSend.value.status === "accepted" ? acceptedSend.value.turnId : "turn-1"
+      const steerBlocked = await coordinator.steer(scope, visionPrep.value.bindingId, turnId, {
+        kind: "queued",
+        requestId: queuedReqId,
+      })
+      assert.equal(steerBlocked.ok, false)
+
+      // 移除排队项以免完成后自动触发下一轮
+      await coordinator.promptQueue(scope, { kind: "remove", requestId: queuedReqId })
+
+      // 4. 轮次完成后上传摘要写作 `[附 1 张本机图片]`，绝不包含 Base64 或路径
+      listeners.get("vision")?.({ type: "text-delta", turnId, text: "已收到截图分析完成。", messageId: "m-1" })
+      listeners.get("vision")?.({ type: "completed", turnId, sequence: 1, shareable: true })
+      await waitFor(() => uploadedBatches.length > 0)
+      const userMsg = uploadedBatches[0]!.messages.find(m => m.type === "user")
+      assert.ok(userMsg)
+      assert.match(userMsg.payload, /\[附 1 张本机图片\]/)
+      assert.equal(userMsg.payload.includes(Buffer.from(PNG_TEST_BYTES).toString("base64")), false)
+    } finally {
+      await coordinator.dispose()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("HC-238 IPC 通道校验 stage-image / read-image / remove-staged-image 与 7 参 send", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc238-ipc-images-"))
+  try {
+    const workdir = join(root, "work")
+    await mkdir(workdir, { recursive: true })
+    const identity = await createSignedInState(USER_A)
+    const { window } = createFakeWindow()
+    const trustedWindow = {
+      ...window,
+      webContents: { ...window.webContents, mainFrame: { url: `${ORIGIN}/index.html` } },
+    } as unknown as IpcWindow
+    const { runtime } = createMockRuntime({ promptCapabilities: { image: true } })
+    const coordinator = createLocalExecutionCoordinator(window, identity, null, runtime, {
+      personal: new PersonalStore(identity, ORIGIN, root),
+      images: new LocalImageStore(join(root, "images")),
+    })
+    const registered = new Map<string, (...args: unknown[]) => Promise<unknown>>()
+    const fakeIpc = {
+      handle: (channel: string, handler: (...args: unknown[]) => Promise<unknown>) => { registered.set(channel, handler) },
+      removeHandler: (channel: string) => { registered.delete(channel) },
+    }
+    const unbind = bindLocalExecutionIpc(trustedWindow, `${ORIGIN}/index.html`, coordinator, fakeIpc as never)
+    try {
+      const senderEvent = { sender: trustedWindow.webContents, senderFrame: trustedWindow.webContents.mainFrame }
+      const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+      await coordinator.captureDirectorySelection()(workdir)
+      const ready = await coordinator.prepare(scope, workdir)
+      assert.ok(ready.ok)
+
+      const staged = await registered.get("workbench:local-execution:stage-image")!(senderEvent, scope, {
+        name: "clip.png",
+        mimeType: "image/png",
+        bytes: PNG_TEST_BYTES,
+        width: 120,
+        height: 90,
+      }) as { ok: true; value: PersonalDraftImage } | { ok: false }
+      assert.equal(staged.ok, true)
+      if (!staged.ok) return
+
+      const badStage = await registered.get("workbench:local-execution:stage-image")!(senderEvent, scope, {
+        mimeType: "image/png",
+        bytes: [1, 2, 3],
+      }) as { ok: boolean }
+      assert.equal(badStage.ok, false)
+
+      const readRes = await registered.get("workbench:local-execution:read-image")!(senderEvent, scope, staged.value.id) as {
+        ok: true; value: { mimeType: string; bytes: Uint8Array }
+      }
+      assert.equal(readRes.ok, true)
+      assert.equal(readRes.value.mimeType, "image/png")
+
+      const sendRes = await registered.get("workbench:local-execution:send")!(
+        senderEvent, scope, ready.value.bindingId, REQ_ID, "", [], [], [staged.value],
+      ) as { ok: boolean }
+      assert.equal(sendRes.ok, true)
+
+      const removeRes = await registered.get("workbench:local-execution:remove-staged-image")!(
+        senderEvent, scope, staged.value.id,
+      ) as { ok: boolean }
+      assert.equal(removeRes.ok, true)
+
+      const badRead = await registered.get("workbench:local-execution:read-image")!(senderEvent, scope, "../bad-id") as { ok: boolean }
+      assert.equal(badRead.ok, false)
+    } finally {
+      unbind()
+      await coordinator.dispose()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+

@@ -12,7 +12,11 @@ import {
   MAX_DRAFT_ANNOTATION_COMMENT_CHARS,
   MAX_DRAFT_ANNOTATION_SOURCE_CHARS,
   MAX_DRAFT_ANNOTATION_TEXT_CHARS,
+  MAX_DRAFT_IMAGES,
+  MAX_SENT_IMAGE_RECORDS,
+  MAX_SINGLE_IMAGE_BYTES,
   MAX_PROMPT_QUEUE_BYTES, MAX_QUEUED_PROMPTS,
+  SUPPORTED_DRAFT_IMAGE_MIME_TYPES,
   type ConversationPersonal, type LocalExecutionScope, type PersonalKey, type PersonalRead, type PersonalResult, type PersonalValue,
   type PromptQueueRecord,
 } from "../shared/index.js"
@@ -67,6 +71,26 @@ const syncCacheSchema = {
     messages: { type: "array", maxItems: 5000, items: historyMessageSchema },
     cacheTruncated: { type: "boolean" },
   },
+}
+
+const draftImageSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "mimeType", "sizeBytes"],
+  properties: {
+    id: { type: "string", pattern: "^(?:pending|sent)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    name: { type: "string", minLength: 1, maxLength: 128 },
+    mimeType: { enum: [...SUPPORTED_DRAFT_IMAGE_MIME_TYPES] },
+    sizeBytes: { type: "integer", minimum: 1, maximum: MAX_SINGLE_IMAGE_BYTES },
+    width: { type: "integer", minimum: 1, maximum: 65_536 },
+    height: { type: "integer", minimum: 1, maximum: 65_536 },
+  },
+}
+
+const draftImagesSchema = {
+  type: "array",
+  maxItems: MAX_DRAFT_IMAGES,
+  items: draftImageSchema,
 }
 
 const schemas: Record<PersonalKey["kind"], object> = {
@@ -125,10 +149,17 @@ const schemas: Record<PersonalKey["kind"], object> = {
           },
         },
       },
+      images: draftImagesSchema,
     }),
     localDirectoryPath: nullableText,
     customTitle: { type: "string", minLength: 1, maxLength: 80 },
     providerId: { anyOf: [{ type: "string", minLength: 1, maxLength: 64 }, { type: "null" }] },
+    sentImages: {
+      type: "object",
+      maxProperties: MAX_SENT_IMAGE_RECORDS,
+      propertyNames: { type: "string", pattern: "^[1-9][0-9]{0,14}$" },
+      additionalProperties: draftImagesSchema,
+    },
     syncCache: { anyOf: [syncCacheSchema, { type: "null" }] },
   }),
   sessionWorkspace: object(["personal", "positions"], {
@@ -176,6 +207,7 @@ const validatePromptQueue = ajv.compile<PromptQueueRecord>(object(["items"], {
     text: { type: "string", maxLength: 16_384 },
     referenceIds: strings,
     attachments: strings,
+    images: draftImagesSchema,
   }) },
   starting: id,
 }))

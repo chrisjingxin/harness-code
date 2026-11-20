@@ -5,7 +5,13 @@
  * 把服务端的 ConversationSummary / HistoryMessage 与本地缓存水位组合成可供左栏和中央页展示的
  * 确定性数据结构，不持有网络、React 状态或磁盘读写。
  */
-import { EMPTY_CONVERSATION_PERSONAL, MAX_DRAFT_ANNOTATIONS, parseFixedReference } from "../../../shared/index.js"
+import {
+  EMPTY_CONVERSATION_PERSONAL,
+  MAX_DRAFT_ANNOTATIONS,
+  MAX_DRAFT_IMAGES,
+  parseFixedReference,
+  type PersonalDraftImage,
+} from "../../../shared/index.js"
 import type {
   ConversationAvailability,
   ConversationContextActionItem,
@@ -170,6 +176,7 @@ export function boundCachedMessages(
 export function decodeHistoryToTimelineEntries(
   messages: readonly ProjectHistoryMessage[],
   owner: { readonly userId: string; readonly displayName: string },
+  sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>,
 ): ConversationTimelineEntry[] {
   return messages.map(message => {
     const parsed = parsePayloadObject(message.payload)
@@ -177,6 +184,7 @@ export function decodeHistoryToTimelineEntries(
     if (message.type === "user") {
       const ids = parsed?.referenceIds
       const referenceIds = Array.isArray(ids) ? ids.filter((id): id is string => parseFixedReference(id) !== null) : []
+      const images = sentImages?.[String(message.sequence)]
       return {
         kind: "message",
         id,
@@ -185,6 +193,7 @@ export function decodeHistoryToTimelineEntries(
         createdAtMs: message.occurredAtMs,
         text: pickString(parsed, ["text", "content", "message"]) ?? message.payload,
         ...(referenceIds.length ? { referenceIds } : {}),
+        ...(images?.length ? { images } : {}),
       }
     }
     if (message.type === "assistant") {
@@ -470,11 +479,20 @@ export function applyConversationPersonalChange(
           revision: previous.draft.revision + 1,
         },
       }
+    case "draft-images":
+      return {
+        ...previous,
+        draft: {
+          ...previous.draft,
+          images: change.images.slice(0, MAX_DRAFT_IMAGES),
+          revision: previous.draft.revision + 1,
+        },
+      }
     case "clear-draft":
       if (previous.draft.revision !== change.expectedRevision) return previous
       return {
         ...previous,
-        draft: { ...EMPTY_PERSONAL_STATE.draft, annotations: [], revision: previous.draft.revision + 1 },
+        draft: { ...EMPTY_PERSONAL_STATE.draft, annotations: [], images: [], revision: previous.draft.revision + 1 },
       }
     case "interaction": {
       const nextInteractions = { ...previous.interactions }

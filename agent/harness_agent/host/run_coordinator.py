@@ -56,6 +56,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -307,6 +308,15 @@ class RequestedSkill:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptImage:
+    """随用户消息附带的内联图片；仅参与当轮模型多模态推理与幂等指纹，不写入 SQLite Transcript。"""
+
+    mime_type: str
+    data: str
+    uri: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class UserRunInput:
     """普通用户输入；只有它会进入 Transcript。"""
 
@@ -315,6 +325,7 @@ class UserRunInput:
     requested_skill: RequestedSkill | None = None
     # 给模型看的正文。Transcript 与标题仍用 `message`，避免把内联文件写进历史。
     model_message: str | None = None
+    images: tuple[PromptImage, ...] = ()
     steering: RunSteering | None = None
 
 
@@ -395,10 +406,18 @@ class StartRun:
         """返回幂等判断所需的请求指纹；工作模式冻结在 Run 身份内。"""
         skill = self.requested_skill
         if isinstance(self.input, UserRunInput):
+            image_digests = tuple(
+                (
+                    image.mime_type,
+                    hashlib.sha256(image.data.encode("ascii")).hexdigest(),
+                )
+                for image in self.input.images
+            )
             input_fingerprint: tuple[object, ...] = (
                 "user",
                 self.input.message,
                 self.input.model_message,
+                image_digests,
             )
         elif isinstance(self.input, GoalProposalRunInput):
             input_fingerprint = ("goal_proposal", self.input.request_id)

@@ -30,10 +30,11 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
+import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
 import { FileTypeIcon } from "../common/file-type-icon.js"
 import { ComposerAnnotationsBar } from "./annotations.js"
+import { ComposerImagesBar } from "./image-attachments.js"
 import {
   extractMentionToken,
   insertMentionTrigger,
@@ -220,14 +221,17 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       : filteredEntries.length
   const canEdit = Boolean(actions.onPersonalChange)
   const annotations = draft.annotations ?? []
+  const images = draft.images ?? []
+  const hasPreparingImage = images.some(item => item.status === "preparing")
   const hasContent = draft.text.trim().length > 0
     || draft.referenceIds.length > 0
     || draft.attachmentIds.length > 0
     || annotations.length > 0
+    || images.length > 0
   const allowsSend = model.primaryActions === "send" || model.primaryActions === "both"
   const allowsCancel = model.primaryActions === "cancel" || model.primaryActions === "both"
   const showStop = allowsCancel && (!allowsSend || !hasContent)
-  const canSend = Boolean(allowsSend && visible && canEdit && actions.onSend && model.send.enabled && !sendBlocked && hasContent)
+  const canSend = Boolean(allowsSend && visible && canEdit && actions.onSend && model.send.enabled && !sendBlocked && !hasPreparingImage && hasContent)
   const canStop = Boolean(visible && actions.onCancel && model.cancel.enabled && !cancelBlocked)
 
   const invalidateCandidates = () => {
@@ -573,6 +577,8 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         if (props.onSteer && (event.metaKey || event.ctrlKey)) {
           if (!cancelBlocked) props.onSteer()
         } else onSend()
+      } else if (hasPreparingImage && hasContent) {
+        setHint("正在处理粘贴的图片，请稍候发送。")
       }
       return
     }
@@ -606,6 +612,36 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       event.preventDefault()
       event.stopPropagation()
     }
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasteHandler = actions.onPasteImages
+    if (!visible || !canEdit || !pasteHandler || !event.clipboardData) return
+    const clipboard = event.clipboardData
+    const files: File[] = []
+    if (clipboard.items && clipboard.items.length > 0) {
+      for (const item of Array.from(clipboard.items)) {
+        if (item.kind !== "file") continue
+        const file = item.getAsFile()
+        if (file && (file.type.toLowerCase().startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name))) {
+          files.push(file)
+        }
+      }
+    }
+    if (files.length === 0 && clipboard.files && clipboard.files.length > 0) {
+      for (const file of Array.from(clipboard.files)) {
+        if (file.type.toLowerCase().startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
+          files.push(file)
+        }
+      }
+    }
+    if (files.length === 0) return
+    const plainText = clipboard.getData("text/plain").trim()
+    // 剪贴板仅包含图片（或系统复制图片文件附带的文件名文本）时阻止将文件名插入输入框。
+    if (!plainText || files.some(file => file.name && file.name.trim() === plainText)) {
+      event.preventDefault()
+    }
+    pasteHandler(scope, files)
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (canSend) onSend() }
@@ -803,6 +839,15 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const composerBox = (
     <div className="wb-composer-box" data-queue-mode={model.queue ? "" : undefined}>
+      <ComposerImagesBar
+        images={images}
+        canEdit={canEdit && visible}
+        onRemove={target => {
+          const next = images.filter(item => item.id !== target.id)
+          actions.onPersonalChange?.(scope, { kind: "draft-images", images: next })
+        }}
+        onResolvePreview={actions.onResolveImagePreview ? imageId => actions.onResolveImagePreview!(scope, imageId) : undefined}
+      />
       {draft.referenceIds.length ? <div className="wb-composer-references" aria-label="引用材料">{draft.referenceIds.map(id => {
         const reference = model.references.find(item => item.id === id)
         if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
@@ -906,6 +951,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
             composing.current = false
             setIsComposing(false)
           }}
+          onPaste={handlePaste}
           onKeyDown={handleKeyDown}
         />
       </div>

@@ -469,10 +469,12 @@ def _create_controlled_inline_subagents(
             policy = context.delegation_policy
             if policy is None:
                 raise AgentDelegationError("DELEGATION_POLICY_REQUIRED")
+            from harness_agent.runtime.execution_stream import content_text
+
             messages = state.get("messages", [])
             task = next(
                 (
-                    str(message.content)
+                    content_text(message.content)
                     for message in reversed(messages)
                     if isinstance(message, HumanMessage)
                 ),

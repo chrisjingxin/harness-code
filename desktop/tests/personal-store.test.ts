@@ -505,3 +505,83 @@ test("HC-237 draft.annotations 支持可选保存恢复并校验数量与长度�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("HC-238 draft.images 与 sentImages 支持保存恢复并严格校验上限与多余字段", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc238-personal-images-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    assert.equal((await store.load(convKey)).ok, true)
+
+    const sampleImg = {
+      id: "pending-11111111-1111-4111-8111-111111111111",
+      name: "shot.png",
+      mimeType: "image/png" as const,
+      sizeBytes: 2048,
+      width: 800,
+      height: 600,
+    }
+    const sentImg = {
+      id: "sent-22222222-2222-4222-8222-222222222222",
+      name: "sent.webp",
+      mimeType: "image/webp" as const,
+      sizeBytes: 4096,
+    }
+    const validRecord: ConversationPersonal = {
+      ...sampleConversation,
+      draft: {
+        ...sampleConversation.draft,
+        revision: 2,
+        images: [sampleImg],
+      },
+      sentImages: {
+        "12": [sentImg],
+      },
+    }
+    assert.equal((await store.save(convKey, 1, validRecord)).ok, true)
+
+    const reopened = new PersonalStore(mock.state, ORIGIN, dir)
+    const loaded = await reopened.load(convKey)
+    assert.equal(loaded.ok, true)
+    if (loaded.ok) {
+      const savedData = loaded.value.data as ConversationPersonal
+      assert.deepEqual(savedData.draft.images, [sampleImg])
+      assert.deepEqual(savedData.sentImages, { "12": [sentImg] })
+    }
+
+    // 渲染层临时字段 previewUrl / status 必须被 schema 拒绝，防止写入 Store
+    assert.equal((await reopened.save(convKey, 2, {
+      ...validRecord,
+      draft: {
+        ...validRecord.draft,
+        images: [{ ...sampleImg, previewUrl: "blob:leak", status: "ready" } as unknown as typeof sampleImg],
+      },
+    })).ok, false)
+
+    // 超出单轮 6 张上限拒绝保存
+    assert.equal((await reopened.save(convKey, 2, {
+      ...validRecord,
+      draft: {
+        ...validRecord.draft,
+        images: Array.from({ length: 7 }, (_, i) => ({
+          ...sampleImg,
+          id: `pending-${String(i).repeat(8).slice(0, 8)}-1111-4111-8111-111111111111`,
+        })),
+      },
+    })).ok, false)
+
+    // 非法 sentImages 序号键或超出 50 条上限必须拒绝
+    assert.equal((await reopened.save(convKey, 2, {
+      ...validRecord,
+      sentImages: { "0": [sentImg] },
+    })).ok, false)
+    assert.equal((await reopened.save(convKey, 2, {
+      ...validRecord,
+      sentImages: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [String(i + 1), [sentImg]])),
+    })).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+

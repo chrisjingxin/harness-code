@@ -1,6 +1,15 @@
 /** 对话区入口；根包导出由统筹按停点顺序集成。 */
 export { ConversationView } from "./view.js"
 export { ConversationComposer } from "./composer.js"
+export { ComposerImagesBar, MessageImagesBar } from "./image-attachments.js"
+export { preparePastedImage } from "./image-compression.js"
+export {
+  IMAGE_ATTACHMENT_MAX_EDGE,
+  fitImageAttachmentSize,
+  formatImageByteSize,
+  formatImageDimensions,
+  inferImageMimeFromName,
+} from "./image-sizing.js"
 export { ConversationToolBlocks } from "./tool-blocks.js"
 export { SelectionToolbar, resolveFileSelectionSource } from "./selection-toolbar.js"
 export {
@@ -38,6 +47,7 @@ export type {
   ConversationDirectoryContextView,
   ConversationDraft,
   ConversationDraftAnnotation,
+  ConversationDraftImage,
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,

@@ -29,6 +29,8 @@ export type ConversationTimelineEntry =
       readonly runSummary?: { readonly durationMs?: number; readonly cachedTokens?: number; readonly agentName?: string }
       /** 消息只持有固定材料标识，装配方经当前权限读取正文。 */
       readonly referenceIds?: readonly string[]
+      /** 本机发送附带的图片元数据（仅作本机时间线与重开会话后的缩略图/放大回显）。 */
+      readonly images?: readonly ConversationDraftImage[]
     }
   | { readonly kind: "reasoning"; readonly id: string; readonly text: string; readonly active: boolean }
   | {
@@ -113,6 +115,23 @@ export interface ConversationSelectionAnnotation {
 }
 
 /**
+ * 粘贴到输入框的图片附件元数据。
+ * 真实图片字节保存在桌面主进程隔离目录，草稿层仅持有轻量标识与展示所需的尺寸/状态。
+ */
+export interface ConversationDraftImage {
+  readonly id: string
+  readonly name: string
+  readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+  readonly sizeBytes: number
+  readonly width?: number
+  readonly height?: number
+  /** 渲染端临时状态：正在压缩/落盘时为 preparing，落盘完成后为 ready（持久化前会剥离）。 */
+  readonly status?: "preparing" | "ready"
+  /** 渲染端临时预览 URL（blob: 或 data:，仅内存态持有，不写入 PersonalStore）。 */
+  readonly previewUrl?: string
+}
+
+/**
  * 时间线只消费调用方投影后的条目和个人状态。
  *
  * `visible` 为 false 时暂停滚动跟随；缺少 `onPersonalChange` 时工具展开控件只读。
@@ -130,6 +149,7 @@ export interface ConversationTimelineProps {
   readonly personal: ConversationTimelineState
   readonly onPersonalChange?: (scope: ConversationScope, change: ConversationTimelineChange) => void
   readonly onAddSelectionToChat?: (selection: ConversationSelectionAnnotation) => void
+  readonly onResolveImagePreview?: (imageId: string) => Promise<string | null>
   readonly rendering?: RenderingActions
 }
 
@@ -316,6 +336,7 @@ export interface ConversationDraft {
   readonly referenceIds: readonly string[]
   readonly attachmentIds: readonly string[]
   readonly annotations?: readonly ConversationDraftAnnotation[]
+  readonly images?: readonly ConversationDraftImage[]
 }
 
 export interface ConversationPersonalState extends ConversationTimelineState {
@@ -329,6 +350,7 @@ export type ConversationPersonalChange = ConversationTimelineChange
   | { readonly kind: "draft-references"; readonly referenceIds: readonly string[] }
   | { readonly kind: "draft-attachments"; readonly attachmentIds: readonly string[] }
   | { readonly kind: "draft-annotations"; readonly annotations: readonly ConversationDraftAnnotation[] }
+  | { readonly kind: "draft-images"; readonly images: readonly ConversationDraftImage[] }
   | { readonly kind: "clear-draft"; readonly expectedRevision: number }
   | { readonly kind: "interaction"; readonly interactionId: string; readonly answer: ConversationInteractionAnswer | null }
 
@@ -395,7 +417,14 @@ export type ConversationFileLineRange = {
  */
 export interface ConversationActions {
   readonly onPersonalChange?: (scope: ConversationScope, change: ConversationPersonalChange) => void
-  readonly onSend?: (scope: ConversationScope, revision: number, text: string, referenceIds: readonly string[], attachmentIds: readonly string[]) => Promise<ConversationSendResult>
+  readonly onSend?: (
+    scope: ConversationScope,
+    revision: number,
+    text: string,
+    referenceIds: readonly string[],
+    attachmentIds: readonly string[],
+    images?: readonly ConversationDraftImage[],
+  ) => Promise<ConversationSendResult>
   readonly onSteer?: ConversationActions["onSend"]
   readonly onCancel?: (scope: ConversationScope) => Promise<void>
   /**
@@ -415,6 +444,8 @@ export interface ConversationActions {
   readonly onDirectoryContextAction?: (scope: ConversationScope, itemId: string) => void
   readonly onGitContextAction?: (scope: ConversationScope, itemId: string) => void
   readonly onContextMenuAction?: (scope: ConversationScope, itemId: string) => void
+  readonly onPasteImages?: (scope: ConversationScope, files: readonly File[]) => void
+  readonly onResolveImagePreview?: (scope: ConversationScope, imageId: string) => Promise<string | null>
   readonly rendering?: RenderingActions
 }
 

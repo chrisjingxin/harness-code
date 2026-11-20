@@ -55,16 +55,16 @@ def _prompt_params(session_id: str, prompt_text: str = "你好") -> dict[str, An
 
 
 async def test_initialize_advertises_minimal_honest_capabilities(tmp_path: Path) -> None:
-    """initialize 只广告真的实现了的能力：会 load/list，但不做 prompt 多媒体。"""
+    """initialize 只广告真的实现了的能力：会 load/list 与图片输入，不做音频。"""
     async with InProcessAcp(make_host(tmp_path, echo=True)) as acp:
         response = await _initialize(acp.client)
         result = response["result"]
         assert result["protocolVersion"] == 1
         capabilities = result["agentCapabilities"]
-        # S2 实现了 session/load 与 session/list；能力声明必须跟上，否则客户端不会调。
+        # S2 实现了 session/load 与 session/list；HC-238 开启图片输入支持，能力声明必须真实。
         assert capabilities["loadSession"] is True
         assert capabilities["promptCapabilities"] == {
-            "image": False,
+            "image": True,
             "audio": False,
             "embeddedContext": True,
         }

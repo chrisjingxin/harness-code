@@ -24,6 +24,7 @@ import {
   type LocalExecutionNotice,
   type LocalExecutionScope,
   type LocalExecutionSessionState,
+  type PersonalDraftImage,
   type PromptQueueView,
 } from "../../../shared/index.js"
 import { MAX_QUEUED_PROMPT_CHARS } from "../../../ui/conversation/annotations-codec.js"
@@ -59,6 +60,7 @@ type Flight = {
   readonly bindingId: string
   readonly draftRevision?: number
   readonly referenceIds: readonly string[]
+  readonly images?: readonly PersonalDraftImage[]
   readonly requestId: string
   turnId?: string
   lastSequence: number
@@ -128,6 +130,7 @@ export function useLocalExecution(
   preferredProviders?: Readonly<Record<string, string>>,
   onSessionTitleChange?: (scope: LocalExecutionScope, title: string | undefined) => void,
   onProviderChange?: (scope: LocalExecutionScope, providerId: string) => void,
+  onTurnUploaded?: (scope: LocalExecutionScope, userSequence: number, images: readonly PersonalDraftImage[]) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
   const workspaceId = project?.workspaceId
@@ -144,13 +147,13 @@ export function useLocalExecution(
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
   const providerOverrides = useRef(new Map<string, string>())
-  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange })
+  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded })
   const mounted = useRef(false)
   const [, refresh] = useReducer(revision => revision + 1, 0)
 
   useLayoutEffect(() => {
-    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange }
-  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange])
+    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded }
+  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded])
 
   function applySessionStateNotice(
     scope: LocalExecutionScope,
@@ -191,15 +194,25 @@ export function useLocalExecution(
     }
   }
 
-  function accept(screen: Screen, flight: Flight, conversationId: string, turnId: string, text: string, canSteer?: boolean): void {
+  function accept(
+    screen: Screen,
+    flight: Flight,
+    conversationId: string,
+    turnId: string,
+    text: string,
+    canSteer?: boolean,
+    images?: readonly PersonalDraftImage[],
+  ): void {
     if (flight.turnId !== undefined) return
     flight.turnId = turnId
+    const finalImages = images && images.length > 0 ? images : flight.images
     screen.timeline = applyLocalExecutionUpdate(screen.timeline, {
       kind: "accepted",
       turnId,
       text,
       canSteer,
       referenceIds: flight.referenceIds,
+      ...(finalImages?.length ? { images: finalImages } : {}),
       author: { id: flight.scope.accountId, displayName: current.current.ownerName },
     })
     if (flight.draftRevision !== undefined) current.current.onAccepted(flight.scope, conversationId, flight.draftRevision)
@@ -229,6 +242,22 @@ export function useLocalExecution(
         const nextScreen = screen ?? { timeline: emptyLocalExecutionView }
         nextScreen.timeline = applyLocalExecutionUpdate(nextScreen.timeline, notice)
         screens.current.set(key, nextScreen)
+        if (!notice.failure && notice.firstSequence !== undefined) {
+          const userEntry = nextScreen.timeline.entries.find(
+            entry => entry.kind === "message" && entry.role === "user" && entry.id === `local-execution:${notice.turnId}:user`,
+          )
+          if (userEntry?.kind === "message" && userEntry.images?.length) {
+            const persisted = userEntry.images.map(({ id, name, mimeType, sizeBytes, width, height }) => ({
+              id,
+              name,
+              mimeType,
+              sizeBytes,
+              ...(width !== undefined ? { width } : {}),
+              ...(height !== undefined ? { height } : {}),
+            }))
+            current.current.onTurnUploaded?.(notice.scope, notice.firstSequence, persisted)
+          }
+        }
         refresh()
         return
       }
@@ -276,10 +305,11 @@ export function useLocalExecution(
         const flight: Flight = {
           scope: { ...notice.scope, namespace: screen.preparedFor.namespace },
           bindingId: notice.bindingId, requestId: notice.requestId, referenceIds: notice.referenceIds ?? [],
+          ...(notice.images?.length ? { images: notice.images } : {}),
           lastSequence: 0, unknown: false,
         }
         screen.flight = flight
-        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer)
+        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images)
         return
       }
       const flight = screen.flight
@@ -297,7 +327,7 @@ export function useLocalExecution(
       }
       if (flight.bindingId !== notice.bindingId) return
       if (notice.kind === "accepted") {
-        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer)
+        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images)
         return
       }
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
@@ -525,7 +555,7 @@ export function useLocalExecution(
       screen.binding = undefined
       screen.availability = preparing
       screen.directoryStatus = "checking"
-      screen.timeline = { ...screen.timeline, sessionState: undefined, elicitation: null }
+      screen.timeline = { ...screen.timeline, sessionState: undefined, supportsImagePrompt: undefined, elicitation: null }
       current.current.onSessionTitleChange?.(source.scope, undefined)
       refresh()
 
@@ -685,7 +715,33 @@ export function useLocalExecution(
       })
       refresh()
     },
+    ...(host.stageImage ? {
+      async stageImage(input) {
+        const source = current.current.target
+        if (!source) throw new Error("会话目标尚未就绪。")
+        const result = await host.stageImage!(source.scope, input)
+        if (!result.ok) throw new Error(result.error.message)
+        return result.value
+      },
+    } : {}),
+    ...(host.readImage ? {
+      async readImage(imageId) {
+        const source = current.current.target
+        if (!source) return null
+        const result = await host.readImage!(source.scope, imageId)
+        if (!result.ok) return null
+        return result.value
+      },
+    } : {}),
+    ...(host.removeStagedImage ? {
+      async removeStagedImage(imageId) {
+        const source = current.current.target
+        if (!source) return
+        await host.removeStagedImage!(source.scope, imageId)
+      },
+    } : {}),
     async send(input) {
+      const images = input.images?.length ? [...input.images] : undefined
       const attachments = extractFileAttachments(input.text, input.attachmentIds)
       if (input.attachmentIds.length > attachments.length && attachments.length === 0) {
         return { status: "rejected", message: "仅支持添加有效的本机文件或目录附件。" }
@@ -702,7 +758,7 @@ export function useLocalExecution(
       if (!screen?.binding) return { status: "rejected", message: status.reason ?? "当前无法发送。" }
       if (input.steer) {
         const turnId = screen.flight?.turnId
-        if (!turnId || !screen.timeline.activeCanSteer || !isSteerText(input.text) || input.referenceIds.length || input.attachmentIds.length) {
+        if (!turnId || !screen.timeline.activeCanSteer || !isSteerText(input.text) || input.referenceIds.length || input.attachmentIds.length || images?.length) {
           return { status: "rejected", message: "当前轮无法追发这条消息，草稿已保留。" }
         }
         try {
@@ -723,6 +779,7 @@ export function useLocalExecution(
         try {
           const result = await host.promptQueue(scope, { kind: "add", bindingId: screen.binding.bindingId, item: {
             requestId: crypto.randomUUID(), text: input.text, referenceIds: [...input.referenceIds], attachments,
+            ...(images?.length ? { images } : {}),
           } })
           if (!result.ok) return { status: "rejected", message: result.error.message }
           applyQueue(screen, result.value)
@@ -739,6 +796,7 @@ export function useLocalExecution(
         bindingId: screen.binding.bindingId,
         draftRevision: input.draftRevision,
         referenceIds: [...input.referenceIds],
+        ...(images?.length ? { images } : {}),
         requestId: crypto.randomUUID(),
         lastSequence: 0,
         unknown: false,
@@ -746,14 +804,16 @@ export function useLocalExecution(
       screen.flight = flight
       refresh()
       try {
-        const result = attachments.length > 0
-          ? await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds, attachments)
-          : await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds)
+        const result = images?.length
+          ? await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds, attachments, images)
+          : attachments.length > 0
+            ? await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds, attachments)
+            : await host.send(scope, flight.bindingId, flight.requestId, input.text, flight.referenceIds)
         if (flight.turnId) return { status: "accepted" }
         const receipt = result.ok ? result.value : { status: "rejected" as const, reason: result.error.message }
         if (receipt.status === "accepted") {
           if (mounted.current && screens.current.get(source.key) === screen && screen.flight === flight) {
-            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer)
+            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer, images)
           }
           return { status: "accepted" }
         }

@@ -651,11 +651,50 @@ test("extractFileAttachments 对带注释消息跳过引用与批注里的 @ 包
   ])
   assert.deepEqual(extractFileAttachments(slashComposed), ["src/only-this.ts"])
 })
-
 test("extractFileAttachments 允许显式本机文件与本机目录附件，同时保持正文越界令牌拦截", () => {
   const extracted = extractFileAttachments(
     "检查 @/etc/passwd、@../secret.txt 和 @src/ 后对照外部资料",
     ["/Users/dev/spec.md", "/Users/dev/refs/", "/Users/dev/refs/"],
   )
   assert.deepEqual(extracted, ["/Users/dev/spec.md", "/Users/dev/refs/"])
+})
+
+test("HC-238 supportsImagePrompt 协商与 accepted images 透传到本地时间线用户消息", () => {
+  const baseState = {
+    providerId: "harness",
+    connected: true,
+    supportsImagePrompt: false,
+    configOptions: [],
+    availableCommands: [],
+    plans: [],
+    restoreStatus: { kind: "none" as const },
+  }
+  const s1 = applyLocalExecutionUpdate(emptyLocalExecutionView, { kind: "session-state", state: baseState })
+  assert.equal(s1.supportsImagePrompt, false)
+
+  const s2 = applyLocalExecutionUpdate(s1, {
+    kind: "session-state",
+    state: { ...baseState, supportsImagePrompt: true },
+  })
+  assert.equal(s2.supportsImagePrompt, true)
+
+  const img = {
+    id: "sent-11111111-1111-4111-8111-111111111111",
+    name: "cap.png",
+    mimeType: "image/png" as const,
+    sizeBytes: 1024,
+    width: 100,
+    height: 80,
+  }
+  const s3 = applyLocalExecutionUpdate(s2, {
+    kind: "accepted",
+    turnId: "turn-1",
+    text: "",
+    author: { id: "user-1", displayName: "我" },
+    images: [img],
+  })
+  assert.equal(s3.entries.length, 1)
+  const userMsg = s3.entries[0]
+  assert.ok(userMsg?.kind === "message" && userMsg.role === "user")
+  assert.deepEqual(userMsg.images, [img])
 })

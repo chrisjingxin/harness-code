@@ -978,6 +978,21 @@ def _echo_content(value: str | Mapping[str, object]) -> str:
     """为无 Agent 的协议测试路径生成可投影的确定性文本。"""
     if isinstance(value, str):
         return value
+    if isinstance(value, Mapping):
+        messages = value.get("messages")
+        if isinstance(messages, (list, tuple)) and messages:
+            content = getattr(messages[-1], "content", None)
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                return "".join(
+                    item
+                    if isinstance(item, str)
+                    else str(item.get("text", ""))
+                    if isinstance(item, Mapping)
+                    else ""
+                    for item in content
+                )
     raise ManagedAgentExecutionError("MANAGED_AGENT_ECHO_INPUT_INVALID")
 
 

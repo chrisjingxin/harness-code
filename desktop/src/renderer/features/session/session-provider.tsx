@@ -9,6 +9,7 @@
  */
 import type { ReactElement, ReactNode } from "react"
 import type { UserSummary } from "@workbench/collaboration-client/types"
+import type { PersonalDraftImage } from "../../../shared/index.js"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -44,6 +45,7 @@ export type SessionPageController = {
   readonly conversations: readonly ProjectConversationSummary[]
   readonly syncStates: Readonly<Record<string, SessionSyncState>>
   readonly personalStates: Readonly<Record<string, ConversationPersonalState>>
+  readonly sentImagesByConversation?: Readonly<Record<string, Readonly<Record<string, readonly PersonalDraftImage[]>>>>
   readonly directories: Readonly<Record<string, string | null>>
   readonly recentDirectories?: readonly string[]
   readonly newDraft: NewSessionDraft
@@ -163,10 +165,14 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         syncing: syncState.syncing,
         syncError: syncState.syncError,
       })
-      const entries = decodeHistoryToTimelineEntries(syncState.messages, {
-        userId: conversation.ownerUserId,
-        displayName: ownerName,
-      })
+      const entries = decodeHistoryToTimelineEntries(
+        syncState.messages,
+        {
+          userId: conversation.ownerUserId,
+          displayName: ownerName,
+        },
+        controller.sentImagesByConversation?.[conversation.conversationId],
+      )
       const convScope: ConversationScope = {
         namespace: scope.namespace,
         accountId: scope.accountId,

@@ -11,10 +11,15 @@ export function createLocalExecutionHost(ipc: IpcRenderer): DesktopLocalExecutio
         ? ipc.invoke("workbench:local-execution:prepare", scope, directory)
         : ipc.invoke("workbench:local-execution:prepare", scope, directory, providerId),
     confirmDirectory: scope => ipc.invoke("workbench:local-execution:confirm-directory", scope),
-    send: (scope, bindingId, requestId, text, referenceIds = [], attachments = []) =>
-      attachments.length === 0
-        ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds)
-        : ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds, attachments),
+    stageImage: (scope, input) => ipc.invoke("workbench:local-execution:stage-image", scope, input),
+    readImage: (scope, imageId) => ipc.invoke("workbench:local-execution:read-image", scope, imageId),
+    removeStagedImage: (scope, imageId) => ipc.invoke("workbench:local-execution:remove-staged-image", scope, imageId),
+    send: (scope, bindingId, requestId, text, referenceIds = [], attachments = [], images = []) =>
+      images.length > 0
+        ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds, attachments, images)
+        : attachments.length === 0
+          ? ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds)
+          : ipc.invoke("workbench:local-execution:send", scope, bindingId, requestId, text, referenceIds, attachments),
     steer: (scope, bindingId, turnId, input) =>
       ipc.invoke("workbench:local-execution:steer", scope, bindingId, turnId, input),
     cancel: (scope, bindingId, turnId) => ipc.invoke("workbench:local-execution:cancel", scope, bindingId, turnId),

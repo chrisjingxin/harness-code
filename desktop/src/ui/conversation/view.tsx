@@ -80,20 +80,28 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
   const send = async (steer = false): Promise<void> => {
     const onSend = steer ? actions.onSteer : actions.onSend
     const annotations = personal.draft.annotations ?? []
+    const draftImages = personal.draft.images ?? []
+    const hasPreparingImage = draftImages.some(image => image.status === "preparing")
     const hasContent = personal.draft.text.trim().length > 0
       || personal.draft.referenceIds.length > 0
       || personal.draft.attachmentIds.length > 0
       || annotations.length > 0
-    if (!visible || (composer.primaryActions !== "send" && composer.primaryActions !== "both") || !onSend || !actions.onPersonalChange || !composer.send.enabled || !hasContent || sending.current.has(key) || currentSend?.phase === "unknown") return
+      || draftImages.length > 0
+    if (!visible || (composer.primaryActions !== "send" && composer.primaryActions !== "both") || !onSend || !actions.onPersonalChange || !composer.send.enabled || !hasContent || hasPreparingImage || sending.current.has(key) || currentSend?.phase === "unknown") return
     const request = Symbol("send")
     const sourceScope = { ...scope }
     const sourceIdentity = identity.current.revision
     const { revision, text, referenceIds, attachmentIds } = personal.draft
     const composedText = composeAnnotatedPrompt(text, annotations)
+    const readyImages = draftImages
+      .filter(image => image.status !== "preparing")
+      .map(({ status: _s, previewUrl: _p, ...rest }) => rest)
     sending.current.set(key, request)
     setSendStates(previous => ({ ...previous, [key]: { phase: "sending", message: "正在提交…", identity: sourceIdentity, sawDisabled: false } }))
     try {
-      const result = await onSend(sourceScope, revision, composedText, [...referenceIds], [...attachmentIds])
+      const result = readyImages.length > 0
+        ? await onSend(sourceScope, revision, composedText, [...referenceIds], [...attachmentIds], readyImages)
+        : await onSend(sourceScope, revision, composedText, [...referenceIds], [...attachmentIds])
       if (!mounted.current || identity.current.revision !== sourceIdentity || sending.current.get(key) !== request) return
       if (result.status === "accepted") {
         actionsRef.current.onPersonalChange?.(sourceScope, { kind: "clear-draft", expectedRevision: revision })
@@ -175,6 +183,7 @@ export function ConversationView(props: ConversationViewProps): ReactElement {
         personal={personal}
         onPersonalChange={actions.onPersonalChange}
         onAddSelectionToChat={actions.onAddSelectionToChat ? selection => actions.onAddSelectionToChat?.(scope, selection) : undefined}
+        onResolveImagePreview={actions.onResolveImagePreview ? imageId => actions.onResolveImagePreview!(scope, imageId) : undefined}
         rendering={actions.rendering}
       />
       {interaction ? <ConversationInteraction key={interactionKey} scope={scope} interaction={interaction} personal={personal} actions={actions} blocked={interactionBlocked} status={interactionRetryable ? undefined : currentInteraction?.message} onSubmit={answer => { void submitInteraction(answer) }} /> : null}

@@ -1325,3 +1325,224 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* 输入框顶部图片缩略图条、消息内图片与全局放大预览灯箱。 */
+.wb-composer-images {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft, var(--line));
+}
+.wb-composer-image-item {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+}
+.wb-composer-image-item[data-preparing] .wb-image-thumb-img {
+  opacity: 0.55;
+}
+.wb-composer-image-thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft, var(--line));
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.wb-composer-image-thumb:hover:not(:disabled) {
+  border-color: var(--accent-border-strong, var(--accent));
+}
+.wb-composer-image-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wb-composer-image-thumb:disabled {
+  cursor: default;
+}
+.wb-composer-image-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.28);
+  color: #ffffff;
+}
+.wb-composer-image-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid var(--surface, #ffffff);
+  border-radius: 999px;
+  background: var(--fg, #1f2937);
+  color: var(--surface, #ffffff);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+.wb-composer-image-remove:hover:not(:disabled) {
+  transform: scale(1.08);
+}
+.wb-composer-image-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wb-message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.wb-message-image-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft, var(--line));
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.wb-message-image-thumb:hover {
+  border-color: var(--accent-border-strong, var(--accent));
+}
+.wb-message-image-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wb-image-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wb-image-thumb-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--muted);
+}
+.wb-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(4px);
+}
+.wb-image-lightbox-close,
+.wb-image-lightbox-nav {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.wb-image-lightbox-close:hover,
+.wb-image-lightbox-nav:hover {
+  background: rgba(15, 23, 42, 0.9);
+}
+.wb-image-lightbox-close:focus-visible,
+.wb-image-lightbox-nav:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+.wb-image-lightbox-close {
+  top: 20px;
+  right: 20px;
+}
+.wb-image-lightbox-nav {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.wb-image-lightbox-nav.is-prev {
+  left: 20px;
+}
+.wb-image-lightbox-nav.is-next {
+  right: 20px;
+}
+.wb-image-lightbox-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 90vw;
+  max-height: 88vh;
+}
+.wb-image-lightbox-img {
+  max-width: 86vw;
+  max-height: 78vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+.wb-image-lightbox-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 240px;
+  min-height: 160px;
+  padding: 24px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+}
+.wb-image-lightbox-caption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12.5px;
+}
+.wb-image-lightbox-counter {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes wb-image-spin {
+  to { transform: rotate(360deg); }
+}
+.wb-image-spin {
+  animation: wb-image-spin 0.9s linear infinite;
+}
+
+

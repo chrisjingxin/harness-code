@@ -14,17 +14,19 @@ import type {
   UserSummary,
 } from "@workbench/collaboration-client/types"
 import {
+  MAX_SENT_IMAGE_RECORDS,
   localExecutionKey,
   type ConversationPersonal,
   type DesktopHost,
   type DesktopLocalExecutionHost,
   type LocalDirectoryHost,
   type LocalExecutionScope,
+  type PersonalDraftImage,
   type ProjectConversationHost,
   type ProjectDraftPersonal,
 } from "../../../shared/index.js"
 import { mergeAttachmentPaths } from "../../../ui/index.js"
-import type { ConversationPersonalState, ConversationScope, RenderingActions } from "../../../ui/index.js"
+import type { ConversationDraftImage, ConversationPersonalState, ConversationScope, RenderingActions } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
 import type { NavigationSessionSource, ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type {
@@ -78,6 +80,7 @@ type ConversationRecordState = {
   readonly directoryPath: string | null
   readonly providerId: string | null
   readonly customTitle?: string
+  readonly sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>
   readonly syncState: SessionSyncState
 }
 
@@ -117,6 +120,30 @@ function syncStateFromPersonal(saved: ConversationPersonal | null): SessionSyncS
   }
 }
 
+function toPersistedDraftImages(images: readonly ConversationDraftImage[] | undefined): readonly PersonalDraftImage[] {
+  if (!images?.length) return []
+  return images
+    .filter(item => item.status !== "preparing")
+    .map(({ id, name, mimeType, sizeBytes, width, height }) => ({
+      id,
+      name,
+      mimeType,
+      sizeBytes,
+      ...(width !== undefined ? { width } : {}),
+      ...(height !== undefined ? { height } : {}),
+    }))
+}
+
+function boundSentImages(
+  sentImages: Readonly<Record<string, readonly PersonalDraftImage[]>> | undefined,
+): Readonly<Record<string, readonly PersonalDraftImage[]>> | undefined {
+  if (!sentImages) return undefined
+  const entries = Object.entries(sentImages).filter(([, list]) => list.length > 0)
+  if (entries.length === 0) return undefined
+  entries.sort((a, b) => Number(a[0]) - Number(b[0]))
+  return Object.fromEntries(entries.slice(-MAX_SENT_IMAGE_RECORDS))
+}
+
 function personalFromSaved(saved: ConversationPersonal | null): ConversationPersonalState {
   if (!saved) return EMPTY_PERSONAL_STATE
   return {
@@ -126,6 +153,7 @@ function personalFromSaved(saved: ConversationPersonal | null): ConversationPers
     draft: {
       ...saved.draft,
       annotations: Array.isArray(saved.draft.annotations) ? [...saved.draft.annotations] : [],
+      images: Array.isArray(saved.draft.images) ? [...saved.draft.images] : [],
     },
     interactions: {},
   }
@@ -136,14 +164,22 @@ function toPersistablePersonal(
   directoryPath: string | null,
   syncState: SessionSyncState,
   providerId: string | null,
+  sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>,
 ): ConversationPersonal {
   const { interactions: _ignored, ...rest } = personal
+  const persistedImages = toPersistedDraftImages(rest.draft.images)
+  const boundedSentImages = boundSentImages(sentImages)
   const hasSyncData = syncState.localSyncedSequence > 0 || syncState.messages.length > 0
   const bounded = hasSyncData ? boundCachedMessages(syncState.messages) : null
   return {
     ...rest,
+    draft: {
+      ...rest.draft,
+      images: persistedImages,
+    },
     localDirectoryPath: directoryPath,
     ...(providerId ? { providerId } : {}),
+    ...(boundedSentImages ? { sentImages: boundedSentImages } : {}),
     syncCache: bounded
       ? {
           syncedSequence: syncState.localSyncedSequence,
@@ -370,6 +406,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         directoryPath: saved?.localDirectoryPath ?? null,
         providerId: saved?.providerId ?? null,
         customTitle: saved?.customTitle,
+        ...(saved?.sentImages ? { sentImages: saved.sentImages } : {}),
         syncState: syncStateFromPersonal(saved),
       }
       // 等待恢复的草稿动作可能先于 React 重新渲染，直接从同一记录读取最新值。
@@ -444,7 +481,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           projectId: targetScope.projectId,
           conversationId,
         },
-        toPersistablePersonal(next.personal, next.directoryPath, next.syncState, next.providerId),
+        toPersistablePersonal(next.personal, next.directoryPath, next.syncState, next.providerId, next.sentImages),
       )
     }
   }, [persistence])
@@ -894,6 +931,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [currentScopeKey, activeConversations, recordsByKey])
 
+  const currentSentImages = useMemo(() => {
+    const map: Record<string, Readonly<Record<string, readonly PersonalDraftImage[]>>> = {}
+    if (!currentScopeKey) return map
+    for (const conv of activeConversations) {
+      const rec = recordsByKey[makeRecordKey(currentScopeKey, conv.conversationId)]
+      if (rec?.sentImages) map[conv.conversationId] = rec.sentImages
+    }
+    return map
+  }, [currentScopeKey, activeConversations, recordsByKey])
+
   const memberById = useMemo(() => {
     const map = new Map<string, UserSummary>()
     for (const member of members) map.set(member.user.id, member.user)
@@ -985,6 +1032,30 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       prev.providerId === trimmed ? prev : { ...prev, providerId: trimmed }
     ), true)
   }, [scope, currentScopeKey, updateRecord])
+  const handleTurnUploaded = useCallback((
+    execScope: LocalExecutionScope,
+    userSequence: number,
+    images: readonly PersonalDraftImage[],
+  ) => {
+    if (!mountedRef.current || !images.length || userSequence < 1 || !scope || !currentScopeKey) return
+    if (
+      execScope.accountId !== scope.accountId
+      || execScope.workspaceId !== scope.workspaceId
+      || execScope.projectId !== scope.projectId
+    ) return
+    const seqKey = String(userSequence)
+    updateRecord(scope, currentScopeKey, execScope.conversationId, prev => {
+      if (!prev.loaded) return prev
+      const merged = boundSentImages({
+        ...(prev.sentImages ?? {}),
+        [seqKey]: images,
+      })
+      return {
+        ...prev,
+        ...(merged ? { sentImages: merged } : {}),
+      }
+    }, true)
+  }, [scope, currentScopeKey, updateRecord])
   const refreshWorkspaceRef = useRef<((source: ProjectNavigationScope, id: string) => Promise<void>) | null>(null)
   const refreshExecutionWorkspace = useCallback((source: ProjectNavigationScope, id: string) => {
     if (!mountedRef.current) return
@@ -998,6 +1069,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     currentProviders,
     handleSessionTitleChange,
     handleProviderChange,
+    handleTurnUploaded,
   )
 
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
@@ -1079,6 +1151,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     conversations: effectiveConversations,
     syncStates: currentSyncStates,
     personalStates: currentPersonalStates,
+    sentImagesByConversation: currentSentImages,
     directories: currentDirectories,
     recentDirectories,
     newDraft: currentDraft,

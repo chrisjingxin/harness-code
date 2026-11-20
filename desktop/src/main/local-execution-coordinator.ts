@@ -49,10 +49,13 @@ import {
   type LocalExecutionScope,
   type LocalExecutionSessionState,
   type LocalSteerInput,
+  type PersonalDraftImage,
   type PromptQueueAction,
   type PromptQueueRecord,
   type PromptQueueView,
   type QueuedPrompt,
+  type ReadLocalImageResult,
+  type StageLocalImageInput,
 } from "../shared/index.js"
 import {
   createLocalAttachmentGrantStore,
@@ -62,6 +65,7 @@ import {
   sameDirectory,
   type DirectoryGrant,
 } from "./local-directory-grants.js"
+import type { LocalImageStore } from "./local-image-store.js"
 import {
   extractHarnessWorkflowOption, parseHarnessAgentCapabilitiesMeta, parseHarnessApprovalMeta, parseHarnessCommandMeta,
   parseHarnessParentMeta, parseHarnessRunMeta,
@@ -72,6 +76,7 @@ import { CodeCheckpoints, overlappingDirectories, type CheckpointStart } from ".
 export type LocalExecutionCoordinatorOptions = {
   readonly grantsDir?: string
   readonly checkpointsDir?: string
+  readonly images?: LocalImageStore
   readonly confirmCheckpointRestore?: (path: string) => Promise<boolean>
   readonly origin?: string
   readonly personal?: PersonalStore
@@ -104,6 +109,7 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
   needsSegmentBreak?: boolean
   checkpoint?: CheckpointStart
   ephemeral?: boolean
+  images?: readonly PersonalDraftImage[]
   steering?: Promise<"accepted" | "rejected" | "unknown">
   steerKind?: "harness" | "kiro"
   toolStates: Map<string, LocalAcpTool>
@@ -194,6 +200,7 @@ function toExecutionSessionState(providerId: string, state: LocalAcpSessionState
   return {
     providerId,
     connected,
+    supportsImagePrompt: Boolean(state.agentCapabilities?.promptCapabilities?.image),
     ...(modes ? { modes } : {}),
     ...(currentModeId !== undefined ? { currentModeId } : {}),
     ...(models ? { models } : {}),
@@ -460,7 +467,7 @@ export function createLocalExecutionCoordinator(
     scope: LocalExecutionScope, binding: Binding, item: QueuedPrompt, prompt: string, queued = false,
   ): Promise<CollaborationResult<LocalExecutionReceipt>> {
     const { login } = binding
-    const { requestId, text, referenceIds: ids, attachments } = item
+    const { requestId, text, referenceIds: ids, attachments, images = [] } = item
     let attachmentBlocks: readonly LocalAcpPromptBlock[] = []
     if (attachments.length > 0) {
       const resolvedAttachments = await resolveAttachmentBlocks(
@@ -476,11 +483,33 @@ export function createLocalExecutionCoordinator(
     }
     if (binding.activeTurn) return ok({ status: "rejected", reason: unavailableMessages["session-busy"] })
 
+    let imageBlocks: readonly LocalAcpPromptBlock[] = []
+    let claimedImages: readonly PersonalDraftImage[] = []
+    if (images.length > 0) {
+      const supportsImage = Boolean(binding.session.getState?.()?.agentCapabilities?.promptCapabilities?.image)
+      if (!supportsImage) {
+        return ok({ status: "rejected", reason: "当前 Agent 暂不支持图片输入，移除图片或切换支持图片的 Agent 后可发送。" })
+      }
+      if (!binding.session.sendPrompt) {
+        return ok({ status: "rejected", reason: "当前 Agent 连接不支持多模态图片发送。" })
+      }
+      if (!options?.images) {
+        return ok({ status: "rejected", reason: "本机图片存储尚未就绪。" })
+      }
+      try {
+        const claimed = await options.images.claimForSend(login.accountId, images)
+        claimedImages = claimed.claimed
+        imageBlocks = claimed.blocks
+      } catch (error) {
+        return ok({ status: "rejected", reason: error instanceof Error ? error.message : "图片附件读取失败。" })
+      }
+    }
+
     const blocks: LocalAcpPromptBlock[] = []
-    if (prompt.trim().length > 0 || attachmentBlocks.length === 0) {
+    if (prompt.trim().length > 0 || (imageBlocks.length === 0 && attachmentBlocks.length === 0)) {
       blocks.push({ type: "text", text: prompt })
     }
-    blocks.push(...attachmentBlocks)
+    blocks.push(...imageBlocks, ...attachmentBlocks)
 
     let checkpoint: CheckpointStart | undefined
     if (checkpoints) {
@@ -503,7 +532,7 @@ export function createLocalExecutionCoordinator(
       await checkpoints?.discard(checkpoint)
       return forbidden()
     }
-    const result = (attachmentBlocks.length > 0 || history.length > 0) && binding.session.sendPrompt
+    const result = (imageBlocks.length > 0 || attachmentBlocks.length > 0 || history.length > 0) && binding.session.sendPrompt
       ? binding.session.sendPrompt(blocks, history)
       : binding.session.send(prompt || attachmentBlocks.map(b => b.type === "resource_link" ? `@${b.name}` : "").join(" "))
 
@@ -520,6 +549,7 @@ export function createLocalExecutionCoordinator(
       turnId: result.turnId,
       userText: text,
       referenceIds: ids,
+      ...(claimedImages.length ? { images: claimedImages } : {}),
       reply: "",
       acceptedAtMs: Date.now(),
       checkpoint,
@@ -533,6 +563,7 @@ export function createLocalExecutionCoordinator(
     publish(login, { scope, bindingId: binding.id, kind: "accepted", turnId: result.turnId, requestId, text,
       ...(binding.activeTurn.steerKind ? { canSteer: true } : {}),
       ...(queued ? { queued: true, referenceIds: ids } : {}),
+      ...(claimedImages.length ? { images: claimedImages } : {}),
     })
     return ok(binding.activeTurn.steerKind ? { ...result, canSteer: true } : result)
   }
@@ -632,9 +663,9 @@ export function createLocalExecutionCoordinator(
         const record = current?.ok ? current.value : undefined
         const queued = record?.items.find(item => item.requestId === input.requestId)
         const text = input.kind === "draft" ? input.text : queued?.text
-        if (!text || !isSteerText(text) || queued?.referenceIds.length || queued?.attachments.length
+        if (!text || !isSteerText(text) || queued?.referenceIds.length || queued?.attachments.length || queued?.images?.length
           || (input.kind === "queued" && (!queued || !record || record.starting || !store))) {
-          return identityError("INVALID_REQUEST", "追发仅支持无引用和附件的普通文本。")
+          return identityError("INVALID_REQUEST", "追发仅支持无引用、图片和附件的普通文本。")
         }
         if (!isCurrent(login) || binding.activeTurn !== turn) return identityError("INVALID_REQUEST", "当前轮已结束，消息已保留。")
         if (record && store) {
@@ -736,7 +767,7 @@ export function createLocalExecutionCoordinator(
           const item = record.items.find(item => item.requestId === action.requestId)
           if (!item) return identityError("INVALID_REQUEST", "待发消息已经送出或移除。")
           if (action.kind === "edit" && (record.starting === item.requestId
-            || (!action.text.trim() && !item.referenceIds.length && !item.attachments.length))) {
+            || (!action.text.trim() && !item.referenceIds.length && !item.attachments.length && !item.images?.length))) {
             return identityError("INVALID_REQUEST", "请输入有效正文，或先核对提交结果。")
           }
           const next = await store.conversationPromptQueue(scope, {
@@ -1119,9 +1150,14 @@ export function createLocalExecutionCoordinator(
                 if (uploads) binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
                   await steering
                   if (!isCurrent(login)) return
+                  const uploadUserText = turn.images?.length
+                    ? (turn.userText.trim()
+                        ? `${turn.userText}\n\n[附 ${turn.images.length} 张本机图片]`
+                        : `[附 ${turn.images.length} 张本机图片]`)
+                    : turn.userText
                   await uploads.enqueue(scope, {
                     turnId: turn.turnId,
-                    userText: turn.userText,
+                    userText: uploadUserText,
                     referenceIds: turn.referenceIds,
                     ...(tools ? { tools } : {}),
                     reply: turn.reply,
@@ -1186,6 +1222,48 @@ export function createLocalExecutionCoordinator(
       })
     },
 
+    async stageImage(
+      scope: LocalExecutionScope,
+      input: StageLocalImageInput,
+    ): Promise<CollaborationResult<PersonalDraftImage>> {
+      const login = identity.personalIdentity()
+      if (!login || !isCurrent(login)) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      if (!options?.images) return identityError("INVALID_REQUEST", "本机图片存储尚未启用。")
+      try {
+        return ok(await options.images.stage(login.accountId, input))
+      } catch (error) {
+        return identityError("INVALID_REQUEST", error instanceof Error ? error.message : "图片暂存失败。")
+      }
+    },
+
+    async readImage(
+      scope: LocalExecutionScope,
+      imageId: string,
+    ): Promise<CollaborationResult<ReadLocalImageResult>> {
+      const login = identity.personalIdentity()
+      if (!login || !isCurrent(login)) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      if (!options?.images) return identityError("INVALID_REQUEST", "本机图片存储尚未启用。")
+      const result = await options.images.read(login.accountId, imageId)
+      return result ? ok(result) : identityError("INVALID_REQUEST", "图片不存在或已失效。")
+    },
+
+    async removeStagedImage(
+      scope: LocalExecutionScope,
+      imageId: string,
+    ): Promise<CollaborationResult<null>> {
+      const login = identity.personalIdentity()
+      if (!login || !isCurrent(login)) return forbidden()
+      const authorized = await authorize(scope, login)
+      if (!authorized.ok) return authorized
+      if (!options?.images) return ok(null)
+      await options.images.removePending(login.accountId, imageId)
+      return ok(null)
+    },
+
     async send(
       scope: LocalExecutionScope,
       bindingId: string,
@@ -1193,6 +1271,7 @@ export function createLocalExecutionCoordinator(
       text: string,
       referenceIds: readonly string[],
       attachments: readonly string[] = [],
+      images: readonly PersonalDraftImage[] = [],
     ): Promise<CollaborationResult<LocalExecutionReceipt>> {
       const login = identity.personalIdentity()
       if (!login || !isCurrent(login)) return forbidden()
@@ -1226,7 +1305,7 @@ export function createLocalExecutionCoordinator(
         if (!authorized.ok) return authorized
 
         if (binding.queueArmed) return ok({ status: "rejected", reason: "待发队列正在发送，请加入队列。" })
-        return sendBound(scope, binding, { requestId, text, referenceIds: ids, attachments }, prompt)
+        return sendBound(scope, binding, { requestId, text, referenceIds: ids, attachments, ...(images.length ? { images } : {}) }, prompt)
       })
     },
 

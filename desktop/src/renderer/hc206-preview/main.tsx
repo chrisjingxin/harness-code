@@ -11,6 +11,7 @@ import {
   ConversationView,
   MAX_DRAFT_ANNOTATIONS,
   applyLeadingSlashCommand,
+  inferImageMimeFromName,
   mergeAttachmentPaths,
   normalizeAnnotationSelectedText,
   normalizeAnnotationSourceLabel,
@@ -19,6 +20,7 @@ import type {
   ConversationActions,
   ConversationComposerView,
   ConversationDraftAnnotation,
+  ConversationDraftImage,
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,
@@ -309,10 +311,23 @@ function TimelinePreview() {
           },
         }
       }
+      if (change.kind === "draft-images") {
+        return {
+          ...previous,
+          [key]: {
+            ...current,
+            draft: {
+              ...draft,
+              images: change.images.slice(0, 6),
+              revision: draft.revision + 1,
+            },
+          },
+        }
+      }
       // 旧发送结果只能条件清空原账号的原修订，不能覆盖当前账号或后续编辑。
       if (change.kind === "clear-draft") {
         if (identityKey(scope) !== currentIdentity.current.key || draft.revision !== change.expectedRevision) return previous
-        return { ...previous, [key]: { ...current, draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: draft.revision + 1, referenceIds: [], attachmentIds: [], annotations: [] } } }
+        return { ...previous, [key]: { ...current, draft: { text: "", selectionStart: 0, selectionEnd: 0, revision: draft.revision + 1, referenceIds: [], attachmentIds: [], annotations: [], images: [] } } }
       }
       return previous
     })
@@ -487,6 +502,26 @@ function TimelinePreview() {
           attachmentIds: mergeAttachmentPaths(personal.draft.attachmentIds, ["/Users/example/references/"]),
         })
       }
+    },
+    onPasteImages: (sourceScope, files) => {
+      const current = personal.draft.images ?? []
+      const added: ConversationDraftImage[] = files.slice(0, Math.max(0, 6 - current.length)).map(file => ({
+        id: `preview-${crypto.randomUUID()}`,
+        name: file.name || "pasted-image.png",
+        mimeType: inferImageMimeFromName(file.name) ?? "image/png",
+        sizeBytes: file.size || 0,
+        status: "ready",
+        previewUrl: typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+          ? URL.createObjectURL(file)
+          : undefined,
+      }))
+      if (!added.length) return
+      updatePersonal(sourceScope, { kind: "draft-images", images: [...current, ...added] })
+      record(sourceScope, `粘贴图片预览：${added.length} 张`)
+    },
+    onResolveImagePreview: async (_sourceScope, imageId) => {
+      const match = (personal.draft.images ?? []).find(item => item.id === imageId)
+      return match?.previewUrl ?? null
     },
     rendering,
   }

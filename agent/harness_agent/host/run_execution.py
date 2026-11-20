@@ -21,7 +21,7 @@ import os
 import signal
 import time
 from copy import deepcopy
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -214,6 +214,23 @@ class AdapterOutcome:
     retryable: bool = False
 
 
+def _build_human_content(
+    text: str, images: Sequence[Any]
+) -> str | list[dict[str, object]]:
+    """无图片时保持纯字符串兼容所有旧路径；含图片时组装 OpenAI 兼容多模态块。"""
+    if not images:
+        return text
+    blocks: list[dict[str, object]] = [{"type": "text", "text": text}]
+    for img in images:
+        blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{img.mime_type};base64,{img.data}"},
+            }
+        )
+    return blocks
+
+
 class BuildRunAdapter:
     """Build 路径的执行 adapter。
 
@@ -291,7 +308,14 @@ class BuildRunAdapter:
             """恢复 stream 正常返回后，提交当前 Run 的审批规则意图。"""
             await port.commit_staged_approval_rules(run)
 
-        stream_input: object = run.message
+        images = getattr(getattr(run.start, "input", None), "images", ()) or ()
+        human_content = _build_human_content(run.message, images)
+        if images:
+            from langchain_core.messages import HumanMessage
+
+            stream_input: object = {"messages": [HumanMessage(content=human_content)]}
+        else:
+            stream_input = run.message
         steering = getattr(getattr(run.start, "input", None), "steering", None)
 
         async def record_steer(request_id: str, text: str) -> None:
@@ -318,7 +342,7 @@ class BuildRunAdapter:
             from harness_agent.goals.rubric_adapter import canonical_rubric
 
             stream_input = {
-                "messages": [HumanMessage(content=run.message)],
+                "messages": [HumanMessage(content=human_content)],
                 "rubric": canonical_rubric(goal_binding.criteria),
             }
         request = ManagedAgentRequest(
@@ -980,11 +1004,24 @@ class ComposeRunAdapter:
             """恢复 stream 正常返回后，提交当前 Run 的审批规则意图。"""
             await port.commit_staged_approval_rules(run)
 
+        images = (
+            getattr(getattr(run.start, "input", None), "images", ()) or ()
+            if not self._root_started
+            else ()
+        )
+        if images:
+            from langchain_core.messages import HumanMessage
+
+            stream_input: object = {
+                "messages": [HumanMessage(content=_build_human_content(run.message, images))]
+            }
+        else:
+            stream_input = run.message
         request = ManagedAgentRequest(
             execution_ref=run.root_execution_ref.execution_id,
             parent_execution_ref=None,
             run_id=run.ref.run_id,
-            input=run.message,
+            input=stream_input,
             checkpoint_namespace=checkpoint_namespace or run.ref.thread_id,
             output_policy="passthrough",
             runtime_provider=acquire_runtime,

@@ -15,6 +15,7 @@ import type {
   LocalAcpTool,
 } from "@workbench/acp-runtime/types"
 import type { CollaborationResult } from "@workbench/collaboration-client/types"
+import type { PersonalDraftImage } from "./personal.js"
 
 export type LocalExecutionScope = {
   readonly accountId: string
@@ -53,6 +54,21 @@ export type LocalExecutionSessionState = Pick<
 > & {
   readonly providerId: string
   readonly sessionTitle?: string | null
+  /** 从 AgentCapabilities.promptCapabilities.image 派生的图片提示支持标志。 */
+  readonly supportsImagePrompt?: boolean
+}
+
+export type StageLocalImageInput = {
+  readonly bytes: Uint8Array
+  readonly mimeType: string
+  readonly name?: string
+  readonly width?: number
+  readonly height?: number
+}
+
+export type ReadLocalImageResult = {
+  readonly bytes: Uint8Array
+  readonly mimeType: string
 }
 
 export type LocalExecutionReceipt =
@@ -65,6 +81,7 @@ export type QueuedPrompt = {
   readonly text: string
   readonly referenceIds: readonly string[]
   readonly attachments: readonly string[]
+  readonly images?: readonly PersonalDraftImage[]
 }
 
 /** starting 表示已经开始提交，进程中断后需由用户核对，禁止自动重发。 */
@@ -140,7 +157,7 @@ export type LocalExecutionNotice =
       readonly bindingId: string
       readonly turnId: string
     } & (
-      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly canSteer?: boolean; readonly referenceIds?: readonly string[] }
+      | { readonly kind: "accepted"; readonly requestId: string; readonly text: string; readonly queued?: boolean; readonly canSteer?: boolean; readonly referenceIds?: readonly string[]; readonly images?: readonly PersonalDraftImage[] }
       | { readonly kind: "text"; readonly sequence: number; readonly text: string; readonly messageId?: string }
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
       | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
@@ -179,7 +196,10 @@ export interface DesktopLocalExecutionHost {
   prepare(scope: LocalExecutionScope, directory: string, providerId?: string): Promise<LocalExecutionPreparation>
   /** 从该会话的本机个人记录取路径，经原生确认窗口记住旧目录。 */
   confirmDirectory(scope: LocalExecutionScope): Promise<CollaborationResult<boolean>>
-  /** 主进程按固定 ID 读取引用材料，并按工作区沙箱路径生成 resource_link。发送端始终传用户原文。 */
+  stageImage(scope: LocalExecutionScope, input: StageLocalImageInput): Promise<CollaborationResult<PersonalDraftImage>>
+  readImage(scope: LocalExecutionScope, imageId: string): Promise<CollaborationResult<ReadLocalImageResult>>
+  removeStagedImage(scope: LocalExecutionScope, imageId: string): Promise<CollaborationResult<null>>
+  /** 主进程按固定 ID 读取引用材料，并按工作区沙箱路径生成 resource_link；图片读取后组装标准 ACP image 块。 */
   send(
     scope: LocalExecutionScope,
     bindingId: string,
@@ -187,6 +207,7 @@ export interface DesktopLocalExecutionHost {
     text: string,
     referenceIds?: readonly string[],
     attachments?: readonly string[],
+    images?: readonly PersonalDraftImage[],
   ): Promise<CollaborationResult<LocalExecutionReceipt>>
   cancel(scope: LocalExecutionScope, bindingId: string, turnId: string): Promise<CollaborationResult<null>>
   answerPermission(scope: LocalExecutionScope, bindingId: string, turnId: string, requestId: string, optionId: string): Promise<CollaborationResult<null>>

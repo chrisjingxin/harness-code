@@ -7,7 +7,20 @@
  */
 import type { BrowserWindow } from "electron"
 import type { LocalAcpElicitationAnswer } from "@workbench/acp-runtime"
-import { isSteerText, parseFixedReference, type CodeCheckpointAction, type LocalExecutionScope, type LocalSteerInput, type PromptQueueAction, type QueuedPrompt } from "../shared/index.js"
+import {
+  isSteerText,
+  MAX_DRAFT_IMAGES,
+  MAX_SINGLE_IMAGE_BYTES,
+  parseFixedReference,
+  SUPPORTED_DRAFT_IMAGE_MIME_TYPES,
+  type CodeCheckpointAction,
+  type LocalExecutionScope,
+  type LocalSteerInput,
+  type PersonalDraftImage,
+  type PromptQueueAction,
+  type QueuedPrompt,
+  type StageLocalImageInput,
+} from "../shared/index.js"
 import {
   createCollaborationIpcRegistrar,
   formatIpcError,
@@ -22,6 +35,8 @@ import { MAX_ATTACHMENTS } from "./local-directory-grants.js"
 import type { LocalExecutionCoordinator } from "./local-execution-coordinator.js"
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9_-]{1,64}$/i
+const IMAGE_ID_PATTERN = /^(?:pending|sent)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const SUPPORTED_IMAGE_MIME_SET = new Set<string>(SUPPORTED_DRAFT_IMAGE_MIME_TYPES)
 
 function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
   return isPlainObject(value)
@@ -52,6 +67,41 @@ function isValidAttachments(value: unknown): value is string[] | undefined {
     && value.every(item => typeof item === "string" && item.length > 0 && item.length <= 1024 && hasNoControlChars(item))
 }
 
+function isValidDraftImage(value: unknown): value is PersonalDraftImage {
+  if (!isPlainObject(value)) return false
+  const keys = Object.keys(value)
+  if (!keys.every(key => key === "id" || key === "name" || key === "mimeType" || key === "sizeBytes" || key === "width" || key === "height")) {
+    return false
+  }
+  return typeof value.id === "string" && IMAGE_ID_PATTERN.test(value.id)
+    && typeof value.name === "string" && value.name.length >= 1 && value.name.length <= 128 && hasNoControlChars(value.name)
+    && typeof value.mimeType === "string" && SUPPORTED_IMAGE_MIME_SET.has(value.mimeType)
+    && typeof value.sizeBytes === "number" && Number.isSafeInteger(value.sizeBytes) && value.sizeBytes >= 1 && value.sizeBytes <= MAX_SINGLE_IMAGE_BYTES
+    && (value.width === undefined || (typeof value.width === "number" && Number.isSafeInteger(value.width) && value.width >= 1 && value.width <= 65_536))
+    && (value.height === undefined || (typeof value.height === "number" && Number.isSafeInteger(value.height) && value.height >= 1 && value.height <= 65_536))
+}
+
+function isValidDraftImages(value: unknown): value is PersonalDraftImage[] | undefined {
+  if (value === undefined) return true
+  return Array.isArray(value)
+    && value.length <= MAX_DRAFT_IMAGES
+    && value.every(isValidDraftImage)
+}
+
+function isStageImageInput(value: unknown): value is StageLocalImageInput {
+  if (!isPlainObject(value)) return false
+  if (!Object.keys(value).every(key => key === "bytes" || key === "mimeType" || key === "name" || key === "width" || key === "height")) {
+    return false
+  }
+  if (!(value.bytes instanceof Uint8Array)) return false
+  if (value.bytes.byteLength < 1 || value.bytes.byteLength > MAX_SINGLE_IMAGE_BYTES) return false
+  if (typeof value.mimeType !== "string" || !SUPPORTED_IMAGE_MIME_SET.has(value.mimeType.toLowerCase())) return false
+  if (value.name !== undefined && (typeof value.name !== "string" || value.name.length > 256 || !hasNoControlChars(value.name))) return false
+  if (value.width !== undefined && (typeof value.width !== "number" || !Number.isSafeInteger(value.width) || value.width < 1 || value.width > 65_536)) return false
+  if (value.height !== undefined && (typeof value.height !== "number" || !Number.isSafeInteger(value.height) || value.height < 1 || value.height > 65_536)) return false
+  return true
+}
+
 function isPromptText(value: unknown): value is string {
   return typeof value === "string" && value.length <= 16_384 && Buffer.byteLength(value, "utf8") <= 32_768
 }
@@ -63,15 +113,17 @@ function isSteerInput(value: unknown): value is LocalSteerInput {
     : value.kind === "draft" && keys === "kind,requestId,text" && isPromptText(value.text) && isSteerText(value.text)
 }
 
-function isPromptContent(text: unknown, referenceIds: unknown, attachments: unknown): boolean {
+function isPromptContent(text: unknown, referenceIds: unknown, attachments: unknown, images?: unknown): boolean {
   return isPromptText(text) && Array.isArray(referenceIds) && referenceIds.length <= 2000
-    && referenceIds.every(id => parseFixedReference(id) !== null) && isValidAttachments(attachments)
-    && Boolean(text.trim() || referenceIds.length || attachments?.length)
+    && referenceIds.every(id => parseFixedReference(id) !== null) && isValidAttachments(attachments) && isValidDraftImages(images)
+    && Boolean(text.trim() || referenceIds.length || attachments?.length || (Array.isArray(images) && images.length > 0))
 }
 
 function isQueuedPrompt(item: unknown): item is QueuedPrompt {
-  return isPlainObject(item) && Object.keys(item).sort().join(",") === "attachments,referenceIds,requestId,text"
-    && isUuid(item.requestId) && Array.isArray(item.attachments) && isPromptContent(item.text, item.referenceIds, item.attachments)
+  if (!isPlainObject(item)) return false
+  const keys = Object.keys(item).sort().join(",")
+  if (keys !== "attachments,referenceIds,requestId,text" && keys !== "attachments,images,referenceIds,requestId,text") return false
+  return isUuid(item.requestId) && Array.isArray(item.attachments) && isPromptContent(item.text, item.referenceIds, item.attachments, item.images)
 }
 
 function isPromptQueueAction(value: unknown): value is PromptQueueAction {
@@ -143,11 +195,31 @@ export function bindLocalExecutionIpc(
     isLocalExecutionScope(scope)
       ? execution.confirmDirectory(scope)
       : formatIpcError("INVALID_REQUEST", "本机会话参数无效。"))
-  ipc.handle("workbench:local-execution:send", [5, 6], (scope, bindingId, requestId, text, referenceIds, attachments) =>
+  ipc.handle("workbench:local-execution:stage-image", 2, (scope, input) =>
+    isLocalExecutionScope(scope) && isStageImageInput(input)
+      ? execution.stageImage(scope, input)
+      : formatIpcError("INVALID_REQUEST", "图片参数无效或超出大小限制。"))
+  ipc.handle("workbench:local-execution:read-image", 2, (scope, imageId) =>
+    isLocalExecutionScope(scope) && typeof imageId === "string" && IMAGE_ID_PATTERN.test(imageId)
+      ? execution.readImage(scope, imageId)
+      : formatIpcError("INVALID_REQUEST", "图片标识无效。"))
+  ipc.handle("workbench:local-execution:remove-staged-image", 2, (scope, imageId) =>
+    isLocalExecutionScope(scope) && typeof imageId === "string" && IMAGE_ID_PATTERN.test(imageId)
+      ? execution.removeStagedImage(scope, imageId)
+      : formatIpcError("INVALID_REQUEST", "图片标识无效。"))
+  ipc.handle("workbench:local-execution:send", [5, 6, 7], (scope, bindingId, requestId, text, referenceIds, attachments, images) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(requestId)
-      && isPromptContent(text, referenceIds, attachments)
-      ? execution.send(scope, bindingId, requestId, text as string, referenceIds as string[], (attachments as string[] | undefined) ?? [])
-      : formatIpcError("INVALID_REQUEST", "请输入有效的文本消息、固定引用或工作区文件附件。文字最长 16,384 字符且不超过 32 KiB。"))
+      && isPromptContent(text, referenceIds, attachments, images)
+      ? execution.send(
+          scope,
+          bindingId,
+          requestId,
+          text as string,
+          referenceIds as string[],
+          (attachments as string[] | undefined) ?? [],
+          (images as PersonalDraftImage[] | undefined) ?? [],
+        )
+      : formatIpcError("INVALID_REQUEST", "请输入有效的文本消息、固定引用、工作区文件附件或图片。文字最长 16,384 字符且不超过 32 KiB。"))
   ipc.handle("workbench:local-execution:steer", 4, (scope, bindingId, turnId, input) =>
     isLocalExecutionScope(scope) && isUuid(bindingId) && isUuid(turnId) && isSteerInput(input)
       ? execution.steer(scope, bindingId, turnId, input)

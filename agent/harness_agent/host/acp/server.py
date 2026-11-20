@@ -32,6 +32,7 @@ Host 的扇出任务并发调 `sender` 进来的。如果直接在 `sender` 里 
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import os
 import re
@@ -161,6 +162,7 @@ from harness_agent.host.run_coordinator import (
     GoalContinuationRunInput,
     GoalProposalRunInput,
     InteractionMode,
+    PromptImage,
     RunError,
     UserRunInput,
 )
@@ -178,6 +180,10 @@ PROTOCOL_VERSION = 1
 _STEERING_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 MAX_PROMPT_SUMMARY_CHARS = 2000
+_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
+_MAX_PROMPT_IMAGES = 10
+_MAX_SINGLE_IMAGE_BYTES = 4 * 1024 * 1024
+_MAX_TOTAL_IMAGE_BYTES = 5 * 1024 * 1024
 """错误响应里回显的 message 上限，避免把整段模型输出塞进错误帧。"""
 
 _UPPERCASE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
@@ -505,7 +511,7 @@ class AcpServer:
             agent_capabilities=AgentCapabilities(
                 load_session=True,
                 prompt_capabilities=PromptCapabilities(
-                    image=False, audio=False, embedded_context=True
+                    image=True, audio=False, embedded_context=True
                 ),
                 mcp_capabilities=McpCapabilities(http=True, sse=False, acp=False),
                 session_capabilities=SessionCapabilities(
@@ -816,12 +822,12 @@ class AcpServer:
         session.cancel_requested = False
         self._begin_request()
         try:
-            text, pieces = await self._prepare_prompt_parts(prompt)
+            text, pieces, images = await self._prepare_prompt_parts(prompt)
         except BaseException:
             session.busy = False
             self._finish_request()
             raise
-        builtin = parse_builtin(text, forms=self._forms)
+        builtin = parse_builtin(text, forms=self._forms) if not images else None
         goal_follow: GoalProposalRunInput | GoalContinuationRunInput | None = None
         plan_follow: _PlanFollow | None = None
         command_meta_payload: dict[str, object] | None = None
@@ -877,6 +883,7 @@ class AcpServer:
                     user_text,
                     requested_skill=self._commands.match(user_text),
                     model_message=model_message,
+                    images=images,
                     steering=steering,
                 )
             outcome = await self._await_host_run(
@@ -1539,19 +1546,32 @@ class AcpServer:
             workflow=session.workflow,
         )
 
-    async def _prepare_prompt_parts(self, prompt: Sequence[object]) -> tuple[str, list[str]]:
-        """把内容块收成（记录原文, 附加上下文块列表）。
+    async def _prepare_prompt_parts(
+        self, prompt: Sequence[object]
+    ) -> tuple[str, list[str], tuple[PromptImage, ...]]:
+        """把内容块收成（记录原文, 附加上下文块列表, 内联图片列表）。
 
-        记录里只有用户文本和 `@路径`。授权根内的文件内容只出现在模型正文前面。
-        图片、音频和二进制嵌入资源仍然拒绝。
+        记录里只有用户文本、`@路径` 与纯文本图片数量标注，Base64 绝不落入 Transcript；
+        音频和二进制嵌入资源仍然拒绝。
         """
         parts: list[str] = []
         pieces: list[str] = []
+        images: list[PromptImage] = []
+        total_image_bytes = 0
         budget = InlineBudget()
         for block in prompt:
             block_type = getattr(block, "type", None)
             if block_type == "text":
                 parts.append(str(getattr(block, "text", "")))
+                continue
+            if block_type == "image":
+                image, decoded_len = _parse_prompt_image_block(
+                    block,
+                    current_count=len(images),
+                    current_total_bytes=total_image_bytes,
+                )
+                images.append(image)
+                total_image_bytes += decoded_len
                 continue
             if block_type == "resource_link":
                 mention, piece = await self._inline_link(str(getattr(block, "uri", "")), budget)
@@ -1568,12 +1588,15 @@ class AcpServer:
                 pieces.append(piece)
         text = "\n".join(parts)
         if not text.strip():
-            raise RequestError(
-                -32602,
-                "EMPTY_PROMPT",
-                {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
-            )
-        return text, pieces
+            if images:
+                text = f"[附 {len(images)} 张图片]"
+            else:
+                raise RequestError(
+                    -32602,
+                    "EMPTY_PROMPT",
+                    {"code": "EMPTY_PROMPT", "message": "prompt must contain non-empty text"},
+                )
+        return text, pieces, tuple(images)
 
     async def _inline_link(self, uri: str, budget: InlineBudget) -> tuple[str, str | None]:
         """根内文件读入内联块；其它链接保持 `@uri`，不读盘。"""
@@ -2234,6 +2257,79 @@ def _cap_text_block(item: object, limit: int) -> Any:
     if not isinstance(text, str) or len(text) <= limit or copier is None:
         return inner
     return copier(update={"text": text[: limit - 1] + "…"})
+
+
+def _parse_prompt_image_block(
+    block: object,
+    *,
+    current_count: int,
+    current_total_bytes: int,
+) -> tuple[PromptImage, int]:
+    """校验并提取单张 ACP `image` 内容块，返回 `(PromptImage, 解码后字节数)`。"""
+    if current_count >= _MAX_PROMPT_IMAGES:
+        raise RequestError(
+            -32602,
+            "IMAGE_TOO_LARGE",
+            {"code": "IMAGE_TOO_LARGE", "reason": "too_many_images"},
+        )
+    raw_mime = getattr(block, "mime_type", None)
+    if raw_mime is None:
+        raw_mime = getattr(block, "mimeType", None)
+    mime_type = raw_mime.strip().lower() if isinstance(raw_mime, str) else ""
+    if mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+        raise RequestError(
+            -32602,
+            "INVALID_IMAGE_BLOCK",
+            {
+                "code": "INVALID_IMAGE_BLOCK",
+                "reason": "unsupported_mime_type",
+                "mimeType": mime_type,
+            },
+        )
+    raw_data = getattr(block, "data", None)
+    if not isinstance(raw_data, str):
+        raise RequestError(
+            -32602,
+            "INVALID_IMAGE_BLOCK",
+            {"code": "INVALID_IMAGE_BLOCK", "reason": "invalid_base64"},
+        )
+    compact_b64 = "".join(raw_data.split())
+    if not compact_b64:
+        raise RequestError(
+            -32602,
+            "INVALID_IMAGE_BLOCK",
+            {"code": "INVALID_IMAGE_BLOCK", "reason": "invalid_base64"},
+        )
+    try:
+        decoded = base64.b64decode(compact_b64, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise RequestError(
+            -32602,
+            "INVALID_IMAGE_BLOCK",
+            {"code": "INVALID_IMAGE_BLOCK", "reason": "invalid_base64"},
+        ) from exc
+    if not decoded:
+        raise RequestError(
+            -32602,
+            "INVALID_IMAGE_BLOCK",
+            {"code": "INVALID_IMAGE_BLOCK", "reason": "empty_image"},
+        )
+    byte_len = len(decoded)
+    if byte_len > _MAX_SINGLE_IMAGE_BYTES or current_total_bytes + byte_len > _MAX_TOTAL_IMAGE_BYTES:
+        raise RequestError(
+            -32602,
+            "IMAGE_TOO_LARGE",
+            {"code": "IMAGE_TOO_LARGE"},
+        )
+    raw_uri = getattr(block, "uri", None)
+    return (
+        PromptImage(
+            mime_type=mime_type,
+            data=compact_b64,
+            uri=raw_uri if isinstance(raw_uri, str) and raw_uri else None,
+        ),
+        byte_len,
+    )
 
 
 __all__ = [
