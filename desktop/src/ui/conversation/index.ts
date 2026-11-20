@@ -18,16 +18,27 @@ export {
   normalizeAnnotationSourceLabel,
   parseAnnotatedUserMessage,
 } from "./annotations-codec.js"
+export {
+  insertMentionTrigger,
+  toggleAttachmentPath,
+} from "./mention-policy.js"
 export type {
   ConversationActions,
   ConversationAvailability,
+  ConversationComposerContextBar,
   ConversationComposerView,
+  ConversationContextActionItem,
+  ConversationContextMenuIcon,
+  ConversationContextMenuItem,
+  ConversationContextMenuView,
+  ConversationDirectoryContextView,
   ConversationDraft,
   ConversationDraftAnnotation,
   ConversationFileCandidate,
   ConversationFileCandidateRequest,
   ConversationFileCandidateResult,
   ConversationFileLineRange,
+  ConversationGitContextView,
   ConversationInteractionAnswer,
   ConversationInteractionView,
   ConversationMentionOrigin,

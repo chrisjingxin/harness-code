@@ -204,6 +204,76 @@ export interface ConversationReferenceView {
   }
 }
 
+/** 顶部上下文浮层与底部菜单共用的操作条目视图。 */
+export interface ConversationContextActionItem {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+  readonly active?: boolean
+  readonly tone?: "default" | "accent" | "danger"
+  readonly availability: ConversationAvailability
+}
+
+/** 输入框顶部的工作目录展示及下拉操作模型。 */
+export interface ConversationDirectoryContextView {
+  readonly label: string
+  readonly fullPath?: string | null
+  readonly statusLabel?: string
+  readonly statusTone?: "default" | "warning" | "danger"
+  /** 目录待确认等场景下的单键快捷操作，点击直接处理无需展开下拉。 */
+  readonly quickAction?: {
+    readonly id: string
+    readonly label: string
+    readonly availability: ConversationAvailability
+  }
+  readonly availability: ConversationAvailability
+  readonly items: readonly ConversationContextActionItem[]
+}
+
+/** 输入框顶部的只读 Git 分支与变更摘要模型。 */
+export interface ConversationGitContextView {
+  readonly branch: string
+  readonly head?: string
+  readonly upstreamLabel?: string
+  readonly changedCount?: number
+  readonly availability: ConversationAvailability
+  readonly items: readonly ConversationContextActionItem[]
+}
+
+/** 输入框外层顶部上下文条配置（工作目录与 Git 环境）。 */
+export interface ConversationComposerContextBar {
+  readonly directory?: ConversationDirectoryContextView
+  readonly git?: ConversationGitContextView
+}
+
+/** `+` 添加上下文菜单支持的语义图标类型。 */
+export type ConversationContextMenuIcon =
+  | "file"
+  | "folder"
+  | "mention"
+  | "action"
+  | "knowledge"
+  | "conversation"
+  | "external"
+
+/** `+` 添加上下文菜单的单行条目：支持内建唤起动作或交由装配方处理。 */
+export interface ConversationContextMenuItem {
+  readonly id: string
+  readonly label: string
+  readonly icon: ConversationContextMenuIcon
+  readonly behavior: "files" | "folder" | "mention" | "command" | "custom"
+  readonly badge?: string
+  readonly badgeTone?: "default" | "accent" | "danger"
+  readonly availability: ConversationAvailability
+}
+
+/** 输入区左下角 `+` 添加上下文菜单配置。 */
+export interface ConversationContextMenuView {
+  readonly title?: string
+  readonly tooltip?: string
+  readonly items: readonly ConversationContextMenuItem[]
+}
+
 /** 输入区只展示调用方明确提供的命令、能力和状态，不解释 Agent 类型。 */
 export interface ConversationComposerView {
   readonly send: ConversationAvailability
@@ -226,7 +296,14 @@ export interface ConversationComposerView {
   readonly tabCycle?: { readonly controlId: string; readonly itemIds: readonly string[] }
   readonly projectTarget: ConversationProjectTarget | null
   readonly references: readonly ConversationReferenceView[]
-  readonly attachments: readonly { readonly id: string; readonly label: string; readonly availability: ConversationAvailability }[]
+  readonly attachments: readonly {
+    readonly id: string
+    readonly label: string
+    readonly path?: string
+    readonly availability: ConversationAvailability
+  }[]
+  readonly contextBar?: ConversationComposerContextBar
+  readonly contextMenu?: ConversationContextMenuView
 }
 
 /** 草稿由装配方按完整 scope 保存；修订只在文字、引用、注释或附件选择变化时递增。 */
@@ -334,6 +411,9 @@ export interface ConversationActions {
   readonly onOpenFile?: (scope: ConversationScope, target: ConversationProjectTarget, relativePath: string, destination: "preview" | "central", lineRange?: ConversationFileLineRange) => void
   readonly onReferenceAction?: (scope: ConversationScope, id: string, action: "open" | "refresh" | "remove") => void
   readonly onAddSelectionToChat?: (scope: ConversationScope, selection: ConversationSelectionAnnotation) => void
+  readonly onDirectoryContextAction?: (scope: ConversationScope, itemId: string) => void
+  readonly onGitContextAction?: (scope: ConversationScope, itemId: string) => void
+  readonly onContextMenuAction?: (scope: ConversationScope, itemId: string) => void
   readonly rendering?: RenderingActions
 }
 

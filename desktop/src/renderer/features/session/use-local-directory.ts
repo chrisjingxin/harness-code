@@ -60,6 +60,16 @@ type SessionTargetLocation = {
   readonly seq: number
 }
 
+export type LocalDirectoryGitSummary = {
+  readonly isGitRepository: boolean
+  readonly loading: boolean
+  readonly branch: string | null
+  readonly head?: string
+  readonly upstream?: { readonly remote: string; readonly branch: string; readonly ahead: number; readonly behind: number }
+  readonly changedCount: number
+  readonly error?: string
+}
+
 type SessionWorkspaceRuntime = {
   readonly loaded: boolean
   readonly directory: DirectoryState
@@ -1063,10 +1073,55 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     }
   }, [getRuntime])
 
+  const getGitSummary = useCallback((
+    targetScope: ProjectNavigationScope,
+    conversationId: string,
+  ): LocalDirectoryGitSummary | null => {
+    const runtime = getRuntime(targetScope, conversationId)
+    if (runtime.directory.status !== "ready" || !runtime.directory.isGitRepository) return null
+    const repo = runtime.changes.repository
+    return {
+      isGitRepository: true,
+      loading: runtime.changes.busy || runtime.changes.status === "loading",
+      branch: repo?.branch ?? null,
+      ...(repo?.head ? { head: repo.head } : {}),
+      ...(repo?.upstream ? { upstream: repo.upstream } : {}),
+      changedCount: repo?.files.length ?? 0,
+      ...(runtime.changes.message ? { error: runtime.changes.message } : {}),
+    }
+  }, [getRuntime])
+
+  const openChangesPanel = useCallback((
+    targetScope: ProjectNavigationScope,
+    conversationId: string,
+  ) => {
+    mutateRuntime(targetScope, conversationId, prev => ({
+      ...prev,
+      personal: { ...prev.personal, view: { ...prev.personal.view, panel: "changes" } },
+    }), true)
+    const runtime = runtimesRef.current[makeKey(targetScope, conversationId)]
+    if (runtime?.directory.status === "ready") {
+      void loadGitStatus(targetScope, conversationId)
+    }
+  }, [mutateRuntime, loadGitStatus])
+
+  const refreshGitStatus = useCallback((
+    targetScope: ProjectNavigationScope,
+    conversationId: string,
+  ) => {
+    const runtime = runtimesRef.current[makeKey(targetScope, conversationId)]
+    if (runtime?.directory.status === "ready" && runtime.directory.isGitRepository) {
+      void loadGitStatus(targetScope, conversationId)
+    }
+  }, [loadGitStatus])
+
   const stableResult = useMemo(() => ({
     getRuntime,
     buildDockProps,
     getCentralState,
+    getGitSummary,
+    openChangesPanel,
+    refreshGitStatus,
     openFileTab,
     selectConversationCentralTab,
     selectCentralFileTab,
@@ -1081,6 +1136,9 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     getRuntime,
     buildDockProps,
     getCentralState,
+    getGitSummary,
+    openChangesPanel,
+    refreshGitStatus,
     openFileTab,
     selectConversationCentralTab,
     selectCentralFileTab,

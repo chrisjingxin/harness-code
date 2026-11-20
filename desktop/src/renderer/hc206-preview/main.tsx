@@ -345,7 +345,50 @@ function TimelinePreview() {
     tabCycle: tabCycleEnabled ? { controlId: "display-choice", itemIds: ["choice-a", "missing", "choice-locked", "choice-b", "choice-a"] } : undefined,
     projectTarget: { deviceId: targetId, projectId: "example-project" },
     references: [previewReference],
-    attachments: [{ id: "attachment-1", label: "固定示例附件", availability: { enabled: true } }],
+    attachments: [
+      { id: "attachment-1", label: "固定示例附件", availability: { enabled: true } },
+      ...personal.draft.attachmentIds
+        .filter(id => id !== "attachment-1")
+        .map(path => ({
+          id: path,
+          label: path.split("/").at(-1) || path,
+          path,
+          availability: { enabled: true },
+        })),
+    ],
+    contextBar: {
+      directory: {
+        label: "harness-code",
+        fullPath: "/Users/example/harness-code",
+        availability: { enabled: true },
+        items: [
+          { id: "recent:0", label: "harness-code", description: "/Users/example/harness-code", active: true, availability: { enabled: true } },
+          { id: "choose", label: "选择本机文件夹…", tone: "accent", availability: { enabled: true } },
+        ],
+      },
+      git: {
+        branch: "harness_lody",
+        head: "32765c8",
+        upstreamLabel: "origin/harness_lody · ↑1 ↓0",
+        changedCount: 3,
+        availability: { enabled: true },
+        items: [
+          { id: "open-changes", label: "在右侧查看变更", description: "3 个未提交变更", availability: { enabled: true } },
+          { id: "copy-branch", label: "复制分支名", description: "harness_lody", availability: { enabled: true } },
+        ],
+      },
+    },
+    contextMenu: {
+      title: "添加上下文",
+      tooltip: "添加上下文",
+      items: [
+        { id: "files", label: "文件", icon: "file", behavior: "files", availability: { enabled: true } },
+        { id: "folder", label: "目录", icon: "folder", behavior: "folder", availability: { enabled: true } },
+        { id: "mention", label: "提及", icon: "mention", behavior: "mention", availability: { enabled: true } },
+        { id: "actions", label: "命令", icon: "action", behavior: "command", availability: { enabled: true } },
+        { id: "external-source", label: "外部资料源", icon: "external", behavior: "custom", badge: "去配置", badgeTone: "danger", availability: { enabled: true } },
+      ],
+    },
   }
 
   const actions: ConversationActions = {
@@ -412,6 +455,9 @@ function TimelinePreview() {
       updatePersonal(sourceScope, { kind: "draft-annotations", annotations: [...current, nextItem] })
       record(sourceScope, `添加到对话：${normalized.text.slice(0, 32)}`)
     },
+    onDirectoryContextAction: (sourceScope, itemId) => { record(sourceScope, `目录上下文意图：${itemId}`) },
+    onGitContextAction: (sourceScope, itemId) => { record(sourceScope, `Git 上下文意图：${itemId}`) },
+    onContextMenuAction: (sourceScope, itemId) => { record(sourceScope, `添加上下文扩展意图：${itemId}`) },
     rendering,
   }
 

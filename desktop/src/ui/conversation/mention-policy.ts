@@ -25,6 +25,30 @@ export function replaceMentionToken(text: string, token: MentionToken, relativeP
   return { text: `${before}${replacement}${text.slice(token.end).trimStart()}`, cursor: before.length + replacement.length }
 }
 
+/** 在选区位置插入 `@` 触发符；若前一个字符非空白，自动补前导空格以便识别提及词元。 */
+export function insertMentionTrigger(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+): { text: string; cursor: number } {
+  const start = Math.max(0, Math.min(text.length, selectionStart))
+  const end = Math.max(start, Math.min(text.length, selectionEnd))
+  const needsSpace = start > 0 && !/\s/.test(text[start - 1]!)
+  const insertion = needsSpace ? " @" : "@"
+  return {
+    text: `${text.slice(0, start)}${insertion}${text.slice(end)}`,
+    cursor: start + insertion.length,
+  }
+}
+
+/** 切换工作区文件附件选中状态：已存在则移除，否则去重后追加。 */
+export function toggleAttachmentPath(current: readonly string[], path: string): string[] {
+  const unique = [...new Set(current)]
+  return unique.includes(path)
+    ? unique.filter(item => item !== path)
+    : [...unique, path]
+}
+
 /** 选中项始终留在最多八行的窗口内；首尾移动不循环。 */
 export function mentionWindow(selected: number, start: number, count: number): { start: number; end: number } {
   if (count <= 0) return { start: 0, end: 0 }

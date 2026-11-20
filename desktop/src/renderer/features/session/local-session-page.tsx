@@ -50,7 +50,9 @@ import {
   projectLocalExecution,
 } from "./local-execution-view.js"
 import { attachmentUnavailableReason } from "./use-local-execution.js"
+import type { LocalDirectoryGitSummary } from "./use-local-directory.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
+import { buildDirectoryContextView, handleDirectoryContextAction } from "./session-model.js"
 import { CodeCheckpointPanel } from "./code-checkpoint-panel.js"
 import { PromptQueuePanel } from "./prompt-queue-panel.js"
 
@@ -59,6 +61,8 @@ export type LocalSessionPageProps = {
   readonly visible: boolean
   readonly conversation: ProjectConversationSummary
   readonly directoryPath: string | null
+  readonly recentDirectories?: readonly string[]
+  readonly gitSummary?: LocalDirectoryGitSummary | null
   readonly entries: readonly ConversationTimelineEntry[]
   readonly contentRevision: number
   readonly personal: ConversationPersonalState
@@ -67,6 +71,9 @@ export type LocalSessionPageProps = {
   readonly hooks?: SessionExternalHooks
   readonly centralFiles?: SessionCentralFilesState
   readonly onChooseDirectory?: () => void
+  readonly onSelectDirectory?: (directoryPath: string) => void
+  readonly onOpenChangesPanel?: () => void
+  readonly onRefreshGitStatus?: () => void
   readonly onPersonalChange: (scope: ConversationScope, change: ConversationPersonalChange) => void
   readonly onCapabilitySelect?: ConversationActions["onCapabilitySelect"]
   readonly onRequestFileCandidates?: ConversationActions["onRequestFileCandidates"]
@@ -84,6 +91,8 @@ export function LocalSessionPage({
   visible,
   conversation,
   directoryPath,
+  recentDirectories,
+  gitSummary,
   entries,
   contentRevision,
   personal,
@@ -93,6 +102,9 @@ export function LocalSessionPage({
   centralFiles,
   onPersonalChange,
   onChooseDirectory,
+  onSelectDirectory,
+  onOpenChangesPanel,
+  onRefreshGitStatus,
   onCapabilitySelect,
   onRequestFileCandidates,
   onOpenFile,
@@ -217,15 +229,143 @@ export function LocalSessionPage({
       queue: queueMode,
       steer,
     })
+  const isRunning = Boolean(activeExecution?.activeTurnId)
   const capabilities = buildComposerCapabilities({
     providers,
     selectedProviderId,
     sessionState,
     availability,
     directoryPath,
-    running: Boolean(activeExecution?.activeTurnId),
+    running: isRunning,
     textOnly: execution.textOnly,
   })
+  const composerProjectTarget = directoryPath || hooks?.onRequestCollaborationCandidates
+    ? { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
+    : null
+  const directoryStatusLabel = directoryPath
+    ? (directoryStatus === "checking" ? "检查中"
+      : directoryStatus === "confirmation-required" ? "待确认"
+        : directoryStatus === "invalid" ? "已失效"
+          : directoryStatus === "unavailable" ? "待检查" : undefined)
+    : undefined
+  const directoryStatusTone: "default" | "warning" | "danger" | undefined =
+    directoryStatus === "invalid"
+      ? "danger"
+      : directoryStatus === "confirmation-required" || directoryStatus === "checking" || directoryStatus === "unavailable"
+        ? "warning"
+        : undefined
+  const canConfirmDirectory = Boolean(directoryStatus === "confirmation-required" && execution.confirmDirectory)
+  const triggerConfirmDirectory = () => {
+    if (!execution.confirmDirectory || confirmingDirectory || isRunning) return
+    setConfirmingDirectory(true)
+    void execution.confirmDirectory(conversation.conversationId).finally(() => setConfirmingDirectory(false))
+  }
+  const switchingAvailability = isRunning
+    ? { enabled: false, reason: "等待当前回复完成" }
+    : { enabled: true }
+  const { directory: directoryContext, recentById } = buildDirectoryContextView({
+    directoryPath,
+    recentDirectories,
+    statusLabel: directoryStatusLabel,
+    statusTone: directoryStatusTone,
+    quickAction: canConfirmDirectory
+      ? {
+          id: "confirm",
+          label: confirmingDirectory ? "正在确认…" : "确认目录",
+          availability: { enabled: !confirmingDirectory && !isRunning, reason: isRunning ? "等待当前回复完成" : undefined },
+        }
+      : undefined,
+    confirmItem: canConfirmDirectory
+      ? {
+          label: confirmingDirectory ? "正在确认…" : "确认并授权此目录",
+          availability: { enabled: !confirmingDirectory && !isRunning, reason: isRunning ? "等待当前回复完成" : undefined },
+        }
+      : undefined,
+    switchingAvailability,
+    canCopyPath: Boolean(rendering.copyText),
+  })
+  const upstreamLabel = gitSummary?.upstream
+    ? `${gitSummary.upstream.remote}/${gitSummary.upstream.branch} · ↑${gitSummary.upstream.ahead} ↓${gitSummary.upstream.behind}`
+    : undefined
+  const gitContext = gitSummary?.isGitRepository && gitSummary.branch
+    ? {
+        branch: gitSummary.branch,
+        ...(gitSummary.head ? { head: gitSummary.head } : {}),
+        ...(upstreamLabel ? { upstreamLabel } : {}),
+        changedCount: gitSummary.changedCount,
+        availability: { enabled: true },
+        items: [
+          {
+            id: "open-changes",
+            label: "在右侧查看变更",
+            description: gitSummary.changedCount > 0 ? `${gitSummary.changedCount} 个未提交变更` : "工作区暂无变更",
+            availability: { enabled: Boolean(onOpenChangesPanel) },
+          },
+          {
+            id: "copy-branch",
+            label: "复制分支名",
+            description: gitSummary.branch,
+            availability: { enabled: Boolean(rendering.copyText) },
+          },
+          {
+            id: "refresh-git",
+            label: gitSummary.loading ? "正在刷新…" : "刷新 Git 状态",
+            availability: { enabled: Boolean(onRefreshGitStatus) && !gitSummary.loading },
+          },
+        ],
+      }
+    : undefined
+  const directoryReady = Boolean(directoryPath && !directoryNeedsAction && directoryStatus !== "checking")
+  const contextMenu: ConversationComposerView["contextMenu"] = {
+    title: "添加上下文",
+    tooltip: "添加上下文",
+    items: [
+      {
+        id: "files",
+        label: "文件",
+        icon: "file",
+        behavior: "files",
+        availability: execution.textOnly
+          ? { enabled: false, reason: attachmentUnavailableReason }
+          : !directoryPath
+            ? { enabled: false, reason: "请先在顶部选择工作目录" }
+            : !directoryReady || !onRequestFileCandidates
+              ? { enabled: false, reason: availability.reason ?? "工作目录暂不可读" }
+              : { enabled: true },
+      },
+      {
+        id: "folder",
+        label: "目录",
+        icon: "folder",
+        behavior: directoryReady && onRequestFileCandidates ? "folder" : "custom",
+        availability: execution.textOnly && directoryPath
+          ? { enabled: false, reason: attachmentUnavailableReason }
+          : directoryReady && onRequestFileCandidates
+            ? { enabled: true }
+            : onChooseDirectory
+              ? switchingAvailability
+              : { enabled: false, reason: "当前无法浏览或选择目录" },
+      },
+      {
+        id: "mention",
+        label: "提及",
+        icon: "mention",
+        behavior: "mention",
+        availability: composerProjectTarget
+          ? { enabled: true }
+          : { enabled: false, reason: "请先选择工作目录或连接协作范围" },
+      },
+      {
+        id: "actions",
+        label: "命令",
+        icon: "action",
+        behavior: "command",
+        availability: capabilities.commands.length > 0 || availability.available
+          ? { enabled: true }
+          : { enabled: false, reason: availability.reason ?? "当前 Agent 暂未提供斜杠命令" },
+      },
+    ],
+  }
 
   const composer: ConversationComposerView = {
     send: hasUnsupportedMaterial
@@ -243,11 +383,21 @@ export function LocalSessionPage({
     commands: capabilities.commands,
     agentModel: capabilities.agentModel,
     controls: capabilities.controls,
-    projectTarget: directoryPath || hooks?.onRequestCollaborationCandidates
-      ? { deviceId: conversation.ownerUserId, projectId: conversation.projectId }
-      : null,
+    projectTarget: composerProjectTarget,
     references: hooks?.references ?? [],
-    attachments: [],
+    attachments: personal.draft.attachmentIds.map(path => ({
+      id: path,
+      label: path.split("/").at(-1) || path,
+      path,
+      availability: execution.textOnly
+        ? { enabled: false, reason: attachmentUnavailableReason }
+        : { enabled: true },
+    })),
+    contextBar: {
+      directory: directoryContext,
+      ...(gitContext ? { git: gitContext } : {}),
+    },
+    contextMenu,
   }
 
   const permission = activeExecution?.permission
@@ -468,7 +618,7 @@ export function LocalSessionPage({
     </div>
   ) : undefined
 
-  const composerSlot = capabilities.usageBadge || hooks?.composerExtra || directoryNeedsAction ? (
+  const composerSlot = capabilities.usageBadge || hooks?.composerExtra ? (
     <div className="session-composer-extra">
       {capabilities.usageBadge ? (
         <span className="session-usage-badge" title="当前上下文窗口 Token 占用">
@@ -476,32 +626,6 @@ export function LocalSessionPage({
         </span>
       ) : null}
       {hooks?.composerExtra}
-      {directoryNeedsAction ? (
-        <span className="session-directory-actions">
-          {directoryStatus === "confirmation-required" && execution.confirmDirectory ? (
-            <button
-              type="button"
-              className="wb-button wb-button-secondary wb-button-small"
-              disabled={confirmingDirectory}
-              onClick={() => {
-                setConfirmingDirectory(true)
-                void execution.confirmDirectory!(conversation.conversationId).finally(() => setConfirmingDirectory(false))
-              }}
-            >
-              {confirmingDirectory ? "正在确认…" : "确认目录"}
-            </button>
-          ) : null}
-          {onChooseDirectory ? (
-            <button
-              type="button"
-              className="wb-button wb-button-secondary wb-button-small"
-              onClick={onChooseDirectory}
-            >
-              选择目录
-            </button>
-          ) : null}
-        </span>
-      ) : null}
     </div>
   ) : undefined
 
@@ -626,6 +750,29 @@ export function LocalSessionPage({
                 onAddSelectionToChat: (targetScope, selection) => {
                   if (targetScope.conversationId === scope.conversationId) {
                     handleAddSelectionToChat(selection)
+                  }
+                },
+                onDirectoryContextAction: (targetScope, itemId) => {
+                  if (targetScope.conversationId !== scope.conversationId) return
+                  handleDirectoryContextAction({
+                    itemId,
+                    directoryPath,
+                    recentById,
+                    onConfirmDirectory: triggerConfirmDirectory,
+                    onChooseDirectory,
+                    onSelectDirectory,
+                    onCopyPath: path => { void rendering.copyText?.(path).catch(() => {}) },
+                  })
+                },
+                onGitContextAction: (targetScope, itemId) => {
+                  if (targetScope.conversationId !== scope.conversationId) return
+                  if (itemId === "open-changes") onOpenChangesPanel?.()
+                  else if (itemId === "copy-branch" && gitSummary?.branch) void rendering.copyText?.(gitSummary.branch).catch(() => {})
+                  else if (itemId === "refresh-git") onRefreshGitStatus?.()
+                },
+                onContextMenuAction: (targetScope, itemId) => {
+                  if (targetScope.conversationId === scope.conversationId && itemId === "folder") {
+                    onChooseDirectory?.()
                   }
                 },
                 rendering: messageRendering,

@@ -7,6 +7,9 @@
  */
 import { EMPTY_CONVERSATION_PERSONAL, MAX_DRAFT_ANNOTATIONS, parseFixedReference } from "../../../shared/index.js"
 import type {
+  ConversationAvailability,
+  ConversationContextActionItem,
+  ConversationDirectoryContextView,
   ConversationPersonalChange,
   ConversationPersonalState,
   ConversationTimelineEntry,
@@ -291,6 +294,121 @@ function pickString(record: Record<string, unknown> | null, keys: readonly strin
     if (typeof value === "string" && value.length > 0) return value
   }
   return null
+}
+
+/** 构造输入框顶部的工作目录上下文视图及最近目录映射，供本机会话与新建会话页复用。 */
+export function buildDirectoryContextView(input: {
+  readonly directoryPath: string | null
+  readonly recentDirectories?: readonly string[]
+  readonly statusLabel?: string
+  readonly statusTone?: "default" | "warning" | "danger"
+  readonly quickAction?: ConversationDirectoryContextView["quickAction"]
+  readonly switchingAvailability: ConversationAvailability
+  readonly confirmItem?: { readonly label: string; readonly availability: ConversationAvailability }
+  readonly canCopyPath?: boolean
+}): {
+  readonly directory: ConversationDirectoryContextView
+  readonly recentById: Readonly<Record<string, string>>
+} {
+  const {
+    directoryPath,
+    recentDirectories = [],
+    statusLabel,
+    statusTone,
+    quickAction,
+    switchingAvailability,
+    confirmItem,
+    canCopyPath,
+  } = input
+  const items: ConversationContextActionItem[] = []
+  const recentById: Record<string, string> = {}
+
+  if (confirmItem) {
+    items.push({
+      id: "confirm",
+      label: confirmItem.label,
+      description: directoryPath ?? undefined,
+      tone: "accent",
+      availability: confirmItem.availability,
+    })
+  }
+
+  const orderedDirs: string[] = []
+  const pushUnique = (path: string | null | undefined) => {
+    const trimmed = path?.trim()
+    if (trimmed && !orderedDirs.includes(trimmed)) orderedDirs.push(trimmed)
+  }
+  pushUnique(directoryPath)
+  for (const path of recentDirectories) pushUnique(path)
+
+  orderedDirs.forEach((path, index) => {
+    const id = `recent:${index}`
+    recentById[id] = path
+    items.push({
+      id,
+      label: directoryBasename(path) || path,
+      description: path,
+      active: path === directoryPath,
+      availability: switchingAvailability,
+    })
+  })
+
+  if (directoryPath && canCopyPath) {
+    items.push({
+      id: "copy-path",
+      label: "复制完整路径",
+      availability: { enabled: true },
+    })
+  }
+
+  items.push({
+    id: "choose",
+    label: "选择本机文件夹…",
+    tone: "accent",
+    availability: switchingAvailability,
+  })
+
+  return {
+    directory: {
+      label: directoryBasename(directoryPath) || "选择工作目录",
+      fullPath: directoryPath,
+      ...(statusLabel ? { statusLabel } : {}),
+      ...(statusTone ? { statusTone } : {}),
+      ...(quickAction ? { quickAction } : {}),
+      availability: { enabled: true },
+      items,
+    },
+    recentById,
+  }
+}
+
+/** 统一分发顶部工作目录浮层的条目点击动作。 */
+export function handleDirectoryContextAction(input: {
+  readonly itemId: string
+  readonly directoryPath: string | null
+  readonly recentById: Readonly<Record<string, string>>
+  readonly onConfirmDirectory?: () => void
+  readonly onChooseDirectory?: () => void
+  readonly onSelectDirectory?: (directoryPath: string) => void
+  readonly onCopyPath?: (directoryPath: string) => void
+}): void {
+  const { itemId, directoryPath, recentById, onConfirmDirectory, onChooseDirectory, onSelectDirectory, onCopyPath } = input
+  if (itemId === "confirm") {
+    onConfirmDirectory?.()
+    return
+  }
+  if (itemId === "choose") {
+    onChooseDirectory?.()
+    return
+  }
+  if (itemId === "copy-path") {
+    if (directoryPath) onCopyPath?.(directoryPath)
+    return
+  }
+  const nextPath = recentById[itemId]
+  if (nextPath && nextPath !== directoryPath) {
+    onSelectDirectory?.(nextPath)
+  }
 }
 
 export const EMPTY_PERSONAL_STATE: ConversationPersonalState = {

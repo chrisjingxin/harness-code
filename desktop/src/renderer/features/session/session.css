@@ -364,23 +364,8 @@
   text-wrap: pretty;
 }
 
-.session-new-card {
-  width: min(700px, 100%);
-  padding: 12px 12px 10px 14px;
-  border: 1px solid var(--border, var(--line));
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: 0 4px 14px -6px rgba(15, 23, 42, 0.1);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-
-.session-new-card:focus-within {
-  border-color: var(--accent-border-strong, var(--line-strong));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), 0 4px 14px -6px rgba(15, 23, 42, 0.1);
-}
-
 .session-new-composer {
-  width: 100%;
+  width: min(700px, 100%);
 }
 
 .session-new-composer .wb-composer-inner {
@@ -388,124 +373,14 @@
   padding: 0;
 }
 
-.session-new-composer .wb-composer-box,
-.session-new-composer .wb-composer-box:focus-within {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-}
-
-.session-new-composer .wb-composer-tabs,
-.session-new-composer .wb-composer-rail:has(.wb-composer-rail-left:empty) {
-  display: none;
-}
-
-.session-new-composer .wb-composer-rail {
-  margin-bottom: 6px;
-  padding-top: 4px;
-  box-shadow: none;
-}
-
 .session-new-composer .wb-composer-backdrop,
 .session-new-composer .wb-composer-textarea {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 92px;
+  min-height: 88px;
   max-height: 220px;
-  padding: 2px 2px 8px;
-  font: inherit;
-  font-size: var(--text-md, 14px);
-  line-height: 1.7;
 }
 
 .session-new-composer .wb-composer-textarea {
   resize: vertical;
-  border: 0;
-  background: transparent;
-  color: var(--fg, var(--text));
-  outline: none;
-}
-
-.session-new-composer .wb-composer-textarea::placeholder {
-  color: var(--meta, var(--subtle));
-}
-
-.session-new-composer .wb-composer-textarea:focus,
-.session-new-composer .wb-composer-textarea:focus-visible {
-  outline: none;
-}
-
-.session-new-card-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 8px;
-  box-shadow: inset 0 1px 0 var(--border-soft, var(--line-soft));
-}
-
-.session-new-card-left {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.session-new-card-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.session-new-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--fg-2, var(--text-soft));
-  font: inherit;
-  font-size: var(--text-xs, 12px);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-
-.session-new-chip:hover {
-  background: var(--hover);
-  color: var(--fg, var(--text));
-}
-
-.session-new-send-btn {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent, var(--action));
-  color: var(--accent-fg, var(--action-text));
-  cursor: pointer;
-  transition: background-color 120ms ease, opacity 120ms ease;
-}
-
-.session-new-send-btn:hover:not(:disabled) {
-  background: var(--accent-hover, var(--action-hover));
-}
-
-.session-new-send-btn:disabled {
-  opacity: .45;
-  cursor: not-allowed;
 }
 
 .session-new-send {
@@ -848,31 +723,6 @@
   font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
-}
-
-.session-new-provider-select {
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 6px;
-  border: 0;
-  background: var(--surface-2);
-  color: var(--fg-2, var(--text-soft));
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-
-.session-new-provider-select:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--fg, var(--text));
-}
-
-.session-new-provider-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .session-above-timeline {
@@ -1338,10 +1188,3 @@
 .session-checkpoint-files button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
 .session-checkpoint-diff { max-height: 320px; overflow: auto; }
 .session-checkpoint-dialog [role="alert"] { color: var(--danger); }
-
-.session-directory-actions {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-}

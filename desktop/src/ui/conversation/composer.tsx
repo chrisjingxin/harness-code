@@ -5,20 +5,28 @@
  */
 import {
   IconAlertTriangle,
+  IconApps,
+  IconArrowLeft,
   IconArrowUp,
+  IconAt,
   IconBook,
   IconCheck,
   IconChecklist,
   IconChevronDown,
+  IconChevronRight,
   IconCpu,
   IconFolder,
+  IconGitBranch,
   IconLock,
   IconMessages,
+  IconPaperclip,
   IconPencil,
   IconPlayerStopFilled,
+  IconPlus,
   IconSearch,
   IconShield,
   IconShieldExclamation,
+  IconSlash,
   IconSparkles,
   IconUser,
   IconX,
@@ -28,12 +36,21 @@ import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 
 import { FileTypeIcon } from "../common/file-type-icon.js"
 import { ComposerAnnotationsBar } from "./annotations.js"
-import { extractMentionToken, mentionWindow, replaceMentionToken } from "./mention-policy.js"
+import {
+  extractMentionToken,
+  insertMentionTrigger,
+  mentionWindow,
+  replaceMentionToken,
+  toggleAttachmentPath,
+} from "./mention-policy.js"
 import type {
   ConversationActions,
   ConversationCollaborationCandidate,
   ConversationCollaborationCandidateResult,
   ConversationComposerView,
+  ConversationContextActionItem,
+  ConversationContextMenuIcon,
+  ConversationContextMenuItem,
   ConversationDraft,
   ConversationFileCandidate,
   ConversationFileCandidateResult,
@@ -43,6 +60,8 @@ import type {
 } from "./types.js"
 
 type BrowseState = { targetKey: string; tokenStart: number; baseQuery: string; directory: string }
+type FilePickerState = { readonly mode: "files" | "folder"; readonly query: string; readonly directory: string }
+type ComposerPopover = null | "context-menu" | "file-picker" | "directory" | "git" | "command" | "agent-model" | `control:${string}`
 type CandidateState<T> = { key: string; result?: T }
 type MentionCandidate = ConversationFileCandidate | ConversationCollaborationCandidate
 type MentionGroup = "file" | "knowledge" | "conversation" | "task" | "member"
@@ -104,11 +123,23 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const rootRef = useRef<HTMLFormElement | null>(null)
   const backdropRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const dirWrapRef = useRef<HTMLDivElement | null>(null)
+  const dirTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const dirPopoverRef = useRef<HTMLDivElement | null>(null)
+  const gitWrapRef = useRef<HTMLDivElement | null>(null)
+  const gitTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const gitPopoverRef = useRef<HTMLDivElement | null>(null)
+  const addWrapRef = useRef<HTMLDivElement | null>(null)
+  const addTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
+  const filePickerRef = useRef<HTMLDivElement | null>(null)
+  const filePickerInputRef = useRef<HTMLInputElement | null>(null)
   const composing = useRef(false)
   const [isComposing, setIsComposing] = useState(false)
   const pendingCaret = useRef<number | null>(null)
   const wasEditableRef = useRef(false)
-  const [commandOpen, setCommandOpen] = useState(false)
+  // 单一互斥浮层状态：同时只允许打开一个弹出层，避免顶部菜单、+ 菜单、文件选择器、@ 与 / 彼此遮挡。
+  const [openPopover, setOpenPopover] = useState<ComposerPopover>(null)
   const [commandIndex, setCommandIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [browse, setBrowse] = useState<BrowseState | null>(null)
@@ -117,12 +148,23 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const [collaborationState, setCollaborationState] = useState<CandidateState<ConversationCollaborationCandidateResult> | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [windowStart, setWindowStart] = useState(0)
+  const [filePicker, setFilePicker] = useState<FilePickerState | null>(null)
+  const [filePickerState, setFilePickerState] = useState<CandidateState<ConversationFileCandidateResult> | null>(null)
+  const [filePickerSelected, setFilePickerSelected] = useState<string | null>(null)
+  const [filePickerWindowStart, setFilePickerWindowStart] = useState(0)
   const [hint, setHint] = useState("")
   const requestSequence = useRef(0)
+  const filePickerSequence = useRef(0)
   const requestFiles = useRef(actions.onRequestFileCandidates)
   requestFiles.current = actions.onRequestFileCandidates
   const requestCollaboration = useRef(actions.onRequestCollaborationCandidates)
   requestCollaboration.current = actions.onRequestCollaborationCandidates
+
+  const commandOpen = openPopover === "command"
+  const contextMenuOpen = openPopover === "context-menu"
+  const filePickerOpen = openPopover === "file-picker" && filePicker !== null
+  const directoryOpen = openPopover === "directory"
+  const gitOpen = openPopover === "git"
 
   const token = draft.selectionStart === draft.selectionEnd ? extractMentionToken(draft.text, draft.selectionStart) : null
   const target = model.projectTarget
@@ -133,17 +175,27 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   const query = token ? token.query.slice(validBrowse?.baseQuery.length ?? 0) : ""
   const tokenText = token ? draft.text.slice(token.start, token.end) : ""
   const showCollaboration = Boolean(target && !directory && actions.onRequestCollaborationCandidates && actions.onSelectCollaborationCandidate)
-  const mentionVisible = Boolean(visible && !commandOpen && token && dismissed !== tokenKey && actions.onPersonalChange)
+  const mentionVisible = Boolean(visible && !commandOpen && !filePickerOpen && token && dismissed !== tokenKey && actions.onPersonalChange)
   const requestKey = mentionVisible && token
     ? JSON.stringify([targetKey, draft.revision, token.start, token.end, tokenText, query, directory, showCollaboration, Boolean(actions.onRequestFileCandidates)])
     : ""
   const currentRequest = useRef(requestKey)
   currentRequest.current = requestKey
+  const filePickerRequestKey = visible && filePickerOpen && filePicker && target && actions.onRequestFileCandidates
+    ? JSON.stringify([targetKey, filePicker.mode, filePicker.directory, filePicker.query])
+    : ""
+  const currentFilePickerRequest = useRef(filePickerRequestKey)
+  currentFilePickerRequest.current = filePickerRequestKey
   const matchedCommands = filterCommands(model.commands, draft.text)
   const fileResult = fileState?.key === requestKey ? fileState.result : undefined
   const collaborationResult = showCollaboration && collaborationState?.key === requestKey ? collaborationState.result : undefined
   const files = fileResult?.status === "ready" ? fileResult.items.slice(0, 1000) : []
   const collaborationItems = collaborationResult?.status === "ready" ? collaborationResult.items.slice(0, 1000) : []
+  const filePickerResult = filePickerState?.key === filePickerRequestKey ? filePickerState.result : undefined
+  const filePickerItems = filePickerResult?.status === "ready" ? filePickerResult.items.slice(0, 1000) : []
+  const filePickerIndex = Math.max(0, filePickerItems.findIndex(item => item.relativePath === filePickerSelected))
+  const filePickerWindow = mentionWindow(filePickerIndex, filePickerWindowStart, filePickerItems.length)
+  const visibleFilePickerItems = filePickerItems.slice(filePickerWindow.start, filePickerWindow.end)
 
   // 将所有候选按语义分组排列（文件 → 知识库 → 会话 → 任务 → 成员），确保视觉分组与键盘上下键顺序完全一致。
   const knowledgeItems = collaborationItems.filter(item => item.kind === "knowledge")
@@ -204,6 +256,19 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     setCollaborationState(null)
   }
 
+  const openExclusivePopover = (next: ComposerPopover) => {
+    setOpenPopover(next)
+    if (next !== "file-picker") {
+      filePickerSequence.current += 1
+      setFilePicker(null)
+      setFilePickerState(null)
+    }
+    if (next !== null && token) {
+      setDismissed(tokenKey)
+      invalidateCandidates()
+    }
+  }
+
   // 进入可编辑会话且焦点停留在 body 时自动聚焦输入框，方便用户直接输入或按 Tab 切换模式。
   useEffect(() => {
     const editableNow = Boolean(visible && canEdit)
@@ -217,8 +282,19 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }, [visible, canEdit])
 
   useEffect(() => {
-    if (!mentionVisible) setMentionTab("all")
+    if (!mentionVisible) {
+      setMentionTab("all")
+      return
+    }
+    setOpenPopover(current => current && current !== "command" ? null : current)
   }, [mentionVisible])
+
+  useEffect(() => {
+    setOpenPopover(null)
+    filePickerSequence.current += 1
+    setFilePicker(null)
+    setFilePickerState(null)
+  }, [targetKey])
 
   useEffect(() => {
     if (!requestKey || !token) return
@@ -258,11 +334,37 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }, [requestKey])
 
   useEffect(() => {
+    if (!filePickerRequestKey || !filePicker || !target) return
+    const requestId = ++filePickerSequence.current
+    let active = true
+    setFilePickerSelected(null)
+    setFilePickerWindowStart(0)
+    const isCurrent = () => active && filePickerSequence.current === requestId && currentFilePickerRequest.current === filePickerRequestKey
+    const loadFiles = requestFiles.current
+    setFilePickerState({ key: filePickerRequestKey })
+    if (loadFiles) {
+      void Promise.resolve().then(() => {
+        if (isCurrent()) return loadFiles(scope, target, {
+          requestId, draftRevision: draft.revision, tokenStart: 0, tokenEnd: 0, query: filePicker.query, directory: filePicker.directory,
+        })
+      }).then(result => {
+        if (result && isCurrent()) setFilePickerState({ key: filePickerRequestKey, result })
+      }).catch(() => {
+        if (isCurrent()) setFilePickerState({ key: filePickerRequestKey, result: { status: "error", items: [], truncated: false, message: "文件候选暂不可用。" } })
+      })
+    }
+    return () => { active = false }
+  }, [filePickerRequestKey])
+
+  useEffect(() => {
     if (visible) return
     requestSequence.current += 1
+    filePickerSequence.current += 1
     setFileState(null)
     setCollaborationState(null)
-    setCommandOpen(false)
+    setOpenPopover(null)
+    setFilePicker(null)
+    setFilePickerState(null)
     setBrowse(null)
     setMentionTab("all")
     setDismissed(null)
@@ -270,16 +372,47 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
   }, [visible])
 
   useEffect(() => {
-    if (!commandOpen && !mentionVisible) return
+    if (openPopover === "directory") {
+      dirPopoverRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
+    } else if (openPopover === "git") {
+      gitPopoverRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
+    } else if (openPopover === "context-menu") {
+      contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
+    } else if (openPopover === "file-picker") {
+      filePickerInputRef.current?.focus()
+    }
+  }, [openPopover])
+
+  useEffect(() => {
+    if (!openPopover && !mentionVisible) return
     const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return
-      setCommandOpen(false)
+      const targetNode = event.target as Node
+      if (openPopover === "directory") {
+        if (!dirWrapRef.current?.contains(targetNode)) setOpenPopover(null)
+        return
+      }
+      if (openPopover === "git") {
+        if (!gitWrapRef.current?.contains(targetNode)) setOpenPopover(null)
+        return
+      }
+      if (openPopover === "context-menu") {
+        if (!addWrapRef.current?.contains(targetNode)) setOpenPopover(null)
+        return
+      }
+      if (openPopover === "file-picker") {
+        if (!filePickerRef.current?.contains(targetNode) && !addWrapRef.current?.contains(targetNode)) {
+          openExclusivePopover(null)
+        }
+        return
+      }
+      if (rootRef.current?.contains(targetNode)) return
+      if (openPopover === "command") setOpenPopover(null)
       if (token) setDismissed(tokenKey)
       invalidateCandidates()
     }
     document.addEventListener("pointerdown", onPointerDown)
     return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [commandOpen, mentionVisible, tokenKey])
+  }, [openPopover, mentionVisible, tokenKey])
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
@@ -314,8 +447,12 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     setDismissed(null)
     setHint("")
     const slash = props.submitOnEnter !== false && isSlashQuery(text)
-    setCommandOpen(slash)
-    if (slash) setCommandIndex(0)
+    if (slash) {
+      openExclusivePopover("command")
+      setCommandIndex(0)
+    } else {
+      setOpenPopover(current => (current === "command" || current === "directory" || current === "git" || current === "context-menu") ? null : current)
+    }
     actions.onPersonalChange(scope, { kind: "draft-text", text, selectionStart: start, selectionEnd: end })
   }
 
@@ -368,9 +505,115 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
   const selectCommand = (item: ConversationMenuItemView | undefined) => {
     if (!item || !item.availability.enabled || !actions.onCommand) return
-    setCommandOpen(false)
+    setOpenPopover(null)
     actions.onCommand(scope, item.id)
     textareaRef.current?.focus()
+  }
+
+  const closeFilePicker = () => {
+    filePickerSequence.current += 1
+    setOpenPopover(null)
+    setFilePicker(null)
+    setFilePickerState(null)
+    textareaRef.current?.focus()
+  }
+
+  const selectFilePickerCandidate = (item: ConversationFileCandidate) => {
+    if (item.kind === "directory") {
+      setFilePicker(prev => prev ? { ...prev, directory: item.relativePath, query: "" } : prev)
+      setFilePickerSelected(null)
+      setFilePickerWindowStart(0)
+      return
+    }
+    if (!canEdit || !actions.onPersonalChange) return
+    actions.onPersonalChange(scope, {
+      kind: "draft-attachments",
+      attachmentIds: toggleAttachmentPath(draft.attachmentIds, item.relativePath),
+    })
+    closeFilePicker()
+  }
+
+  const moveFilePickerCandidate = (delta: number) => {
+    const next = clamp(filePickerIndex + delta, filePickerItems.length)
+    setFilePickerSelected(filePickerItems[next] ? filePickerItems[next].relativePath : null)
+    setFilePickerWindowStart(mentionWindow(next, filePickerWindow.start, filePickerItems.length).start)
+  }
+
+  const handleFilePickerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) return
+    if (event.key === "Escape") {
+      event.preventDefault()
+      event.stopPropagation()
+      closeFilePicker()
+      return
+    }
+    if (["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(event.key)) {
+      event.preventDefault()
+      event.stopPropagation()
+      moveFilePickerCandidate(event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : event.key === "PageDown" ? 8 : -8)
+      return
+    }
+    if (event.key === "ArrowLeft" && filePicker?.directory && !filePicker.query) {
+      event.preventDefault()
+      event.stopPropagation()
+      setFilePicker(prev => prev ? { ...prev, directory: parentDirectory(prev.directory), query: "" } : prev)
+      return
+    }
+    const activeItem = filePickerItems[filePickerIndex]
+    if (event.key === "ArrowRight" && activeItem?.kind === "directory" && !filePicker?.query) {
+      event.preventDefault()
+      event.stopPropagation()
+      selectFilePickerCandidate(activeItem)
+      return
+    }
+    if (event.key === "Enter") {
+      event.preventDefault()
+      event.stopPropagation()
+      if (activeItem) selectFilePickerCandidate(activeItem)
+    }
+  }
+
+  const handleContextMenuSelect = (item: ConversationContextMenuItem) => {
+    if (!item.availability.enabled) return
+    if (item.behavior === "files") {
+      openExclusivePopover("file-picker")
+      setFilePicker({ mode: "files", query: "", directory: "" })
+      return
+    }
+    if (item.behavior === "folder") {
+      if (actions.onRequestFileCandidates && target) {
+        openExclusivePopover("file-picker")
+        setFilePicker({ mode: "folder", query: "", directory: "" })
+      } else {
+        openExclusivePopover(null)
+        actions.onContextMenuAction?.(scope, item.id)
+      }
+      return
+    }
+    if (item.behavior === "mention") {
+      openExclusivePopover(null)
+      if (!actions.onPersonalChange) return
+      const next = insertMentionTrigger(draft.text, draft.selectionStart, draft.selectionEnd)
+      invalidateCandidates()
+      setDismissed(null)
+      setBrowse(null)
+      pendingCaret.current = next.cursor
+      actions.onPersonalChange(scope, {
+        kind: "draft-text",
+        text: next.text,
+        selectionStart: next.cursor,
+        selectionEnd: next.cursor,
+      })
+      return
+    }
+    if (item.behavior === "command") {
+      setCommandIndex(0)
+      openExclusivePopover("command")
+      textareaRef.current?.focus()
+      return
+    }
+    openExclusivePopover(null)
+    actions.onContextMenuAction?.(scope, item.id)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -380,7 +623,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
       if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Tab", "Escape"].includes(event.key)) {
         event.preventDefault()
         event.stopPropagation()
-        if (event.key === "Escape") setCommandOpen(false)
+        if (event.key === "Escape") setOpenPopover(null)
         else if (event.key === "Enter" || event.key === "Tab") selectCommand(matchedCommands[clamp(commandIndex, matchedCommands.length)])
         else if (event.key === "Home") setCommandIndex(0)
         else if (event.key === "End") setCommandIndex(Math.max(0, matchedCommands.length - 1))
@@ -413,6 +656,12 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
         if (activeCandidate) selectCandidate(activeCandidate)
         return
       }
+    }
+    if (event.key === "Escape" && openPopover) {
+      event.preventDefault()
+      event.stopPropagation()
+      openExclusivePopover(null)
+      return
     }
     if (event.key === "Enter" && !event.shiftKey && props.submitOnEnter !== false) {
       event.preventDefault()
@@ -486,6 +735,388 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
     return null
   }
 
+  const hasContextBar = Boolean(model.contextBar?.directory || model.contextBar?.git)
+  const dirContext = model.contextBar?.directory
+  const gitContext = model.contextBar?.git
+  const contextMenu = model.contextMenu && model.contextMenu.items.length > 0 ? model.contextMenu : null
+  const contextMenuTitle = contextMenu?.title ?? "添加上下文"
+  const contextMenuTooltip = contextMenu?.tooltip ?? "添加上下文"
+
+  const renderContextBar = () => {
+    if (!hasContextBar) return null
+    return (
+      <div className="wb-composer-context-bar" role="group" aria-label="工作区上下文">
+        {dirContext ? (
+          <div
+            ref={dirWrapRef}
+            className="wb-composer-context-item"
+            onBlur={event => {
+              if (directoryOpen && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
+                setOpenPopover(current => current === "directory" ? null : current)
+              }
+            }}
+          >
+            <button
+              ref={dirTriggerRef}
+              type="button"
+              className="wb-composer-context-trigger"
+              data-context-trigger="directory"
+              data-tone={dirContext.statusTone}
+              disabled={!dirContext.availability.enabled}
+              title={dirContext.availability.reason || dirContext.fullPath || dirContext.label}
+              aria-haspopup="menu"
+              aria-expanded={directoryOpen}
+              onClick={() => openExclusivePopover(directoryOpen ? null : "directory")}
+            >
+              <IconFolder size={14} aria-hidden="true" />
+              <span className="wb-composer-context-label">{dirContext.label}</span>
+              {dirContext.statusLabel ? (
+                <span className="wb-composer-context-status" data-tone={dirContext.statusTone}>
+                  · {dirContext.statusLabel}
+                </span>
+              ) : null}
+              <IconChevronDown size={12} className="wb-composer-context-chev" aria-hidden="true" />
+            </button>
+            {dirContext.quickAction ? (
+              <button
+                type="button"
+                className="wb-composer-context-quick"
+                disabled={!dirContext.quickAction.availability.enabled || !actions.onDirectoryContextAction}
+                title={dirContext.quickAction.availability.reason}
+                onClick={() => actions.onDirectoryContextAction?.(scope, dirContext.quickAction!.id)}
+              >
+                {dirContext.quickAction.label}
+              </button>
+            ) : null}
+            {directoryOpen ? (
+              <div
+                ref={dirPopoverRef}
+                className="wb-composer-context-popover"
+                role="menu"
+                aria-label="工作目录操作"
+                onKeyDown={event => handleMenuListKeyDown(event, '[role="menuitem"]:not(:disabled)', () => {
+                  setOpenPopover(null)
+                  dirTriggerRef.current?.focus()
+                })}
+              >
+                <div className="wb-composer-context-popover-head" onMouseDown={event => event.preventDefault()}>
+                  <span className="wb-composer-context-popover-title">工作目录</span>
+                  {dirContext.fullPath ? (
+                    <span className="wb-composer-context-popover-path" title={dirContext.fullPath}>
+                      {dirContext.fullPath}
+                    </span>
+                  ) : null}
+                </div>
+                <ContextPopoverOptions
+                  items={dirContext.items}
+                  emptyText="暂无可用目录操作"
+                  disabled={!actions.onDirectoryContextAction}
+                  onSelect={itemId => {
+                    setOpenPopover(null)
+                    actions.onDirectoryContextAction?.(scope, itemId)
+                    dirTriggerRef.current?.focus()
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {gitContext ? (
+          <div
+            ref={gitWrapRef}
+            className="wb-composer-context-item"
+            onBlur={event => {
+              if (gitOpen && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
+                setOpenPopover(current => current === "git" ? null : current)
+              }
+            }}
+          >
+            <button
+              ref={gitTriggerRef}
+              type="button"
+              className="wb-composer-context-trigger"
+              data-context-trigger="git"
+              disabled={!gitContext.availability.enabled}
+              title={gitContext.availability.reason || [gitContext.branch, gitContext.upstreamLabel].filter(Boolean).join(" · ")}
+              aria-haspopup="menu"
+              aria-expanded={gitOpen}
+              onClick={() => openExclusivePopover(gitOpen ? null : "git")}
+            >
+              <IconGitBranch size={14} aria-hidden="true" />
+              <span className="wb-composer-context-label">{gitContext.branch}</span>
+              {gitContext.changedCount && gitContext.changedCount > 0 ? (
+                <span className="wb-composer-context-count">· {gitContext.changedCount}</span>
+              ) : null}
+              <IconChevronDown size={12} className="wb-composer-context-chev" aria-hidden="true" />
+            </button>
+            {gitOpen ? (
+              <div
+                ref={gitPopoverRef}
+                className="wb-composer-context-popover"
+                role="menu"
+                aria-label="Git 仓库摘要"
+                onKeyDown={event => handleMenuListKeyDown(event, '[role="menuitem"]:not(:disabled)', () => {
+                  setOpenPopover(null)
+                  gitTriggerRef.current?.focus()
+                })}
+              >
+                <div className="wb-composer-context-popover-head" onMouseDown={event => event.preventDefault()}>
+                  <span className="wb-composer-context-popover-title">Git 仓库（只读）</span>
+                  <div className="wb-composer-git-meta">
+                    <span className="wb-composer-git-branch">{gitContext.branch}</span>
+                    {gitContext.head ? <code className="wb-composer-git-head">{gitContext.head.slice(0, 7)}</code> : null}
+                  </div>
+                  {gitContext.upstreamLabel || gitContext.changedCount !== undefined ? (
+                    <span className="wb-composer-context-popover-sub">
+                      {[
+                        gitContext.upstreamLabel,
+                        gitContext.changedCount !== undefined
+                          ? (gitContext.changedCount > 0 ? `${gitContext.changedCount} 个未提交变更` : "工作区干净")
+                          : undefined,
+                      ].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                </div>
+                <ContextPopoverOptions
+                  items={gitContext.items}
+                  emptyText="暂无 Git 操作"
+                  disabled={!actions.onGitContextAction}
+                  onSelect={itemId => {
+                    setOpenPopover(null)
+                    actions.onGitContextAction?.(scope, itemId)
+                    gitTriggerRef.current?.focus()
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  const composerBox = (
+    <div className="wb-composer-box" data-queue-mode={model.queue ? "" : undefined}>
+      {draft.referenceIds.length ? <div className="wb-composer-references" aria-label="引用材料">{draft.referenceIds.map(id => {
+        const reference = model.references.find(item => item.id === id)
+        if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
+        return <div key={reference.id} className="wb-composer-reference">
+          <div className="wb-composer-reference-head">
+            <div className="wb-composer-reference-meta">
+              <strong>{reference.sourceLabel}</strong>
+              {reference.rangeLabel ? <span className="wb-composer-reference-badge">{reference.rangeLabel}</span> : null}
+            </div>
+            <div className="wb-composer-reference-actions">{(["open", "refresh"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : "刷新"}</button>)}</div>
+          </div>
+          <button
+            type="button"
+            className="wb-composer-reference-remove"
+            aria-label={`取消引用 ${reference.sourceLabel}`}
+            title={reference.actions.remove.reason || (!actions.onReferenceAction ? "当前无法取消引用" : "取消这次引用")}
+            disabled={!actions.onReferenceAction || !reference.actions.remove.enabled}
+            onClick={() => actions.onReferenceAction?.(scope, reference.id, "remove")}
+          ><IconX size={14} aria-hidden="true" /></button>
+          {reference.snapshotText ? <p>{reference.snapshotText}</p> : null}
+          {reference.status !== "ready" ? <p role="status">{reference.message || (reference.status === "loading" ? "正在读取引用…" : "引用来源暂不可用")}</p> : null}
+        </div>
+      })}</div> : null}
+      {draft.attachmentIds.length ? <div className="wb-composer-attachments" aria-label="附件">{draft.attachmentIds.map(id => {
+        const item = model.attachments.find(attachment => attachment.id === id)
+        if (!item) return <span key={id}>附件资料暂不可用</span>
+        return (
+          <span key={item.id} title={item.path ?? item.label}>
+            <span className="wb-composer-attachment-icon" aria-hidden="true">
+              {item.path ? <FileTypeIcon name={item.label} size={13} /> : <IconPaperclip size={13} />}
+            </span>
+            <span className="wb-composer-attachment-label">{item.label}</span>
+            <button
+              type="button"
+              aria-label={`移除 ${item.label}`}
+              title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)}
+              disabled={!canEdit || !item.availability.enabled}
+              onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(currentId => currentId !== item.id) })}
+            >
+              <IconX aria-hidden="true" />
+            </button>
+          </span>
+        )
+      })}</div> : null}
+      <ComposerAnnotationsBar
+        annotations={annotations}
+        canEdit={canEdit && visible}
+        onUpdate={(id, patch) => {
+          const next = annotations.map(item => {
+            if (item.id !== id) return item
+            return {
+              id: item.id,
+              selectedText: patch.selectedText,
+              ...(patch.comment ? { comment: patch.comment } : {}),
+              ...(item.sourceLabel ? { sourceLabel: item.sourceLabel } : {}),
+            }
+          })
+          actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
+        }}
+        onRemove={id => {
+          const next = annotations.filter(item => item.id !== id)
+          actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
+        }}
+      />
+      <div className="wb-composer-editor" data-highlighted={showHighlight || undefined}>
+        {showHighlight && highlightSegments ? (
+          <div ref={backdropRef} className="wb-composer-backdrop" aria-hidden="true">
+            {highlightSegments.map((segment, index) => (
+              segment.kind === "mention"
+                ? <mark key={index} className="wb-composer-inline-mention">{segment.text}</mark>
+                : <span key={index}>{segment.text}</span>
+            ))}
+            {draft.text.endsWith("\n") ? " " : null}
+          </div>
+        ) : null}
+        <textarea
+          ref={textareaRef}
+          className="wb-composer-textarea"
+          rows={1}
+          value={draft.text}
+          disabled={!canEdit}
+          placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息 · @ 引用 · / 命令") : "当前无法编辑草稿"}
+          aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
+          onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+          onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
+          onScroll={event => {
+            if (backdropRef.current) backdropRef.current.scrollTop = event.currentTarget.scrollTop
+          }}
+          onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }}
+          onCompositionStart={() => {
+            composing.current = true
+            setIsComposing(true)
+          }}
+          onCompositionEnd={() => {
+            composing.current = false
+            setIsComposing(false)
+          }}
+          onKeyDown={handleKeyDown}
+        />
+      </div>
+      <div className="wb-composer-rail">
+        <div className="wb-composer-rail-left">
+          {contextMenu ? (
+            <div
+              ref={addWrapRef}
+              className="wb-composer-add-wrap"
+              onBlur={event => {
+                if (contextMenuOpen && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) {
+                  setOpenPopover(current => current === "context-menu" ? null : current)
+                }
+              }}
+            >
+              <button
+                ref={addTriggerRef}
+                type="button"
+                className="wb-composer-add-btn"
+                aria-label={contextMenuTooltip}
+                aria-haspopup="menu"
+                aria-expanded={contextMenuOpen}
+                disabled={!canEdit}
+                onClick={() => openExclusivePopover(contextMenuOpen ? null : "context-menu")}
+              >
+                <IconPlus size={15} aria-hidden="true" />
+              </button>
+              <span className="wb-composer-add-tooltip" role="tooltip" aria-hidden="true">
+                {contextMenuTooltip}
+              </span>
+              {contextMenuOpen ? (
+                <div
+                  ref={contextMenuRef}
+                  className="wb-context-menu"
+                  role="menu"
+                  aria-label={contextMenuTitle}
+                  onKeyDown={event => handleMenuListKeyDown(event, '[role="menuitem"]:not(:disabled)', () => {
+                    setOpenPopover(null)
+                    addTriggerRef.current?.focus()
+                  })}
+                >
+                  <div className="wb-context-menu-title" onMouseDown={event => event.preventDefault()}>
+                    {contextMenuTitle}
+                  </div>
+                  <div className="wb-context-menu-list">
+                    {contextMenu.items.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="menuitem"
+                        className="wb-context-menu-item"
+                        disabled={!item.availability.enabled}
+                        title={item.availability.reason}
+                        onClick={() => handleContextMenuSelect(item)}
+                      >
+                        <span className="wb-context-menu-icon" aria-hidden="true">
+                          {renderContextMenuIcon(item.icon)}
+                        </span>
+                        <span className="wb-context-menu-label">{item.label}</span>
+                        {item.badge ? (
+                          <span className="wb-context-menu-badge" data-tone={item.badgeTone ?? "default"}>
+                            {item.badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {model.agentModel?.length ? (
+            <CapabilityMenu
+              scope={scope}
+              controls={model.agentModel}
+              label="Agent 和模型"
+              split
+              open={openPopover === "agent-model"}
+              onOpenChange={next => {
+                if (next) openExclusivePopover("agent-model")
+                else setOpenPopover(current => current === "agent-model" ? null : current)
+              }}
+              onSelect={actions.onCapabilitySelect}
+            />
+          ) : null}
+          {model.controls.map(control => {
+            const controlPopoverId = `control:${control.id}` as const
+            return (
+              <CapabilityMenu
+                key={control.id}
+                scope={scope}
+                controls={[control]}
+                label={control.label}
+                isTabCycle={model.tabCycle?.controlId === control.id}
+                open={openPopover === controlPopoverId}
+                onOpenChange={next => {
+                  if (next) openExclusivePopover(controlPopoverId)
+                  else setOpenPopover(current => current === controlPopoverId ? null : current)
+                }}
+                onSelect={actions.onCapabilitySelect}
+              />
+            )
+          })}
+          {children}
+        </div>
+        <div className="wb-composer-rail-right">
+          {allowsSend || allowsCancel ? (
+            <button type={showStop ? "button" : "submit"}
+              className={showStop ? "wb-composer-cancel" : "wb-composer-send"}
+              aria-label={showStop ? "取消当前任务" : "发送消息"}
+              disabled={showStop ? !canStop : !canSend}
+              title={showStop
+                ? model.cancel.reason || (actions.onCancel ? "请求停止" : "当前无法停止")
+                : model.send.reason || (!actions.onSend ? "当前无法发送" : model.queue ? "发送到待发队列" : "发送消息")}
+              onClick={showStop ? onCancel : undefined}>
+              {showStop ? <IconPlayerStopFilled size={14} aria-hidden="true" /> : <IconArrowUp aria-hidden="true" />}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="wb-composer-bar">
       <form ref={rootRef} className="wb-composer-inner" onSubmit={handleSubmit}>
@@ -513,6 +1144,112 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
                 <small>{item.availability.enabled ? item.description : item.availability.reason || "当前不可用"}</small>
               </button>
             ))}
+          </div>
+        ) : null}
+        {filePickerOpen && filePicker ? (
+          <div
+            ref={filePickerRef}
+            className="wb-file-picker-menu"
+            role="dialog"
+            aria-label={filePicker.mode === "folder" ? "浏览目录添加文件" : "添加工作区文件"}
+            onKeyDown={handleFilePickerKeyDown}
+            onWheel={event => {
+              if (!filePickerItems.length) return
+              event.preventDefault()
+              moveFilePickerCandidate(event.deltaY >= 0 ? 1 : -1)
+            }}
+          >
+            <div className="wb-file-picker-head">
+              {filePicker.directory ? (
+                <button
+                  type="button"
+                  className="wb-file-picker-back"
+                  aria-label="返回上级目录"
+                  title="返回上级目录"
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => setFilePicker(prev => prev ? { ...prev, directory: parentDirectory(prev.directory), query: "" } : prev)}
+                >
+                  <IconArrowLeft size={13} aria-hidden="true" />
+                  <span>上级</span>
+                </button>
+              ) : null}
+              <label className="wb-file-picker-search">
+                <IconSearch size={14} aria-hidden="true" />
+                <input
+                  ref={filePickerInputRef}
+                  type="search"
+                  aria-label="搜索工作区文件"
+                  placeholder={filePicker.mode === "folder" ? "筛选当前目录或搜索文件…" : "搜索工作区文件…"}
+                  value={filePicker.query}
+                  onChange={event => {
+                    const nextQuery = event.currentTarget.value
+                    setFilePicker(prev => prev ? { ...prev, query: nextQuery } : prev)
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="wb-file-picker-close"
+                aria-label="关闭文件选择器"
+                onMouseDown={event => event.preventDefault()}
+                onClick={closeFilePicker}
+              >
+                <IconX size={14} aria-hidden="true" />
+              </button>
+            </div>
+            {filePicker.directory ? (
+              <div className="wb-file-picker-crumb" onMouseDown={event => event.preventDefault()}>
+                <IconFolder size={12} aria-hidden="true" />
+                <span>{filePicker.directory}</span>
+              </div>
+            ) : null}
+            <div className="wb-mention-list" role="listbox" aria-label="工作区文件列表">
+              {!target || !actions.onRequestFileCandidates ? (
+                <p className="wb-composer-menu-empty">当前会话没有可用的工作区目录。</p>
+              ) : !filePickerResult ? (
+                <p className="wb-composer-menu-empty">正在查找工作区文件…</p>
+              ) : filePickerResult.status !== "ready" ? (
+                <p className="wb-composer-menu-empty">{filePickerResult.message || "文件候选不可用"}</p>
+              ) : filePickerItems.length === 0 ? (
+                <p className="wb-composer-menu-empty">{filePicker.query ? "没有匹配的工作区文件" : "当前目录为空"}</p>
+              ) : visibleFilePickerItems.map((item, localIndex) => {
+                const index = filePickerWindow.start + localIndex
+                const isSelected = index === filePickerIndex
+                const attached = item.kind !== "directory" && draft.attachmentIds.includes(item.relativePath)
+                return (
+                  <button
+                    key={item.relativePath}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    data-selected={isSelected}
+                    className="wb-mention-item"
+                    title={item.relativePath}
+                    onMouseDown={event => event.preventDefault()}
+                    onMouseEnter={() => setFilePickerSelected(item.relativePath)}
+                    onClick={() => selectFilePickerCandidate(item)}
+                  >
+                    <span className="wb-mention-icon" aria-hidden="true">
+                      {item.kind === "directory"
+                        ? <IconFolder size={14} />
+                        : <FileTypeIcon name={item.relativePath.split("/").at(-1) ?? item.relativePath} size={14} />}
+                    </span>
+                    <HighlightedPath item={item} />
+                    {item.kind === "directory" ? (
+                      <IconChevronRight size={13} className="wb-file-picker-dir-arrow" aria-hidden="true" />
+                    ) : attached ? (
+                      <IconCheck size={13} className="wb-file-picker-attached" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="wb-mention-footer">
+              <span>
+                {filePickerItems.length ? `${filePickerIndex + 1}/${filePickerResult?.total ?? filePickerItems.length}` : "添加文件附件"}
+              </span>
+              <span className="wb-mention-footer-hint">↵ 附加文件 · ↑↓ 选择 · Esc 关闭</span>
+            </div>
           </div>
         ) : null}
         {mentionVisible && token ? (
@@ -620,126 +1357,91 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           </div>
         ) : null}
         {props.aboveComposer}
-        <div className="wb-composer-box" data-queue-mode={model.queue ? "" : undefined}>
-          {draft.referenceIds.length ? <div className="wb-composer-references" aria-label="引用材料">{draft.referenceIds.map(id => {
-            const reference = model.references.find(item => item.id === id)
-            if (!reference) return <div key={id} className="wb-composer-reference" role="status">引用资料暂不可用。</div>
-            return <div key={reference.id} className="wb-composer-reference">
-              <div className="wb-composer-reference-head">
-                <div className="wb-composer-reference-meta">
-                  <strong>{reference.sourceLabel}</strong>
-                  {reference.rangeLabel ? <span className="wb-composer-reference-badge">{reference.rangeLabel}</span> : null}
-                </div>
-                <div className="wb-composer-reference-actions">{(["open", "refresh"] as const).map(action => <button key={action} type="button" disabled={!actions.onReferenceAction || !reference.actions[action].enabled} title={reference.actions[action].reason || (!actions.onReferenceAction ? "当前无法操作引用" : undefined)} onClick={() => actions.onReferenceAction?.(scope, reference.id, action)}>{action === "open" ? "定位" : "刷新"}</button>)}</div>
-              </div>
-              <button
-                type="button"
-                className="wb-composer-reference-remove"
-                aria-label={`取消引用 ${reference.sourceLabel}`}
-                title={reference.actions.remove.reason || (!actions.onReferenceAction ? "当前无法取消引用" : "取消这次引用")}
-                disabled={!actions.onReferenceAction || !reference.actions.remove.enabled}
-                onClick={() => actions.onReferenceAction?.(scope, reference.id, "remove")}
-              ><IconX size={14} aria-hidden="true" /></button>
-              {reference.snapshotText ? <p>{reference.snapshotText}</p> : null}
-              {reference.status !== "ready" ? <p role="status">{reference.message || (reference.status === "loading" ? "正在读取引用…" : "引用来源暂不可用")}</p> : null}
-            </div>
-          })}</div> : null}
-          {draft.attachmentIds.length ? <div className="wb-composer-attachments" aria-label="附件">{draft.attachmentIds.map(id => {
-            const item = model.attachments.find(attachment => attachment.id === id)
-            if (!item) return <span key={id}>附件资料暂不可用</span>
-            return <span key={item.id}>{item.label}<button type="button" aria-label={`移除 ${item.label}`} title={item.availability.reason || (!canEdit ? "当前无法修改草稿" : undefined)} disabled={!canEdit || !item.availability.enabled} onClick={() => actions.onPersonalChange?.(scope, { kind: "draft-attachments", attachmentIds: draft.attachmentIds.filter(id => id !== item.id) })}><IconX aria-hidden="true" /></button></span>
-          })}</div> : null}
-          <ComposerAnnotationsBar
-            annotations={annotations}
-            canEdit={canEdit && visible}
-            onUpdate={(id, patch) => {
-              const next = annotations.map(item => {
-                if (item.id !== id) return item
-                return {
-                  id: item.id,
-                  selectedText: patch.selectedText,
-                  ...(patch.comment ? { comment: patch.comment } : {}),
-                  ...(item.sourceLabel ? { sourceLabel: item.sourceLabel } : {}),
-                }
-              })
-              actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
-            }}
-            onRemove={id => {
-              const next = annotations.filter(item => item.id !== id)
-              actions.onPersonalChange?.(scope, { kind: "draft-annotations", annotations: next })
-            }}
-          />
-          <div className="wb-composer-editor" data-highlighted={showHighlight || undefined}>
-            {showHighlight && highlightSegments ? (
-              <div ref={backdropRef} className="wb-composer-backdrop" aria-hidden="true">
-                {highlightSegments.map((segment, index) => (
-                  segment.kind === "mention"
-                    ? <mark key={index} className="wb-composer-inline-mention">{segment.text}</mark>
-                    : <span key={index}>{segment.text}</span>
-                ))}
-                {draft.text.endsWith("\n") ? " " : null}
-              </div>
-            ) : null}
-            <textarea
-              ref={textareaRef}
-              className="wb-composer-textarea"
-              rows={1}
-              value={draft.text}
-              disabled={!canEdit}
-              placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息 · @ 引用 · / 命令") : "当前无法编辑草稿"}
-              aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
-              onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
-              onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
-              onScroll={event => {
-                if (backdropRef.current) backdropRef.current.scrollTop = event.currentTarget.scrollTop
-              }}
-              onFocus={event => { if (visible) event.currentTarget.setSelectionRange(draft.selectionStart, draft.selectionEnd) }}
-              onCompositionStart={() => {
-                composing.current = true
-                setIsComposing(true)
-              }}
-              onCompositionEnd={() => {
-                composing.current = false
-                setIsComposing(false)
-              }}
-              onKeyDown={handleKeyDown}
-            />
+        {hasContextBar ? (
+          <div className="wb-composer-shell">
+            {renderContextBar()}
+            {composerBox}
           </div>
-          <div className="wb-composer-rail">
-            <div className="wb-composer-rail-left">
-              {model.agentModel?.length ? <CapabilityMenu scope={scope} controls={model.agentModel}
-                label="Agent 和模型" split onSelect={actions.onCapabilitySelect} /> : null}
-              {model.controls.map(control => (
-                <CapabilityMenu
-                  key={control.id}
-                  scope={scope}
-                  controls={[control]}
-                  label={control.label}
-                  isTabCycle={model.tabCycle?.controlId === control.id}
-                  onSelect={actions.onCapabilitySelect}
-                />
-              ))}
-              {children}
-            </div>
-            <div className="wb-composer-rail-right">
-              {allowsSend || allowsCancel ? (
-                <button type={showStop ? "button" : "submit"}
-                  className={showStop ? "wb-composer-cancel" : "wb-composer-send"}
-                  aria-label={showStop ? "取消当前任务" : "发送消息"}
-                  disabled={showStop ? !canStop : !canSend}
-                  title={showStop
-                    ? model.cancel.reason || (actions.onCancel ? "请求停止" : "当前无法停止")
-                    : model.send.reason || (!actions.onSend ? "当前无法发送" : model.queue ? "发送到待发队列" : "发送消息")}
-                  onClick={showStop ? onCancel : undefined}>
-                  {showStop ? <IconPlayerStopFilled size={14} aria-hidden="true" /> : <IconArrowUp aria-hidden="true" />}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        ) : composerBox}
         {displayStatus ? <p className="wb-composer-status" role="status"><IconAlertTriangle aria-hidden="true" />{displayStatus}</p> : null}
         {fullAccess ? <p className="wb-composer-permission-warning" role="status"><IconShieldExclamation aria-hidden="true" />完全访问已开启，部分操作无需确认。</p> : null}
       </form>
+    </div>
+  )
+}
+
+function renderContextMenuIcon(icon: ConversationContextMenuIcon): ReactElement {
+  switch (icon) {
+    case "file": return <IconPaperclip size={16} stroke={1.7} />
+    case "folder": return <IconFolder size={16} stroke={1.7} />
+    case "mention": return <IconAt size={16} stroke={1.7} />
+    case "action": return <IconSlash size={16} stroke={1.7} />
+    case "knowledge": return <IconBook size={16} stroke={1.7} />
+    case "conversation": return <IconMessages size={16} stroke={1.7} />
+    case "external": return <IconApps size={16} stroke={1.7} />
+  }
+}
+
+function handleMenuListKeyDown(
+  event: KeyboardEvent<HTMLElement>,
+  itemSelector: string,
+  onClose: () => void,
+): void {
+  if (event.key === "Escape") {
+    event.preventDefault()
+    event.stopPropagation()
+    onClose()
+    return
+  }
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(itemSelector))
+  if (!items.length) return
+  const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement))
+  let next: number | null = null
+  if (event.key === "ArrowDown") next = (current + 1) % items.length
+  if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length
+  if (event.key === "Home") next = 0
+  if (event.key === "End") next = items.length - 1
+  if (next !== null) {
+    event.preventDefault()
+    event.stopPropagation()
+    items[next]?.focus()
+  }
+}
+
+function ContextPopoverOptions({
+  items,
+  emptyText,
+  disabled,
+  onSelect,
+}: {
+  items: readonly ConversationContextActionItem[]
+  emptyText: string
+  disabled: boolean
+  onSelect: (itemId: string) => void
+}): ReactElement {
+  return (
+    <div className="wb-composer-context-popover-list">
+      {items.length === 0 ? (
+        <p className="wb-composer-menu-empty">{emptyText}</p>
+      ) : items.map(item => (
+        <button
+          key={item.id}
+          type="button"
+          role="menuitem"
+          className="wb-composer-context-option"
+          data-active={item.active || undefined}
+          data-tone={item.tone}
+          disabled={disabled || !item.availability.enabled}
+          title={item.availability.reason ?? item.description}
+          onClick={() => onSelect(item.id)}
+        >
+          <span className="wb-composer-context-option-text">
+            <span>{item.label}</span>
+            {item.description ? <small>{item.description}</small> : null}
+          </span>
+          {item.active ? <IconCheck size={13} aria-hidden="true" /> : null}
+        </button>
+      ))}
     </div>
   )
 }
@@ -754,15 +1456,16 @@ function renderCollaborationIcon(kind: ConversationCollaborationCandidate["kind"
 }
 
 /** Agent 切换保留分栏打开，新会话公布模型后立即更新右侧。 */
-function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }: {
+function CapabilityMenu({ scope, controls, label, split, isTabCycle, open, onOpenChange, onSelect }: {
   scope: ConversationScope
   controls: readonly Control[]
   label: string
   split?: boolean
   isTabCycle?: boolean
+  open: boolean
+  onOpenChange: (next: boolean) => void
   onSelect?: ConversationActions["onCapabilitySelect"]
 }): ReactElement {
-  const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const root = useRef<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -784,29 +1487,24 @@ function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }:
     const current = menu.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)')
     const first = menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')
     ;(searchField ?? current ?? first)?.focus()
-    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) onOpenChange(false) }
     document.addEventListener("pointerdown", close)
     return () => document.removeEventListener("pointerdown", close)
   }, [open])
 
-  useEffect(() => { if (!enabled) setOpen(false) }, [enabled])
+  useEffect(() => { if (!enabled && open) onOpenChange(false) }, [enabled, open])
 
   const onMenuKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); return }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onOpenChange(false); trigger.current?.focus(); return }
     if (split) {
       // 搜索框在消息表单内。回车只留在搜索，避免误发原来的草稿。
       if (event.key === "Enter" && event.target instanceof HTMLInputElement) event.preventDefault()
       return
     }
-    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)'))
-    if (!items.length) return
-    const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement))
-    let next: number | null = null
-    if (event.key === "ArrowDown") next = (current + 1) % items.length
-    if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length
-    if (event.key === "Home") next = 0
-    if (event.key === "End") next = items.length - 1
-    if (next !== null) { event.preventDefault(); event.stopPropagation(); items[next]?.focus() }
+    handleMenuListKeyDown(event, '[role="menuitemradio"]:not(:disabled)', () => {
+      onOpenChange(false)
+      trigger.current?.focus()
+    })
   }
 
   const modelControls = split ? controls.slice(1) : controls
@@ -829,7 +1527,7 @@ function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }:
             data-full-access={item.permissionKind === "full" || undefined}
             disabled={!control.availability.enabled || !item.availability.enabled}
             title={item.availability.reason ?? control.availability.reason ?? (control.kind === "model" ? item.label : undefined)}
-            onClick={() => { setOpen(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}>
+            onClick={() => { onOpenChange(false); onSelect?.(scope, control.id, item.id); trigger.current?.focus() }}>
             {PermissionIcon ? <PermissionIcon className="wb-permission-icon" size={15} aria-hidden="true" /> : null}
             <span>{item.label}{item.description || item.availability.reason ? <small>{item.description ?? item.availability.reason}</small> : null}</span>
             {selected ? <IconCheck size={13} aria-hidden="true" /> : null}
@@ -841,7 +1539,7 @@ function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }:
 
   return <div ref={root} className="wb-composer-control" data-agent-model={split || undefined} onBlur={event => {
     // 焦点在触发按钮与菜单选项之间移动时保持打开；离开整个控件后及时收起。
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
+    if (open && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) onOpenChange(false)
   }}>
     <button
       ref={trigger}
@@ -853,7 +1551,7 @@ function CapabilityMenu({ scope, controls, label, split, isTabCycle, onSelect }:
       aria-label={`${label}：${displayLabel}`}
       aria-haspopup={split ? "dialog" : "menu"}
       aria-expanded={open}
-      onClick={() => { setSearch(""); setOpen(value => !value) }}
+      onClick={() => { setSearch(""); onOpenChange(!open) }}
     >
       {TriggerIcon ? <TriggerIcon className={permission ? "wb-permission-icon" : undefined} aria-hidden="true" /> : null}
       <span className="wb-composer-chip-label">{displayLabel}</span>

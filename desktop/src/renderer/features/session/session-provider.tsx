@@ -21,9 +21,9 @@ import type {
 import { UserAvatar } from "../collaboration-views/index.js"
 import type { ProjectPage, ProjectPageProvider, ProjectNavigationScope } from "../project-navigation/contracts.js"
 import type { LocalSessionExecutionPort, NewSessionDraft, ProjectConversationSummary, SessionExternalHooks, SessionKind, SessionSyncState } from "./contracts.js"
-import { IconChevronDown, IconFolder } from "@tabler/icons-react"
 import { LocalSessionPage } from "./local-session-page.js"
 import type { SessionCentralFilesState } from "./session-center.js"
+import type { LocalDirectoryGitSummary } from "./use-local-directory.js"
 import { NewSessionPage } from "./new-session-page.js"
 import { RemoteSessionPage } from "./remote-session-page.js"
 import "./session.css"
@@ -33,7 +33,6 @@ import {
   classifyConversation,
   decodeHistoryToTimelineEntries,
   deriveSyncStatus,
-  directoryBasename,
   emptySyncState,
 } from "./session-model.js"
 
@@ -46,6 +45,7 @@ export type SessionPageController = {
   readonly syncStates: Readonly<Record<string, SessionSyncState>>
   readonly personalStates: Readonly<Record<string, ConversationPersonalState>>
   readonly directories: Readonly<Record<string, string | null>>
+  readonly recentDirectories?: readonly string[]
   readonly newDraft: NewSessionDraft
   readonly newSessionBusy: boolean
   readonly canCreateConversation: boolean
@@ -59,10 +59,15 @@ export type SessionPageController = {
   resolveOwner?(userId: string): Pick<UserSummary, "userNo" | "userName" | "photo"> | undefined
   resolveOwnerName(userId: string): string
   onChooseNewDirectory(): void
+  onSelectNewDirectory?(directoryPath: string): void
   onSelectNewProvider?(providerId: string): void
   onNewDraftChange(text: string, selectionStart?: number, selectionEnd?: number): void
   onStartNewSession(): void
   onChooseSessionDirectory(conversationId: string): void
+  onSelectSessionDirectory?(conversationId: string, directoryPath: string): void
+  getGitSummary?(conversationId: string): LocalDirectoryGitSummary | null
+  onOpenChangesPanel?(conversationId: string): void
+  onRefreshGitStatus?(conversationId: string): void
   onSyncConversation(conversationId: string): void
   onRefreshBrief(conversationId: string): void
   onPersonalChange(scope: ConversationScope, change: ConversationPersonalChange): void
@@ -112,8 +117,11 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             agentAvailable={agentAvailable}
             providers={providerList?.providers}
             selectedProviderId={selectedProviderId}
+            recentDirectories={controller.recentDirectories}
+            rendering={controller.rendering}
             errorMessage={controller.newSessionError}
             onChooseDirectory={controller.onChooseNewDirectory}
+            onSelectDirectory={controller.onSelectNewDirectory}
             onSelectProvider={controller.onSelectNewProvider}
             onDraftChange={controller.onNewDraftChange}
             onStartSession={controller.onStartNewSession}
@@ -172,6 +180,8 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             visible={visible}
             conversation={conversation}
             directoryPath={controller.directories[conversation.conversationId] ?? null}
+            recentDirectories={controller.recentDirectories}
+            gitSummary={controller.getGitSummary?.(conversation.conversationId) ?? null}
             entries={entries}
             contentRevision={syncState.localSyncedSequence}
             personal={personal}
@@ -180,6 +190,15 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             hooks={controller.hooks}
             centralFiles={controller.getCentralFiles?.({ scope, conversation })}
             onChooseDirectory={() => controller.onChooseSessionDirectory(conversation.conversationId)}
+            onSelectDirectory={controller.onSelectSessionDirectory
+              ? path => controller.onSelectSessionDirectory!(conversation.conversationId, path)
+              : undefined}
+            onOpenChangesPanel={controller.onOpenChangesPanel
+              ? () => controller.onOpenChangesPanel!(conversation.conversationId)
+              : undefined}
+            onRefreshGitStatus={controller.onRefreshGitStatus
+              ? () => controller.onRefreshGitStatus!(conversation.conversationId)
+              : undefined}
             onPersonalChange={controller.onPersonalChange}
             onCapabilitySelect={controller.onCapabilitySelect}
             onRequestFileCandidates={controller.onRequestFileCandidates}
@@ -254,31 +273,11 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       const title = conversation.title
 
       if (isLocal) {
-        const directoryPath = controller.directories[conversation.conversationId] ?? null
-        const folderName = directoryBasename(directoryPath)
-        const availability = controller.execution.getAvailability(conversation.conversationId)
-        const directoryStatus = availability.directoryStatus
-        const directoryStatusLabel = directoryPath
-          ? (directoryStatus === "checking" ? "检查中"
-            : directoryStatus === "confirmation-required" ? "待确认"
-              : directoryStatus === "invalid" ? "已失效"
-                : directoryStatus === "unavailable" ? "待检查" : "")
-          : ""
         const isRunning = Boolean(activeExecution?.activeTurnId)
         return (
           <>
             {crumb}
             <span className="tb-name" title={title}>{title}</span>
-            <button
-              type="button"
-              className="tb-dir session-directory-button"
-              title={directoryPath ? [directoryPath, directoryStatusLabel ? availability.reason : undefined].filter(Boolean).join("\n") : "选择一个本机文件夹（支持普通非 Git 目录）"}
-              onClick={() => controller.onChooseSessionDirectory(conversation.conversationId)}
-            >
-              <IconFolder size={12} aria-hidden="true" />
-              <span className="d">{folderName ? `${folderName}${directoryStatusLabel ? ` · ${directoryStatusLabel}` : ""}` : "选择工作目录"}</span>
-              <span className="chev" aria-hidden="true"><IconChevronDown size={11} aria-hidden="true" /></span>
-            </button>
             {isRunning ? (
               <span className="tb-state running">
                 <span className="d" aria-hidden="true" />

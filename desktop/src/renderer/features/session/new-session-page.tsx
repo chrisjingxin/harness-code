@@ -6,12 +6,11 @@
  * 并诚实展示当前设备登记与 Agent 可用性；选择目录和输入草稿仅保存在本人本机范围，不自动建会。
  */
 import type { ReactElement } from "react"
-import { IconArrowUp, IconChevronDown, IconFolder, IconLoader2 } from "@tabler/icons-react"
 import type { AcpAgentInfo } from "@workbench/acp-runtime/types"
 import { ConversationComposer } from "../../../ui/index.js"
-import type { ConversationComposerView } from "../../../ui/index.js"
+import type { ConversationComposerView, RenderingActions } from "../../../ui/index.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
-import { directoryBasename } from "./session-model.js"
+import { buildDirectoryContextView, directoryBasename, handleDirectoryContextAction } from "./session-model.js"
 import { NEW_SESSION_DRAFT_ID } from "./contracts.js"
 import type { NewSessionDraft, SessionExternalHooks } from "./contracts.js"
 import { newSessionConversationDraft } from "./new-session-draft.js"
@@ -29,8 +28,11 @@ export type NewSessionPageProps = {
   readonly agentAvailable: boolean
   readonly providers?: readonly AcpAgentInfo[]
   readonly selectedProviderId?: string
+  readonly recentDirectories?: readonly string[]
+  readonly rendering?: RenderingActions
   readonly errorMessage?: string | null
   readonly onChooseDirectory: () => void
+  readonly onSelectDirectory?: (directoryPath: string) => void
   readonly onSelectProvider?: (providerId: string) => void
   readonly onDraftChange: (text: string, selectionStart?: number, selectionEnd?: number) => void
   readonly onStartSession: () => void
@@ -49,8 +51,11 @@ export function NewSessionPage({
   agentAvailable,
   providers,
   selectedProviderId,
+  recentDirectories,
+  rendering,
   errorMessage,
   onChooseDirectory,
+  onSelectDirectory,
   onSelectProvider,
   onDraftChange,
   onStartSession,
@@ -64,94 +69,137 @@ export function NewSessionPage({
       ? "请输入事项或加入引用材料"
       : !canCreateConversation
         ? createBlockedReason ?? "当前尚不能发起新会话"
-        : undefined
+        : busy
+          ? "创建中…"
+          : undefined
+
+  const switchingAvailability = busy
+    ? { enabled: false, reason: "正在创建会话…" }
+    : { enabled: true }
+  const { directory: directoryContext, recentById } = buildDirectoryContextView({
+    directoryPath: draft.directoryPath,
+    recentDirectories,
+    switchingAvailability,
+    canCopyPath: Boolean(rendering?.copyText),
+  })
+
+  const controls: ConversationComposerView["controls"] = providers && providers.length > 0 && onSelectProvider
+    ? [{
+        id: "provider",
+        label: "Agent",
+        selectedId: selectedProviderId ?? providers[0]?.id,
+        availability: switchingAvailability,
+        items: providers.map(provider => ({
+          id: provider.id,
+          label: provider.label,
+          ...(provider.available ? {} : { description: provider.reason ?? "暂不可用" }),
+          availability: provider.available
+            ? { enabled: true }
+            : { enabled: false, reason: provider.reason ?? "暂不可用" },
+        })),
+      }]
+    : []
+
   const composer: ConversationComposerView = {
-    primaryActions: "none",
-    send: { enabled: false },
+    primaryActions: "send",
+    send: { enabled: canSubmit, reason: disabledReason ?? "开始会话" },
     cancel: { enabled: false },
     commands: [],
-    controls: [],
+    controls,
     references: hooks?.references ?? [],
     attachments: [],
     projectTarget: { projectId: scope.projectId, deviceId: scope.accountId },
+    contextBar: {
+      directory: directoryContext,
+    },
+    contextMenu: {
+      title: "添加上下文",
+      tooltip: "添加上下文",
+      items: [
+        {
+          id: "files",
+          label: "文件",
+          icon: "file",
+          behavior: "files",
+          availability: { enabled: false, reason: "开始会话后可添加工作区文件" },
+        },
+        {
+          id: "folder",
+          label: folderName ? "更换工作目录" : "选择工作目录",
+          icon: "folder",
+          behavior: "custom",
+          availability: switchingAvailability,
+        },
+        {
+          id: "mention",
+          label: "提及",
+          icon: "mention",
+          behavior: "mention",
+          availability: hooks?.onRequestCollaborationCandidates
+            ? switchingAvailability
+            : { enabled: false, reason: "协作引用暂不可用" },
+        },
+        {
+          id: "actions",
+          label: "命令",
+          icon: "action",
+          behavior: "command",
+          availability: { enabled: false, reason: "开始会话后可使用斜杠命令" },
+        },
+      ],
+    },
   }
 
   return (
     <section className="session-new-page" aria-label="新会话准备">
       <h1>今天想推进什么？</h1>
       <p>在“{projectName}”中创建自己的会话。</p>
-      <div className="session-new-card">
-        <div className="session-new-composer">
-          <ConversationComposer
-            scope={{ ...scope, conversationId: NEW_SESSION_DRAFT_ID }}
-            visible={visible}
-            model={composer}
-            draft={newSessionConversationDraft(draft)}
-            actions={{
-              onPersonalChange: (_source, change) => {
-                if (change.kind === "draft-text") onDraftChange(change.text, change.selectionStart, change.selectionEnd)
-              },
-              onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
-              onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
-              onReferenceAction: hooks?.onReferenceAction,
-            }}
-            sendBlocked
-            cancelBlocked
-            submitOnEnter={false}
-            onSend={() => {}}
-            onCancel={() => {}}
-          >{hooks?.composerExtra}</ConversationComposer>
-        </div>
-        <div className="session-new-card-footer">
-          <div className="session-new-card-left">
-            <button
-              type="button"
-              className="session-new-chip"
-              onClick={onChooseDirectory}
-              title={draft.directoryPath ?? "选择一个本机文件夹（支持普通非 Git 目录）"}
-            >
-              <IconFolder size={13} aria-hidden="true" />
-              <span>{folderName || "选择文件夹"}</span>
-              <IconChevronDown size={12} aria-hidden="true" />
-            </button>
-            {providers && providers.length > 0 && onSelectProvider ? (
-              <select
-                className="session-new-provider-select"
-                aria-label="选择本机 Agent"
-                value={selectedProviderId ?? providers[0]?.id ?? ""}
-                disabled={busy}
-                onChange={event => onSelectProvider(event.currentTarget.value)}
-              >
-                {providers.map(provider => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.available ? provider.label : `${provider.label}（暂不可用）`}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <span
-              className="session-tag"
-              data-tone={agentAvailable ? "success" : "warning"}
-              title={agentLabel}
-            >
-              {agentAvailable ? "本机可用" : agentLabel}
-            </span>
-          </div>
-          <div className="session-new-card-right">
-            <button
-              type="button"
-              className="session-new-send-btn"
-              aria-label={busy ? "创建中…" : "开始会话"}
-              disabled={!canSubmit}
-              title={disabledReason ?? (busy ? "创建中…" : "开始会话")}
-              onClick={() => { if (canSubmit) onStartSession() }}
-            >
-              {busy
-                ? <IconLoader2 size={14} aria-hidden="true" className="session-plan-spin" />
-                : <IconArrowUp size={14} aria-hidden="true" />}
-            </button>
-          </div>
-        </div>
+      <div className="session-new-composer">
+        <ConversationComposer
+          scope={{ ...scope, conversationId: NEW_SESSION_DRAFT_ID }}
+          visible={visible}
+          model={composer}
+          draft={newSessionConversationDraft(draft)}
+          actions={{
+            onPersonalChange: (_source, change) => {
+              if (change.kind === "draft-text") onDraftChange(change.text, change.selectionStart, change.selectionEnd)
+            },
+            onSend: async () => ({ status: "accepted" }),
+            onCapabilitySelect: (_source, controlId, itemId) => {
+              if (controlId === "provider") onSelectProvider?.(itemId)
+            },
+            onDirectoryContextAction: (_source, itemId) => {
+              handleDirectoryContextAction({
+                itemId,
+                directoryPath: draft.directoryPath,
+                recentById,
+                onChooseDirectory,
+                onSelectDirectory,
+                onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
+              })
+            },
+            onContextMenuAction: (_source, itemId) => {
+              if (itemId === "folder") onChooseDirectory()
+            },
+            onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
+            onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
+            onReferenceAction: hooks?.onReferenceAction,
+          }}
+          sendBlocked={busy}
+          cancelBlocked
+          submitOnEnter={false}
+          onSend={() => { if (canSubmit) onStartSession() }}
+          onCancel={() => {}}
+        >
+          <span
+            className="session-tag"
+            data-tone={agentAvailable ? "success" : "warning"}
+            title={agentLabel}
+          >
+            {agentAvailable ? "本机可用" : agentLabel}
+          </span>
+          {hooks?.composerExtra}
+        </ConversationComposer>
       </div>
       {(errorMessage || (!canCreateConversation && createBlockedReason)) ? (
         <div className="session-new-send">

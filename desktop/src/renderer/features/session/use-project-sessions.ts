@@ -654,6 +654,14 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     }).catch(() => {})
   }, [scope, currentScopeKey, host, saveDraftValue])
 
+  const onSelectNewDirectory = useCallback((directoryPath: string) => {
+    if (!scope || !currentScopeKey || !directoryPath.trim()) return
+    setNewSessionError(null)
+    const currentDraft = draftsRef.current[currentScopeKey]?.value ?? EMPTY_NEW_DRAFT
+    if (directoryPath !== currentDraft.directoryPath) pendingRequestRef.current = null
+    saveDraftValue(scope, currentScopeKey, { ...currentDraft, directoryPath, revision: currentDraft.revision + 1 })
+  }, [scope, currentScopeKey, saveDraftValue])
+
   const onNewDraftChange = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
     if (!scope || !currentScopeKey) return
     setNewSessionError(null)
@@ -787,6 +795,15 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   ])
 
   const [directorySelectionRevision, confirmDirectorySelection] = useState(0)
+  const onSelectSessionDirectory = useCallback((conversationId: string, directoryPath: string) => {
+    if (!scope || !currentScopeKey || !directoryPath.trim()) return
+    updateRecord(scope, currentScopeKey, conversationId, prev => ({
+      ...prev,
+      directoryPath,
+    }), true)
+    confirmDirectorySelection(value => value + 1)
+  }, [scope, currentScopeKey, updateRecord])
+
   const onChooseSessionDirectory = useCallback((conversationId: string) => {
     if (!scope || !currentScopeKey) return
     const targetScope = scope
@@ -1015,6 +1032,16 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const currentDraft = (currentScopeKey ? draftsByScope[currentScopeKey]?.value : undefined) ?? EMPTY_NEW_DRAFT
   const canCreateConversation = Boolean(scope && draftsByScope[currentScopeKey]?.loaded)
   const createBlockedReason = canCreateConversation ? undefined : "正在恢复新建草稿，请稍候。"
+  const recentDirectories = useMemo(() => {
+    const unique: string[] = []
+    const pushIfNew = (dir: string | null | undefined) => {
+      const trimmed = dir?.trim()
+      if (trimmed && !unique.includes(trimmed)) unique.push(trimmed)
+    }
+    pushIfNew(currentDraft.directoryPath)
+    for (const dir of Object.values(currentDirectories)) pushIfNew(dir)
+    return unique.slice(0, 6)
+  }, [currentDraft.directoryPath, currentDirectories])
 
   const rendering: RenderingActions = useMemo(() => ({
     copyText: text => host.copyText(text),
@@ -1028,6 +1055,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     syncStates: currentSyncStates,
     personalStates: currentPersonalStates,
     directories: currentDirectories,
+    recentDirectories,
     newDraft: currentDraft,
     newSessionBusy,
     canCreateConversation,
@@ -1039,10 +1067,21 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     resolveOwner: ownerId => memberById.get(ownerId),
     resolveOwnerName: ownerId => memberById.get(ownerId)?.userName ?? `成员 (${ownerId.slice(0, 6)})`,
     onChooseNewDirectory,
+    onSelectNewDirectory,
     onSelectNewProvider: providerId => setNewProviderId(providerId),
     onNewDraftChange,
     onStartNewSession: () => { void onStartNewSession() },
     onChooseSessionDirectory,
+    onSelectSessionDirectory,
+    getGitSummary: conversationId => (scope ? localDir.getGitSummary(scope, conversationId) : null),
+    onOpenChangesPanel: conversationId => {
+      if (!scope) return
+      localDir.openChangesPanel(scope, conversationId)
+      onOpenRightPanel?.()
+    },
+    onRefreshGitStatus: conversationId => {
+      if (scope) localDir.refreshGitStatus(scope, conversationId)
+    },
     onSyncConversation: conversationId => { void syncConversation(conversationId) },
     onRefreshBrief: conversationId => { void refreshBrief(conversationId) },
     onPersonalChange,
@@ -1140,13 +1179,18 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     rendering,
     memberById,
     onChooseNewDirectory,
+    onSelectNewDirectory,
     onNewDraftChange,
     onStartNewSession,
     onChooseSessionDirectory,
+    onSelectSessionDirectory,
     syncConversation,
     refreshBrief,
     onPersonalChange,
     localDir,
+    scope,
+    recentDirectories,
+    onOpenRightPanel,
   ])
 
   const listProjectConversations = useCallback<SessionIntegrationApi["listProjectConversations"]>(targetScope => {
