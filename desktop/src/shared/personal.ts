@@ -9,10 +9,10 @@ export type PersonalKey =
   | { kind: "workspace"; workspaceId: string }
   | { kind: "projectNavigation"; workspaceId: string; projectId: string }
   | { kind: "projectDraft"; workspaceId: string; projectId: string }
-  | { kind: "conversation"; workspaceId: string; projectId: string; conversationId: string }
-  | { kind: "sessionWorkspace"; workspaceId: string; projectId: string; conversationId: string }
+  | { kind: "conversation"; workspaceId: string | null; projectId: string | null; conversationId: string }
+  | { kind: "sessionWorkspace"; workspaceId: string | null; projectId: string | null; conversationId: string }
 
-export type AccountPersonal = { workspaceId: string | null }
+export type AccountPersonal = { workspaceId: string | null; activeView?: "workspace" | "solo" }
 
 /** 团队范围：当前项目与左右栏布局偏好。 */
 export type WorkspacePersonal = {

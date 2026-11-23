@@ -101,14 +101,18 @@ export class LocalAcpHost {
 
   /** cwd 必须来自受信任宿主的目录选择。绑定后改变目录需先关闭旧句柄。 */
   async bind(scope: LocalAcpScope, cwd: string, setup?: import("./types.js").LocalAcpSessionSetup): Promise<LocalAcpSession> {
-    const ids = [scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId]
-    if (ids.some(id => !id.trim())) throw new Error("缺少本机会话标识。")
+    if (!scope.accountId.trim() || !scope.conversationId.trim()
+      || (scope.workspaceId !== null && !scope.workspaceId.trim())
+      || (scope.projectId !== null && !scope.projectId.trim())
+      || (scope.projectId !== null && scope.workspaceId === null)) {
+      throw new Error("缺少本机会话标识。")
+    }
     if (!isAbsolute(cwd)) throw new Error("本机工作目录必须使用绝对路径。")
     const root = await realpath(cwd)
     const identity = await stat(root, { bigint: true })
     if (!identity.isDirectory()) throw new Error("本机工作目录不可用。")
     if (this.#closing) throw new Error("本机执行宿主已关闭。")
-    const key = JSON.stringify(ids)
+    const key = JSON.stringify([scope.accountId, scope.conversationId])
     const preparedSetup = await prepareSessionSetup(root, {
       additionalDirectories: setup?.additionalDirectories ?? this.options.additionalDirectories,
       mcpServers: setup?.mcpServers ?? this.options.mcpServers,

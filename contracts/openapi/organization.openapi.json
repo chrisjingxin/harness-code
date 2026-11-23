@@ -1323,6 +1323,71 @@
           }
         }
       }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/stop-sharing": {
+      "post": {
+        "operationId": "post__conversation_stop_sharing",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "停止共享后的会话详情（幂等）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/organization.schema.json#/$defs/ConversationDetailResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误（非创建者 403 / 非活跃成员 404）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

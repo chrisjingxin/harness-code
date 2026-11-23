@@ -73,7 +73,7 @@ export class CodeCheckpoints {
   constructor(private readonly directory: string, private readonly origin: string) {}
 
   #scope(scope: LocalExecutionScope): string {
-    return digest(JSON.stringify([this.origin, scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId])).slice(0, 32)
+    return digest(JSON.stringify([this.origin, scope.accountId, scope.conversationId])).slice(0, 32)
   }
 
   #index(scope: string): string { return join(this.directory, scope + ".json") }

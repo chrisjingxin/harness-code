@@ -2,6 +2,8 @@ package workbench.collaboration.infrastructure.persistence;
 
 import workbench.collaboration.domain.conversation.BriefSource;
 import workbench.collaboration.domain.conversation.Conversation;
+import workbench.collaboration.domain.conversation.ConversationShareMode;
+import workbench.collaboration.domain.conversation.ConversationShareStatus;
 import workbench.collaboration.domain.conversation.ConversationStatus;
 
 /**
@@ -35,6 +37,9 @@ final class ConversationConverter {
         po.setBriefUpdatedAt(Times.ofMs(conversation.briefUpdatedAtMs()));
         po.setSyncedSequence(conversation.syncedSequence());
         po.setNativeSessionId(conversation.nativeSessionId());
+        po.setShareMode(ConversationShareMode.dbOf(conversation.shareMode()));
+        po.setShareStatus(ConversationShareStatus.dbOf(conversation.shareStatus()));
+        po.setStoppedAt(Times.ofMs(conversation.stoppedAtMs()));
         po.setCreatedAt(Times.ofMs(conversation.createdAtMs()));
         po.setUpdatedAt(Times.ofMs(conversation.updatedAtMs()));
         return po;
@@ -55,6 +60,9 @@ final class ConversationConverter {
                 Times.ms(po.getBriefUpdatedAt()),
                 po.getSyncedSequence(),
                 po.getNativeSessionId(),
+                ConversationShareMode.codeOf(po.getShareMode()),
+                ConversationShareStatus.codeOf(po.getShareStatus()),
+                Times.ms(po.getStoppedAt()),
                 Times.ms(po.getCreatedAt()),
                 Times.ms(po.getUpdatedAt())
         );

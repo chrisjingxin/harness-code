@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto"
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type {
-  CollaborationError, CollaborationResult, ConversationSyncRequest, ConversationSyncResponse, SyncMessage,
+  CollaborationError, CollaborationResult, ConversationShareMode, ConversationSyncRequest, ConversationSyncResponse, SyncMessage,
 } from "./types/index.js"
 import {
   collaborationConversationKey,
@@ -43,6 +43,8 @@ export type FinalizedAttachmentSummary = {
 export type FinalizedTurn = {
   turnId: string
   userText: string
+  shareMode?: ConversationShareMode
+  briefText?: string
   referenceIds?: readonly string[]
   attachments?: readonly FinalizedAttachmentSummary[]
   followUps?: readonly { readonly text: string; readonly occurredAtMs: number }[]
@@ -54,6 +56,7 @@ export type FinalizedTurn = {
 
 type WaitingTurn = {
   turnId: string
+  shareMode?: ConversationShareMode
   messages: Omit<SyncMessage, "sequence">[]
   briefText: string
   firstSequence?: number
@@ -70,11 +73,11 @@ export interface ConversationUploadPort {
 }
 
 class UploadFailure extends Error {
-  constructor(message: string, readonly retryable: boolean) { super(message) }
+  constructor(message: string, readonly retryable: boolean, readonly code?: CollaborationError["code"]) { super(message) }
 }
 
 function unwrap<T>(result: CollaborationResult<T>): T {
-  if (!result.ok) throw new UploadFailure(result.error.message, canRetry(result.error))
+  if (!result.ok) throw new UploadFailure(result.error.message, canRetry(result.error), result.error.code)
   return result.value
 }
 
@@ -155,66 +158,83 @@ export class ConversationUploads {
     this.#wake()
   }
 
-  /** 只接收已完成的文本轮（含本轮已终态工具摘要）。超出单条载荷上限时保留本机显示并报告共享失败。 */
+  /** 只接收已完成的文本轮（含本轮已终态工具摘要）。summary_only 仅组装简报而不保存或发送对话正文。 */
   async enqueue(scope: CollaborationConversationScope, turn: FinalizedTurn): Promise<void> {
     const { turnId, userText, reply, acceptedAtMs, completedAtMs } = turn
-    const userMessage: Omit<SyncMessage, "sequence"> = {
-      type: "user",
-      occurredAtMs: acceptedAtMs,
-      payload: JSON.stringify({
-        text: userText,
-        ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}),
-        ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
-      }),
+    const shareMode: ConversationShareMode = turn.shareMode ?? "full"
+    const trimmedExplicitBrief = turn.briefText?.trim()
+    const requestPreview = userText.trim()
+      ? userText
+      : (turn.attachments?.length ? turn.attachments.map(item => item.label).join(" ") : userText)
+    const fallbackBrief = `诉求：${briefExcerpt(requestPreview)}\n回复：${briefExcerpt(reply ?? "")}`
+    const briefText = (trimmedExplicitBrief ? trimmedExplicitBrief : fallbackBrief).slice(0, 2000)
+
+    let messages: WaitingTurn["messages"] = []
+    if (shareMode === "full") {
+      const userMessage: Omit<SyncMessage, "sequence"> = {
+        type: "user",
+        occurredAtMs: acceptedAtMs,
+        payload: JSON.stringify({
+          text: userText,
+          ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}),
+          ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
+        }),
+      }
+      const assistantMessage: Omit<SyncMessage, "sequence"> = {
+        type: "assistant",
+        occurredAtMs: completedAtMs,
+        payload: JSON.stringify({ text: reply }),
+      }
+      const userBytes = Buffer.byteLength(userMessage.payload, "utf8")
+      const assistantBytes = Buffer.byteLength(assistantMessage.payload, "utf8")
+      if (reply === undefined || userBytes > syncPayloadLimit || assistantBytes > syncPayloadLimit) {
+        this.#report(scope, turnId, "本轮正文超出单条共享消息的 32 KiB 上限。")
+        return
+      }
+      const followUps: Omit<SyncMessage, "sequence">[] = (turn.followUps ?? []).map(({ text, occurredAtMs }) => ({
+        type: "user", occurredAtMs, payload: JSON.stringify({ text }),
+      }))
+      const followUpBytes = followUps.map(message => Buffer.byteLength(message.payload, "utf8"))
+      let remainingBatchBytes = BATCH_PAYLOAD_BUDGET - userBytes - assistantBytes - followUpBytes.reduce((a, b) => a + b, 0)
+      if (followUpBytes.some(bytes => bytes > syncPayloadLimit) || remainingBatchBytes < 0) {
+        this.#report(scope, turnId, "本轮追发消息超出共享载荷上限。")
+        return
+      }
+      const toolMessages: Omit<SyncMessage, "sequence">[] = []
+      for (const tool of (turn.tools ?? []).slice(0, MAX_TOOL_SUMMARIES)) {
+        if (remainingBatchBytes <= 0) break
+        const payload = buildToolSummaryPayload(tool, Math.min(syncPayloadLimit, remainingBatchBytes))
+        if (!payload) continue
+        const occurredAtMs = Number.isSafeInteger(tool.occurredAtMs) && tool.occurredAtMs >= 0
+          ? tool.occurredAtMs
+          : completedAtMs
+        toolMessages.push({ type: "tool_summary", occurredAtMs, payload })
+        remainingBatchBytes -= Buffer.byteLength(payload, "utf8")
+      }
+      messages = [userMessage, ...followUps, ...toolMessages, assistantMessage]
     }
-    const assistantMessage: Omit<SyncMessage, "sequence"> = {
-      type: "assistant",
-      occurredAtMs: completedAtMs,
-      payload: JSON.stringify({ text: reply }),
-    }
-    const userBytes = Buffer.byteLength(userMessage.payload, "utf8")
-    const assistantBytes = Buffer.byteLength(assistantMessage.payload, "utf8")
-    if (reply === undefined || userBytes > syncPayloadLimit || assistantBytes > syncPayloadLimit) {
-      this.#report(scope, turnId, "本轮正文超出单条共享消息的 32 KiB 上限。")
-      return
-    }
-    const followUps: Omit<SyncMessage, "sequence">[] = (turn.followUps ?? []).map(({ text, occurredAtMs }) => ({
-      type: "user", occurredAtMs, payload: JSON.stringify({ text }),
-    }))
-    const followUpBytes = followUps.map(message => Buffer.byteLength(message.payload, "utf8"))
-    let remainingBatchBytes = BATCH_PAYLOAD_BUDGET - userBytes - assistantBytes - followUpBytes.reduce((a, b) => a + b, 0)
-    if (followUpBytes.some(bytes => bytes > syncPayloadLimit) || remainingBatchBytes < 0) {
-      this.#report(scope, turnId, "本轮追发消息超出共享载荷上限。")
-      return
-    }
-    const toolMessages: Omit<SyncMessage, "sequence">[] = []
-    for (const tool of (turn.tools ?? []).slice(0, MAX_TOOL_SUMMARIES)) {
-      if (remainingBatchBytes <= 0) break
-      const payload = buildToolSummaryPayload(tool, Math.min(syncPayloadLimit, remainingBatchBytes))
-      if (!payload) continue
-      const occurredAtMs = Number.isSafeInteger(tool.occurredAtMs) && tool.occurredAtMs >= 0
-        ? tool.occurredAtMs
-        : completedAtMs
-      toolMessages.push({ type: "tool_summary", occurredAtMs, payload })
-      remainingBatchBytes -= Buffer.byteLength(payload, "utf8")
-    }
-    const messages: WaitingTurn["messages"] = [userMessage, ...followUps, ...toolMessages, assistantMessage]
+
     const path = join(this.root, scope.accountId, scope.conversationId + ".json")
     try {
       await this.#mutate(async () => {
         const pending = await this.#read(path) ?? { scope, turns: [] }
         if (collaborationConversationKey(pending.scope) !== collaborationConversationKey(scope)) throw new Error("会话范围不一致")
         if (pending.turns.some(item => item.turnId === turnId)) return
-        const requestPreview = userText.trim()
-          ? userText
-          : (turn.attachments?.length ? turn.attachments.map(item => item.label).join(" ") : userText)
-        pending.turns.push({ turnId, messages, briefText: `诉求：${briefExcerpt(requestPreview)}\n回复：${briefExcerpt(reply)}` })
+        pending.turns.push({ turnId, shareMode, messages, briefText })
         await this.#write(path, pending)
       })
       this.#wake()
     } catch {
       this.#report(scope, turnId, "无法保存待上传的本轮定稿。")
     }
+  }
+
+  /** 移除指定会话尚未排空的本机待传文件（例如停止共享后止损清理）。 */
+  async cancelConversation(scope: CollaborationConversationScope): Promise<void> {
+    const path = join(this.root, scope.accountId, scope.conversationId + ".json")
+    await this.#mutate(async () => {
+      await rm(path, { force: true })
+    })
   }
 
   /** 关窗只等待已受理的落盘，已固定序号的批次可由下一次登录重发。 */
@@ -226,16 +246,17 @@ export class ConversationUploads {
     failure?: string,
     firstSequence?: number,
     syncedSequence?: number,
+    sharingStopped?: boolean,
   ): void {
     this.notify({
       scope,
       turnId,
       kind: "upload",
       failure: failure ? `会话共享失败：${failure}` : undefined,
-      // 仅在整批成功确认水位后附带 sequence 区间，防止消费端提前消隐未落盘的本地记录。
-      ...(failure || firstSequence === undefined || syncedSequence === undefined
-        ? {}
-        : { firstSequence, syncedSequence }),
+      ...(sharingStopped ? { sharingStopped: true } : {}),
+      // 仅在上传成功确认后附带区间或水位：summary_only 只含 syncedSequence 而不含 firstSequence
+      ...(!failure && firstSequence !== undefined ? { firstSequence } : {}),
+      ...(!failure && syncedSequence !== undefined ? { syncedSequence } : {}),
     })
   }
 
@@ -293,6 +314,14 @@ export class ConversationUploads {
         delay = 2_000
       } catch (error) {
         if (signal.aborted) return
+        if (error instanceof UploadFailure && error.code === "CONVERSATION_SHARING_STOPPED") {
+          // 服务端返回 409 CONVERSATION_SHARING_STOPPED：清空待传文件并通知上层停传，不安排重试
+          await this.#mutate(async () => {
+            await rm(path, { force: true })
+          }).catch(() => {})
+          this.#report(pending.scope, turn.turnId, error.message, undefined, undefined, true)
+          continue
+        }
         this.#report(pending.scope, turn.turnId, error instanceof UploadFailure ? error.message : "无法读写本机待传记录。")
         if (error instanceof UploadFailure && !error.retryable) this.#blocked.add(turn.turnId)
         else delay = Math.min(delay ?? 5_000, 5_000)
@@ -313,6 +342,16 @@ export class ConversationUploads {
   async #send(path: string, scope: CollaborationConversationScope, turn: WaitingTurn, signal: AbortSignal): Promise<void> {
     const watermark = unwrap(await this.port.watermark(scope, signal))
     signal.throwIfAborted()
+    if (turn.messages.length === 0) {
+      const receipt = unwrap(await this.port.upload(scope, {
+        messages: [],
+        brief: { status: "idle", briefSource: "rule", briefText: turn.briefText },
+      }, signal))
+      signal.throwIfAborted()
+      await this.#editHead(path, turn.turnId, pending => { pending.turns.shift() })
+      if (!signal.aborted) this.#report(scope, turn.turnId, undefined, undefined, receipt.syncedSequence)
+      return
+    }
     const firstSequence = turn.firstSequence ?? watermark + 1
     const finalSequence = firstSequence + turn.messages.length - 1
     if (!Number.isSafeInteger(finalSequence) || firstSequence < 1

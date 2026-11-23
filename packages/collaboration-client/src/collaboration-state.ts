@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto"
 import type {
   CollaborationError, CollaborationResult, ConversationDetailResponse, CurrentUserResponse,
-  DemoUsersResponse, IdentityState, MembersResponse,
+  DemoUsersResponse, IdentityState, MembersResponse, WorkspaceSummary,
 } from "./types/index.js"
 import { CollaborationClient } from "./collaboration-client.js"
 
@@ -21,6 +21,7 @@ export function identityError(code: CollaborationError["code"], message: string)
 export class CollaborationState {
   #client: CollaborationClient | null = null
   #state: IdentityState = { status: "signedOut" }
+  #lastKnownWorkspaces: WorkspaceSummary[] = []
   #generation = 0
   #disposed = false
   #exiting = false
@@ -40,12 +41,18 @@ export class CollaborationState {
   #unavailable() { return identityError("NETWORK_UNAVAILABLE", "协作服务不可用，请检查连接后重试。") }
   #publish(state: IdentityState) {
     this.#state = state
+    if (state.status === "signedIn") {
+      this.#lastKnownWorkspaces = structuredClone(state.workspaces)
+    } else if (state.status === "signedOut") {
+      this.#lastKnownWorkspaces = []
+    }
     for (const listener of this.#listeners) listener(structuredClone(state))
   }
   #failure(error: CollaborationError) {
     if (error.code === "AUTHENTICATION_REQUIRED") { this.#generation++; this.#publish({ status: "signedOut" }); return }
     if (["NETWORK_UNAVAILABLE", "TLS_ERROR", "INVALID_SERVER_RESPONSE", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR"].includes(error.code)) {
       const user = this.#state.status === "signedIn" ? this.#state.user : this.#state.status === "connectionError" ? this.#state.lastKnownUser : null
+      if (!user) this.#lastKnownWorkspaces = []
       this.#publish({ status: "connectionError", lastKnownUser: user, error })
     }
   }
@@ -103,6 +110,7 @@ export class CollaborationState {
     if (this.#exiting) return identityError("INVALID_REQUEST", "正在退出，请稍候。")
     const generation = ++this.#generation
     this.#exiting = true
+    this.#lastKnownWorkspaces = []
     this.#publish({ status: "loading" })
     try {
       // 客户端在首次 await 之前隔离旧 Jar、取消旧请求；远端退出另用旧 Jar 的独立上下文。
@@ -153,18 +161,40 @@ export class CollaborationState {
     return this.withWorkspace(workspaceId, client => client.getProjectConversation(workspaceId, projectId, conversationId))
   }
 
+  /** 会话创建者停止继续向团队同步该会话；通过统一工作区守卫执行。 */
+  stopProjectConversationSharing(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
+    return this.withWorkspace(workspaceId, client => client.stopProjectConversationSharing(workspaceId, projectId, conversationId))
+  }
+
   /** 仅宿主或 SDK 内部组合使用；调用方仍要按当前代次核对异步结果。 */
   network(): CollaborationClient | null { return this.#client }
 
-  /** 提取当前已确认的账号、工作区与身份代次快照，供本地存储与执行隔离使用。 */
-  personalIdentity(): { generation: number; accountId: string; workspaces: readonly string[] } | null {
-    if (this.#disposed || this.#state.status !== "signedIn") return null
-    return { generation: this.#generation, accountId: this.#state.user.id, workspaces: this.#state.workspaces.map(item => item.id) }
+  /** 提取当前已确认的账号、工作区与身份代次快照；在断网续用态（connectionError + lastKnownUser）下保留只读/本机离线身份。 */
+  personalIdentity(): { generation: number; accountId: string; workspaces: readonly string[]; offline: boolean } | null {
+    if (this.#disposed) return null
+    if (this.#state.status === "signedIn") {
+      return {
+        generation: this.#generation,
+        accountId: this.#state.user.id,
+        workspaces: this.#state.workspaces.map(item => item.id),
+        offline: false,
+      }
+    }
+    if (this.#state.status === "connectionError" && this.#state.lastKnownUser) {
+      return {
+        generation: this.#generation,
+        accountId: this.#state.lastKnownUser.id,
+        workspaces: this.#lastKnownWorkspaces.map(item => item.id),
+        offline: true,
+      }
+    }
+    return null
   }
 
   /** 销毁后不再发通知/接受业务；重开需创建全新实例。 */
   dispose(): void {
     this.#disposed = true; this.#generation++; this.#listeners.clear()
+    this.#lastKnownWorkspaces = []
     this.#client?.dispose(); this.#state = { status: "signedOut" }
   }
 }

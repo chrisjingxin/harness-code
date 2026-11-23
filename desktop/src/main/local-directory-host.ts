@@ -41,8 +41,8 @@ const ERROR_CODE_MAP: Record<ProjectErrorCode, ProjectReadFailureCode> = {
   "io-error": "PROJECT_READ_FAILED",
 }
 
-function bindingKey(accountId: string, workspaceId: string, projectId: string, conversationKey: string): string {
-  return `${accountId}\0${workspaceId}\0${projectId}\0${conversationKey}`
+function bindingKey(accountId: string, conversationKey: string): string {
+  return `${accountId}\0${conversationKey}`
 }
 
 function toDirectoryError(error: unknown): CollaborationResult<never> {
@@ -65,8 +65,8 @@ export class LocalDirectoryService implements LocalDirectoryHost {
   }
 
   async bindDirectory(
-    workspaceId: string,
-    projectId: string,
+    workspaceId: string | null,
+    projectId: string | null,
     conversationKey: string,
     directoryPath: string,
   ): Promise<CollaborationResult<{ directoryPath: string; isGitRepository: boolean }>> {
@@ -74,7 +74,10 @@ export class LocalDirectoryService implements LocalDirectoryHost {
     if (!accountId) {
       return identityError("AUTHENTICATION_REQUIRED", "请先登录后再选择本机工作目录。")
     }
-    if (!workspaceId.trim() || !projectId.trim() || !conversationKey.trim()) {
+    if ((workspaceId !== null && !workspaceId.trim())
+      || (projectId !== null && !projectId.trim())
+      || (projectId !== null && workspaceId === null)
+      || !conversationKey.trim()) {
       return identityError("INVALID_REQUEST", "缺少会话标识，无法绑定本机工作目录。")
     }
     if (!directoryPath || !isAbsolute(directoryPath) || directoryPath.includes("\0")) {
@@ -86,7 +89,7 @@ export class LocalDirectoryService implements LocalDirectoryHost {
       if (accountId !== this.#getAccountId()) {
         return identityError("AUTHENTICATION_REQUIRED", "登录账号已变化，请重新选择本机工作目录。")
       }
-      this.#bindings.set(bindingKey(accountId, workspaceId, projectId, conversationKey), service)
+      this.#bindings.set(bindingKey(accountId, conversationKey), service)
       return {
         ok: true,
         value: {
@@ -100,8 +103,8 @@ export class LocalDirectoryService implements LocalDirectoryHost {
   }
 
   async readDirectory(
-    workspaceId: string,
-    projectId: string,
+    workspaceId: string | null,
+    projectId: string | null,
     conversationKey: string,
     action: ProjectReadAction,
   ): Promise<CollaborationResult<ProjectReadResponse>> {
@@ -109,7 +112,13 @@ export class LocalDirectoryService implements LocalDirectoryHost {
     if (!accountId) {
       return identityError("AUTHENTICATION_REQUIRED", "请先登录后再读取本机工作目录。")
     }
-    const key = bindingKey(accountId, workspaceId, projectId, conversationKey)
+    if ((workspaceId !== null && !workspaceId.trim())
+      || (projectId !== null && !projectId.trim())
+      || (projectId !== null && workspaceId === null)
+      || !conversationKey.trim()) {
+      return identityError("INVALID_REQUEST", "缺少会话标识，无法读取本机工作目录。")
+    }
+    const key = bindingKey(accountId, conversationKey)
     const service = this.#bindings.get(key)
     if (!service) {
       return identityError("RESOURCE_NOT_FOUND", "当前会话尚未绑定本机工作目录。")

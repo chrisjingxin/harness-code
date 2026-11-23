@@ -86,11 +86,19 @@ public class ConversationSyncAppService {
                 "ConversationSyncRequest", rawBody, ConversationDtos.ConversationSyncRequest.class);
         // 短事务内行锁会话：水位校验与推进原子化，防并发批次互相覆盖
         Conversation conversation = conversations.lockById(conversationId)
-                .filter(found -> found.projectId().equals(projectId))
+                .filter(found -> found.projectId().equals(projectId) && found.workspaceId().equals(workspaceId))
                 .orElseThrow(() -> new ApiProblem(404, "RESOURCE_NOT_FOUND"));
         policy.requireConversationOwner(conversation, userId);
+        // 一旦停止共享，拒绝一切后续增量上传，明确通知客户端停止重传并解除待传队列
+        if ("stopped".equals(conversation.shareStatus())) {
+            throw new ApiProblem(409, "CONVERSATION_SHARING_STOPPED");
+        }
 
         List<ConversationDtos.SyncMessage> batch = request.messages() == null ? List.of() : request.messages();
+        // summary_only 会话禁止上传对话消息正文或工具明细，防止个人试错上下文泄漏到团队云端
+        if ("summary_only".equals(conversation.shareMode()) && !batch.isEmpty()) {
+            throw new ApiProblem(400, "INVALID_REQUEST");
+        }
         List<SyncBatch.Item> items = batch.stream()
                 .map(m -> new SyncBatch.Item(m.sequence(), m.type(), m.occurredAtMs(), m.payload()))
                 .toList();
@@ -121,7 +129,9 @@ public class ConversationSyncAppService {
                 brief != null ? (brief.briefText() == null ? "" : brief.briefText()) : conversation.briefText(),
                 brief != null && brief.briefSource() != null ? brief.briefSource() : conversation.briefSource(),
                 briefUpdatedAt,
-                watermark, conversation.nativeSessionId(), conversation.createdAtMs(), now);
+                watermark, conversation.nativeSessionId(),
+                conversation.shareMode(), conversation.shareStatus(), conversation.stoppedAtMs(),
+                conversation.createdAtMs(), now);
         conversations.update(updated);
         // 先更新会话行再持久化消息：若 ES/Redis 写入失败抛 503，事务整体回滚，水位绝不虚推
         messages.saveAll(batchMessages);
@@ -132,17 +142,19 @@ public class ConversationSyncAppService {
         }
 
         // 会话头也入检索索引（wb_conversation_v1），供简报看板全文检索
-        searchIndex.publishSearchIndex(conversation.workspaceId(), JSON.writeValueAsString(Map.of(
-                "conversationId", updated.id(),
-                "projectId", updated.projectId(),
-                "ownerUserId", updated.ownerUserId(),
-                "title", updated.title(),
-                "status", updated.status(),
-                "briefText", updated.briefText(),
-                "briefSource", updated.briefSource(),
-                "briefUpdatedAtMs", updated.briefUpdatedAtMs(),
-                "syncedSequence", updated.syncedSequence(),
-                "updatedAtMs", now)));
+        searchIndex.publishSearchIndex(conversation.workspaceId(), JSON.writeValueAsString(Map.ofEntries(
+                Map.entry("conversationId", updated.id()),
+                Map.entry("projectId", updated.projectId()),
+                Map.entry("ownerUserId", updated.ownerUserId()),
+                Map.entry("title", updated.title()),
+                Map.entry("status", updated.status()),
+                Map.entry("briefText", updated.briefText()),
+                Map.entry("briefSource", updated.briefSource()),
+                Map.entry("shareMode", updated.shareMode()),
+                Map.entry("shareStatus", updated.shareStatus()),
+                Map.entry("briefUpdatedAtMs", updated.briefUpdatedAtMs()),
+                Map.entry("syncedSequence", updated.syncedSequence()),
+                Map.entry("updatedAtMs", now))));
 
         notifications.publish("conversation.brief_updated", updated.id(), Map.of(
                 "workspaceId", updated.workspaceId(), "actorId", updated.ownerUserId(),

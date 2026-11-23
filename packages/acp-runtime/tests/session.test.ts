@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 import { LocalAcpHost } from "../dist/index.js"
+import { buildNativeBindingIdentity } from "../dist/native-binding.js"
 
 const sdkUrl = import.meta.resolve("@agentclientprotocol/sdk")
 const stubAgentScript = `
@@ -99,5 +100,53 @@ test("permission 请求携带规范化工具 details（locations/diffs/input）�
   } finally {
     await host.close()
     await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test("LocalAcpHost 支持无团队与未发布会话，并在发布与停止共享前后复用同一原生绑定与内存会话", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "acp-scope-continuity-"))
+  const bindings = await mkdtemp(join(tmpdir(), "acp-scope-bindings-"))
+  const host = new LocalAcpHost(
+    {
+      executable: process.execPath,
+      args: ["--input-type=module", "-e", stubAgentScript],
+      env: process.env,
+    },
+    { bindingDirectory: bindings, bindingNamespace: "test-ns" },
+  )
+  try {
+    const soloScope = {
+      accountId: "acc-1",
+      workspaceId: null,
+      projectId: null,
+      conversationId: "conv-continuity-1",
+    }
+    const teamPublishedScope = {
+      accountId: "acc-1",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      conversationId: "conv-continuity-1",
+    }
+    const teamPersonalScope = {
+      accountId: "acc-1",
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      projectId: null,
+      conversationId: "conv-continuity-1",
+    }
+
+    assert.deepEqual(
+      buildNativeBindingIdentity("test-ns", soloScope, workspace, 1n, 2n),
+      buildNativeBindingIdentity("test-ns", teamPublishedScope, workspace, 1n, 2n),
+    )
+
+    const s1 = await host.bind(soloScope, workspace)
+    const s2 = await host.bind(teamPersonalScope, workspace)
+    const s3 = await host.bind(teamPublishedScope, workspace)
+    assert.equal(s1, s2)
+    assert.equal(s2, s3)
+  } finally {
+    await host.close()
+    await rm(workspace, { recursive: true, force: true })
+    await rm(bindings, { recursive: true, force: true })
   }
 })

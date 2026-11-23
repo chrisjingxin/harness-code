@@ -178,7 +178,9 @@ export class AcpAgentRegistry {
    */
   async findBoundProvider(scope: LocalAcpScope, cwd: string): Promise<string | undefined> {
     if (!this.#bindingDirectory || !isAbsolute(cwd)) return undefined
-    if ([scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId].some(id => !id.trim())) {
+    if (!scope.accountId.trim() || !scope.conversationId.trim()
+      || (scope.workspaceId !== null && !scope.workspaceId.trim())
+      || (scope.projectId !== null && !scope.projectId.trim())) {
       return undefined
     }
     let root: string

@@ -2,7 +2,7 @@
 import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, IdentityState } from "@workbench/collaboration-client/types"
 import type {
-  CollaborationAppsHost, DesktopHost, LocalDirectoryHost,
+  CollaborationAppsHost, DesktopHost, LocalConversationsHost, LocalDirectoryHost,
   OrganizationHost, PersonalHost, ProjectConversationHost, WindowState,
 } from "../shared/index.js"
 import { createLocalExecutionHost } from "./local-execution-api.js"
@@ -44,8 +44,22 @@ const projectConversations: ProjectConversationHost = {
   registerConversation: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:project-conversations:register", workspaceId, projectId, request),
   getConversation: (workspaceId, projectId, conversationId) => ipcRenderer.invoke("workbench:project-conversations:get", workspaceId, projectId, conversationId),
   readHistory: (workspaceId, projectId, conversationId, afterSequence, limit) => ipcRenderer.invoke("workbench:project-conversations:history", workspaceId, projectId, conversationId, afterSequence, limit),
+  stopSharing: (workspaceId, projectId, conversationId) => ipcRenderer.invoke("workbench:project-conversations:stop-sharing", workspaceId, projectId, conversationId),
 }
 contextBridge.exposeInMainWorld("projectConversations", projectConversations)
+
+const localConversations: LocalConversationsHost = {
+  list: filter => ipcRenderer.invoke("workbench:local-conversations:list", filter),
+  get: conversationId => ipcRenderer.invoke("workbench:local-conversations:get", conversationId),
+  create: input => ipcRenderer.invoke("workbench:local-conversations:create", input),
+  rename: (conversationId, title) => ipcRenderer.invoke("workbench:local-conversations:rename", conversationId, title),
+  updateWorkspace: (conversationId, workspaceId) => ipcRenderer.invoke("workbench:local-conversations:update-workspace", conversationId, workspaceId),
+  updateBinding: (conversationId, patch) => ipcRenderer.invoke("workbench:local-conversations:update-binding", conversationId, patch),
+  markPublished: (conversationId, binding) => ipcRenderer.invoke("workbench:local-conversations:mark-published", conversationId, binding),
+  markSharingStopped: (conversationId, stoppedAtMs) => ipcRenderer.invoke("workbench:local-conversations:mark-sharing-stopped", conversationId, stoppedAtMs),
+  remove: conversationId => ipcRenderer.invoke("workbench:local-conversations:remove", conversationId),
+}
+contextBridge.exposeInMainWorld("localConversations", localConversations)
 
 const collaborationApps: CollaborationAppsHost = {
   createSnapshot: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createSnapshot", workspaceId, projectId, request),

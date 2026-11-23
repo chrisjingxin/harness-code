@@ -41,7 +41,9 @@ const messages: Record<CollaborationError["code"], string> = {
   TARGET_UNAVAILABLE: "目标设备或执行配置不可用", EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新",
   SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
   WORKSPACE_MEMBER_REQUIRED: "请先加入该团队", PROJECT_OWNER_REQUIRED: "仅项目负责人可执行该操作",
-  DEVICE_FORBIDDEN: "设备无权执行该操作", CONVERSATION_FORBIDDEN: "仅会话创建者可执行该操作", REPOSITORY_CONFLICT: "仓库地址已被登记",
+  DEVICE_FORBIDDEN: "设备无权执行该操作", CONVERSATION_FORBIDDEN: "仅会话创建者可执行该操作",
+  CONVERSATION_CONFLICT: "会话标识或请求参数冲突", CONVERSATION_SHARING_STOPPED: "该会话已停止团队共享",
+  REPOSITORY_CONFLICT: "仓库地址已被登记",
   VERSION_CONFLICT: "数据已被他人修改，请刷新后重试", PROJECT_ARCHIVED: "项目已归档",
   REPOSITORY_ARCHIVED: "仓库已归档", OWNER_CANNOT_LEAVE: "项目负责人不能移出自己",
   SEQUENCE_CONFLICT: "消息序号与服务端水位不一致，请按 expectedSequence 续传",
@@ -339,6 +341,17 @@ export class CollaborationClient {
       `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations`,
       "organization#ConversationDetailResponse",
       { body: request, inputSchema: "organization#ConversationRegisterRequest" },
+    )
+  }
+  /** 会话创建者停止继续向团队同步该会话；采用空请求体，匹配服务端 POST 边界限制。 */
+  stopProjectConversationSharing(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
+    if (!this.#validIds(workspaceId, projectId, conversationId)) {
+      return Promise.resolve(this.#error("INVALID_REQUEST"))
+    }
+    return this.#write(
+      `/api/v1/workspaces/${workspaceId}/projects/${projectId}/conversations/${conversationId}/stop-sharing`,
+      "organization#ConversationDetailResponse",
+      {},
     )
   }
   getProjectConversation(workspaceId: string, projectId: string, conversationId: string, signal?: AbortSignal): Promise<CollaborationResult<ConversationDetailResponse>> {

@@ -39,14 +39,20 @@ public final class ConversationDtos {
             long briefUpdatedAtMs,
             long syncedSequence,
             String updatedAt,
+            String shareMode,
+            String shareStatus,
+            String stoppedAt,
             List<ConversationRepositoryItem> repositories
     ) {}
 
-    /** 登记会话请求：repositoryIds ⊆ 项目引用 */
+    /** 登记会话请求：repositoryIds ⊆ 项目引用；可选指定 client 生成的 conversationId、共享档位与初始简报 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ConversationRegisterRequest(
             String title,
             List<String> repositoryIds,
+            String conversationId,
+            String shareMode,
+            SyncBrief initialBrief,
             String requestId
     ) {}
 

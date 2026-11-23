@@ -78,6 +78,18 @@ public class ConversationPO {
     @TableField("native_session_id")
     private String nativeSessionId;
 
+    /** 团队共享档位：1=full(全文同步) 2=summary_only(仅简报) */
+    @TableField("share_mode")
+    private Integer shareMode;
+
+    /** 共享状态：1=active(持续同步) 2=stopped(已停止共享) */
+    @TableField("share_status")
+    private Integer shareStatus;
+
+    /** 停止共享时间戳 */
+    @TableField("stopped_at")
+    private LocalDateTime stoppedAt;
+
     /** 创建时间戳（毫秒） */
     @TableField("created_at")
     private LocalDateTime createdAt;
@@ -196,6 +208,30 @@ public class ConversationPO {
 
     public void setNativeSessionId(String nativeSessionId) {
         this.nativeSessionId = nativeSessionId;
+    }
+
+    public Integer getShareMode() {
+        return shareMode;
+    }
+
+    public void setShareMode(Integer shareMode) {
+        this.shareMode = shareMode;
+    }
+
+    public Integer getShareStatus() {
+        return shareStatus;
+    }
+
+    public void setShareStatus(Integer shareStatus) {
+        this.shareStatus = shareStatus;
+    }
+
+    public LocalDateTime getStoppedAt() {
+        return stoppedAt;
+    }
+
+    public void setStoppedAt(LocalDateTime stoppedAt) {
+        this.stoppedAt = stoppedAt;
     }
 
     public LocalDateTime getCreatedAt() {

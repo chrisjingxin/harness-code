@@ -16,6 +16,8 @@ export type ConversationUploadNotice = {
   readonly turnId: string
   readonly kind: "upload"
   readonly failure?: string
+  /** 服务端明确返回 409 CONVERSATION_SHARING_STOPPED 时为 true，提示宿主收敛本地共享状态并停止后续入队。 */
+  readonly sharingStopped?: boolean
   /** 上传确认后附带服务器写入的最小/最大 sequence，供消费端去重已同步记录。 */
   readonly firstSequence?: number
   readonly syncedSequence?: number

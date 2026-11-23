@@ -37,14 +37,28 @@ class PersistenceConverterTest {
   void conversationKeepsEmptyBriefTaskAndSession() {
     // 全列 NOT NULL：未绑定/无简报统一 '' 空串哨兵，进出领域不丢
     Conversation conversation = new Conversation(
-      "c1", "w1", "p1", "u1", "", "", "idle", "标题", "", "rule", 1L, 0L, "", 1L, 2L);
+      "c1", "w1", "p1", "u1", "", "", "idle", "标题", "", "rule", 1L, 0L, "",
+      "full", "active", 1L, 1L, 2L);
     ConversationPO po = ConversationConverter.toPo(conversation);
     assertThat(po.getNativeSessionId()).isEmpty();
     assertThat(po.getTaskId()).isEmpty();
     assertThat(po.getBriefText()).isEmpty();
     assertThat(po.getStatus()).isEqualTo(1);
     assertThat(po.getBriefSource()).isEqualTo(1);
+    assertThat(po.getShareMode()).isEqualTo(1);
+    assertThat(po.getShareStatus()).isEqualTo(1);
     assertThat(po.getId()).isNull();
+    assertThat(ConversationConverter.toConversation(po)).isEqualTo(conversation);
+  }
+
+  @Test
+  void conversationSummaryOnlyAndStoppedRoundTrips() {
+    Conversation conversation = new Conversation(
+      "c2", "w1", "p1", "u1", "", "", "idle", "摘要发布", "完成排查", "agent", 10L, 0L, "",
+      "summary_only", "stopped", 99L, 1L, 99L);
+    ConversationPO po = ConversationConverter.toPo(conversation);
+    assertThat(po.getShareMode()).isEqualTo(2);
+    assertThat(po.getShareStatus()).isEqualTo(2);
     assertThat(ConversationConverter.toConversation(po)).isEqualTo(conversation);
   }
 

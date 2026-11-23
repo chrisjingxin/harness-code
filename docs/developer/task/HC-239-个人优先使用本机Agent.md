@@ -5,13 +5,13 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: Devin
 priority: P0
-status: 待认领
-owner: 未认领
-branch: -
+status: 进行中
+owner: Antigravity
+branch: harness_lody
 scope: 登录后不依赖 Workspace 与 Project 即可使用本机 Agent，提供可用 ACP Agent 连通性预检引导与左栏多团队切换 UI；个人会话只在本机保存、不上传；本机执行授权只核对当前账号、本机会话绑定与目录授权，与 Project 上传授权分离；左栏固定“我的会话”；个人会话可主动“发布到 Project”（支持“完整定稿正文”或“仅共享状态与成果摘要”两档）、Project 会话可“停止共享”（保留已上传只读并标注“已停止同步”）；会话的团队上下文在新建时绑定当时选中的团队、之后不变，与可见性相互独立；无团队会话不装配团队知识与记忆。
 acceptance: 未加入任何团队的账号登录后能完成本机 Agent 预检并选目录完成一轮对话；多团队成员可在左栏切换当前 Workspace；服务端不可用时已登录用户仍能新建并继续个人会话；个人会话不出现在任何 Project 简报或成员视图；从“我的会话”发布到 Project 时可选“仅共享状态与成果摘要”（成员可见进展与结论摘要但看不到完整试错过程）或完整正文；停止共享后已上传内容保留只读并标注“已停止同步”，不再上传新内容；加入团队后新建的个人会话带上该团队知识但团队成员与管理员仍看不到它，切换侧栏团队不改变已有会话的团队上下文；“我的会话”按当前选中团队过滤，只显示所属当前团队的个人会话（未加入团队或无团队态下显示无团队个人会话）。
 user_docs: 实施阶段更新 docs/user/独立桌面工作台.md
-developer_docs: docs/developer/architecture/个人与团队协同用户旅程.md；认领后建立同名 Spec、Plan、Todo
+developer_docs: docs/developer/architecture/个人与团队协同用户旅程.md；docs/developer/spec/HC-239-个人优先使用本机Agent.md；docs/developer/plan/HC-239-个人优先使用本机Agent.md；docs/developer/todo/HC-239-个人优先使用本机Agent.md
 test_evidence: -
 references: docs/developer/architecture/多人协作工作台顶层设计.md；docs/developer/task/HC-218-会话只读与主动同步.md；docs/developer/task/HC-233-项目记忆与团队知识读取.md；docs/developer/task/HC-202-桌面工作台视图迁移.md；docs/developer/task/HC-249-共享出口脱敏与组织审计日志.md
 completed_at: -
@@ -21,7 +21,7 @@ completed_at: -
 
 ## 当前阶段
 
-2026-11-20 用户确认：登录后即可使用本机 Agent，进入 Project 后才有会话共享等协作能力；个人会话使用当前选中团队的知识。2026-11-23 补齐个人与团队双轨细节：纳入左栏多团队切换 UI、本机 Agent 连通性预检引导、“仅共享状态与成果摘要”档位及停止共享只读策略。本卡待认领，认领后按 Spec → Plan → Todo 推进。整体旅程见[个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md)第 4 节及第 7 节旅程 0、1、8。
+2026-11-20 用户确认：登录后即可使用本机 Agent，进入 Project 后才有会话共享等协作能力；个人会话使用当前选中团队的知识。2026-11-23 补齐个人与团队双轨细节：纳入左栏多团队切换 UI、本机 Agent 连通性预检引导、“仅共享状态与成果摘要”档位及停止共享只读策略，并完成全栈实施口径确认。已于 `harness_lody` 认领并产出 [HC-239 Spec](../spec/HC-239-个人优先使用本机Agent.md)、[HC-239 Plan](../plan/HC-239-个人优先使用本机Agent.md) 与 [HC-239 Todo](../todo/HC-239-个人优先使用本机Agent.md)（已按用户要求对齐[方案 B 交互原型](../previews/personal-team-workbench/README.md)与个人会话共享到团队 Project 规则）。整体旅程见[个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md)第 4 节及第 7 节旅程 0、1、8。
 
 ## 要解决的问题
 
@@ -71,8 +71,8 @@ completed_at: -
 - HC-233 与本卡都会修改 `desktop/src/main/local-execution-coordinator.ts`：本卡要把执行范围中的 `projectId` 改为可选并加入会话团队上下文，HC-233 要在同一位置装配知识与记忆。两卡在 Spec 阶段先约定执行范围接口，再并行实施。
 - 只同步“发布之后”的内容不需要新增服务端能力。若决定发布时带上已有历史，需要服务端历史补传能力；若“仅共享状态与成果摘要”需在会话头与同步接口区分可见模式字段，以上能力按全栈分工同步在 `contracts/`、`server/` 与 `packages/collaboration-client/` 中补齐。
 
-## 待定问题（Spec 阶段确定）
+## 待定问题（已在 Spec 收口）
 
-1. 发布到 Project 时是否允许带上发布前的历史（建议默认“仅从当前或所选节点起共享，可选勾选带入历史”）。
-2. 个人会话本机存储复用现有个人状态存储还是独立存储，以及存储上限。
+1. 发布到 Project 时是否允许带上发布前的历史：**已在 Spec 收口**——默认仅同步发布后的新轮次，发布弹窗支持勾选带入已定稿历史（复用原 `conversationId`）；且个人会话（含无团队会话）均可主动发布到团队活跃 Project（无团队会话随发布显式绑定目标 Workspace）。
+2. 个人会话本机存储方式与上限：**已在 Spec 收口**——采用独立本机存储 `LocalConversationStore`（`<userData>/workbench/local-conversations/<originSha256>/<accountId>/`），单会话上限 4 MiB 自动折叠旧轮、单账号上限 500 条。
 3. （原“停止共享后是否保留”已收口：默认保留只读并标注“已停止同步”；原“公司对个人会话是否有审计要求”由 HC-249 承接“个人会话正文不进组织审计，共享出口脱敏与元数据审计”；原“仅共享状态档位”已纳入本卡第 6 条。）

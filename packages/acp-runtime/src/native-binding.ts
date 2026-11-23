@@ -9,13 +9,13 @@ export type NativeBinding = {
   clear(): Promise<void>
 }
 
-/** 计算与 `LocalAcpHost.bind` 一致的原生绑定标识数组。 */
+/** 计算与 `LocalAcpHost.bind` 一致的原生绑定标识数组（剥离 workspaceId/projectId 以保持发布与停止共享前后连续）。 */
 export function buildNativeBindingIdentity(
   bindingNamespace: string | undefined,
   scope: {
     readonly accountId: string
-    readonly workspaceId: string
-    readonly projectId: string
+    readonly workspaceId?: string | null
+    readonly projectId?: string | null
     readonly conversationId: string
   },
   root: string,
@@ -31,8 +31,6 @@ export function buildNativeBindingIdentity(
   return [
     bindingNamespace ?? "",
     scope.accountId,
-    scope.workspaceId,
-    scope.projectId,
     scope.conversationId,
     root,
     String(dev),

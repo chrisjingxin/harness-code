@@ -89,7 +89,8 @@ public final class RouteCatalog {
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/board", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/notifications", Set.of("GET"), Auth.USER, 0, NOTIFICATION_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/notifications/stream", Set.of("GET"), Auth.USER, 0, Map.of("afterId", SEQUENCE)),
-            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/sync", Set.of("POST"), Auth.USER, 1048576, NONE)
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/sync", Set.of("POST"), Auth.USER, 1048576, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/stop-sharing", Set.of("POST"), Auth.USER, 0, NONE)
     );
 
     public RouteCatalog() {

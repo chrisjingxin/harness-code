@@ -3,6 +3,8 @@ package workbench.collaboration.application.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
+import workbench.collaboration.application.port.NotificationPort;
+import workbench.collaboration.application.port.SearchIndexBus;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.conversation.Message;
 import workbench.collaboration.support.FakeStores;
@@ -21,6 +23,10 @@ import workbench.collaboration.support.FakeStores.FakeConversations;
 import workbench.collaboration.support.FakeStores.FakeIdentity;
 import workbench.collaboration.support.FakeStores.FakeProjects;
 import workbench.collaboration.support.FakeStores.FakeRepositories;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -47,6 +53,8 @@ class ConversationAppServiceTest {
     private final FakeRepositories repositories = new FakeRepositories();
     private final FakeConversations conversations = new FakeConversations();
     private final MemoryHotWindow messages = new MemoryHotWindow();
+    private final List<String> indexedDocs = new ArrayList<>();
+    private final List<String> notifications = new ArrayList<>();
     private ConversationAppService service;
 
     @BeforeEach
@@ -64,10 +72,12 @@ class ConversationAppServiceTest {
         repositories.items.put(REPO, new Repository(
                 REPO, WS, "中台服务", "git@example.com:team/middle.git", "main",
                 RepositoryStatus.ACTIVE, OWNER, 1L, 1L));
+        NotificationPort notificationPort = (eventType, subjectId, payload) -> notifications.add(eventType + ":" + subjectId);
+        SearchIndexBus indexBus = (workspaceId, docJson) -> indexedDocs.add(docJson);
         service = new ConversationAppService(
                 new ProjectAccessPolicy(identity, projects, repositories),
                 conversations, messages, projects, repositories,
-                new MemoryIdempotency(), new Contracts());
+                new MemoryIdempotency(), new Contracts(), notificationPort, indexBus);
     }
 
     @Test
@@ -162,6 +172,87 @@ class ConversationAppServiceTest {
 
         assertThatThrownBy(() -> service.history(OUTSIDER, WS, PROJECT, conversationId, 0, 100))
                 .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+    }
+
+    @Test
+    void 摘要档位支持指定conversationId与初始简报且历史始终返回空() {
+        String presetId = "88888888-8888-4888-8888-888888888888";
+        String otherProject = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        String req1 = "12121212-1212-4121-8121-121212121212";
+        String req2 = "34343434-3434-4343-8343-343434343434";
+        projects.projects.put(otherProject, new Project(
+                otherProject, WS, "订单服务", "", OWNER, ProjectStatus.ACTIVE, 1L, 1L, 1L));
+        projects.upsertMember(new ProjectMember(otherProject, OWNER, MemberStatus.ACTIVE, 1L, 1L));
+
+        String body = "{\"title\":\"仅共享结论\",\"repositoryIds\":[\"" + REPO + "\"],"
+                + "\"conversationId\":\"" + presetId + "\",\"shareMode\":\"summary_only\","
+                + "\"initialBrief\":{\"status\":\"idle\",\"briefText\":\"已定位死锁并给出修复方案\",\"briefSource\":\"rule\"},"
+                + "\"requestId\":\"" + req1 + "\"}";
+
+        String created = service.register(OWNER, WS, PROJECT, body);
+        var summary = JSON.readTree(created).path("conversation");
+        assertThat(summary.path("conversationId").asString()).isEqualTo(presetId);
+        assertThat(summary.path("shareMode").asString()).isEqualTo("summary_only");
+        assertThat(summary.path("shareStatus").asString()).isEqualTo("active");
+        assertThat(summary.path("stoppedAt").isNull()).isTrue();
+        assertThat(summary.path("briefText").asString()).isEqualTo("已定位死锁并给出修复方案");
+        assertThat(summary.path("briefSource").asString()).isEqualTo("rule");
+        assertThat(notifications).containsExactly("conversation.brief_updated:" + presetId);
+
+        // 同 requestId 幂等重放
+        String replay = service.register(OWNER, WS, PROJECT, body);
+        assertThat(replay).isEqualTo(created);
+
+        // 相同 conversationId 跨项目或换 requestId 冲突 409 CONVERSATION_CONFLICT
+        String conflictBody = "{\"title\":\"冲突\",\"conversationId\":\"" + presetId + "\",\"requestId\":\"" + req2 + "\"}";
+        assertThatThrownBy(() -> service.register(OWNER, WS, otherProject, conflictBody))
+                .isInstanceOf(ApiProblem.class)
+                .extracting("status", "code")
+                .containsExactly(409, "CONVERSATION_CONFLICT");
+
+        // 即使底层消息库已有误写入记录，summary_only 会话历史查询也始终返回 0 水位空列表
+        seedMessages(presetId, 2);
+        String historyJson = service.history(MEMBER, WS, PROJECT, presetId, 0, 100);
+        var history = JSON.readTree(historyJson);
+        assertThat(history.path("syncedSequence").asLong()).isEqualTo(0L);
+        assertThat(history.path("messages").size()).isEqualTo(0);
+    }
+
+    @Test
+    void 停止共享仅owner可用且幂等并允许归档项目止损() {
+        String created = service.register(OWNER, WS, PROJECT, registerBody());
+        String conversationId = conversationIdOf(created);
+        assertThat(JSON.readTree(created).path("conversation").path("shareMode").asString()).isEqualTo("full");
+        assertThat(JSON.readTree(created).path("conversation").path("shareStatus").asString()).isEqualTo("active");
+        assertThat(JSON.readTree(created).path("conversation").path("stoppedAt").isNull()).isTrue();
+
+        assertThatThrownBy(() -> service.stopSharing(OUTSIDER, WS, PROJECT, conversationId))
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+        assertThatThrownBy(() -> service.stopSharing(MEMBER, WS, PROJECT, conversationId))
+                .isInstanceOf(ApiProblem.class)
+                .extracting("status", "code")
+                .containsExactly(403, "CONVERSATION_FORBIDDEN");
+
+        // 模拟项目归档后 owner 仍可执行停止共享止损
+        projects.projects.put(PROJECT, new Project(
+                PROJECT, WS, "账单服务", "计费与对账", OWNER, ProjectStatus.ARCHIVED, 2L, 1L, 2L));
+        notifications.clear();
+        indexedDocs.clear();
+
+        String stopped = service.stopSharing(OWNER, WS, PROJECT, conversationId);
+        var stoppedSummary = JSON.readTree(stopped).path("conversation");
+        assertThat(stoppedSummary.path("shareStatus").asString()).isEqualTo("stopped");
+        String stoppedAt = stoppedSummary.path("stoppedAt").asString();
+        assertThat(stoppedAt).isNotBlank();
+        assertThat(notifications).containsExactly("conversation.brief_updated:" + conversationId);
+        assertThat(indexedDocs).hasSize(1);
+        assertThat(indexedDocs.get(0)).contains("\"shareStatus\":\"stopped\"");
+
+        // 幂等重复调用：保持首次 stoppedAt 且不再重复发送通知或写索引
+        String repeated = service.stopSharing(OWNER, WS, PROJECT, conversationId);
+        assertThat(JSON.readTree(repeated).path("conversation").path("stoppedAt").asString()).isEqualTo(stoppedAt);
+        assertThat(notifications).hasSize(1);
+        assertThat(indexedDocs).hasSize(1);
     }
 
     private void seedMessages(String conversationId, int count) {

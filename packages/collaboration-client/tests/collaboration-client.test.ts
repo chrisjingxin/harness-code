@@ -282,6 +282,9 @@ test("createCollaborationSdk 自动联动登录态、所有权校验并在登出
           briefUpdatedAtMs: 1_700_000_000_000,
           syncedSequence: watermark,
           updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "active",
+          stoppedAt: null,
           repositories: [],
         },
       })
@@ -419,5 +422,187 @@ test("createCollaborationSdk 自动联动登录态、所有权校验并在登出
     await sdk.dispose()
   } finally {
     await rm(dir2, { recursive: true, force: true })
+  }
+})
+
+test("CollaborationClient 支持 summary_only 登记、空请求体停止共享；ConversationUploads 支持摘要上传、409 停传与队列取消", async () => {
+  const REGISTER_CONV_ID = "44444444-4444-4444-8444-444444444444"
+  const REQUEST_ID = "55555555-5555-4555-8555-555555555555"
+  let registerBodyCapture: unknown = null
+  let stopSharingBodyCapture: BodyInit | null | undefined = "not-called"
+  let stopSharingContentType: string | null = "not-called"
+
+  const clientTransport: typeof fetch = async (input, init) => {
+    const url = String(input)
+    if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+    if (url.endsWith(`/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/conversations`) && init?.method === "POST") {
+      registerBodyCapture = JSON.parse(String(init.body ?? "{}"))
+      return new Response(JSON.stringify({
+        returnCode: "SUC0000",
+        errorMsg: "",
+        body: {
+          conversation: {
+            conversationId: REGISTER_CONV_ID,
+            projectId: PROJECT_ID,
+            ownerUserId: USER_ID,
+            title: "仅摘要发布",
+            status: "idle",
+            briefText: "已完成排查摘要",
+            briefSource: "rule",
+            briefUpdatedAtMs: 1_700_000_000_000,
+            syncedSequence: 0,
+            updatedAt: "2026-11-18T00:00:00.000Z",
+            shareMode: "summary_only",
+            shareStatus: "active",
+            stoppedAt: null,
+            repositories: [],
+          },
+        },
+      }), { status: 201, headers: { "content-type": "application/json" } })
+    }
+    if (url.endsWith(`/conversations/${REGISTER_CONV_ID}/stop-sharing`) && init?.method === "POST") {
+      stopSharingBodyCapture = init.body
+      const headers = new Headers(init.headers)
+      stopSharingContentType = headers.get("Content-Type")
+      return jsonOk({
+        conversation: {
+          conversationId: REGISTER_CONV_ID,
+          projectId: PROJECT_ID,
+          ownerUserId: USER_ID,
+          title: "仅摘要发布",
+          status: "idle",
+          briefText: "已完成排查摘要",
+          briefSource: "rule",
+          briefUpdatedAtMs: 1_700_000_000_000,
+          syncedSequence: 0,
+          updatedAt: "2026-11-18T00:02:00.000Z",
+          shareMode: "summary_only",
+          shareStatus: "stopped",
+          stoppedAt: "2026-11-18T00:02:00.000Z",
+          repositories: [],
+        },
+      })
+    }
+    return new Response("not found", { status: 404 })
+  }
+
+  const client = new CollaborationClient(ORIGIN, clientTransport)
+  const registered = await client.registerProjectConversation(WORKSPACE_ID, PROJECT_ID, {
+    conversationId: REGISTER_CONV_ID,
+    title: "仅摘要发布",
+    shareMode: "summary_only",
+    initialBrief: { status: "idle", briefText: "已完成排查摘要", briefSource: "rule" },
+    requestId: REQUEST_ID,
+  })
+  assert.equal(registered.ok, true)
+  if (registered.ok) {
+    assert.equal(registered.value.conversation.shareMode, "summary_only")
+    assert.equal(registered.value.conversation.shareStatus, "active")
+    assert.equal(registered.value.conversation.stoppedAt, null)
+  }
+  assert.deepEqual(registerBodyCapture, {
+    conversationId: REGISTER_CONV_ID,
+    title: "仅摘要发布",
+    shareMode: "summary_only",
+    initialBrief: { status: "idle", briefText: "已完成排查摘要", briefSource: "rule" },
+    requestId: REQUEST_ID,
+  })
+
+  const stopped = await client.stopProjectConversationSharing(WORKSPACE_ID, PROJECT_ID, REGISTER_CONV_ID)
+  assert.equal(stopped.ok, true)
+  if (stopped.ok) {
+    assert.equal(stopped.value.conversation.shareStatus, "stopped")
+    assert.equal(stopped.value.conversation.stoppedAt, "2026-11-18T00:02:00.000Z")
+  }
+  assert.equal(stopSharingBodyCapture, undefined)
+  assert.equal(stopSharingContentType, null)
+  client.dispose()
+
+  const dir = await mkdtemp(join(tmpdir(), "hc239-uploads-"))
+  try {
+    const scope: CollaborationConversationScope = {
+      accountId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      projectId: PROJECT_ID,
+      conversationId: CONV_ID,
+    }
+    const notices: ConversationUploadNotice[] = []
+    const uploaded: ConversationSyncRequest[] = []
+    let simulateStopped = false
+
+    const uploads = new ConversationUploads(
+      dir,
+      {
+        watermark: async () => ({ ok: true, value: 0 }),
+        upload: async (_scope, request) => {
+          if (simulateStopped) {
+            return {
+              ok: false,
+              error: {
+                code: "CONVERSATION_SHARING_STOPPED",
+                message: "该会话已停止团队共享",
+                requestId: REQUEST_ID,
+                retryable: false,
+              },
+            }
+          }
+          uploaded.push(request)
+          return { ok: true, value: { syncedSequence: 0 } }
+        },
+      },
+      notice => notices.push(notice),
+    )
+    uploads.useAccount(USER_ID)
+
+    // 1) summary_only 即使含超长原文也只上传空 messages + 精简摘要
+    await uploads.enqueue(scope, {
+      turnId: "turn-summary-only",
+      shareMode: "summary_only",
+      userText: "敏感长文" + "甲".repeat(40_000),
+      reply: "内部调试细节" + "乙".repeat(40_000),
+      briefText: "阶段结论：已完成配置修复并验证通过",
+      acceptedAtMs: 1_700_000_000_000,
+      completedAtMs: 1_700_000_001_000,
+    })
+    await waitUntil(() => notices.length >= 1)
+    assert.equal(uploaded.length, 1)
+    assert.deepEqual(uploaded[0]!.messages, [])
+    assert.equal(uploaded[0]!.brief?.briefText, "阶段结论：已完成配置修复并验证通过")
+    assert.equal(notices[0]!.failure, undefined)
+    assert.equal(notices[0]!.syncedSequence, 0)
+    assert.equal(notices[0]!.firstSequence, undefined)
+
+    // 2) 服务端返回 CONVERSATION_SHARING_STOPPED 时删除待传文件并通知 sharingStopped: true
+    simulateStopped = true
+    await uploads.enqueue(scope, {
+      turnId: "turn-after-stop",
+      shareMode: "full",
+      userText: "停止共享后触发上传",
+      reply: "应收到 409 并清除队列",
+      acceptedAtMs: 1_700_000_002_000,
+      completedAtMs: 1_700_000_003_000,
+    })
+    await waitUntil(() => notices.length >= 2)
+    assert.equal(notices[1]!.sharingStopped, true)
+    await uploads.flush()
+    const pendingExists = await readFile(join(dir, USER_ID, `${CONV_ID}.json`), "utf8").then(() => true, () => false)
+    assert.equal(pendingExists, false)
+
+    // 3) cancelConversation 主动删除未发送待传队列
+    uploads.useAccount(null)
+    await uploads.enqueue(scope, {
+      turnId: "turn-cancel",
+      shareMode: "full",
+      userText: "离线入队",
+      reply: "随后取消",
+      acceptedAtMs: 1_700_000_004_000,
+      completedAtMs: 1_700_000_005_000,
+    })
+    await uploads.flush()
+    await uploads.cancelConversation(scope)
+    const cancelledExists = await readFile(join(dir, USER_ID, `${CONV_ID}.json`), "utf8").then(() => true, () => false)
+    assert.equal(cancelledExists, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })

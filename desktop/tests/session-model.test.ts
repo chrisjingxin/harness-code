@@ -32,6 +32,9 @@ const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {})
   briefUpdatedAtMs: 1_700_000_000_000,
   syncedSequence: 3,
   updatedAt: "2026-11-13T08:00:00Z",
+  shareMode: "full",
+  shareStatus: "active",
+  stoppedAt: null,
   repositories: [],
   ...overrides,
 })

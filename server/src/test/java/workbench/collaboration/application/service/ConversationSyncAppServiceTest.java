@@ -172,10 +172,42 @@ class ConversationSyncAppServiceTest {
         assertThat(messages.messageCount(CONV)).isEqualTo(0);
     }
 
+    @Test
+    void 摘要档位允许仅同步简报并拒绝携带正文消息() {
+        conversations.insert(conversationWith(0L, "summary_only", "active"));
+        String briefOnly = "{\"messages\":[],\"brief\":{\"status\":\"running\",\"briefText\":\"阶段总结\",\"briefSource\":\"rule\"}}";
+        String ok = service.sync(OWNER, WS, PROJECT, CONV, briefOnly);
+        assertThat(ok).contains("\"syncedSequence\":0");
+        assertThat(conversations.items.get(CONV).briefText()).isEqualTo("阶段总结");
+        assertThat(index.docs.get(index.docs.size() - 1))
+                .contains("\"shareMode\":\"summary_only\"")
+                .contains("\"shareStatus\":\"active\"");
+
+        String withMessages = syncBody("[{\"sequence\":1,\"type\":\"user\",\"occurredAtMs\":10,\"payload\":\"{}\"}]", null);
+        assertThatThrownBy(() -> service.sync(OWNER, WS, PROJECT, CONV, withMessages))
+                .isInstanceOf(ApiProblem.class)
+                .extracting("status", "code")
+                .containsExactly(400, "INVALID_REQUEST");
+        assertThat(messages.messageCount(CONV)).isEqualTo(0);
+    }
+
+    @Test
+    void 已停止共享后拒绝继续增量或简报同步并返回409() {
+        conversations.insert(conversationWith(2L, "full", "stopped"));
+        assertThatThrownBy(() -> service.sync(OWNER, WS, PROJECT, CONV, syncBody("[]", "{\"status\":\"idle\",\"briefText\":\"新简报\"}")))
+                .isInstanceOf(ApiProblem.class)
+                .extracting("status", "code")
+                .containsExactly(409, "CONVERSATION_SHARING_STOPPED");
+    }
+
     private static Conversation conversation(long watermark) {
+        return conversationWith(watermark, "full", "active");
+    }
+
+    private static Conversation conversationWith(long watermark, String shareMode, String shareStatus) {
         return new Conversation(
                 CONV, WS, PROJECT, OWNER, "", "", "idle", "联调",
-                "", "rule", 1L, watermark, "", 1L, 1L);
+                "", "rule", 1L, watermark, "", shareMode, shareStatus, 1L, 1L, 1L);
     }
 
     private static String syncBody(String messagesArray, String briefObject) {

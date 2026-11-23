@@ -6,6 +6,8 @@ import org.springframework.stereotype.Repository;
 import workbench.collaboration.domain.conversation.BriefSource;
 import workbench.collaboration.domain.conversation.Conversation;
 import workbench.collaboration.domain.conversation.ConversationRepository;
+import workbench.collaboration.domain.conversation.ConversationShareMode;
+import workbench.collaboration.domain.conversation.ConversationShareStatus;
 import workbench.collaboration.domain.conversation.ConversationStatus;
 import workbench.collaboration.infrastructure.persistence.mapper.ConversationMapper;
 import workbench.collaboration.infrastructure.persistence.mapper.ConversationRepoRefMapper;
@@ -114,6 +116,9 @@ public class ConversationRepositoryImpl implements ConversationRepository {
                 .set("brief_updated_at", Times.ofMs(conversation.briefUpdatedAtMs()))
                 .set("synced_sequence", conversation.syncedSequence())
                 .set("native_session_id", conversation.nativeSessionId())
+                .set("share_mode", ConversationShareMode.dbOf(conversation.shareMode()))
+                .set("share_status", ConversationShareStatus.dbOf(conversation.shareStatus()))
+                .set("stopped_at", Times.ofMs(conversation.stoppedAtMs()))
                 .set("updated_at", Times.ofMs(conversation.updatedAtMs())));
         if (rows != 1) {
             throw new IllegalStateException("会话不存在");

@@ -304,9 +304,15 @@ export function useLocalExecution(
       }
 
       if (notice.kind === "accepted" && notice.queued && screen.binding?.bindingId === notice.bindingId
-        && screen.preparedFor && !screen.flight) {
+        && screen.preparedFor && !screen.flight
+        && notice.scope.workspaceId !== null && notice.scope.projectId !== null) {
         const flight: Flight = {
-          scope: { ...notice.scope, namespace: screen.preparedFor.namespace },
+          scope: {
+            ...notice.scope,
+            workspaceId: notice.scope.workspaceId,
+            projectId: notice.scope.projectId,
+            namespace: screen.preparedFor.namespace,
+          },
           bindingId: notice.bindingId, requestId: notice.requestId, referenceIds: notice.referenceIds ?? [],
           ...(notice.images?.length ? { images: notice.images } : {}),
           lastSequence: 0, unknown: false,

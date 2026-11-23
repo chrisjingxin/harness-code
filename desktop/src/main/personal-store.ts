@@ -21,6 +21,7 @@ import {
   type PromptQueueRecord,
 } from "../shared/index.js"
 import type { CollaborationState } from "@workbench/collaboration-client"
+import type { LocalConversationStore } from "./local-conversation-store.js"
 
 type Identity = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type Entry = { revision: number; flushed: number; data: PersonalValue | PromptQueueRecord | null; writing: Promise<void> | null }
@@ -94,7 +95,10 @@ const draftImagesSchema = {
 }
 
 const schemas: Record<PersonalKey["kind"], object> = {
-  account: object(["workspaceId"], { workspaceId: nullableId }),
+  account: object(["workspaceId"], {
+    workspaceId: nullableId,
+    activeView: { enum: ["workspace", "solo"] },
+  }),
   workspace: object(["projectId", "panels"], {
     projectId: nullableId,
     panels: object(["left", "right"], { left: panel, right: panel }),
@@ -216,14 +220,29 @@ const keyValidators = {
   workspace: ajv.compile(object(["kind", "workspaceId"], { kind: { const: "workspace" }, workspaceId: id })),
   projectNavigation: ajv.compile(object(["kind", "workspaceId", "projectId"], { kind: { const: "projectNavigation" }, workspaceId: id, projectId: id })),
   projectDraft: ajv.compile(object(["kind", "workspaceId", "projectId"], { kind: { const: "projectDraft" }, workspaceId: id, projectId: id })),
-  conversation: ajv.compile(object(["kind", "workspaceId", "projectId", "conversationId"], { kind: { const: "conversation" }, workspaceId: id, projectId: id, conversationId: id })),
-  sessionWorkspace: ajv.compile(object(["kind", "workspaceId", "projectId", "conversationId"], { kind: { const: "sessionWorkspace" }, workspaceId: id, projectId: id, conversationId: id })),
+  conversation: ajv.compile(object(["kind", "workspaceId", "projectId", "conversationId"], { kind: { const: "conversation" }, workspaceId: nullableId, projectId: nullableId, conversationId: id })),
+  sessionWorkspace: ajv.compile(object(["kind", "workspaceId", "projectId", "conversationId"], { kind: { const: "sessionWorkspace" }, workspaceId: nullableId, projectId: nullableId, conversationId: id })),
 }
 
 function validKey(value: unknown): value is PersonalKey {
   if (!value || typeof value !== "object" || !("kind" in value)) return false
   const kind = value.kind
-  return typeof kind === "string" && Object.hasOwn(keyValidators, kind) && keyValidators[kind as PersonalKey["kind"]](value)
+  if (typeof kind !== "string" || !Object.hasOwn(keyValidators, kind) || !keyValidators[kind as PersonalKey["kind"]](value)) {
+    return false
+  }
+  const typed = value as unknown as PersonalKey
+  if ((typed.kind === "conversation" || typed.kind === "sessionWorkspace")
+    && typed.projectId !== null
+    && typed.workspaceId === null) {
+    return false
+  }
+  return true
+}
+
+function requiresWorkspaceMembership(
+  key: PersonalKey,
+): key is Extract<PersonalKey, { kind: "workspace" | "projectNavigation" | "projectDraft" }> {
+  return key.kind === "workspace" || key.kind === "projectNavigation" || key.kind === "projectDraft"
 }
 
 /** 超过安全阈值时从最旧消息起裁剪正文缓存，保证阅读位置与草稿永远可正常落盘。 */
@@ -259,7 +278,12 @@ export class PersonalStore {
   readonly #authorizing = new Map<string, Promise<PersonalResult<Authorized>>>()
   readonly #root: string
 
-  constructor(private readonly identity: CollaborationState, private readonly origin: string, userData: string) {
+  constructor(
+    private readonly identity: CollaborationState,
+    private readonly origin: string,
+    userData: string,
+    private readonly localConversations?: LocalConversationStore,
+  ) {
     this.#root = join(userData, "personal-view-v2")
   }
   #current(identity: Identity): boolean {
@@ -285,7 +309,7 @@ export class PersonalStore {
     const identity = this.identity.personalIdentity()
     this.#evictStalePermissions(identity)
     if (!identity) return fail("请重新登录后恢复个人视图。")
-    if (key.kind !== "account" && !identity.workspaces.includes(key.workspaceId)) {
+    if (requiresWorkspaceMembership(key) && !identity.workspaces.includes(key.workspaceId)) {
       return fail("当前账号无法访问该工作区。")
     }
 
@@ -333,21 +357,50 @@ export class PersonalStore {
           parts.push(key.workspaceId, key.projectId)
         }
         if (key.kind === "conversation" || key.kind === "sessionWorkspace") {
-          const detail = await this.identity.withWorkspace(
-            key.workspaceId,
-            client => client.getProjectConversation(key.workspaceId, key.projectId, key.conversationId),
-          )
-          if (!detail.ok || !this.#current(identity)) {
-            this.#permissions.delete(cacheKey)
-            return fail("无法确认会话访问权限，请重试。")
+          // 会话与右侧面板文件名仅按 (accountId, kind, conversationId) 计算，发布或停止共享后个人草稿与阅读位不断裂
+          parts.push(key.conversationId)
+          if (key.projectId === null) {
+            if (!this.localConversations) {
+              this.#permissions.delete(cacheKey)
+              return fail("本机会话存储尚未就绪，请重试。")
+            }
+            const record = await this.localConversations.getRecord(identity.accountId, key.conversationId)
+            if (!this.#current(identity) || !record || record.projectId !== null || record.workspaceId !== key.workspaceId) {
+              this.#permissions.delete(cacheKey)
+              return fail("无法确认本机个人会话归属，请重试。")
+            }
+            ownsConversation = true
+          } else {
+            const localRecord = this.localConversations
+              ? await this.localConversations.getRecord(identity.accountId, key.conversationId)
+              : null
+            if (localRecord && localRecord.projectId === key.projectId && localRecord.workspaceId === key.workspaceId) {
+              if (!this.#current(identity)) {
+                this.#permissions.delete(cacheKey)
+                return fail("账号已变化，请重试。")
+              }
+              ownsConversation = true
+            } else {
+              if (key.workspaceId === null || !identity.workspaces.includes(key.workspaceId)) {
+                this.#permissions.delete(cacheKey)
+                return fail("当前账号无法访问该工作区。")
+              }
+              const detail = await this.identity.withWorkspace(
+                key.workspaceId,
+                client => client.getProjectConversation(key.workspaceId!, key.projectId!, key.conversationId),
+              )
+              if (!detail.ok || !this.#current(identity)) {
+                this.#permissions.delete(cacheKey)
+                return fail("无法确认会话访问权限，请重试。")
+              }
+              const conversation = detail.value.conversation
+              if (conversation.projectId !== key.projectId || conversation.conversationId !== key.conversationId) {
+                this.#permissions.delete(cacheKey)
+                return fail("会话范围已变化，请重试。")
+              }
+              ownsConversation = conversation.ownerUserId === identity.accountId
+            }
           }
-          const conversation = detail.value.conversation
-          if (conversation.projectId !== key.projectId || conversation.conversationId !== key.conversationId) {
-            this.#permissions.delete(cacheKey)
-            return fail("会话范围已变化，请重试。")
-          }
-          ownsConversation = conversation.ownerUserId === identity.accountId
-          parts.push(key.workspaceId, key.projectId, key.conversationId)
         }
         if (!this.#current(identity)) {
           this.#permissions.delete(cacheKey)
@@ -426,7 +479,7 @@ export class PersonalStore {
       if (!refreshed.ok) return refreshed
       authorized = refreshed.value
     }
-    if (key.kind !== "account" && !authorized.identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
+    if (requiresWorkspaceMembership(key) && !authorized.identity.workspaces.includes(key.workspaceId)) return fail("当前账号无法访问该工作区。")
     if (key.kind === "account" && (value as { workspaceId: string | null }).workspaceId !== null
       && !authorized.identity.workspaces.includes((value as { workspaceId: string }).workspaceId)) return fail("工作区不可用。")
     if (key.kind === "conversation" && Object.hasOwn(value as ConversationPersonal, "customTitle")) {
@@ -529,8 +582,8 @@ export class PersonalStore {
   }
 
   /** 只供主进程确认旧会话是否也记录了相同或重叠的目录。 */
-  async otherConversationDirectories(scope: { accountId: string; workspaceId: string; projectId: string; conversationId: string }): Promise<readonly string[]> {
-    const own = this.#name([scope.accountId, "conversation", scope.workspaceId, scope.projectId, scope.conversationId]) + ".json"
+  async otherConversationDirectories(scope: LocalExecutionScope): Promise<readonly string[]> {
+    const own = this.#name([scope.accountId, "conversation", scope.conversationId]) + ".json"
     const entries = await readdir(this.#root, { withFileTypes: true }).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
       throw error

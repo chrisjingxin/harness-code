@@ -321,7 +321,9 @@
             "TASK_ROLE_REQUIRED",
             "TASK_CONVERSATION_CONFLICT",
             "KNOWLEDGE_TERM_CONFLICT",
-            "KNOWLEDGE_ARCHIVED"
+            "KNOWLEDGE_ARCHIVED",
+            "CONVERSATION_CONFLICT",
+            "CONVERSATION_SHARING_STOPPED"
           ]
         },
         "requestId": {

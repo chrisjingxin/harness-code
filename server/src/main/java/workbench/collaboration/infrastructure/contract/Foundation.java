@@ -65,7 +65,7 @@ public final class Foundation {
             Map.entry("wb_workspace", List.of("workspace_id")),
             Map.entry("wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status")),
             Map.entry("wb_project", List.of("project_id", "owner_user_id", "version")),
-            Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence")),
+            Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence", "share_mode", "share_status", "stopped_at")),
             Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id")),
             Map.entry("wb_snapshot", List.of("snapshot_id", "project_id", "source_conversation_id",
                     "source_owner_user_id", "source_title", "source_synced_sequence", "source_synced_at",

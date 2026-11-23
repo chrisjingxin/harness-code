@@ -164,7 +164,7 @@ class ProjectAccessPolicyTest {
     // ---------- 测试夹具 ----------
 
     private static Conversation conversation(String projectId, String owner) {
-        return new Conversation("c-1", WS, projectId, owner, "", "", "idle", "t", "", "rule", 1L, 0L, "", 1L, 1L);
+        return new Conversation("c-1", WS, projectId, owner, "", "", "idle", "t", "", "rule", 1L, 0L, "", "full", "active", 1L, 1L, 1L);
     }
 
     private static final class FakeIdentity implements IdentityRepository {

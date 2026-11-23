@@ -228,6 +228,14 @@
       "type": "string",
       "enum": ["user", "assistant", "tool_summary", "status"]
     },
+    "ConversationShareMode": {
+      "type": "string",
+      "enum": ["full", "summary_only"]
+    },
+    "ConversationShareStatus": {
+      "type": "string",
+      "enum": ["active", "stopped"]
+    },
     "ConversationRepositoryItem": {
       "type": "object",
       "properties": {
@@ -249,21 +257,32 @@
         "briefSource": { "$ref": "#/$defs/ConversationBriefSource" },
         "briefUpdatedAtMs": { "type": "integer", "minimum": 0 },
         "syncedSequence": { "type": "integer", "minimum": 0 },
+        "shareMode": { "$ref": "#/$defs/ConversationShareMode" },
+        "shareStatus": { "$ref": "#/$defs/ConversationShareStatus" },
+        "stoppedAt": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" }
+          ]
+        },
         "updatedAt": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UtcTimestamp" },
         "repositories": { "type": "array", "items": { "$ref": "#/$defs/ConversationRepositoryItem" } }
       },
-      "required": ["conversationId", "projectId", "ownerUserId", "title", "status", "briefText", "briefSource", "briefUpdatedAtMs", "syncedSequence", "updatedAt", "repositories"],
+      "required": ["conversationId", "projectId", "ownerUserId", "title", "status", "briefText", "briefSource", "briefUpdatedAtMs", "syncedSequence", "shareMode", "shareStatus", "stoppedAt", "updatedAt", "repositories"],
       "additionalProperties": false
     },
     "ConversationRegisterRequest": {
       "type": "object",
       "properties": {
+        "conversationId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "repositoryIds": {
           "type": "array",
           "items": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" },
           "maxItems": 32
         },
+        "shareMode": { "$ref": "#/$defs/ConversationShareMode" },
+        "initialBrief": { "$ref": "#/$defs/SyncBrief" },
         "requestId": { "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id" }
       },
       "required": ["requestId"],

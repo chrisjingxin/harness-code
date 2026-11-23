@@ -36,6 +36,11 @@ export interface ProjectConversationHost {
     afterSequence: number,
     limit?: number,
   ): Promise<CollaborationResult<ConversationHistoryResponse>>
+  stopSharing(
+    workspaceId: string,
+    projectId: string,
+    conversationId: string,
+  ): Promise<CollaborationResult<ConversationDetailResponse>>
 }
 
 export type LocalDirectoryBinding = { conversationKey: string; directoryPath: string }
@@ -43,14 +48,14 @@ export type LocalDirectoryBinding = { conversationKey: string; directoryPath: st
 /** 本机授权目录只读端口：由渲染进程提交原生选择路径，主进程校验防逃逸后绑定读取。 */
 export interface LocalDirectoryHost {
   bindDirectory(
-    workspaceId: string,
-    projectId: string,
+    workspaceId: string | null,
+    projectId: string | null,
     conversationKey: string,
     directoryPath: string,
   ): Promise<CollaborationResult<{ directoryPath: string; isGitRepository: boolean }>>
   readDirectory(
-    workspaceId: string,
-    projectId: string,
+    workspaceId: string | null,
+    projectId: string | null,
     conversationKey: string,
     action: ProjectReadAction,
   ): Promise<CollaborationResult<ProjectReadResponse>>

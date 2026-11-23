@@ -35,6 +35,9 @@ test("CollaborationClient 按 organization Schema 校验项目会话四接口", 
     briefUpdatedAtMs: 1_700_000_000_000,
     syncedSequence: 2,
     updatedAt: "2026-11-13T08:00:00.000Z",
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [],
   }
   const transport: typeof fetch = async (input, init) => {
@@ -160,6 +163,9 @@ test("PersonalStore 支持 projectDraft 与 conversation 超 800KB 正文自动�
             briefUpdatedAtMs: 1_700_000_000_000,
             syncedSequence: 12,
             updatedAt: "2026-11-13T08:00:00.000Z",
+            shareMode: "full",
+            shareStatus: "active",
+            stoppedAt: null,
             repositories: [],
           },
         })

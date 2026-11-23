@@ -45,6 +45,9 @@ public record Conversation(
         long briefUpdatedAtMs,
         long syncedSequence,
         String nativeSessionId,
+        String shareMode,
+        String shareStatus,
+        long stoppedAtMs,
         long createdAtMs,
         long updatedAtMs
 ) {}

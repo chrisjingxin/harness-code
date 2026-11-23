@@ -139,6 +139,10 @@ export interface ProjectDetailResponse {
 
 /** 会话运行状态（由主人本机随同步批次上送） */
 export type ConversationStatus = "idle" | "running" | "waiting_approval" | "error"
+/** 团队共享档位：full=完整正文，summary_only=仅状态与成果摘要 */
+export type ConversationShareMode = "full" | "summary_only"
+/** 会话共享生命周期状态：active=持续同步，stopped=已停止共享（保留只读快照） */
+export type ConversationShareStatus = "active" | "stopped"
 /** 简报来源：rule 规则生成；agent 预留给后续 Agent 摘要 */
 export type ConversationBriefSource = "rule" | "agent"
 /** 定稿消息类型；tool_summary 只含摘要字段，不含完整输出 */
@@ -163,6 +167,9 @@ export interface ConversationSummary {
   /** 服务端已确认的最大已上传消息序号（单调水位） */
   syncedSequence: number
   updatedAt: string
+  shareMode: ConversationShareMode
+  shareStatus: ConversationShareStatus
+  stoppedAt: string | null
   /** 登记时的仓库快照，不随项目引用变化 */
   repositories: ConversationRepositoryItem[]
 }
@@ -171,6 +178,12 @@ export interface ConversationRegisterRequest {
   title?: string
   /** 必须是项目已引用仓库的子集，否则 400 */
   repositoryIds?: string[]
+  /** 可选指定本机既有个人会话 UUID，便于原会话直接发布到 Project 且保持标识连续 */
+  conversationId?: string
+  /** 团队共享档位（省略时服务端默认为 full） */
+  shareMode?: ConversationShareMode
+  /** 发布时可随会话头一并写入初始状态与成果摘要 */
+  initialBrief?: SyncBrief
   requestId: string
 }
 

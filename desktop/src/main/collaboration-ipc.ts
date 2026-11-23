@@ -40,6 +40,8 @@ import {
   isUuid,
 } from "./ipc-guard.js"
 import { LocalDirectoryService } from "./local-directory-host.js"
+import { LocalConversationStore } from "./local-conversation-store.js"
+import { bindLocalConversationsIpc } from "./local-conversations-ipc.js"
 import { createLocalExecutionCoordinator, type LocalExecutionRuntime } from "./local-execution-coordinator.js"
 import { LocalImageStore } from "./local-image-store.js"
 import { bindLocalExecutionIpc } from "./local-execution-ipc.js"
@@ -83,10 +85,22 @@ function isHistoryLimit(value: unknown): value is number | undefined {
 }
 
 function isConversationRegisterRequest(value: unknown): value is ConversationRegisterRequest {
-  return isPlainObject(value)
-    && typeof value.requestId === "string"
-    && (value.title === undefined || typeof value.title === "string")
-    && (value.repositoryIds === undefined || (Array.isArray(value.repositoryIds) && value.repositoryIds.every(item => typeof item === "string")))
+  if (!isPlainObject(value) || typeof value.requestId !== "string") return false
+  if (value.title !== undefined && typeof value.title !== "string") return false
+  if (value.repositoryIds !== undefined
+    && (!Array.isArray(value.repositoryIds) || !value.repositoryIds.every(item => typeof item === "string"))) {
+    return false
+  }
+  if (value.conversationId !== undefined && !isUuid(value.conversationId)) return false
+  if (value.shareMode !== undefined && value.shareMode !== "full" && value.shareMode !== "summary_only") return false
+  if (value.initialBrief !== undefined) {
+    if (!isPlainObject(value.initialBrief)) return false
+    const brief = value.initialBrief
+    if (brief.status !== undefined && (typeof brief.status !== "string" || !CONVERSATION_STATUSES.has(brief.status))) return false
+    if (brief.briefSource !== undefined && brief.briefSource !== "rule" && brief.briefSource !== "agent") return false
+    if (brief.briefText !== undefined && brief.briefText !== null && typeof brief.briefText !== "string") return false
+  }
+  return true
 }
 
 function isSnapshotRange(value: unknown): value is SnapshotCreateRequest["range"] {
@@ -174,7 +188,8 @@ export function bindCollaborationIpc(
   const origin = process.env.WORKBENCH_SERVICE_ORIGIN
   const identity = new CollaborationState(origin)
   const client = identity.network()
-  const personal = new PersonalStore(identity, client ? origin! : "", app.getPath("userData"))
+  const localConversations = new LocalConversationStore(app.getPath("userData"), origin ?? "")
+  const personal = new PersonalStore(identity, client ? origin! : "", app.getPath("userData"), localConversations)
   const localDirectory = new LocalDirectoryService(() => identity.personalIdentity()?.accountId ?? null)
   const uploads = client
     ? new ConversationUploads(
@@ -186,12 +201,24 @@ export function bindCollaborationIpc(
             if (detail.value.conversation.ownerUserId !== scope.accountId) {
               return formatIpcError("CONVERSATION_FORBIDDEN", "仅会话创建者可执行该操作。")
             }
+            if (detail.value.conversation.shareStatus === "stopped") {
+              return formatIpcError("CONVERSATION_SHARING_STOPPED", "该会话已停止团队共享。")
+            }
             return { ok: true, value: detail.value.conversation.syncedSequence }
           },
           upload: (scope, request, signal) =>
             client.syncConversation(scope.workspaceId, scope.projectId, scope.conversationId, request, signal),
         },
         notice => {
+          if (notice.sharingStopped) {
+            void localConversations.markSharingStopped(notice.scope.accountId, notice.scope.conversationId).catch(() => {})
+          } else if (!notice.failure && notice.syncedSequence !== undefined) {
+            void localConversations.updateSyncedSequence(
+              notice.scope.accountId,
+              notice.scope.conversationId,
+              notice.syncedSequence,
+            ).catch(() => {})
+          }
           if (identity.personalIdentity()?.accountId === notice.scope.accountId && !window.isDestroyed() && !window.webContents.isDestroyed()) {
             try { window.webContents.send("workbench:local-execution:notice", notice) } catch { /* 窗口可能正好关闭。 */ }
           }
@@ -215,6 +242,7 @@ export function bindCollaborationIpc(
     },
     origin: origin ?? "",
     personal,
+    localConversations,
     confirmDirectoryPrompt: async path => {
       const result = await dialog.showMessageBox(window, {
         type: "question",
@@ -229,6 +257,7 @@ export function bindCollaborationIpc(
     },
   })
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
+  const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
   const unsubscribe = identity.onStateChanged(state => {
@@ -318,13 +347,19 @@ export function bindCollaborationIpc(
     && isHistoryLimit(limit)
       ? identity.withWorkspace(workspaceId, c => c.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit))
       : formatIpcError("INVALID_REQUEST", "项目会话历史参数无效。"))
+  ipc.handle("workbench:project-conversations:stop-sharing", 3, (workspaceId, projectId, conversationId) =>
+    isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
+      ? identity.stopProjectConversationSharing(workspaceId, projectId, conversationId)
+      : formatIpcError("INVALID_REQUEST", "停止共享参数无效。"))
 
   ipc.handle("workbench:local-directory:bind", 4, (workspaceId, projectId, conversationKey, directoryPath) =>
-    isUuid(workspaceId) && isUuid(projectId) && isNonEmptyString(conversationKey, 128) && isNonEmptyString(directoryPath, 4096)
+    isNullableUuid(workspaceId) && isNullableUuid(projectId) && (projectId === null || workspaceId !== null)
+    && isNonEmptyString(conversationKey, 128) && isNonEmptyString(directoryPath, 4096)
       ? localDirectory.bindDirectory(workspaceId, projectId, conversationKey, directoryPath)
       : formatIpcError("INVALID_REQUEST", "本机工作目录绑定参数无效。"))
   ipc.handle("workbench:local-directory:read", 4, (workspaceId, projectId, conversationKey, action) =>
-    isUuid(workspaceId) && isUuid(projectId) && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
+    isNullableUuid(workspaceId) && isNullableUuid(projectId) && (projectId === null || workspaceId !== null)
+    && isNonEmptyString(conversationKey, 128) && isProjectReadAction(action)
       ? localDirectory.readDirectory(workspaceId, projectId, conversationKey, action)
       : formatIpcError("INVALID_REQUEST", "本机工作目录读取参数无效。"))
 
@@ -374,6 +409,7 @@ export function bindCollaborationIpc(
     void execution.dispose().catch(() => {})
     unsubscribe()
     unbindExecution()
+    unbindLocalConversations()
     unbindOrganization()
     unbindProjectUpdates()
     identity.dispose()

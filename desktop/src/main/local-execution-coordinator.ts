@@ -41,6 +41,7 @@ import {
   type CodeCheckpointAction,
   type CodeCheckpointReply,
   type ConversationPersonal,
+  type LocalConversationTurn,
   type LocalExecutionAttachment,
   type LocalExecutionBinding,
   type LocalExecutionNotice,
@@ -73,7 +74,32 @@ import {
   parseHarnessParentMeta, parseHarnessRunMeta,
 } from "@workbench/harness-acp"
 import type { PersonalStore } from "./personal-store.js"
+import type { LocalConversationStore } from "./local-conversation-store.js"
 import { CodeCheckpoints, overlappingDirectories, type CheckpointStart } from "./project-service/checkpoints.js"
+
+export type LocalPromptContextResult = {
+  /** 附加给 Agent 的参考文本块（如记忆条目、团队知识标题目录），不写入用户展示消息与云端原文。 */
+  readonly contextBlocks: readonly LocalAcpPromptBlock[]
+}
+
+export type LocalExecutionContextAssembler = {
+  /**
+   * 在真实账号与会话上下文有效时组装本轮自动材料。
+   * 当 scope.workspaceId === null 时协调器直接跳过调用，保证无团队会话零注入。
+   */
+  assembleTurnContext?(input: {
+    readonly scope: LocalExecutionScope
+    readonly userText: string
+    readonly directoryPath: string
+    readonly turnId: string
+  }): Promise<LocalPromptContextResult>
+  /** 本轮成功/失败/取消结束时的收口钩子（供 HC-233 提交或丢弃本机记忆提案）。 */
+  onTurnSettled?(input: {
+    readonly scope: LocalExecutionScope
+    readonly turnId: string
+    readonly outcome: "completed" | "failed" | "cancelled"
+  }): Promise<void>
+}
 
 export type LocalExecutionCoordinatorOptions = {
   readonly grantsDir?: string
@@ -82,6 +108,8 @@ export type LocalExecutionCoordinatorOptions = {
   readonly confirmCheckpointRestore?: (path: string) => Promise<boolean>
   readonly origin?: string
   readonly personal?: PersonalStore
+  readonly localConversations?: LocalConversationStore
+  readonly contextAssembler?: LocalExecutionContextAssembler
   readonly confirmDirectoryPrompt?: (path: string) => Promise<boolean>
 }
 
@@ -107,6 +135,8 @@ export type LocalExecutionRuntime =
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
   sequence: number
+  localReply: string
+  localAttachments?: readonly LocalExecutionAttachment[]
   lastMessageId?: string
   needsSegmentBreak?: boolean
   checkpoint?: CheckpointStart
@@ -177,6 +207,7 @@ const forbidden = () => identityError("INVALID_REQUEST", "仅当前账号自己�
 
 const MAX_FINALIZED_TOOLS = 50
 const MAX_TRACKED_TOOL_STATES = 200
+const MAX_LOCAL_REPLY_CHARS = 512 * 1024
 const slashCommand = /^\/[a-z][\w-]*(?:\s|$)/i
 
 function steeringKind(binding: Binding, prompt: string): ActiveTurn["steerKind"] {
@@ -328,6 +359,30 @@ function previousPrompt(record: ConversationPersonal | null): LocalAcpPromptBloc
   return history.length ? [{ type: "text", text: header + history.join("") }] : []
 }
 
+/** 从本机独立存储 `LocalConversationStore` 的定稿轮次提取 8 KiB 内对话前情（支持无团队及离线恢复）。 */
+function previousPromptFromLocalTurns(turns: readonly LocalConversationTurn[]): LocalAcpPromptBlock[] {
+  const header = "以下仅为旧会话的定稿历史引用。请以随后提供的本轮内容为准。\n"
+  const history: string[] = []
+  let left = 8192 - Buffer.byteLength(header)
+  for (const turn of turns.slice(-12).reverse()) {
+    if (turn.status !== "completed") continue
+    const assistantLine = turn.reply.trim()
+      ? `助手：${JSON.stringify(turn.reply.slice(0, 1200))}\n`
+      : ""
+    const userLine = turn.userText.trim()
+      ? `用户：${JSON.stringify(turn.userText.slice(0, 1200))}\n`
+      : ""
+    for (const line of [assistantLine, userLine]) {
+      if (!line || left <= 64) continue
+      const bytes = Buffer.byteLength(line)
+      if (bytes > left) continue
+      history.unshift(line)
+      left -= bytes
+    }
+  }
+  return history.length ? [{ type: "text", text: header + history.join("") }] : []
+}
+
 /** 提取本次发送附件的展示摘要：去重已出现在行内 `@file` 中的工作区文件，并为云端定稿隐藏本机绝对路径。 */
 function summarizeDisplayAttachments(
   text: string,
@@ -423,6 +478,7 @@ export function createLocalExecutionCoordinator(
   async function release(key: string, binding: Binding): Promise<void> {
     await binding.session.close()
     await binding.checkpointPending
+    await binding.shareTail?.catch(() => {})
     binding.unsubscribe()
     binding.unsubscribeSession?.()
     bindings.delete(key)
@@ -438,8 +494,34 @@ export function createLocalExecutionCoordinator(
     if (!identity.personalIdentity()) void reset().catch(() => {})
   })
 
-  async function authorize(scope: LocalExecutionScope, login: Login) {
-    if (!isCurrent(login) || login.accountId !== scope.accountId || !login.workspaces.includes(scope.workspaceId)) return forbidden()
+  /** 本机执行鉴权：纯本机核对账号与归属，不发任何云端网络请求；仅无本地记录的云端会话回退远端核验。 */
+  async function authorize(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<null>> {
+    if (!isCurrent(login) || login.accountId !== scope.accountId) return forbidden()
+    if (scope.projectId !== null && scope.workspaceId === null) return forbidden()
+    if (scope.projectId === null) {
+      if (!options?.localConversations) {
+        return identityError("INVALID_REQUEST", "本机会话存储尚未启用。")
+      }
+      try {
+        const record = await options.localConversations.getRecord(login.accountId, scope.conversationId)
+        return isCurrent(login) && record && record.workspaceId === scope.workspaceId
+          ? ok(null)
+          : forbidden()
+      } catch {
+        return identityError("INTERNAL_ERROR", "无法确认本机会话归属。")
+      }
+    }
+    if (options?.localConversations) {
+      try {
+        const record = await options.localConversations.getRecord(login.accountId, scope.conversationId)
+        if (record && record.projectId === scope.projectId && record.workspaceId === scope.workspaceId) {
+          return isCurrent(login) ? ok(null) : forbidden()
+        }
+      } catch {
+        return identityError("INTERNAL_ERROR", "无法确认本机会话归属。")
+      }
+    }
+    if (scope.workspaceId === null || !login.workspaces.includes(scope.workspaceId)) return forbidden()
     const detail = await identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId)
     if (!detail.ok) return detail
     const session = detail.value.conversation
@@ -449,16 +531,28 @@ export function createLocalExecutionCoordinator(
   }
 
   async function savedDirectory(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<string | null>> {
-    if (!options?.personal) return ok(null)
-    const record = await options.personal.load({
-      kind: "conversation",
-      workspaceId: scope.workspaceId,
-      projectId: scope.projectId,
-      conversationId: scope.conversationId,
-    })
-    if (!isCurrent(login)) return forbidden()
-    if (!record.ok) return identityError("INTERNAL_ERROR", record.message)
-    return ok((record.value.data as ConversationPersonal | null)?.localDirectoryPath ?? null)
+    if (options?.personal) {
+      const record = await options.personal.load({
+        kind: "conversation",
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        conversationId: scope.conversationId,
+      })
+      if (!isCurrent(login)) return forbidden()
+      if (!record.ok) return identityError("INTERNAL_ERROR", record.message)
+      const storedPath = (record.value.data as ConversationPersonal | null)?.localDirectoryPath ?? null
+      if (storedPath) return ok(storedPath)
+    }
+    if (options?.localConversations) {
+      try {
+        const localRecord = await options.localConversations.getRecord(login.accountId, scope.conversationId)
+        if (!isCurrent(login)) return forbidden()
+        return ok(localRecord?.directoryPath ?? null)
+      } catch {
+        return identityError("INTERNAL_ERROR", "无法读取本机会话目录绑定。")
+      }
+    }
+    return ok(null)
   }
 
   async function resolvePrompt(scope: LocalExecutionScope, login: Login, text: string, referenceIds: readonly string[]) {
@@ -468,15 +562,27 @@ export function createLocalExecutionCoordinator(
       if (!isCurrent(login)) return forbidden()
       const reference = parseFixedReference(id)
       if (!reference) return identityError("INVALID_REQUEST", "无法识别引用材料，请重新选择。")
-      const material = reference.kind === "snapshot"
-        ? await identity.applicationWorkspace(scope.workspaceId, async client => {
-            const result = await client.readSnapshot(scope.workspaceId, scope.projectId, reference.snapshotId)
-            return result.ok ? ok({ title: result.value.sourceTitle, text: result.value.text }) : result
-          })
-        : await identity.applicationWorkspace(scope.workspaceId, async client => {
-            const result = await client.readKnowledgeVersion(scope.workspaceId, reference.knowledgeId, reference.versionId)
-            return result.ok ? ok({ title: result.value.version.title, text: result.value.text }) : result
-          })
+      let material: CollaborationResult<{ readonly title: string; readonly text: string }>
+      if (reference.kind === "snapshot") {
+        if (scope.workspaceId === null || scope.projectId === null) {
+          return identityError("INVALID_REQUEST", "未关联项目的个人会话不支持引用项目快照。")
+        }
+        const targetWorkspaceId = scope.workspaceId
+        const targetProjectId = scope.projectId
+        material = await identity.applicationWorkspace(targetWorkspaceId, async client => {
+          const result = await client.readSnapshot(targetWorkspaceId, targetProjectId, reference.snapshotId)
+          return result.ok ? ok({ title: result.value.sourceTitle, text: result.value.text }) : result
+        })
+      } else {
+        if (scope.workspaceId === null || !login.workspaces.includes(scope.workspaceId)) {
+          return identityError("INVALID_REQUEST", "无团队会话不支持引用团队知识。")
+        }
+        const targetWorkspaceId = scope.workspaceId
+        material = await identity.applicationWorkspace(targetWorkspaceId, async client => {
+          const result = await client.readKnowledgeVersion(targetWorkspaceId, reference.knowledgeId, reference.versionId)
+          return result.ok ? ok({ title: result.value.version.title, text: result.value.text }) : result
+        })
+      }
       if (!material.ok) return {
         ...material,
         ...(material.error.code === "RESOURCE_NOT_FOUND" ? { unavailableReferenceId: id } : {}),
@@ -567,11 +673,41 @@ export function createLocalExecutionCoordinator(
       }
     }
 
-    const history = !slashCommand.test(text.trimStart()) && options?.personal
-      ? previousPrompt(await options.personal.load({ kind: "conversation", workspaceId: scope.workspaceId,
-          projectId: scope.projectId, conversationId: scope.conversationId,
+    let history: LocalAcpPromptBlock[] = []
+    if (!slashCommand.test(text.trimStart())) {
+      if (options?.localConversations) {
+        const localDetail = await options.localConversations.get(login.accountId, scope.conversationId).catch(() => null)
+        if (localDetail?.ok && localDetail.value.turns.length > 0) {
+          history = previousPromptFromLocalTurns(localDetail.value.turns)
+        }
+      }
+      if (history.length === 0 && options?.personal) {
+        history = previousPrompt(await options.personal.load({
+          kind: "conversation",
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          conversationId: scope.conversationId,
         }).then(result => result.ok ? result.value.data as ConversationPersonal | null : null).catch(() => null))
-      : []
+      }
+      // 当会话绑定有效团队且当前账号仍在团队内时，允许注入 HC-233 自动上下文块；无团队会话严格跳过
+      if (options?.contextAssembler?.assembleTurnContext
+        && scope.workspaceId !== null
+        && login.workspaces.includes(scope.workspaceId)) {
+        try {
+          const assembled = await options.contextAssembler.assembleTurnContext({
+            scope,
+            userText: text,
+            directoryPath: binding.directory.path,
+            turnId: requestId,
+          })
+          if (assembled.contextBlocks.length > 0) {
+            history = [...history, ...assembled.contextBlocks]
+          }
+        } catch {
+          // 记忆/知识上下文装配失败不阻断本机 Agent 执行
+        }
+      }
+    }
     if (!isCurrent(login)) {
       await checkpoints?.discard(checkpoint)
       return forbidden()
@@ -595,8 +731,10 @@ export function createLocalExecutionCoordinator(
       userText: text,
       referenceIds: ids,
       ...(displayAttachments.shareable.length ? { attachments: displayAttachments.shareable } : {}),
+      ...(displayAttachments.local.length ? { localAttachments: displayAttachments.local } : {}),
       ...(claimedImages.length ? { images: claimedImages } : {}),
       reply: "",
+      localReply: "",
       acceptedAtMs: Date.now(),
       checkpoint,
       steerKind: steeringKind(binding, text),
@@ -1087,6 +1225,15 @@ export function createLocalExecutionCoordinator(
           if (existing?.login.generation === login.generation && existing.selectedPath === path && existing.directory.path === directory.path
             && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino
             && providerMatches) {
+            if (options?.localConversations) {
+              const localRecord = await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
+              if (localRecord && (localRecord.directoryPath !== path || localRecord.providerId !== resolvedProviderId)) {
+                await options.localConversations.updateBinding(login.accountId, scope.conversationId, {
+                  directoryPath: path,
+                  providerId: resolvedProviderId,
+                }).catch(() => {})
+              }
+            }
             if (existing.session.getAvailability().available && existing.session.connect && !existing.session.getState?.()?.connected) {
               try { await existing.session.connect() } catch { /* 初始化失败时保留绑定等待下次重试。 */ }
             }
@@ -1124,14 +1271,19 @@ export function createLocalExecutionCoordinator(
               turn.sequence = event.sequence
               if (event.type === "text-delta") {
                 if (enabled("commands") && parseHarnessCommandMeta(event.rawMeta)?.ephemeral === true) turn.ephemeral = true
-                if (turn.reply !== undefined && event.text) {
-                  // 工具/审批打断或 messageId 切换后插入段落空行，避免上传定稿粘连，同时防止叠出多余空行。
-                  const needsBreak = turn.reply.length > 0 && Boolean(
+                if (event.text) {
+                  const needsBreak = (turn.localReply.length > 0 || (turn.reply?.length ?? 0) > 0) && Boolean(
                     turn.needsSegmentBreak
                     || (event.messageId !== undefined && turn.lastMessageId !== undefined && event.messageId !== turn.lastMessageId),
                   )
-                  const addition = joinReplySegment(turn.reply, event.text, needsBreak)
-                  turn.reply = turn.reply.length + addition.length <= syncPayloadLimit ? turn.reply + addition : undefined
+                  const addition = joinReplySegment(turn.localReply, event.text, needsBreak)
+                  if (turn.reply !== undefined) {
+                    turn.reply = turn.reply.length + addition.length <= syncPayloadLimit ? turn.reply + addition : undefined
+                  }
+                  if (turn.localReply.length < MAX_LOCAL_REPLY_CHARS) {
+                    const remainingLocal = MAX_LOCAL_REPLY_CHARS - turn.localReply.length
+                    turn.localReply += addition.length <= remainingLocal ? addition : addition.slice(0, remainingLocal)
+                  }
                   turn.needsSegmentBreak = false
                 }
                 if (event.messageId !== undefined) turn.lastMessageId = event.messageId
@@ -1194,20 +1346,83 @@ export function createLocalExecutionCoordinator(
                   failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
                 } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
               })
-              // 终态先交还输入区。只排入当前账号已受理且成功完成的轮次，未定稿的流片不离开本机。
+              if (options?.contextAssembler?.onTurnSettled
+                && scope.workspaceId !== null
+                && login.workspaces.includes(scope.workspaceId)) {
+                void options.contextAssembler.onTurnSettled({
+                  scope,
+                  turnId: turn.turnId,
+                  outcome: event.type,
+                }).catch(() => {})
+              }
+              // 终态先交还输入区：成功轮优先写入本机独立存储；仅处于 active 共享态且仍属团队的会话才进入云端上传账本
               if (event.type === "completed" && event.shareable && !turn.ephemeral && isCurrent(login)) {
                 const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
                 const steering = turn.steering
-                if (uploads) binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
+                const sameSessionIdentity = () => {
+                  const current = identity.personalIdentity()
+                  return !window.isDestroyed() && current?.generation === login.generation && current?.accountId === login.accountId
+                }
+                binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
                   await steering
-                  if (!isCurrent(login)) return
+                  if (!sameSessionIdentity()) return
+                  const localRecord = options?.localConversations
+                    ? await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
+                    : null
+                  if (localRecord && options?.localConversations) {
+                    const persisted = await options.localConversations.appendTurn(login.accountId, scope.conversationId, {
+                      turnId: turn.turnId,
+                      userText: turn.userText,
+                      ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}),
+                      ...(turn.localAttachments?.length ? { attachments: turn.localAttachments } : {}),
+                      ...(turn.images?.length ? { images: turn.images } : {}),
+                      ...(turn.followUps?.length ? { followUps: turn.followUps } : {}),
+                      ...(tools ? { tools } : {}),
+                      reply: turn.localReply,
+                      status: "completed",
+                      acceptedAtMs: turn.acceptedAtMs,
+                      completedAtMs,
+                    })
+                    if (!persisted.ok) {
+                      publish(login, { scope, turnId: turn.turnId, kind: "upload", failure: persisted.error.message })
+                    }
+                  }
+                  if (!uploads) return
+                  const uploadTarget = localRecord
+                    ? (localRecord.shareStatus === "active"
+                        && localRecord.workspaceId !== null
+                        && localRecord.projectId !== null
+                        && login.workspaces.includes(localRecord.workspaceId)
+                        ? {
+                            scope: {
+                              accountId: scope.accountId,
+                              workspaceId: localRecord.workspaceId,
+                              projectId: localRecord.projectId,
+                              conversationId: scope.conversationId,
+                            },
+                            shareMode: localRecord.shareMode ?? ("full" as const),
+                          }
+                        : null)
+                    : (scope.workspaceId !== null && scope.projectId !== null
+                        ? {
+                            scope: {
+                              accountId: scope.accountId,
+                              workspaceId: scope.workspaceId,
+                              projectId: scope.projectId,
+                              conversationId: scope.conversationId,
+                            },
+                            shareMode: "full" as const,
+                          }
+                        : null)
+                  if (!uploadTarget) return
                   const uploadUserText = turn.images?.length
                     ? (turn.userText.trim()
                         ? `${turn.userText}\n\n[附 ${turn.images.length} 张本机图片]`
                         : `[附 ${turn.images.length} 张本机图片]`)
                     : turn.userText
-                  await uploads.enqueue(scope, {
+                  await uploads.enqueue(uploadTarget.scope, {
                     turnId: turn.turnId,
+                    shareMode: uploadTarget.shareMode,
                     userText: uploadUserText,
                     referenceIds: turn.referenceIds,
                     ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
@@ -1245,6 +1460,15 @@ export function createLocalExecutionCoordinator(
             }),
           }
           bindings.set(key, binding)
+          if (options?.localConversations) {
+            const localRecord = await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
+            if (localRecord && (localRecord.directoryPath !== path || localRecord.providerId !== resolvedProviderId)) {
+              await options.localConversations.updateBinding(login.accountId, scope.conversationId, {
+                directoryPath: path,
+                providerId: resolvedProviderId,
+              }).catch(() => {})
+            }
+          }
           if (session.getAvailability().available && session.connect && !session.getState?.()?.connected) {
             try {
               await session.connect()

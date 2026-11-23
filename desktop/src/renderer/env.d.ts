@@ -1,6 +1,6 @@
 import type { CollaborationHost } from "@workbench/collaboration-client/types"
 import type {
-  CollaborationAppsHost, DesktopHost, DesktopLocalExecutionHost, LocalDirectoryHost, OrganizationHost, PersonalHost,
+  CollaborationAppsHost, DesktopHost, DesktopLocalExecutionHost, LocalConversationsHost, LocalDirectoryHost, OrganizationHost, PersonalHost,
   ProjectConversationHost, ProjectUpdatesHost,
 } from "../shared/index.js"
 
@@ -16,6 +16,7 @@ declare global {
     collaborationApps: CollaborationAppsHost
     projectUpdates: ProjectUpdatesHost
     projectConversations: ProjectConversationHost
+    localConversations: LocalConversationsHost
     localDirectory: LocalDirectoryHost
     localExecution: DesktopLocalExecutionHost
     personal: PersonalHost

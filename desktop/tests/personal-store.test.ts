@@ -14,6 +14,7 @@ import type {
 } from "@workbench/collaboration-client/types"
 import type { CollaborationState } from "@workbench/collaboration-client"
 import { PersonalStore } from "../src/main/personal-store.ts"
+import { LocalConversationStore } from "../src/main/local-conversation-store.ts"
 import type { ConversationPersonal, ProjectNavigationPersonal } from "../src/shared/index.ts"
 
 const ORIGIN = "http://127.0.0.1:9999"
@@ -24,9 +25,14 @@ const PROJECT_ID = "22222222-2222-4222-8222-222222222222"
 const CONV_ID = "33333333-3333-4333-8333-333333333333"
 
 type IdentitySnapshot = ReturnType<CollaborationState["personalIdentity"]>
+type TestIdentityInput = (Omit<NonNullable<IdentitySnapshot>, "offline"> & { offline?: boolean }) | null
 
-function createFakeCollaborationState(initialIdentity: IdentitySnapshot) {
-  let identity = initialIdentity
+function normalizeTestIdentity(input: TestIdentityInput): IdentitySnapshot {
+  return input ? { ...input, offline: input.offline ?? false } : null
+}
+
+function createFakeCollaborationState(initialIdentity: TestIdentityInput) {
+  let identity: IdentitySnapshot = normalizeTestIdentity(initialIdentity)
   let getProjectCalls = 0
   let getConversationCalls = 0
   let getProjectImpl: (workspaceId: string, projectId: string) => Promise<CollaborationResult<ProjectDetailResponse>> = async (
@@ -70,6 +76,9 @@ function createFakeCollaborationState(initialIdentity: IdentitySnapshot) {
         briefUpdatedAtMs: 1_700_000_000_000,
         syncedSequence: 0,
         updatedAt: "2026-11-18T00:00:00.000Z",
+        shareMode: "full",
+        shareStatus: "active",
+        stoppedAt: null,
         repositories: [],
       },
     },
@@ -94,7 +103,7 @@ function createFakeCollaborationState(initialIdentity: IdentitySnapshot) {
 
   return {
     state,
-    setIdentity(next: IdentitySnapshot) { identity = next },
+    setIdentity(next: TestIdentityInput) { identity = normalizeTestIdentity(next) },
     setGetProject(fn: typeof getProjectImpl) { getProjectImpl = fn },
     setGetConversation(fn: typeof getConversationImpl) { getConversationImpl = fn },
     counts: () => ({ getProjectCalls, getConversationCalls }),
@@ -200,6 +209,9 @@ test("PersonalStore 合并同一授权键的并发在途请求，并在失败时
           briefUpdatedAtMs: 1_700_000_000_000,
           syncedSequence: 0,
           updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "active",
+          stoppedAt: null,
           repositories: [],
         },
       },
@@ -329,6 +341,9 @@ test("PersonalStore 在 60 秒 TTL 到期后并发调用 save 复用单次重验
           briefUpdatedAtMs: 1_700_000_000_000,
           syncedSequence: 0,
           updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "active",
+          stoppedAt: null,
           repositories: [],
         },
       },
@@ -580,6 +595,62 @@ test("HC-238 draft.images 与 sentImages 支持保存恢复并严格校验上限
       ...validRecord,
       sentImages: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [String(i + 1), [sentImg]])),
     })).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("HC-239 PersonalStore 支持 AccountPersonal.activeView 与个人会话发布前后纯本机连续授权", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc239-personal-local-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID], offline: true })
+    const localConversations = new LocalConversationStore(dir, ORIGIN)
+    const store = new PersonalStore(mock.state, ORIGIN, dir, localConversations)
+
+    const accountRes = await store.load({ kind: "account" })
+    assert.equal(accountRes.ok, true)
+    assert.equal((await store.save({ kind: "account" }, 1, { workspaceId: null, activeView: "solo" })).ok, true)
+
+    const created = await localConversations.create(USER_A, { workspaceId: null, title: "离线个人草稿测试" })
+    assert.equal(created.ok, true)
+    if (!created.ok) return
+    const convId = created.value.conversationId
+
+    // 未发布会话（workspaceId: null, projectId: null）在断网下通过 LocalConversationStore 纯本机鉴权，零云端请求
+    const soloKey = { kind: "conversation", workspaceId: null, projectId: null, conversationId: convId } as const
+    const soloLoad = await store.load(soloKey)
+    assert.equal(soloLoad.ok, true)
+    assert.equal(mock.counts().getConversationCalls, 0)
+
+    const saved = await store.save(soloKey, 1, {
+      ...sampleConversation,
+      localDirectoryPath: "/tmp/local-repo",
+      draft: { ...sampleConversation.draft, text: "发布前已输入草稿", revision: 1 },
+    })
+    assert.equal(saved.ok, true)
+
+    // 未加入目标团队时的非法匹配必须拒绝
+    const wrongWorkspaceKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: null, conversationId: convId } as const
+    assert.equal((await store.load(wrongWorkspaceKey)).ok, false)
+
+    // 发布到 Project 后改用带 workspaceId/projectId 的 key 读取：无需再调云端且草稿与目录路径连续保留
+    await localConversations.markPublished(USER_A, convId, {
+      workspaceId: WORKSPACE_ID,
+      projectId: PROJECT_ID,
+      shareMode: "summary_only",
+    })
+    const publishedKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: convId } as const
+    const publishedLoad = await new PersonalStore(mock.state, ORIGIN, dir, localConversations).load(publishedKey)
+    assert.equal(publishedLoad.ok, true)
+    assert.equal(mock.counts().getConversationCalls, 0)
+    if (publishedLoad.ok) {
+      const data = publishedLoad.value.data as ConversationPersonal
+      assert.equal(data.localDirectoryPath, "/tmp/local-repo")
+      assert.equal(data.draft.text, "发布前已输入草稿")
+    }
+
+    // 已发布到 Project 后，再以 projectId: null 读取应拒绝（要求走已绑定 Project 作用域）
+    assert.equal((await new PersonalStore(mock.state, ORIGIN, dir, localConversations).load(wrongWorkspaceKey)).ok, false)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

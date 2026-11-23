@@ -82,6 +82,8 @@ public final class ApiResponses {
             Map.entry("TASK_CONVERSATION_CONFLICT", "CLB3012"),
             Map.entry("KNOWLEDGE_TERM_CONFLICT", "CLB3013"),
             Map.entry("KNOWLEDGE_ARCHIVED", "CLB3014"),
+            Map.entry("CONVERSATION_CONFLICT", "CLB3015"),
+            Map.entry("CONVERSATION_SHARING_STOPPED", "CLB3016"),
             Map.entry("INTERNAL_ERROR", "CLB5001"),
             Map.entry("SERVICE_UNAVAILABLE", "CLB5002")
     );
@@ -200,6 +202,8 @@ public final class ApiResponses {
             case "TASK_CONVERSATION_CONFLICT" -> "任务或会话已建立关联";
             case "KNOWLEDGE_TERM_CONFLICT" -> "该术语键已存在";
             case "KNOWLEDGE_ARCHIVED" -> "知识条目已归档";
+            case "CONVERSATION_CONFLICT" -> "会话标识或请求参数冲突";
+            case "CONVERSATION_SHARING_STOPPED" -> "该会话已停止团队共享";
             case "SNAPSHOT_EMPTY" -> "当前范围没有已同步的会话材料";
             case "SNAPSHOT_TOO_LARGE" -> "快照正文超过 64 KiB，请缩小范围";
             case "REPOSITORY_ARCHIVED" -> "仓库已归档";

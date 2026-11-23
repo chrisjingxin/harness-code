@@ -70,6 +70,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now,
     syncedSequence: 0,
     updatedAt: new Date(now).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [],
   },
   {
@@ -83,6 +86,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 15 * 60_000,
     syncedSequence: 3,
     updatedAt: new Date(now - 15 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [{ repositoryId: "r-pay", name: "payment-api" }],
   },
   {
@@ -96,6 +102,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 3 * 3600_000,
     syncedSequence: 2,
     updatedAt: new Date(now - 3 * 3600_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [],
   },
   {
@@ -109,6 +118,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 6 * 60_000,
     syncedSequence: 4,
     updatedAt: new Date(now - 6 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [{ repositoryId: "r-pay", name: "payment-api" }, { repositoryId: "r-ord", name: "order-api" }],
   },
   {
@@ -122,6 +134,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 25 * 60_000,
     syncedSequence: 4,
     updatedAt: new Date(now - 25 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [{ repositoryId: "r-pay", name: "payment-api" }],
   },
   {
@@ -135,6 +150,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 40 * 60_000,
     syncedSequence: 2,
     updatedAt: new Date(now - 40 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [{ repositoryId: "r-ord", name: "order-api" }],
   },
   {
@@ -148,6 +166,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 55 * 60_000,
     syncedSequence: 2,
     updatedAt: new Date(now - 55 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [],
   },
   {
@@ -161,6 +182,9 @@ const initialConversations: ProjectConversationSummary[] = [
     briefUpdatedAtMs: now - 70 * 60_000,
     syncedSequence: 0,
     updatedAt: new Date(now - 70 * 60_000).toISOString(),
+    shareMode: "full",
+    shareStatus: "active",
+    stoppedAt: null,
     repositories: [],
   },
 ]
@@ -317,6 +341,9 @@ function Preview(): ReactElement {
         briefUpdatedAtMs: Date.now(),
         syncedSequence: 1,
         updatedAt: new Date().toISOString(),
+        shareMode: "full",
+        shareStatus: "active",
+        stoppedAt: null,
         repositories: [],
       }
       setConversations(prev => [created, ...prev])

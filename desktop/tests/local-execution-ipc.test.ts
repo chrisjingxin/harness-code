@@ -13,6 +13,8 @@ import type { CollaborationState as CollaborationStateType, ConversationUploads 
 import type { LocalExecutionNotice, PersonalDraftImage } from "../src/shared/index.ts"
 import type { LocalExecutionCoordinator, LocalExecutionRuntime, createLocalExecutionCoordinator as createCoordinatorFn } from "../src/main/local-execution-coordinator.ts"
 import type { bindLocalExecutionIpc as bindLocalExecutionIpcFn } from "../src/main/local-execution-ipc.ts"
+import type { bindLocalConversationsIpc as bindLocalConversationsIpcFn } from "../src/main/local-conversations-ipc.ts"
+import type { LocalConversationStore as LocalConversationStoreType } from "../src/main/local-conversation-store.ts"
 import type { LocalImageStore as LocalImageStoreType } from "../src/main/local-image-store.ts"
 import type { PersonalStore as PersonalStoreType } from "../src/main/personal-store.ts"
 
@@ -45,6 +47,12 @@ const { createLocalExecutionCoordinator } = await import("../src/main/local-exec
 }
 const { bindLocalExecutionIpc } = await import("../src/main/local-execution-ipc.ts") as {
   bindLocalExecutionIpc: typeof bindLocalExecutionIpcFn
+}
+const { bindLocalConversationsIpc } = await import("../src/main/local-conversations-ipc.ts") as {
+  bindLocalConversationsIpc: typeof bindLocalConversationsIpcFn
+}
+const { LocalConversationStore } = await import("../src/main/local-conversation-store.ts") as {
+  LocalConversationStore: typeof LocalConversationStoreType
 }
 const { LocalImageStore } = await import("../src/main/local-image-store.ts") as {
   LocalImageStore: typeof LocalImageStoreType
@@ -105,6 +113,9 @@ async function createSignedInState(userId: string) {
           briefUpdatedAtMs: 1_700_000_000_000,
           syncedSequence: 0,
           updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "active",
+          stoppedAt: null,
           repositories: [],
         },
       })
@@ -1488,6 +1499,287 @@ test("HC-238 IPC 通道校验 stage-image / read-image / remove-staged-image 与
       unbind()
       await coordinator.dispose()
     }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConversationStore 持久化及发布/停止共享上传分流", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc239-ipc-offline-"))
+  try {
+    const workdir = join(root, "work")
+    const uploadsDir = join(root, "uploads")
+    const grantsDir = join(root, "grants")
+    const checkpointsDir = join(root, "checkpoints")
+    await mkdir(workdir, { recursive: true })
+
+    let serverDown = false
+    const cloudCalls: string[] = []
+    const user = {
+      id: USER_A,
+      userNo: "80000001",
+      userName: "测试甲",
+      photo: "",
+      orgId: "org-1",
+      orgNo: "001",
+      orgName: "研发组",
+      orgPathName: "研发部/研发组",
+    }
+    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "团队" }
+    const transport: typeof fetch = async input => {
+      const url = String(input)
+      cloudCalls.push(url)
+      if (serverDown) throw new Error("offline")
+      if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+      if (url.endsWith("/api/v1/auth/demo-login") || url.endsWith("/api/v1/auth/me")) return jsonOk({ user, workspaces: [workspace] })
+      if (url.endsWith(`/workspaces/${WORKSPACE_ID}/projects`)) return jsonOk({ workspaceId: WORKSPACE_ID, projects: [] })
+      if (url.includes("/knowledge/")) {
+        return jsonOk({
+          knowledgeId: "77777777-7777-4777-8777-777777777777",
+          termKey: "team-rule",
+          archived: false,
+          version: {
+            versionId: "88888888-8888-4888-8888-888888888888",
+            version: 1,
+            category: "rule",
+            title: "团队规范",
+            authorId: USER_A,
+            createdAtMs: 1_700_000_000_000,
+          },
+          text: "务必保留单测",
+        })
+      }
+      return new Response("not found", { status: 404 })
+    }
+
+    const identity = new CollaborationState(ORIGIN, transport)
+    assert.equal((await identity.signIn("80000001")).ok, true)
+
+    // 触发断网进入 connectionError（offline 续用态）
+    serverDown = true
+    await identity.withWorkspace(WORKSPACE_ID, c => c.listProjects(WORKSPACE_ID))
+    assert.equal(identity.personalIdentity()?.offline, true)
+    cloudCalls.length = 0
+
+    const uploadedBatches: ConversationSyncRequest[] = []
+    let watermark = 0
+    const uploads = new ConversationUploads(
+      uploadsDir,
+      {
+        watermark: async () => ({ ok: true, value: watermark }),
+        upload: async (_scope, req) => {
+          uploadedBatches.push(req)
+          watermark = req.messages.at(-1)?.sequence ?? watermark
+          return { ok: true, value: { syncedSequence: watermark } }
+        },
+      },
+      () => {},
+    )
+    const localConversations = new LocalConversationStore(root, ORIGIN)
+    const { window } = createFakeWindow()
+    const trustedWindow = {
+      ...window,
+      webContents: { ...window.webContents, mainFrame: { url: `${ORIGIN}/index.html` } },
+    } as unknown as IpcWindow
+
+    const registered = new Map<string, (...args: unknown[]) => Promise<unknown>>()
+    const fakeIpc = {
+      handle: (channel: string, handler: (...args: unknown[]) => Promise<unknown>) => { registered.set(channel, handler) },
+      removeHandler: (channel: string) => { registered.delete(channel) },
+    }
+    const unbindLocal = bindLocalConversationsIpc(trustedWindow, `${ORIGIN}/index.html`, identity, localConversations, uploads, fakeIpc as never)
+
+    const senderEvent = { sender: trustedWindow.webContents, senderFrame: trustedWindow.webContents.mainFrame }
+    const createdSolo = await registered.get("workbench:local-conversations:create")!(senderEvent, {
+      workspaceId: null,
+      directoryPath: workdir,
+      title: "断网离线个人会话",
+    }) as { ok: true; value: { conversationId: string } }
+    assert.equal(createdSolo.ok, true)
+    const soloConvId = createdSolo.value.conversationId
+    const soloScope = { accountId: USER_A, workspaceId: null, projectId: null, conversationId: soloConvId }
+
+    const promptHistories: unknown[] = []
+    const assembledCalls: string[] = []
+    const settledCalls: string[] = []
+    const listeners = new Set<AcpListener>()
+    let counter = 0
+    const mockRuntime: IpcRuntime = {
+      host: {
+        bind: async () => ({
+          getAvailability: () => ({ available: true }),
+          send: () => ({ status: "accepted" as const, turnId: `t-${++counter}` }),
+          sendPrompt: (_blocks: unknown, history: unknown) => {
+            promptHistories.push(history)
+            return { status: "accepted" as const, turnId: `t-${++counter}` }
+          },
+          cancel: () => true,
+          answerPermission: () => true,
+          subscribe: (listener: AcpListener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+          close: async () => { listeners.clear() },
+        }),
+        subscribeDiagnostics: () => () => {},
+        close: async () => {},
+      } as unknown as IpcRuntime["host"],
+    }
+
+    const assembler = {
+      async assembleTurnContext(input: { turnId: string }) {
+        assembledCalls.push(input.turnId)
+        return { contextBlocks: [{ type: "text" as const, text: "TEAM_CTX_BLOCK" }] }
+      },
+      async onTurnSettled(input: { turnId: string; outcome: "completed" | "failed" | "cancelled" }) {
+        settledCalls.push(`${input.turnId}:${input.outcome}`)
+      },
+    }
+
+    const coordinator1 = createLocalExecutionCoordinator(window, identity, uploads, mockRuntime, {
+      grantsDir,
+      checkpointsDir,
+      origin: ORIGIN,
+      localConversations,
+      contextAssembler: assembler,
+    })
+    const unbindExec = bindLocalExecutionIpc(trustedWindow, `${ORIGIN}/index.html`, coordinator1, fakeIpc as never)
+
+    await coordinator1.captureDirectorySelection()(workdir)
+    const prep1 = await registered.get("workbench:local-execution:prepare")!(senderEvent, soloScope, workdir) as {
+      ok: true; value: { bindingId: string }
+    }
+    assert.equal(prep1.ok, true)
+    const send1 = await coordinator1.send(soloScope, prep1.value.bindingId, REQ_ID, "断网第一问", [])
+    assert.equal(send1.ok && send1.value.status === "accepted", true)
+    if (!send1.ok || send1.value.status !== "accepted") return
+    for (const listener of listeners) {
+      listener({ turnId: send1.value.turnId, sequence: 1, type: "text-delta", text: "离线第一答", messageId: "m1" })
+      listener({ turnId: send1.value.turnId, sequence: 2, type: "completed", shareable: true })
+    }
+    await coordinator1.dispose()
+    unbindExec()
+
+    // 断网执行全程零云端请求、零上传入队、无团队跳过 contextAssembler，但完整落盘 LocalConversationStore
+    assert.equal(cloudCalls.length, 0)
+    assert.equal(uploadedBatches.length, 0)
+    assert.equal(assembledCalls.length, 0)
+    assert.equal(settledCalls.length, 0)
+    const persistedAfterRestart = await localConversations.get(USER_A, soloConvId)
+    assert.equal(persistedAfterRestart.ok && persistedAfterRestart.value.turns.length, 1)
+
+    // 恢复联机，新建协调器验证从 LocalConversationStore 还原第二轮前情
+    serverDown = false
+    await identity.getState()
+    uploads.useAccount(USER_A)
+
+    const coordinator2 = createLocalExecutionCoordinator(window, identity, uploads, mockRuntime, {
+      grantsDir,
+      checkpointsDir,
+      origin: ORIGIN,
+      localConversations,
+      contextAssembler: assembler,
+    })
+    await coordinator2.captureDirectorySelection()(workdir)
+    const prep2 = await coordinator2.prepare(soloScope, workdir)
+    assert.equal(prep2.ok, true)
+    if (!prep2.ok) return
+    const req2 = "55555555-5555-4555-8555-555555555555"
+    const send2 = await coordinator2.send(soloScope, prep2.value.bindingId, req2, "继续第二问", [])
+    assert.equal(send2.ok && send2.value.status === "accepted", true)
+    assert.equal(promptHistories.length, 1)
+    assert.match(JSON.stringify(promptHistories[0]), /断网第一问/)
+    assert.match(JSON.stringify(promptHistories[0]), /离线第一答/)
+    if (send2.ok && send2.value.status === "accepted") {
+      for (const listener of listeners) {
+        listener({ turnId: send2.value.turnId, sequence: 1, type: "text-delta", text: "已续传", messageId: "m2" })
+        listener({ turnId: send2.value.turnId, sequence: 2, type: "completed", shareable: true })
+      }
+    }
+
+    // 团队绑定但未发布会话：触发 contextAssembler、允许知识引用、拒绝项目快照引用、且不上传云端
+    const teamCreated = await localConversations.create(USER_A, { workspaceId: WORKSPACE_ID, directoryPath: workdir })
+    assert.equal(teamCreated.ok, true)
+    if (!teamCreated.ok) return
+    const teamConvId = teamCreated.value.conversationId
+    const teamPersonalScope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: null, conversationId: teamConvId }
+    const prepTeam = await coordinator2.prepare(teamPersonalScope, workdir)
+    assert.equal(prepTeam.ok, true)
+    if (!prepTeam.ok) return
+
+    const badSnapshotSend = await coordinator2.send(
+      teamPersonalScope,
+      prepTeam.value.bindingId,
+      "66666666-6666-4666-8666-666666666666",
+      "引用快照",
+      ["snapshot:99999999-9999-4999-8999-999999999999"],
+    )
+    assert.equal(badSnapshotSend.ok, false)
+
+    const sendTeam = await coordinator2.send(
+      teamPersonalScope,
+      prepTeam.value.bindingId,
+      "77777777-7777-4777-8777-777777777777",
+      "按团队规范回答",
+      ["knowledge:77777777-7777-4777-8777-777777777777:88888888-8888-4888-8888-888888888888"],
+    )
+    assert.equal(sendTeam.ok && sendTeam.value.status === "accepted", true)
+    assert.equal(assembledCalls.length, 1)
+    assert.match(JSON.stringify(promptHistories[1]), /TEAM_CTX_BLOCK/)
+    if (sendTeam.ok && sendTeam.value.status === "accepted") {
+      for (const listener of listeners) {
+        listener({ turnId: sendTeam.value.turnId, sequence: 1, type: "text-delta", text: "收到规范", messageId: "m3" })
+        listener({ turnId: sendTeam.value.turnId, sequence: 2, type: "completed", shareable: true })
+      }
+    }
+    await waitFor(() => settledCalls.length === 1)
+    assert.equal(uploadedBatches.length, 0)
+
+    // 发布为 summary_only 后发送一轮：仅上传空 messages + brief；停止共享后发送一轮：仅写本机不入队
+    await localConversations.markPublished(USER_A, teamConvId, {
+      workspaceId: WORKSPACE_ID,
+      projectId: PROJECT_ID,
+      shareMode: "summary_only",
+    })
+    const publishedScope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: teamConvId }
+    const sendPublished = await coordinator2.send(
+      publishedScope,
+      prepTeam.value.bindingId,
+      "99999999-9999-4999-8999-999999999991",
+      "仅简报上传验证",
+      [],
+    )
+    assert.equal(sendPublished.ok && sendPublished.value.status === "accepted", true)
+    if (sendPublished.ok && sendPublished.value.status === "accepted") {
+      for (const listener of listeners) {
+        listener({ turnId: sendPublished.value.turnId, sequence: 1, type: "text-delta", text: "结论摘要文本", messageId: "m4" })
+        listener({ turnId: sendPublished.value.turnId, sequence: 2, type: "completed", shareable: true })
+      }
+    }
+    await waitFor(() => uploadedBatches.length >= 1)
+    assert.equal(uploadedBatches.length, 1)
+    assert.deepEqual(uploadedBatches[0]!.messages, [])
+
+    await registered.get("workbench:local-conversations:mark-sharing-stopped")!(senderEvent, teamConvId)
+    const sendAfterStop = await coordinator2.send(
+      publishedScope,
+      prepTeam.value.bindingId,
+      "99999999-9999-4999-8999-999999999992",
+      "停止共享后继续本地问",
+      [],
+    )
+    assert.equal(sendAfterStop.ok && sendAfterStop.value.status === "accepted", true)
+    if (sendAfterStop.ok && sendAfterStop.value.status === "accepted") {
+      for (const listener of listeners) {
+        listener({ turnId: sendAfterStop.value.turnId, sequence: 1, type: "text-delta", text: "本地保留答复", messageId: "m5" })
+        listener({ turnId: sendAfterStop.value.turnId, sequence: 2, type: "completed", shareable: true })
+      }
+    }
+    await coordinator2.dispose()
+    await uploads.flush()
+    assert.equal(uploadedBatches.length, 1)
+    const finalDetail = await localConversations.get(USER_A, teamConvId)
+    assert.equal(finalDetail.ok && finalDetail.value.turns.length, 3)
+
+    unbindLocal()
+    identity.dispose()
   } finally {
     await rm(root, { recursive: true, force: true })
   }

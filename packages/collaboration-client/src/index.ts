@@ -48,6 +48,9 @@ export function createCollaborationSdk(options: CollaborationSdkOptions) {
           if (detail.value.conversation.ownerUserId !== scope.accountId) {
             return identityError("CONVERSATION_FORBIDDEN", "仅会话创建者可执行该操作。")
           }
+          if (detail.value.conversation.shareStatus === "stopped") {
+            return identityError("CONVERSATION_SHARING_STOPPED", "该会话已停止团队共享。")
+          }
           return { ok: true, value: detail.value.conversation.syncedSequence }
         },
         upload: (scope, request, signal) =>

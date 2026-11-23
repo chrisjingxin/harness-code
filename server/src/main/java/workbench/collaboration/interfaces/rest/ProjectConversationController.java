@@ -84,6 +84,17 @@ public class ProjectConversationController {
                 CurrentSession.userId(), workspaceId, projectId, conversationId, body));
     }
 
+    /** 会话创建者停止继续向团队同步该会话（幂等返回最新摘要）。 */
+    @PostMapping("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/stop-sharing")
+    public ResponseEntity<String> stopSharing(
+            @PathVariable String workspaceId,
+            @PathVariable String projectId,
+            @PathVariable String conversationId
+    ) {
+        return ApiResponses.json(200, conversations.stopSharing(
+                CurrentSession.userId(), workspaceId, projectId, conversationId));
+    }
+
     private static long after(String raw) {
         if (raw == null || raw.isEmpty()) {
             return 0;

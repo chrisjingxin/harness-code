@@ -39,11 +39,11 @@ const IMAGE_ID_PATTERN = /^(?:pending|sent)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 const SUPPORTED_IMAGE_MIME_SET = new Set<string>(SUPPORTED_DRAFT_IMAGE_MIME_TYPES)
 
 function isLocalExecutionScope(value: unknown): value is LocalExecutionScope {
-  return isPlainObject(value)
-    && isUserId(value.accountId)
-    && isUuid(value.workspaceId)
-    && isUuid(value.projectId)
-    && isUuid(value.conversationId)
+  if (!isPlainObject(value) || !isUserId(value.accountId) || !isUuid(value.conversationId)) return false
+  const validWs = value.workspaceId === null || isUuid(value.workspaceId)
+  const validProj = value.projectId === null || isUuid(value.projectId)
+  if (!validWs || !validProj) return false
+  return value.projectId === null || value.workspaceId !== null
 }
 
 function isCheckpointAction(value: unknown): value is CodeCheckpointAction {

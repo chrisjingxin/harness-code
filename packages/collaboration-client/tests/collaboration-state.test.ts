@@ -92,6 +92,9 @@ test("CollaborationState.withWorkspace 校验工作区成员关系、代次隔�
           briefUpdatedAtMs: 1_700_000_000_000,
           syncedSequence: 0,
           updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "active",
+          stoppedAt: null,
           repositories: [],
         },
       })
@@ -133,6 +136,95 @@ test("CollaborationState.withWorkspace 校验工作区成员关系、代次隔�
   assert.equal(authFailed.ok, false)
   const afterAuthFail = await state.getState()
   assert.equal(afterAuthFail.ok && afterAuthFail.value.status, "signedOut")
+
+  state.dispose()
+})
+
+test("CollaborationState 断网进入 connectionError 时保留本机离线身份快照并在 401/signOut 后清除", async () => {
+  let networkDown = false
+  let unauthorized = false
+  const user = {
+    id: USER_ID,
+    userNo: "80000001",
+    userName: "测试用户",
+    photo: "",
+    orgId: "org-1",
+    orgNo: "001",
+    orgName: "研发组",
+    orgPathName: "研发部/研发组",
+  }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队" }
+  const transport: typeof fetch = async input => {
+    const url = String(input)
+    if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+    if (url.endsWith("/api/v1/auth/demo-login") || url.endsWith("/api/v1/auth/me")) {
+      if (unauthorized) return jsonError("AUTHENTICATION_REQUIRED", "请先登录", 401)
+      return jsonOk({ user, workspaces: [workspace] })
+    }
+    if (url.endsWith("/api/v1/auth/logout")) return new Response(null, { status: 204 })
+    if (url.includes("/stop-sharing")) {
+      if (networkDown) throw new Error("offline")
+      return jsonOk({
+        conversation: {
+          conversationId: CONV_ID,
+          projectId: PROJECT_ID,
+          ownerUserId: USER_ID,
+          title: "测试会话",
+          status: "idle",
+          briefText: "",
+          briefSource: "rule",
+          briefUpdatedAtMs: 1_700_000_000_000,
+          syncedSequence: 0,
+          updatedAt: "2026-11-18T00:00:00.000Z",
+          shareMode: "full",
+          shareStatus: "stopped",
+          stoppedAt: "2026-11-18T00:01:00.000Z",
+          repositories: [],
+        },
+      })
+    }
+    return new Response("not found", { status: 404 })
+  }
+
+  const state = new CollaborationState(ORIGIN, transport)
+  assert.equal(state.personalIdentity(), null)
+
+  const login = await state.signIn("80000001")
+  assert.equal(login.ok, true)
+  assert.deepEqual(state.personalIdentity(), {
+    generation: 1,
+    accountId: USER_ID,
+    workspaces: [WORKSPACE_ID],
+    offline: false,
+  })
+
+  // 网络中断触发 connectionError：personalIdentity() 仍返回离线快照，但写接口被严格拦截
+  networkDown = true
+  const failedRemote = await state.stopProjectConversationSharing(WORKSPACE_ID, PROJECT_ID, CONV_ID)
+  assert.equal(failedRemote.ok, false)
+  const offlineSnapshot = state.personalIdentity()
+  assert.deepEqual(offlineSnapshot, {
+    generation: 1,
+    accountId: USER_ID,
+    workspaces: [WORKSPACE_ID],
+    offline: true,
+  })
+  const blockedWhileOffline = await state.stopProjectConversationSharing(WORKSPACE_ID, PROJECT_ID, CONV_ID)
+  assert.equal(blockedWhileOffline.ok, false)
+  if (!blockedWhileOffline.ok) assert.equal(blockedWhileOffline.error.code, "AUTHENTICATION_REQUIRED")
+
+  // 若服务端明确 401 失效，getState 立刻清空离线身份快照
+  networkDown = false
+  unauthorized = true
+  await state.getState()
+  assert.equal(state.personalIdentity(), null)
+
+  // 重新登录后主动 signOut，同样立即清空离线快照
+  unauthorized = false
+  assert.equal((await state.signIn("80000001")).ok, true)
+  assert.notEqual(state.personalIdentity(), null)
+  await state.signOut()
+  assert.equal(state.personalIdentity(), null)
 
   state.dispose()
 })

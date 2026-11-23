@@ -121,3 +121,39 @@ test("目标与现有忽略文件冲突时拒绝写入，非 Git 轮次只记录
     assert.ok(result.kind === "history" && result.turns[0].unavailable?.includes("仅在 Git"))
   } finally { await rm(scratch, { recursive: true, force: true }) }
 })
+
+test("CodeCheckpoints 在无团队个人会话发布到 Project 前后延续同一轮次快照历史", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "hc239-cp-continuity-"))
+  try {
+    const repo = join(scratch, "repo"), data = join(scratch, "checkpoints")
+    await mkdir(repo)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "Fixture")
+    git(repo, "config", "user.email", "fixture@example.invalid")
+    await writeFile(join(repo, "app.txt"), "v1\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "init")
+
+    const grant = await inspectDirectory(repo)
+    const soloScope = { accountId: "user-1", workspaceId: null, projectId: null, conversationId: "conv-shared" }
+    const publishedScope = { accountId: "user-1", workspaceId: "ws-1", projectId: "proj-1", conversationId: "conv-shared" }
+
+    const cpBefore = new CodeCheckpoints(data, "fixture")
+    await cpBefore.register(soloScope, grant)
+    const start = await cpBefore.begin(soloScope, grant)
+    assert.ok(start?.base)
+    await writeFile(join(repo, "app.txt"), "v2\n")
+    const turnId = randomUUID()
+    await cpBefore.finish(start, turnId, Date.now(), "completed", true)
+
+    const cpAfterPublish = new CodeCheckpoints(data, "fixture")
+    const history = await cpAfterPublish.run(publishedScope, grant, { kind: "history" }, current, noOthers)
+    assert.equal(history.kind, "history")
+    assert.equal(history.turns.length, 1)
+    assert.equal(history.turns[0]!.turnId, turnId)
+    const diff = await cpAfterPublish.run(publishedScope, grant, { kind: "diff", turnId, path: "app.txt" }, current, noOthers)
+    assert.ok(diff.kind === "diff" && diff.text.includes("+v2"))
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})

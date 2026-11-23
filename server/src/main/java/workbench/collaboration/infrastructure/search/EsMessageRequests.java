@@ -249,6 +249,8 @@ public final class EsMessageRequests {
                 Map.entry("ownerUserId", Map.of("type", "keyword")),
                 Map.entry("status", Map.of("type", "keyword")),
                 Map.entry("briefSource", Map.of("type", "keyword")),
+                Map.entry("shareMode", Map.of("type", "keyword")),
+                Map.entry("shareStatus", Map.of("type", "keyword")),
                 Map.entry("title", textWithKeyword()),
                 Map.entry("briefText", Map.of("type", "text")),
                 Map.entry("briefUpdatedAtMs", Map.of("type", "long")),

@@ -256,6 +256,7 @@ test("AcpAgentRegistry.findBoundProvider 在新增 WORKBENCH_ACP_EXECUTABLE 后�
     })
     assert.equal(registryAfter.listProviders().defaultProviderId, "custom")
     assert.equal(await registryAfter.findBoundProvider(scopeA, workspace), "alpha")
+    assert.equal(await registryAfter.findBoundProvider({ ...scopeA, workspaceId: null, projectId: null }, workspace), "alpha")
     assert.equal(await registryAfter.findBoundProvider(scopeNew, workspace), undefined)
     await registryAfter.close()
   } finally {

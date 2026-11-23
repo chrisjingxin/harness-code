@@ -12,11 +12,11 @@ export type AgentCommand = {
   readonly env?: Readonly<Record<string, string | undefined>>
 }
 
-/** 四个标识共同区分属于不同账号、团队、项目或会话的本地执行作用域。由受信任的宿主提供。 */
+/** 账号与会话共同定位本地执行作用域；`workspaceId` 与 `projectId` 在无团队或未发布个人会话中允许为 `null`。 */
 export type LocalAcpScope = {
   readonly accountId: string
-  readonly workspaceId: string
-  readonly projectId: string
+  readonly workspaceId: string | null
+  readonly projectId: string | null
   readonly conversationId: string
 }
 

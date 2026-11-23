@@ -19,8 +19,8 @@ import type { PersonalDraftImage } from "./personal.js"
 
 export type LocalExecutionScope = {
   readonly accountId: string
-  readonly workspaceId: string
-  readonly projectId: string
+  readonly workspaceId: string | null
+  readonly projectId: string | null
   readonly conversationId: string
 }
 
@@ -119,6 +119,8 @@ export type LocalExecutionUploadNotice = {
   readonly turnId: string
   readonly kind: "upload"
   readonly failure?: string
+  /** 服务端返回 409 CONVERSATION_SHARING_STOPPED 时置为 true，提示界面收敛本地共享状态。 */
+  readonly sharingStopped?: boolean
   /** 上传确认后附带服务器写入的最小/最大 sequence，供渲染端去重已同步记录。 */
   readonly firstSequence?: number
   readonly syncedSequence?: number
@@ -225,5 +227,5 @@ export interface DesktopLocalExecutionHost {
 }
 
 export function localExecutionKey(scope: LocalExecutionScope): string {
-  return JSON.stringify([scope.accountId, scope.workspaceId, scope.projectId, scope.conversationId])
+  return JSON.stringify([scope.accountId, scope.conversationId])
 }
