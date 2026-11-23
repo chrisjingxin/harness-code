@@ -28,6 +28,7 @@ export interface ProjectMemberAddRequest {
 }
 
 export interface RepositoryCreateRequest {
+  ownerUserId?: string | null
   name: string
   remoteUrl: string
   defaultBranch?: string
@@ -35,6 +36,8 @@ export interface RepositoryCreateRequest {
 }
 
 export interface RepositoryPatchRequest {
+  ownerUserId?: string | null
+  expectedVersion: number
   name?: string
   defaultBranch?: string
   /** 归档只允许置 archived，单向不可逆 */
@@ -97,6 +100,8 @@ export interface RepositorySummary {
   defaultBranch: string
   status: RepositoryStatus
   createdByUserId: string
+  ownerUserId: string | null
+  version: number
   createdAt: string
   updatedAt: string
 }
@@ -262,5 +267,7 @@ export interface SnapshotResponse {
   /** 完整正文的 UTF-8 字节 SHA-256，使用小写十六进制。 */
   sha256: string
   createdByUserId: string
+  ownerUserId: string | null
+  version: number
   createdAtMs: number
 }

@@ -91,6 +91,7 @@ export function useProjectDetail(host: OrganizationHost, workspaceId: string, pr
 export function projectMembers(detail: ProjectDetailResponse | null, team: readonly MemberSummary[]): NavigationMember[] {
   if (!detail) return []
   const users = new Map(team.map(item => [item.user.id, item.user]))
+  const leftUsers = new Set(team.filter(item => item.status === "removed").map(item => item.user.id))
   return detail.members.map(member => {
     const user = users.get(member.userId)
     const fallbackName = `成员 ${member.userId.slice(0, 8)}`
@@ -102,7 +103,7 @@ export function projectMembers(detail: ProjectDetailResponse | null, team: reado
       ...(photo ? { photo } : {}),
       ...(user?.orgName ? { orgName: user.orgName } : {}),
       ...(user?.orgPathName ? { orgPathName: user.orgPathName } : {}),
-      left: member.status === "removed",
+      left: member.status === "removed" || leftUsers.has(member.userId),
     }
   })
 }

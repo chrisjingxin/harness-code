@@ -20,7 +20,8 @@ public final class TaskDtos {
     public record TaskSummary(String taskId, String projectId, String title, String creatorId, String assigneeId,
                               String status, long version, String conversationId, long createdAtMs, long updatedAtMs) {}
     public record TaskTransition(String kind, String actorId, String fromStatus, String toStatus, long version,
-                                 String note, String commitSha, long occurredAtMs) {}
+                                 String note, String commitSha, long occurredAtMs, TaskHandoff handoff) {}
+    public record TaskHandoff(String fromAssigneeId,String toAssigneeId,String previousConversationId) {}
     public record TaskDetail(TaskSummary task, String description, List<String> snapshotIds,
                              List<KnowledgeRef> knowledgeRefs, List<TaskTransition> transitions) {}
     public record TaskListResponse(List<TaskSummary> tasks, String nextAfterId) {}

@@ -43,7 +43,7 @@ public class KnowledgeAppService {
 
     @Transactional
     public String create(String actor, String workspace, String raw) {
-        policy.requireWorkspaceMember(workspace, actor);
+        policy.requireWorkspaceAdmin(workspace, actor);
         var input = contracts.decode("KnowledgeCreateRequest", raw, KnowledgeCreateRequest.class);
         String id = UUID.randomUUID().toString();
         var version = version(actor, 1, input.category(), input.title(), input.text());
@@ -59,7 +59,7 @@ public class KnowledgeAppService {
 
     @Transactional
     public String edit(String actor, String workspace, String id, String raw) {
-        policy.requireWorkspaceMember(workspace, actor);
+        policy.requireWorkspaceAdmin(workspace, actor);
         var input = contracts.decode("KnowledgeUpdateRequest", raw, KnowledgeUpdateRequest.class);
         var before = find(workspace, id);
         var version = version(actor, before.version() + 1, input.category(), input.title(), input.text());
@@ -71,7 +71,7 @@ public class KnowledgeAppService {
 
     @Transactional
     public String archive(String actor, String workspace, String id, long expectedVersion) {
-        policy.requireWorkspaceMember(workspace, actor);
+        policy.requireWorkspaceAdmin(workspace, actor);
         var before = find(workspace, id);
         var after = new KnowledgeSummary(id, before.termKey(), before.category(), before.title(),
                 before.currentVersionId(), before.version() + 1, true, System.currentTimeMillis());

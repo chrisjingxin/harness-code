@@ -18,7 +18,10 @@
         {
           "id": "22222222-2222-4222-8222-222222222222",
           "slug": "demo",
-          "name": "演示工作区"
+          "name": "演示工作区",
+          "role": "admin",
+          "memberVersion": 1,
+          "accessVersion": 1
         }
       ]
     }
@@ -51,7 +54,10 @@
         {
           "id": "22222222-2222-4222-8222-222222222222",
           "slug": "demo",
-          "name": "演示工作区"
+          "name": "演示工作区",
+          "role": "admin",
+          "memberVersion": 1,
+          "accessVersion": 1
         }
       ]
     }
@@ -73,9 +79,16 @@
             "orgNo": "100004",
             "orgName": "平台架构二组",
             "orgPathName": "信息技术部/架构管理团队/零售应用架构四室/平台架构二组"
-          }
+          },
+          "role": "developer",
+          "status": "active",
+          "enabled": true,
+          "version": 1,
+          "joinedAt": "2026-11-23T00:00:00.000Z",
+          "leftAt": null
         }
-      ]
+      ],
+      "accessVersion": 1
     }
   },
   {
@@ -188,7 +201,10 @@
         {
           "id": "22222222-2222-4222-8222-222222222222",
           "slug": "demo",
-          "name": "演示工作区"
+          "name": "演示工作区",
+          "role": "admin",
+          "memberVersion": 1,
+          "accessVersion": 1
         }
       ]
     }
@@ -212,7 +228,10 @@
         {
           "id": "22222222-2222-4222-8222-222222222222",
           "slug": "demo",
-          "name": "演示工作区"
+          "name": "演示工作区",
+          "role": "admin",
+          "memberVersion": 1,
+          "accessVersion": 1
         }
       ]
     }
@@ -288,6 +307,26 @@
       "body": {
         "status": "UP"
       }
+    }
+  },
+  {
+    "name": "workspace-role-change",
+    "schema": "WorkspaceRoleChangeRequest",
+    "valid": true,
+    "data": {
+      "role": "admin",
+      "expectedVersion": 1,
+      "requestId": "66666666-6666-4666-8666-666666666666"
+    }
+  },
+  {
+    "name": "workspace-role-reject-owner",
+    "schema": "WorkspaceRoleChangeRequest",
+    "valid": false,
+    "data": {
+      "role": "owner",
+      "expectedVersion": 1,
+      "requestId": "66666666-6666-4666-8666-666666666666"
     }
   }
 ]

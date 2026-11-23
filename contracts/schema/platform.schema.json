@@ -88,12 +88,28 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 120
+        },
+        "role": {
+          "$ref": "#/$defs/WorkspaceRole"
+        },
+        "memberVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
         }
       },
       "required": [
         "id",
         "slug",
-        "name"
+        "name",
+        "role",
+        "memberVersion",
+        "accessVersion"
       ],
       "additionalProperties": false
     },
@@ -102,10 +118,46 @@
       "properties": {
         "user": {
           "$ref": "#/$defs/UserSummary"
+        },
+        "role": {
+          "$ref": "#/$defs/WorkspaceRole"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "removed"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "joinedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "leftAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "user"
+        "user",
+        "role",
+        "status",
+        "enabled",
+        "version",
+        "joinedAt",
+        "leftAt"
       ],
       "additionalProperties": false
     },
@@ -173,11 +225,17 @@
             "$ref": "#/$defs/MemberSummary"
           },
           "maxItems": 1000
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
         }
       },
       "required": [
         "workspaceId",
-        "members"
+        "members",
+        "accessVersion"
       ],
       "additionalProperties": false
     },
@@ -323,7 +381,14 @@
             "KNOWLEDGE_TERM_CONFLICT",
             "KNOWLEDGE_ARCHIVED",
             "CONVERSATION_CONFLICT",
-            "CONVERSATION_SHARING_STOPPED"
+            "CONVERSATION_SHARING_STOPPED",
+            "WORKSPACE_ADMIN_REQUIRED",
+            "LAST_WORKSPACE_ADMIN",
+            "TARGET_UNAVAILABLE",
+            "HANDOFF_PREVIEW_STALE",
+            "HANDOFF_INCOMPLETE",
+            "PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED",
+            "WORKSPACE_MEMBER_LIMIT"
           ]
         },
         "requestId": {
@@ -385,6 +450,567 @@
         "returnCode",
         "errorMsg",
         "body"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRole": {
+      "enum": [
+        "admin",
+        "developer"
+      ]
+    },
+    "WorkspaceAccess": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "role": {
+          "$ref": "#/$defs/WorkspaceRole"
+        },
+        "memberVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "workspaceId",
+        "role",
+        "memberVersion",
+        "accessVersion"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceMemberAddRequest": {
+      "type": "object",
+      "properties": {
+        "userNo": {
+          "type": "string",
+          "pattern": "^[0-9]{1,32}$"
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "userNo",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRoleChangeRequest": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/WorkspaceRole"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "role",
+        "expectedVersion",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceMemberChangeResponse": {
+      "type": "object",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "member",
+        "accessVersion"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRemovalTask": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "task"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "todo",
+            "doing",
+            "review"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "creatorId": {
+          "$ref": "#/$defs/UserId"
+        },
+        "assigneeId": {
+          "$ref": "#/$defs/UserId"
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duties": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "assignee",
+              "creator"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "taskId",
+        "projectId",
+        "title",
+        "status",
+        "version",
+        "creatorId",
+        "assigneeId",
+        "conversationId",
+        "duties",
+        "archived"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRemovalProject": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "project"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ownerUserId": {
+          "$ref": "#/$defs/UserId"
+        },
+        "targetIsOwner": {
+          "type": "boolean"
+        },
+        "targetIsMember": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "projectId",
+        "name",
+        "status",
+        "version",
+        "ownerUserId",
+        "targetIsOwner",
+        "targetIsMember"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRemovalRepository": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "repository"
+        },
+        "repositoryId": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ownerUserId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "repositoryId",
+        "name",
+        "status",
+        "version",
+        "ownerUserId"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceRemovalPreview": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "targetMember": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "effectiveAdminCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "previewVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/WorkspaceRemovalTask"
+              },
+              {
+                "$ref": "#/$defs/WorkspaceRemovalProject"
+              },
+              {
+                "$ref": "#/$defs/WorkspaceRemovalRepository"
+              }
+            ]
+          }
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "projects": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "repositories": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "archived": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "sharedConversations": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "tasks",
+            "projects",
+            "repositories",
+            "archived",
+            "sharedConversations"
+          ],
+          "additionalProperties": false
+        },
+        "projectEligibility": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "$ref": "#/$defs/Id"
+              },
+              "activeSuccessorUserIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/UserId"
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "activeSuccessorUserIds"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "workspaceId",
+        "targetMember",
+        "accessVersion",
+        "effectiveAdminCount",
+        "previewVersion",
+        "items",
+        "nextAfterId",
+        "counts",
+        "projectEligibility"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceMemberRemovalRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "expectedMemberVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "previewVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "defaultSuccessorUserId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectSuccessors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "$ref": "#/$defs/Id"
+              },
+              "userId": {
+                "$ref": "#/$defs/UserId"
+              }
+            },
+            "required": [
+              "projectId",
+              "userId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "taskSuccessors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "$ref": "#/$defs/Id"
+              },
+              "userId": {
+                "$ref": "#/$defs/UserId"
+              }
+            },
+            "required": [
+              "taskId",
+              "userId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "repositorySuccessors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repositoryId": {
+                "$ref": "#/$defs/Id"
+              },
+              "userId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UserId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "repositoryId",
+              "userId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "addToProjects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "$ref": "#/$defs/Id"
+              },
+              "userId": {
+                "$ref": "#/$defs/UserId"
+              }
+            },
+            "required": [
+              "projectId",
+              "userId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "confirmResetTasks": {
+          "const": true
+        },
+        "confirmRetainHistory": {
+          "const": true
+        }
+      },
+      "required": [
+        "requestId",
+        "expectedMemberVersion",
+        "previewVersion",
+        "defaultSuccessorUserId",
+        "projectSuccessors",
+        "taskSuccessors",
+        "repositorySuccessors",
+        "addToProjects",
+        "confirmResetTasks",
+        "confirmRetainHistory"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceMemberRemovalResponse": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/Id"
+        },
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "accessVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "transferredTaskCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "transferredProjectCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "transferredRepositoryCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unclaimedRepositoryCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "stoppedConversationCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "workspaceId",
+        "member",
+        "accessVersion",
+        "requestId",
+        "transferredTaskCount",
+        "transferredProjectCount",
+        "transferredRepositoryCount",
+        "unclaimedRepositoryCount",
+        "stoppedConversationCount"
       ],
       "additionalProperties": false
     }

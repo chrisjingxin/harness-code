@@ -1,3 +1,4 @@
+import { TeamSettings } from "./features/workspace/team-settings.js"
 /**
  * 正式窗口装配（HC-239 个人优先与双轨协同）：
  * 1. 登录即用与断网续用：已确认账号（含断网只读快照 `lastKnownUser`）立即进入双轨工作台，不再要求先入团或保持在线；
@@ -7,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { IconArrowLeft, IconRefresh, IconWifiOff } from "@tabler/icons-react"
-import type { CollaborationHost, UserSummary } from "@workbench/collaboration-client/types"
+import type { CollaborationHost, UserSummary, WorkspaceRole, WorkspaceSummary } from "@workbench/collaboration-client/types"
 import type {
   AccountPersonal,
   CollaborationAppsHost,
@@ -113,7 +114,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
   const [activeSpace, setActiveSpace] = useState<NavigationSpaceKind>("personal")
   const [account, setAccount] = useState<"loading" | "ready" | "failed">("loading")
   const [attempt, setAttempt] = useState(0)
-  const [knownWorkspaces, setKnownWorkspaces] = useState<readonly { id: string; name: string }[]>([])
+  const [knownWorkspaces, setKnownWorkspaces] = useState<readonly WorkspaceSummary[]>([])
 
   const signedIn = identity.state.status === "signedIn" ? identity.state : null
   const offlineUser = identity.state.status === "connectionError" ? identity.state.lastKnownUser ?? null : null
@@ -185,6 +186,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     </div>
     <div className="desktop-set-section">账号与团队</div>
     <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />
+    {settingsOpen && workspace && signedIn && <TeamSettings host={props.collaboration} organization={props.organization} workspace={workspace} accountId={signedIn.user.id} />}
   </>
 
   if (activeUser && account === "ready") {
@@ -271,8 +273,8 @@ function ConfirmedUserWorkbench(props: Hosts & {
   persistence: PersonalPersistence
   personalError: string
   user: UserSummary
-  workspaces: readonly { id: string; name: string }[]
-  workspace: { id: string; name: string } | null
+  workspaces: readonly WorkspaceSummary[]
+  workspace: WorkspaceSummary | null
   activeSpace: NavigationSpaceKind
   isOffline: boolean
   onSelectWorkspace: (workspaceId: string) => void
@@ -462,6 +464,8 @@ function ConfirmedUserWorkbench(props: Hosts & {
         persistence={props.persistence}
         workspaceId={workspace.id}
         workspaceName={workspace.name}
+        workspaceRole={workspace.role}
+        workspaceAccessVersion={workspace.accessVersion}
         workspaces={workspaceItems}
         onSelectWorkspace={props.onSelectWorkspace}
         dualTrack={dualTrack}
@@ -728,6 +732,8 @@ function WorkspaceProjectWorkbench(props: {
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
+  workspaceRole: WorkspaceRole
+  workspaceAccessVersion: number
   workspaces?: readonly NavigationWorkspaceItem[]
   onSelectWorkspace?(workspaceId: string): void
   dualTrack?: DualTrackNavigationProps
@@ -751,6 +757,7 @@ function WorkspaceProjectWorkbench(props: {
     workspaceId: props.workspaceId,
     user: props.user,
   })
+  useEffect(() => { void shell.team.reload(); void shell.projects.reload(); void shell.detail.reload() }, [props.workspaceAccessVersion])
   const currentProject = shell.projects.projects.find(item => item.projectId === shell.projectId)
   const selectedConversationId = shell.personal.page.kind === "conversation"
     ? shell.personal.page.conversationId
@@ -867,6 +874,7 @@ function WorkspaceProjectWorkbench(props: {
   const taskContext: TasksContext | undefined = props.collaborationApps && shell.scope ? {
     host: props.collaborationApps, scope: shell.scope, projectName: currentProject?.name ?? "当前项目", projectActive: canPublish,
     ownerName: pageController.resolveOwnerName, localDeviceId: props.user.id,
+    canActForCreator: creatorId => shell.team.availability.state === "ready" && currentProject?.role === "owner" && !shell.team.members.some(m => m.user.id === creatorId && m.status === "active" && m.enabled),
     sessions: integration, directories: pageController.directories,
     chooseDirectory, locateConversation, refreshTaskMetadata,
   } : undefined
@@ -935,7 +943,7 @@ function WorkspaceProjectWorkbench(props: {
         render({ scope, page, visible }) {
           if (!visible || page.kind !== "knowledge") return null
           return <div className="collaboration-page-scroll" key={JSON.stringify(scope)}>
-            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName}
+            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName} canManage={props.workspaceRole === "admin"}
               ownerName={pageController.resolveOwnerName} rendering={pageController.rendering}
               revision={knowledgeRevision} refreshMetadata={refreshKnowledgeMetadata}
               requestedItem={knowledgeRequest}

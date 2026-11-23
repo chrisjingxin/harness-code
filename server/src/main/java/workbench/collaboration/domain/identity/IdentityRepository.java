@@ -109,6 +109,12 @@ public interface IdentityRepository {
      */
     void insertMember(WorkspaceMember member);
 
+    /** 写事务先锁团队行，读取事务不持锁；统一成员撤销和普通写请求的先后。 */
+    void lockWorkspace(String workspaceId);
+
+    /** 包含已移出记录；不能用 active 查询推断用户从未加入。 */
+    Optional<WorkspaceMember> findMember(String workspaceId, String userId);
+
     /**
      * 查询所有启用的演示用户账号列表，用于前端登录页面快捷切换身份。
      *

@@ -123,7 +123,8 @@ public class TaskStore {
                 row.getInt("from_status") == 0 ? null : TaskStatus.fromCode(row.getInt("from_status")).wire,
                 TaskStatus.fromCode(row.getInt("to_status")).wire, row.getLong("version"),
                 row.getString("note"), row.getString("commit_sha"),
-                Times.ms(row.getObject("created_at", LocalDateTime.class))), id);
+                Times.ms(row.getObject("created_at", LocalDateTime.class)),
+                "reassigned".equals(row.getString("kind")) ? new TaskHandoff(row.getString("from_assignee_id"),row.getString("to_assignee_id"),emptyToNull(row.getString("previous_conversation_id"))) : null), id);
         return new TaskDetail(task.summary(), task.description(), snapshots, knowledge, transitions);
     }
 

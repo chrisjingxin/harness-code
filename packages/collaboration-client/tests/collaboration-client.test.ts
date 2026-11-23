@@ -240,7 +240,7 @@ test("createCollaborationSdk 自动联动登录态、所有权校验并在登出
     orgName: "研发组",
     orgPathName: "研发部/研发组",
   }
-  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队" }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer", memberVersion: 1, accessVersion: 1 }
   const scope: CollaborationConversationScope = {
     accountId: USER_ID,
     workspaceId: WORKSPACE_ID,

@@ -66,7 +66,7 @@ test("CollaborationState.withWorkspace 校验工作区成员关系、代次隔�
     orgName: "研发组",
     orgPathName: "研发部/研发组",
   }
-  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队" }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer", memberVersion: 1, accessVersion: 1 }
 
   const transport: typeof fetch = async input => {
     const url = String(input)
@@ -153,7 +153,7 @@ test("CollaborationState 断网进入 connectionError 时保留本机离线身�
     orgName: "研发组",
     orgPathName: "研发部/研发组",
   }
-  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队" }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer", memberVersion: 1, accessVersion: 1 }
   const transport: typeof fetch = async input => {
     const url = String(input)
     if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })

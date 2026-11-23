@@ -215,7 +215,8 @@
             "created",
             "edited",
             "transition",
-            "conversation_linked"
+            "conversation_linked",
+            "reassigned"
           ]
         },
         "actorId": {
@@ -252,6 +253,40 @@
         "occurredAtMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "handoff": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "fromAssigneeId": {
+                  "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+                },
+                "toAssigneeId": {
+                  "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+                },
+                "previousConversationId": {
+                  "anyOf": [
+                    {
+                      "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "fromAssigneeId",
+                "toAssigneeId",
+                "previousConversationId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -262,7 +297,8 @@
         "version",
         "note",
         "commitSha",
-        "occurredAtMs"
+        "occurredAtMs",
+        "handoff"
       ],
       "additionalProperties": false
     },
@@ -705,11 +741,19 @@
             "conversation.brief_updated",
             "snapshot.created",
             "knowledge.updated",
-            "project.member_changed"
+            "project.member_changed",
+            "workspace.member_changed"
           ]
         },
         "objectId": {
-          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+            }
+          ]
         },
         "projectId": {
           "anyOf": [
@@ -734,7 +778,32 @@
         "projectId",
         "occurredAtMs"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "workspace.member_changed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "objectId": {
+                "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "objectId": {
+                "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+              }
+            }
+          }
+        }
+      ]
     },
     "NotificationPage": {
       "type": "object",

@@ -11,7 +11,7 @@ import { loadContracts } from "./check-contracts.mjs"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const service = join(root, "server")
 const command = process.argv[2]
-if (process.argv.length !== 3 || !["build", "init-demo", "start", "contracts"].includes(command)) throw new Error("必须选择一个已登记的服务端命令")
+if (process.argv.length !== 3 || !["build", "init-demo", "init-workspace-roles", "start", "contracts"].includes(command)) throw new Error("必须选择一个已登记的服务端命令")
 const version = (await readFile(join(root, "VERSION"), "utf8")).trim()
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error("VERSION 无效")
 const jar = join(service, "target", `collaboration-server-${version}.jar`)

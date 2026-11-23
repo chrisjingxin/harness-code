@@ -468,6 +468,372 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "post_members",
+        "parameters": [
+          {
+            "name": "X-Workbench-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceMemberChangeResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/platform.schema.json#/$defs/WorkspaceMemberAddRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/access": {
+      "get": {
+        "operationId": "get_access",
+        "parameters": [
+          {
+            "name": "X-Workbench-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceAccess"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{userId}/role": {
+      "patch": {
+        "operationId": "patch_members_userId_role",
+        "parameters": [
+          {
+            "name": "X-Workbench-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceMemberChangeResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/platform.schema.json#/$defs/WorkspaceRoleChangeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{userId}/removal-preview": {
+      "get": {
+        "operationId": "get_members_userId_removal-preview",
+        "parameters": [
+          {
+            "name": "X-Workbench-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/UserId"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "previewVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceRemovalPreview"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{userId}/removal": {
+      "post": {
+        "operationId": "post_members_userId_removal",
+        "parameters": [
+          {
+            "name": "X-Workbench-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/platform.schema.json#/$defs/WorkspaceMemberRemovalResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "安全错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/platform.schema.json#/$defs/WorkspaceMemberRemovalRequest"
+              }
+            }
+          }
+        }
       }
     }
   }

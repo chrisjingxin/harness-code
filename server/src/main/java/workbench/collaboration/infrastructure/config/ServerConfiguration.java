@@ -103,8 +103,10 @@ public class ServerConfiguration {
             case "init-demo" -> {
                 foundation.validate();
                 foundation.initializeDemo();
+                foundation.validateRoles();
             }
-            case "start" -> foundation.validate();
+            case "init-workspace-roles" -> { foundation.validate(); foundation.initializeRoles(env.getRequiredProperty("workbench.roles-mapping")); }
+            case "start" -> { foundation.validate(); foundation.validateRoles(); }
             default -> throw new IllegalArgumentException("未知服务端命令");
         }
         return foundation;

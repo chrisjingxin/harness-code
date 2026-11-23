@@ -78,6 +78,8 @@ CREATE TABLE wb_workspace (
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '工作区全局唯一业务标识(UUID)',
   slug VARCHAR(40) NOT NULL COMMENT 'URL 友好短路径标识',
   name VARCHAR(80) NOT NULL COMMENT '工作区展示名称',
+  creator_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '已核实的创建者，未知为空',
+  access_version BIGINT NOT NULL DEFAULT 1 COMMENT '团队成员权限修订号',
   created_at DATETIME(3) NOT NULL COMMENT '创建时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_workspace_id (workspace_id),
@@ -88,9 +90,15 @@ CREATE TABLE wb_workspace_member (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
   workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属工作区标识',
   user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '成员用户标识',
+  role TINYINT UNSIGNED NOT NULL COMMENT '1管理员，2开发者，0待显式初始化',
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '1在册，2移出保留历史',
+  version BIGINT NOT NULL DEFAULT 1 COMMENT '成员修订号',
+  updated_at DATETIME(3) NOT NULL COMMENT '成员修改时间',
+  left_at DATETIME(3) NOT NULL COMMENT '移出时间，在册取加入时间',
   created_at DATETIME(3) NOT NULL COMMENT '加入时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_workspace_id_user_id (workspace_id, user_id),
+  KEY idx_workspace_status_role (workspace_id, status, role),
   KEY idx_user_id_workspace_id (user_id, workspace_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作区成员关联表';
 
@@ -106,12 +114,15 @@ CREATE TABLE wb_repository (
   default_branch VARCHAR(128) NOT NULL COMMENT '默认分支名',
   status TINYINT UNSIGNED NOT NULL COMMENT '目录状态：1=active,2=archived',
   created_by_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '登记者用户标识',
+  owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '当前负责人，空为待认领',
+  version BIGINT NOT NULL DEFAULT 1 COMMENT '仓库修订号',
   created_at DATETIME(3) NOT NULL COMMENT '登记时间',
   updated_at DATETIME(3) NOT NULL COMMENT '最近修改时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_repository_id (repository_id),
   UNIQUE KEY uk_workspace_id_remote_url_sha256 (workspace_id, remote_url_sha256),
-  KEY idx_workspace_id_status (workspace_id, status)
+  KEY idx_workspace_id_status (workspace_id, status),
+  KEY idx_workspace_owner (workspace_id, owner_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='团队仓库目录表';
 
 -- ============ 业务项目与成员 ============
@@ -248,6 +259,9 @@ CREATE TABLE wb_task_transition (
   from_status TINYINT UNSIGNED NOT NULL COMMENT '0 表示任务创建前无状态',
   to_status TINYINT UNSIGNED NOT NULL,
   note VARCHAR(1024) NOT NULL,
+  from_assignee_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  to_assignee_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  previous_conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
   commit_sha VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   created_at DATETIME(3) NOT NULL,
   PRIMARY KEY (id),
@@ -325,4 +339,20 @@ CREATE TABLE wb_notification_outbox (
   PRIMARY KEY (id),
   UNIQUE KEY uk_event_id_user_id (event_id, user_id),
   KEY idx_workspace_id_user_id_id (workspace_id, user_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 团队管理回执与最小事实记录；与权限/交接业务同事务提交。
+CREATE TABLE wb_workspace_request (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  action VARCHAR(24) NOT NULL,
+  target_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  change_summary MEDIUMTEXT NOT NULL,
+  response MEDIUMTEXT NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_workspace_actor_request (workspace_id, actor_id, request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

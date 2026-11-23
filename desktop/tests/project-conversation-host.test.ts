@@ -122,7 +122,7 @@ test("PersonalStore 支持 projectDraft 与 conversation 超 800KB 正文自动�
       orgName: "平台架构二组",
       orgPathName: "信息技术部/平台架构二组",
     }
-    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队" }
+    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer", memberVersion: 1, accessVersion: 1 }
     const transport: typeof fetch = async input => {
       const url = String(input)
       if (url.endsWith("/api/v1/auth/csrf")) {

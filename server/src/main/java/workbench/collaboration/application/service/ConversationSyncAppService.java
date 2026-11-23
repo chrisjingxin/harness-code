@@ -80,6 +80,7 @@ public class ConversationSyncAppService {
      */
     @Transactional
     public String sync(String userId, String workspaceId, String projectId, String conversationId, String rawBody) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         ConversationDtos.ConversationSyncRequest request = contracts.decode(

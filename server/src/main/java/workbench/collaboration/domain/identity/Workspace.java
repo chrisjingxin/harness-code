@@ -21,5 +21,7 @@ public record Workspace(
         String id,
         String slug,
         String name,
+        String creatorUserId,
+        long accessVersion,
         long createdAtMs
 ) {}

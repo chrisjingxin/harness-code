@@ -92,7 +92,7 @@ async function createSignedInState(userId: string) {
     orgName: "研发组",
     orgPathName: "研发部/研发组",
   }
-  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "团队" }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "团队", role: "developer", memberVersion: 1, accessVersion: 1 }
   const transport: typeof fetch = async input => {
     const url = String(input)
     if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
@@ -1525,7 +1525,7 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
       orgName: "研发组",
       orgPathName: "研发部/研发组",
     }
-    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "团队" }
+    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "团队", role: "developer", memberVersion: 1, accessVersion: 1 }
     const transport: typeof fetch = async input => {
       const url = String(input)
       cloudCalls.push(url)

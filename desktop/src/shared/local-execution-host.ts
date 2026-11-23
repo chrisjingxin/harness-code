@@ -158,6 +158,8 @@ export type LocalExecutionNotice =
   | LocalExecutionUploadNotice
   | LocalExecutionSessionStateNotice
   | LocalExecutionElicitationNotice
+  /** 桌面记忆保存独立于 ACP 流序号，正常终态后仍可更新原工具卡。 */
+  | { readonly scope: LocalExecutionScope; readonly bindingId: string; readonly kind: "context-tool"; readonly requestId: string; readonly tool: LocalExecutionTool }
   | { readonly scope: LocalExecutionScope; readonly kind: "prompt-queue"; readonly queue: PromptQueueView }
   | { readonly scope: LocalExecutionScope; readonly bindingId: string; readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string }
   | ({

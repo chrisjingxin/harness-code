@@ -76,6 +76,7 @@ public class IdentityAppService {
      */
     @Transactional(readOnly = true)
     public void requireMember(String workspaceId, String userId) {
+        identity.lockWorkspace(workspaceId);
         requireUser(userId);
         if (!identity.memberExists(workspaceId, userId)) {
             throw new ApiProblem(404, "RESOURCE_NOT_FOUND");
@@ -93,7 +94,7 @@ public class IdentityAppService {
         User user = requireUser(userId);
         List<PlatformDtos.WorkspaceSummary> workspaces = identity.listWorkspacesForUser(userId)
                 .stream()
-                .map(this::workspace)
+                .map(w -> workspace(w, userId))
                 .toList();
         return new PlatformDtos.CurrentUserResponse(user(user), workspaces);
     }
@@ -120,7 +121,7 @@ public class IdentityAppService {
     public PlatformDtos.WorkspaceListResponse workspaces(String userId) {
         requireUser(userId);
         return new PlatformDtos.WorkspaceListResponse(
-                identity.listWorkspacesForUser(userId).stream().map(this::workspace).toList()
+                identity.listWorkspacesForUser(userId).stream().map(w -> workspace(w, userId)).toList()
         );
     }
 
@@ -136,9 +137,9 @@ public class IdentityAppService {
         requireMember(workspaceId, userId);
         List<PlatformDtos.MemberSummary> members = identity.listMembers(workspaceId)
                 .stream()
-                .map(member -> new PlatformDtos.MemberSummary(user(member)))
+                .map(member -> member(workspaceId, member.id()))
                 .toList();
-        return new PlatformDtos.MembersResponse(workspaceId, members);
+        return new PlatformDtos.MembersResponse(workspaceId, members, workspaceVersion(workspaceId));
     }
 
     private PlatformDtos.UserSummary user(User user) {
@@ -154,7 +155,16 @@ public class IdentityAppService {
         );
     }
 
-    private PlatformDtos.WorkspaceSummary workspace(Workspace workspace) {
-        return new PlatformDtos.WorkspaceSummary(workspace.id(), workspace.slug(), workspace.name());
+    PlatformDtos.MemberSummary member(String workspace, String userId) {
+        var m=identity.findMember(workspace,userId).orElseThrow(() -> new ApiProblem(404,"RESOURCE_NOT_FOUND"));
+        var u=identity.findUserById(userId).orElseThrow();
+        return new PlatformDtos.MemberSummary(user(u),m.role().wire,m.active()?"active":"removed",u.enabled(),m.version(),
+                workbench.collaboration.infrastructure.contract.TimeCodec.utc(m.createdAtMs()),
+                m.active()?null:workbench.collaboration.infrastructure.contract.TimeCodec.utc(m.leftAtMs()));
+    }
+    long workspaceVersion(String workspace) { return identity.findWorkspaceById(workspace).orElseThrow().accessVersion(); }
+    private PlatformDtos.WorkspaceSummary workspace(Workspace workspace, String userId) {
+        var m=identity.findMember(workspace.id(),userId).orElseThrow();
+        return new PlatformDtos.WorkspaceSummary(workspace.id(), workspace.slug(), workspace.name(),m.role().wire,m.version(),workspace.accessVersion());
     }
 }

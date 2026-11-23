@@ -81,7 +81,7 @@ public class TaskAppService {
             tasks.insert(task, description);
             snapshotIds.forEach(snapshotId -> tasks.addSnapshot(id, snapshotId));
             knowledgeRefs.forEach(ref -> tasks.addKnowledge(id, ref));
-            tasks.append(id, new TaskTransition("created", actor, null, task.status(), 1, "", "", now));
+            tasks.append(id, new TaskTransition("created", actor, null, task.status(), 1, "", "", now, null));
             publish("task.assigned", actor, workspace, task);
             return encode(new TaskStore.StoredTask(task, description));
         });
@@ -111,7 +111,7 @@ public class TaskAppService {
         return write(project, actor, request.requestId(), IdempotentCalls.fingerprint("patch", id, body), () -> {
             var task = requireVersion(project, id, request.expectedVersion());
             var summary = task.summary();
-            TaskStatus.requireRole(actor.equals(summary.creatorId()));
+            TaskStatus.requireRole(canActForCreator(actor, workspace, project, summary.creatorId()));
             requireState(summary, TaskStatus.TODO);
             return save(actor, workspace, task, "edited", requireText(request.description()), TaskStatus.TODO,
                     summary.conversationId(), "", "");
@@ -126,7 +126,7 @@ public class TaskAppService {
             var task = requireVersion(project, id, request.expectedVersion());
             var summary = task.summary();
             var target = TaskStatus.parse(request.targetStatus());
-            TaskStatus.parse(summary.status()).requireTransition(target, actor.equals(summary.creatorId()),
+            TaskStatus.parse(summary.status()).requireTransition(target, canActForCreator(actor, workspace, project, summary.creatorId()),
                     actor.equals(summary.assigneeId()));
             if (request.commitSha() != null && target != TaskStatus.REVIEW) {
                 throw new ApiProblem(400, "INVALID_REQUEST");
@@ -157,10 +157,17 @@ public class TaskAppService {
         });
     }
 
+    /** 原发起人离开或停用后，当前有效 Project owner 承接职责，原作者不转名。 */
+    private boolean canActForCreator(String actor,String workspace,String project,String creator) {
+        if (actor.equals(creator)) return true;
+        boolean creatorActive=identity.memberExists(workspace,creator) && identity.findUserById(creator).filter(User::enabled).isPresent();
+        return !creatorActive && policy.requireProject(workspace,project).ownerUserId().equals(actor);
+    }
+
     private void authorize(String actor, String workspace, String project, boolean writing) {
+        policy.requireWorkspaceMember(workspace, actor);
         var target = policy.requireProject(workspace, project);
         policy.requireActiveMember(project, actor);
-        policy.requireWorkspaceMember(workspace, actor);
         if (writing && target.status() == ProjectStatus.ARCHIVED) throw new ApiProblem(409, "PROJECT_ARCHIVED");
     }
 
@@ -184,7 +191,7 @@ public class TaskAppService {
         var after = new TaskSummary(before.taskId(), before.projectId(), before.title(), before.creatorId(),
                 before.assigneeId(), target.wire, before.version() + 1, conversationId, before.createdAtMs(), now);
         tasks.append(after.taskId(), new TaskTransition(kind, actor, before.status(), target.wire, after.version(),
-                note, commitSha, now));
+                note, commitSha, now, null));
         publish("task.changed", actor, workspace, after);
         return encode(new TaskStore.StoredTask(after, description));
     }

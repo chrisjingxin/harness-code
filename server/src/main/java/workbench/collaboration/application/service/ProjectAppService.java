@@ -111,6 +111,7 @@ public class ProjectAppService {
      */
     @Transactional(readOnly = true)
     public String detail(String userId, String workspaceId, String projectId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         List<RepositoryDtos.RepositorySummary> referenced = projects.listReferences(projectId).stream()
@@ -128,6 +129,7 @@ public class ProjectAppService {
      */
     @Transactional
     public String patch(String userId, String workspaceId, String projectId, String rawBody) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireOwner(project, userId);
         ProjectDtos.ProjectPatchRequest request = contracts.decode(
@@ -155,6 +157,7 @@ public class ProjectAppService {
      */
     @Transactional(readOnly = true)
     public String listMembers(String userId, String workspaceId, String projectId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         return contracts.encode("ProjectMemberListResponse",
@@ -167,6 +170,7 @@ public class ProjectAppService {
      */
     @Transactional
     public String addMember(String userId, String workspaceId, String projectId, String rawBody) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireOwner(project, userId);
         ProjectDtos.ProjectMemberAddRequest request = contracts.decode(
@@ -202,6 +206,7 @@ public class ProjectAppService {
      */
     @Transactional
     public String removeMember(String userId, String workspaceId, String projectId, String targetUserId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireOwner(project, userId);
         if (project.ownerUserId().equals(targetUserId)) {
@@ -231,6 +236,7 @@ public class ProjectAppService {
      */
     @Transactional(readOnly = true)
     public String listRepositories(String userId, String workspaceId, String projectId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         List<ProjectDtos.ProjectRepositoryItem> items = projects.listReferences(projectId).stream()
@@ -254,6 +260,7 @@ public class ProjectAppService {
      */
     @Transactional
     public void addReference(String userId, String workspaceId, String projectId, String repositoryId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireOwner(project, userId);
         policy.requireActiveRepository(workspaceId, repositoryId);
@@ -272,6 +279,7 @@ public class ProjectAppService {
      */
     @Transactional
     public void removeReference(String userId, String workspaceId, String projectId, String repositoryId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireOwner(project, userId);
         if (projects.deleteReference(projectId, repositoryId) == 0) {
@@ -308,7 +316,7 @@ public class ProjectAppService {
     static RepositoryDtos.RepositorySummary repositorySummary(Repository repository) {
         return new RepositoryDtos.RepositorySummary(
                 repository.id(), repository.workspaceId(), repository.name(), repository.remoteUrl(),
-                repository.defaultBranch(), repository.status().code(), repository.createdByUserId(),
+                repository.defaultBranch(), repository.status().code(), repository.createdByUserId(), repository.ownerUserId(), repository.version(),
                 TimeCodec.utc(repository.createdAtMs()), TimeCodec.utc(repository.updatedAtMs()));
     }
 }

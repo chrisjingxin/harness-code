@@ -56,6 +56,7 @@ public final class ProjectAccessPolicy {
      * @return 校验通过的用户实体
      */
     public User requireWorkspaceMember(String workspaceId, String userId) {
+        identity.lockWorkspace(workspaceId);
         User user = identity.findUserById(userId)
                 .orElseThrow(() -> new ApiProblem(401, "AUTHENTICATION_REQUIRED"));
         if (!user.enabled()) {
@@ -65,6 +66,15 @@ public final class ProjectAccessPolicy {
             throw new ApiProblem(403, "WORKSPACE_MEMBER_REQUIRED");
         }
         return user;
+    }
+
+    /** 实际数据库角色为管理员才允许管理；写事务已经持有团队锁。 */
+    public void requireWorkspaceAdmin(String workspaceId, String userId) {
+        requireWorkspaceMember(workspaceId, userId);
+        if (identity.findMember(workspaceId, userId).orElseThrow().role()
+                != workbench.collaboration.domain.identity.WorkspaceRole.ADMIN) {
+            throw new ApiProblem(403, "WORKSPACE_ADMIN_REQUIRED");
+        }
     }
 
     /**

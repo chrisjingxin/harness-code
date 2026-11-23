@@ -84,7 +84,7 @@ function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { id
     </> : state.status === "signedIn" ? <>
       <div className="identity-actions"><p>当前用户：<strong>{state.user.userName}</strong>（{userDetail(state.user)}）</p><button className="wb-button wb-button-secondary" onClick={() => { void signOut() }}>退出 / 切换账号</button></div>
       {workspace
-        ? <Members key={JSON.stringify([state.user.id, workspace.id])} host={host} workspace={workspace} />
+        ? <p>{workspace.name} · {workspace.role === "admin" ? "管理员" : "开发者"}</p>
         : <p>{state.workspaces.length ? "请先选择工作区。" : "当前账号未加入工作区"}</p>}
     </> : <div className="identity-actions">
       <label>演示账号<select aria-label="演示账号" value={userNo} disabled={fetching || action !== null} onChange={event => setUserNo(event.target.value)}>
@@ -96,29 +96,4 @@ function IdentityForm({ host, identity, workspaceId }: IdentityPanelProps & { id
     </div>}
     {(notice || (signedOut && userNotice)) && <p className="error" role="alert">{notice || userNotice}</p>}
   </section>
-}
-
-function Members({ host, workspace }: { host: CollaborationHost; workspace: { id: string; name: string } }) {
-  const [members, setMembers] = useState<MemberSummary[] | null>(null)
-  const [notice, setNotice] = useState("")
-  const [reload, setReload] = useState(0)
-  useEffect(() => {
-    let active = true
-    setMembers(null)
-    setNotice("")
-    void host.listMembers(workspace.id).then(result => {
-      if (!active) return
-      if (result.ok) setMembers(result.value.members)
-      else setNotice(result.error.message)
-    }).catch(() => { if (active) setNotice("无法读取工作区成员，请重试连接。") })
-    return () => { active = false }
-  }, [host, workspace.id, reload])
-
-  return <div>
-    <h3>{workspace.name}</h3>
-    <div className="identity-actions"><p>工作区成员</p><button className="wb-button wb-button-secondary" onClick={() => setReload(value => value + 1)}>刷新成员</button></div>
-    {notice ? <p className="error" role="alert">{notice}</p> : members === null ? <p role="status">正在读取成员…</p> : members.length
-      ? <ul aria-label="工作区成员">{members.map(member => <li key={member.user.id}>{member.user.userName}（{userDetail(member.user)}）</li>)}</ul>
-      : <p>当前工作区暂无成员。</p>}
-  </div>
 }

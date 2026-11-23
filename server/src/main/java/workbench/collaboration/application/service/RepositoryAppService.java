@@ -63,7 +63,7 @@ public class RepositoryAppService {
      */
     @Transactional
     public String create(String userId, String workspaceId, String rawBody) {
-        policy.requireWorkspaceMember(workspaceId, userId);
+        policy.requireWorkspaceAdmin(workspaceId, userId);
         RepositoryDtos.RepositoryCreateRequest request = contracts.decode(
                 "RepositoryCreateRequest", rawBody, RepositoryDtos.RepositoryCreateRequest.class);
         return IdempotentCalls.run(idempotency, workspaceId, userId, "repository.create", request.requestId(),
@@ -73,7 +73,8 @@ public class RepositoryAppService {
                             UUID.randomUUID().toString(), workspaceId, request.name(), request.remoteUrl(),
                             request.defaultBranch() != null && !request.defaultBranch().isEmpty()
                                     ? request.defaultBranch() : "main",
-                            RepositoryStatus.ACTIVE, userId, now, now);
+                            RepositoryStatus.ACTIVE, userId, rawHasOwner(rawBody)?request.ownerUserId():userId, 1, now, now);
+                    requireOwner(workspaceId,repository.ownerUserId());
                     try {
                         repositories.insert(repository);
                     } catch (DuplicateKeyException conflict) {
@@ -121,21 +122,33 @@ public class RepositoryAppService {
      */
     @Transactional
     public String patch(String userId, String workspaceId, String repositoryId, String rawBody) {
-        policy.requireWorkspaceMember(workspaceId, userId);
+        policy.requireWorkspaceAdmin(workspaceId, userId);
         Repository repository = policy.requireRepository(workspaceId, repositoryId);
         if (repository.status() == RepositoryStatus.ARCHIVED) {
             throw new ApiProblem(409, "REPOSITORY_ARCHIVED");
         }
         RepositoryDtos.RepositoryPatchRequest request = contracts.decode(
                 "RepositoryPatchRequest", rawBody, RepositoryDtos.RepositoryPatchRequest.class);
+        if(request.expectedVersion()!=repository.version()) throw new ApiProblem(409,"VERSION_CONFLICT");
+        String nextOwner=rawHasOwner(rawBody)?request.ownerUserId():repository.ownerUserId();
+        requireOwner(workspaceId,nextOwner);
         Repository updated = new Repository(
                 repository.id(), repository.workspaceId(),
                 request.name() != null ? request.name() : repository.name(),
                 repository.remoteUrl(),
                 request.defaultBranch() != null ? request.defaultBranch() : repository.defaultBranch(),
                 request.status() != null ? RepositoryStatus.ARCHIVED : repository.status(),
-                repository.createdByUserId(), repository.createdAtMs(), System.currentTimeMillis());
+                repository.createdByUserId(), nextOwner, repository.version()+1, repository.createdAtMs(), System.currentTimeMillis());
         repositories.update(updated);
         return contracts.encode("RepositorySummary", ProjectAppService.repositorySummary(updated));
+    }
+    private static boolean rawHasOwner(String raw) {
+        return tools.jackson.databind.json.JsonMapper.builder().build().readTree(raw).has("ownerUserId");
+    }
+    private void requireOwner(String workspace,String user) {
+        if(user!=null) {
+            try { policy.requireWorkspaceMember(workspace,user); }
+            catch(ApiProblem unavailable) { throw new ApiProblem(409,"TARGET_UNAVAILABLE"); }
+        }
     }
 }

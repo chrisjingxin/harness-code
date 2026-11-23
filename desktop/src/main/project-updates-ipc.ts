@@ -17,6 +17,7 @@ export function bindProjectUpdatesIpc(
   trustedUrl: string,
   identity: CollaborationState,
   origin: string,
+  onKnowledgeUpdated?: (workspaceId: string) => void,
 ): () => void {
   // 窗口关闭回调运行时已不能从窗口取 webContents；清理时只检查绑定时持有的引用。
   const contents = window.webContents
@@ -84,6 +85,12 @@ export function bindProjectUpdatesIpc(
           && contents.mainFrame.url === trustedUrl
       },
       publish: notice => {
+        if (notice.kind === "event" && notice.event.type === "workspace.member_changed"
+            || notice.kind === "status" && ["connected", "unavailable"].includes(notice.status)) {
+          onKnowledgeUpdated?.(workspaceId)
+          void identity.refreshIdentity()
+        }
+        if (notice.kind === "event" && notice.event.type === "knowledge.updated") onKnowledgeUpdated?.(workspaceId)
         try { contents.send(projectUpdatesChannels.notice, notice) }
         catch { updates.stop(subscriptionId) }
       },

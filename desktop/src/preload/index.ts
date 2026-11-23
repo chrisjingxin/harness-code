@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, IdentityState } from "@workbench/collaboration-client/types"
 import type {
   CollaborationAppsHost, DesktopHost, LocalConversationsHost, LocalDirectoryHost,
-  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState,
+  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState, WorkbenchContextHost,
 } from "../shared/index.js"
 import { createLocalExecutionHost } from "./local-execution-api.js"
 import { createProjectUpdatesHost } from "./project-updates-api.js"
@@ -26,6 +26,12 @@ const host: DesktopHost = {
 contextBridge.exposeInMainWorld("workbench", host)
 
 const collaboration: CollaborationHost = {
+  refreshIdentity: () => ipcRenderer.invoke("collaboration:refresh-identity"),
+  getWorkspaceAccess: workspace => ipcRenderer.invoke("workspace:access", workspace),
+  addWorkspaceMember: (workspace, request) => ipcRenderer.invoke("workspace:add-member", workspace, request),
+  changeWorkspaceRole: (workspace, user, request) => ipcRenderer.invoke("workspace:role", workspace, user, request),
+  previewWorkspaceRemoval: (workspace, user, after = null, version) => ipcRenderer.invoke("workspace:removal-preview", workspace, user, after, version),
+  removeWorkspaceMember: (workspace, user, request) => ipcRenderer.invoke("workspace:remove", workspace, user, request),
   getState: () => ipcRenderer.invoke("collaboration:get-state"),
   listDemoUsers: () => ipcRenderer.invoke("collaboration:demo-users"),
   signIn: userNo => ipcRenderer.invoke("collaboration:sign-in", userNo),
@@ -66,6 +72,13 @@ const localConversations: LocalConversationsHost = {
 }
 contextBridge.exposeInMainWorld("localConversations", localConversations)
 
+const workbenchContext: WorkbenchContextHost = {
+  listDirectories: scope => ipcRenderer.invoke("workbench:context:list-directories", scope),
+  confirmDirectory: (scope, input) => ipcRenderer.invoke("workbench:context:confirm-directory", scope, input),
+  removeDirectory: (scope, entryId, revision) => ipcRenderer.invoke("workbench:context:remove-directory", scope, entryId, revision),
+}
+contextBridge.exposeInMainWorld("workbenchContext", workbenchContext)
+
 const collaborationApps: CollaborationAppsHost = {
   createSnapshot: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createSnapshot", workspaceId, projectId, request),
   readSnapshot: (workspaceId, projectId, snapshotId) => ipcRenderer.invoke("workbench:collaboration-apps:readSnapshot", workspaceId, projectId, snapshotId),
@@ -96,6 +109,8 @@ contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 contextBridge.exposeInMainWorld("localExecution", createLocalExecutionHost(ipcRenderer))
 
 const organization: OrganizationHost = {
+  createRepository: (workspace, request) => ipcRenderer.invoke("workspace:create-repository", workspace, request),
+  updateRepository: (workspace, repository, request) => ipcRenderer.invoke("workspace:update-repository", workspace, repository, request),
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),
   createProject: (workspaceId, request) => ipcRenderer.invoke("organization:create-project", workspaceId, request),
   getProject: (workspaceId, projectId) => ipcRenderer.invoke("organization:get-project", workspaceId, projectId),

@@ -48,13 +48,14 @@ interface LiveTeamKnowledgeProps {
   readonly rendering: RenderingActions
   readonly ownerName: (id: string) => string
   readonly canReference: boolean
+  readonly canManage: boolean
   readonly requestedItem?: { readonly itemId: string; readonly token: number } | null
   previewFixed(id: string): void
   refreshMetadata(scope: ProjectNavigationScope): void
 }
 
 export function LiveTeamKnowledge({
-  host, scope, teamName, revision, rendering, ownerName, canReference, requestedItem, previewFixed, refreshMetadata,
+  host, scope, teamName, revision, rendering, ownerName, canReference, canManage, requestedItem, previewFixed, refreshMetadata,
 }: LiveTeamKnowledgeProps) {
   const { workspaceId, accountId, namespace } = scope
   const [queryInput, setQueryInput] = useState("")
@@ -65,6 +66,7 @@ export function LiveTeamKnowledge({
   const [targetRequest, setTargetRequest] = useState<{ readonly itemId: string; readonly token: number } | undefined>(
     requestedItem ?? undefined,
   )
+  useEffect(() => { if (!canManage) setEditing(null) }, [canManage])
   const lastHandledToken = useRef(requestedItem?.token ?? 0)
 
   useEffect(() => {
@@ -120,7 +122,7 @@ export function LiveTeamKnowledge({
       initialItemId={updated?.itemId}
       selectedRequest={targetRequest}
       rendering={rendering}
-      onEditItem={itemId => setEditing({ itemId })}
+      onEditItem={canManage ? itemId => setEditing({ itemId }) : undefined}
       controls={<form className="team-knowledge-toolbar" onSubmit={event => {
         event.preventDefault()
         if (query !== queryInput.trim()) { setItems({ status: "loading" }); setQuery(queryInput.trim()) }
@@ -134,7 +136,7 @@ export function LiveTeamKnowledge({
           onChange={event => setQueryInput(event.target.value)}
         />
         <button className="wb-button wb-button-secondary" type="submit">搜索</button>
-        <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button>
+        {canManage ? <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button> : <span>团队知识由管理员发布，可联系管理员维护。</span>}
       </form>}
       actions={{
         async readCurrent(_source, itemId) {
@@ -156,7 +158,7 @@ export function LiveTeamKnowledge({
         retryList: () => refreshMetadata(scope),
       }}
     />
-    {editing && <KnowledgeEditor host={host} workspaceId={workspaceId} itemId={editing.itemId}
+    {editing && canManage && <KnowledgeEditor host={host} workspaceId={workspaceId} itemId={editing.itemId}
       onClose={() => setEditing(null)} onSaved={detail => {
         setEditing(null)
         setTargetRequest(undefined)

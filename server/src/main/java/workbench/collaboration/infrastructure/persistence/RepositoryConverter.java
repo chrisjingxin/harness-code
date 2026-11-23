@@ -30,6 +30,8 @@ final class RepositoryConverter {
         po.setDefaultBranch(repository.defaultBranch());
         po.setStatus(repository.status().db());
         po.setCreatedByUserId(repository.createdByUserId());
+        po.setOwnerUserId(repository.ownerUserId()==null?"":repository.ownerUserId());
+        po.setVersion(repository.version());
         po.setCreatedAt(Times.ofMs(repository.createdAtMs()));
         po.setUpdatedAt(Times.ofMs(repository.updatedAtMs()));
         return po;
@@ -44,6 +46,7 @@ final class RepositoryConverter {
                 po.getDefaultBranch(),
                 RepositoryStatus.fromDb(po.getStatus()),
                 po.getCreatedByUserId(),
+                po.getOwnerUserId().isEmpty()?null:po.getOwnerUserId(), po.getVersion(),
                 Times.ms(po.getCreatedAt()),
                 Times.ms(po.getUpdatedAt())
         );

@@ -25,7 +25,7 @@ import java.util.UUID;
  * 本服务从不执行任何 DDL——库表结构唯一来源是 classpath:db/schema.sql，由运维手工建库。
  *
  * <p>【核心架构底线与校验规则 (Invariants)】
- * 1. 核对当前 19 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量）：
+ * 1. 核对当前 20 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量）：
  *    - 完整集合见 REQUIRED_TABLES，与唯一 schema.sql 对齐；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
@@ -48,9 +48,9 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 19 张控制面表 */
+    /** 必须存在的 20 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
-            "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member",
+            "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_workspace_request",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
             "wb_conversation", "wb_conversation_repository", "wb_snapshot",
             "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
@@ -62,8 +62,10 @@ public final class Foundation {
             Map.entry("wb_user", List.of("user_id", "user_no", "user_name", "org_id", "org_name", "updated_at")),
             Map.entry("wb_user_org", List.of("user_id", "position_type", "org_id", "org_no", "status", "updated_at")),
             Map.entry("wb_org", List.of("org_id", "org_no", "org_name", "parent_org_id", "path_id", "path_name", "updated_at")),
-            Map.entry("wb_workspace", List.of("workspace_id")),
-            Map.entry("wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status")),
+            Map.entry("wb_workspace", List.of("workspace_id", "creator_user_id", "access_version")),
+            Map.entry("wb_workspace_member", List.of("role","status","version","updated_at","left_at")),
+            Map.entry("wb_workspace_request", List.of("workspace_id","actor_id","request_id","fingerprint","response")),
+            Map.entry("wb_repository", List.of("repository_id", "remote_url", "remote_url_sha256", "status", "owner_user_id", "version")),
             Map.entry("wb_project", List.of("project_id", "owner_user_id", "version")),
             Map.entry("wb_conversation", List.of("conversation_id", "project_id", "owner_user_id", "status", "brief_source", "brief_updated_at", "synced_sequence", "share_mode", "share_status", "stopped_at")),
             Map.entry("wb_conversation_repository", List.of("conversation_id", "repository_id")),
@@ -72,7 +74,7 @@ public final class Foundation {
                     "from_sequence", "to_sequence", "message_count", "text", "sha256", "storage_uri",
                     "created_by_user_id", "created_at")),
             Map.entry("wb_task", List.of("task_id", "project_id", "assignee_id", "status", "version", "conversation_id")),
-            Map.entry("wb_task_transition", List.of("task_id", "version", "actor_id", "from_status", "to_status", "commit_sha")),
+            Map.entry("wb_task_transition", List.of("task_id", "version", "actor_id", "from_status", "to_status", "commit_sha", "from_assignee_id", "to_assignee_id", "previous_conversation_id")),
             Map.entry("wb_task_link", List.of("task_id", "link_type", "version_id", "knowledge_id")),
             Map.entry("wb_task_request", List.of("project_id", "actor_id", "request_id", "fingerprint", "response")),
             Map.entry("wb_knowledge_item", List.of("workspace_id", "knowledge_id", "term_key", "current_version_id",
@@ -187,6 +189,55 @@ public final class Foundation {
         }
     }
 
+    /** 运维显式映射初始化历史团队；仅处理 role=0，已生效的角色与移除记录不覆盖。 */
+    public void initializeRoles(String mappingFile) {
+        var mapper=tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.JsonNode mappings;
+        try { mappings=mapper.readTree(java.nio.file.Files.readString(java.nio.file.Path.of(mappingFile))); }
+        catch(java.io.IOException e) { throw new IllegalArgumentException("无法读取团队角色映射文件",e); }
+        if(!mappings.isArray() || mappings.size()>1000)throw new IllegalArgumentException("映射必须为有界数组");
+        var inputs=new java.util.TreeMap<String,tools.jackson.databind.JsonNode>();
+        for(var m:mappings) {
+            if(!m.isObject() || !m.has("workspaceId") || !m.has("adminUserId"))throw new IllegalArgumentException("映射缺少团队/管理员");
+            for(var key:m.propertyNames()) if(!java.util.Set.of("workspaceId","adminUserId","creatorUserId").contains(key))throw new IllegalArgumentException("未知映射字段");
+            if(inputs.put(m.path("workspaceId").asText(),m)!=null)throw new IllegalArgumentException("团队映射重复");
+        }
+        transaction.executeWithoutResult(status -> {
+            var pending=jdbc.queryForList("SELECT DISTINCT workspace_id FROM wb_workspace_member WHERE role=0 ORDER BY workspace_id",String.class);
+            if(!inputs.keySet().containsAll(pending))throw new IllegalArgumentException("缺少团队管理员映射："+pending);
+            for(var entry:inputs.entrySet()) {
+                String workspace=entry.getKey(),admin=entry.getValue().path("adminUserId").asText();
+                if(identity.findWorkspaceById(workspace).isEmpty())throw new IllegalArgumentException("映射团队不存在："+workspace);
+                identity.lockWorkspace(workspace);
+                var rows=jdbc.queryForObject("SELECT COUNT(*) FROM wb_workspace_member WHERE workspace_id=? AND role=0",Integer.class,workspace);
+                if(rows==0)continue;
+                int existing=jdbc.queryForObject("SELECT COUNT(*) FROM wb_workspace_member WHERE workspace_id=? AND role<>0",Integer.class,workspace);
+                if(existing>0)throw new IllegalArgumentException("团队部分成员已有角色，禁止覆盖现有权限："+workspace);
+                int valid=jdbc.queryForObject("SELECT COUNT(*) FROM wb_workspace_member m JOIN wb_user u ON u.user_id=m.user_id WHERE m.workspace_id=? AND m.user_id=? AND m.status=1 AND u.enabled=1",Integer.class,workspace,admin);
+                if(valid!=1)throw new IllegalArgumentException("管理员必须是团队现有启用成员："+workspace);
+                String creator=entry.getValue().path("creatorUserId").asText("");
+                if(!creator.isEmpty() && identity.findUserById(creator).isEmpty())throw new IllegalArgumentException("创建者用户不存在："+workspace);
+                jdbc.update("UPDATE wb_workspace_member SET role=2 WHERE workspace_id=? AND role=0",workspace);
+                jdbc.update("UPDATE wb_workspace_member SET role=1 WHERE workspace_id=? AND user_id=?",workspace,admin);
+                if(!creator.isEmpty())jdbc.update("UPDATE wb_workspace SET creator_user_id=? WHERE workspace_id=? AND creator_user_id=''",creator,workspace);
+                jdbc.update("UPDATE wb_workspace SET access_version=access_version+1 WHERE workspace_id=?",workspace);
+            }
+            validateRoles();
+        });
+    }
+
+    /** 不猜测历史创建者或自动提权；数据初始化未完成时给出明确团队标识。 */
+    public void validateRoles() {
+        var invalid=jdbc.queryForList("""
+            SELECT w.workspace_id FROM wb_workspace w WHERE
+            NOT EXISTS(SELECT 1 FROM wb_workspace_member m JOIN wb_user u ON u.user_id=m.user_id
+              WHERE m.workspace_id=w.workspace_id AND m.status=1 AND m.role=1 AND u.enabled=1)
+            OR EXISTS(SELECT 1 FROM wb_workspace_member m WHERE m.workspace_id=w.workspace_id AND
+              (m.role NOT IN(1,2) OR m.status NOT IN(1,2) OR m.version<1))
+            """,String.class);
+        if(!invalid.isEmpty())throw new IllegalStateException("团队角色尚未正确初始化，请按显式映射维护："+invalid);
+    }
+
     /**
      * 初始化演示环境的基础数据（用户与工作区）。
      * 具备幂等并发重试防护，支持在并发启动时安全避让主键冲突。
@@ -272,12 +323,13 @@ public final class Foundation {
         var workspace = identity.findWorkspaceBySlug("demo");
         String workspaceId = workspace.map(Workspace::id).orElseGet(() -> {
             String id = UUID.randomUUID().toString();
-            identity.insertWorkspace(new Workspace(id, "demo", "平台架构二组协作区", now));
+            identity.insertWorkspace(new Workspace(id, "demo", "平台架构二组协作区", userIds.getFirst(), 1, now));
             return id;
         });
         for (String userId : userIds) {
-            if (!identity.memberExists(workspaceId, userId)) {
-                identity.insertMember(new WorkspaceMember(workspaceId, userId, now));
+            if (identity.findMember(workspaceId, userId).isEmpty()) {
+                identity.insertMember(new WorkspaceMember(workspaceId, userId, userId.equals(userIds.getFirst())
+                        ? workbench.collaboration.domain.identity.WorkspaceRole.ADMIN : workbench.collaboration.domain.identity.WorkspaceRole.DEVELOPER, true, 1, now, now, now));
             }
         }
     }

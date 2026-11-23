@@ -89,6 +89,7 @@ public class ConversationAppService {
      */
     @Transactional
     public String register(String userId, String workspaceId, String projectId, String rawBody) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Project project = policy.requireActiveProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         ConversationDtos.ConversationRegisterRequest request = contracts.decode(
@@ -145,6 +146,7 @@ public class ConversationAppService {
      */
     @Transactional(readOnly = true)
     public String list(String userId, String workspaceId, String projectId, String ownerId, String status) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         List<ConversationDtos.ConversationSummary> found = conversations
@@ -160,6 +162,7 @@ public class ConversationAppService {
      */
     @Transactional(readOnly = true)
     public String detail(String userId, String workspaceId, String projectId, String conversationId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Conversation conversation = requireProjectConversation(userId, workspaceId, projectId, conversationId);
         return contracts.encode("ConversationDetailResponse",
                 new ConversationDtos.ConversationDetailResponse(summary(conversation)));
@@ -174,6 +177,7 @@ public class ConversationAppService {
             String userId, String workspaceId, String projectId, String conversationId,
             long afterSequence, int limit
     ) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         Conversation conversation = requireProjectConversation(userId, workspaceId, projectId, conversationId);
         // summary_only 档位严禁返回历史消息正文，始终返回 0 水位空集合
         if ("summary_only".equals(conversation.shareMode())) {
@@ -194,6 +198,7 @@ public class ConversationAppService {
      */
     @Transactional
     public String stopSharing(String userId, String workspaceId, String projectId, String conversationId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         Conversation conversation = conversations.lockById(conversationId)

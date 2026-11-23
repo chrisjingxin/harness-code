@@ -23,15 +23,15 @@ INSERT IGNORE INTO wb_user_org (user_id, position_type, org_id, org_no, org_name
   ('000000000000400080000000000000d4', 1, 'org-004', '100004', '平台架构二组', 'org-001/org-002/org-003/org-004', '100001/100002/100003/100004', '信息技术部/架构管理团队/零售应用架构四室/平台架构二组', 1, NOW(3), NOW(3)),
   ('000000000000400080000000000000d5', 1, 'org-004', '100004', '平台架构二组', 'org-001/org-002/org-003/org-004', '100001/100002/100003/100004', '信息技术部/架构管理团队/零售应用架构四室/平台架构二组', 1, NOW(3), NOW(3));
 
-INSERT IGNORE INTO wb_workspace (workspace_id, slug, name, created_at) VALUES
-  ('00000000-0000-4000-8000-0000000000c1', 'demo', '平台架构二组协作区', NOW(3));
+INSERT IGNORE INTO wb_workspace (workspace_id, slug, name, creator_user_id, created_at) VALUES
+  ('00000000-0000-4000-8000-0000000000c1', 'demo', '平台架构二组协作区', '000000000000400080000000000000d1', NOW(3));
 
-INSERT IGNORE INTO wb_workspace_member (workspace_id, user_id, created_at) VALUES
-  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d1', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d2', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d3', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d4', NOW(3)),
-  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d5', NOW(3));
+INSERT IGNORE INTO wb_workspace_member (workspace_id, user_id, role, status, version, updated_at, left_at, created_at) VALUES
+  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d1', 1, 1, 1, NOW(3), NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d2', 2, 1, 1, NOW(3), NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d3', 2, 1, 1, NOW(3), NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d4', 2, 1, 1, NOW(3), NOW(3), NOW(3)),
+  ('00000000-0000-4000-8000-0000000000c1', '000000000000400080000000000000d5', 2, 1, 1, NOW(3), NOW(3), NOW(3));
 
 -- remote_url_sha256 由应用侧 SHA-256(remote_url) 写入；本文件用内置 SHA2() 保持同等语义。
 INSERT IGNORE INTO wb_repository (repository_id, workspace_id, name, remote_url, remote_url_sha256, default_branch, status, created_by_user_id, created_at, updated_at) VALUES

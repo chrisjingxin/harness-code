@@ -25,7 +25,7 @@ public class NotificationStore {
         return jdbc.queryForList("""
                 SELECT m.user_id FROM wb_workspace_member m
                 JOIN wb_user u ON u.user_id=m.user_id AND u.enabled=1
-                WHERE m.workspace_id=? AND m.user_id<>?
+                WHERE m.workspace_id=? AND m.status=1 AND m.user_id<>?
                   AND (?='' OR EXISTS (SELECT 1 FROM wb_project_member p
                        WHERE p.project_id=? AND p.user_id=m.user_id AND p.status=1))
                   AND (?='' OR m.user_id=? OR m.user_id=?)

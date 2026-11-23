@@ -28,6 +28,8 @@ public final class RepositoryDtos {
             String defaultBranch,
             String status,
             String createdByUserId,
+            String ownerUserId,
+            long version,
             String createdAt,
             String updatedAt
     ) {}
@@ -56,7 +58,8 @@ public final class RepositoryDtos {
             String name,
             String remoteUrl,
             String defaultBranch,
-            String requestId
+            String requestId,
+            String ownerUserId
     ) {}
 
     /** 修改仓库请求：status 只允许归档（单向不可逆）；可空字段不序列化 null */
@@ -64,6 +67,8 @@ public final class RepositoryDtos {
     public record RepositoryPatchRequest(
             String name,
             String defaultBranch,
-            String status
+            String status,
+            String ownerUserId,
+            long expectedVersion
     ) {}
 }

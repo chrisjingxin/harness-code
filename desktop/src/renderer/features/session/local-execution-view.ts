@@ -85,6 +85,7 @@ export const emptyLocalExecutionView: LocalExecutionView = {
 export type LocalExecutionViewUpdate =
   | { readonly kind: "accepted"; readonly turnId: string; readonly text: string; readonly author: Message["author"]; readonly referenceIds?: readonly string[]; readonly attachments?: readonly ConversationMessageAttachment[]; readonly images?: readonly PersonalDraftImage[]; readonly canSteer?: boolean }
   | { readonly kind: "steered"; readonly turnId: string; readonly requestId: string; readonly text: string; readonly author: Message["author"] }
+  | { readonly kind: "context-tool"; readonly turnId: string; readonly tool: LocalAcpTool }
   | { readonly kind: "tool"; readonly turnId: string; readonly tool: LocalAcpTool }
   | { readonly kind: "assistant-text"; readonly turnId: string; readonly text: string; readonly messageId?: string }
   | { readonly kind: "thought"; readonly turnId: string; readonly text: string }
@@ -301,7 +302,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
   }
 
   // 结束后迟到的分段不能重开这轮对话，也不能写进后来开始的另一轮。
-  if (state.activeTurnId !== update.turnId) return state
+  if (state.activeTurnId !== update.turnId && !(update.kind === "context-tool" && state.entries.some(entry => entry.id === `${entryPrefix}:user`))) return state
 
   if (update.kind === "permission") {
     // 审批出现时停止先前的思考扫光与正文光标，避免界面同时在"思考中"和"等审批"。
@@ -324,7 +325,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     }
   }
 
-  if (update.kind === "tool") {
+  if (update.kind === "tool" || update.kind === "context-tool") {
     const id = `${entryPrefix}:tool:${update.tool.id}`
     const existing = state.entries.find((item): item is Tool => item.id === id && item.kind === "tool")
     const prevSnapshot = state.toolSnapshots?.[id]
@@ -358,7 +359,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
     const entries = existing ? settled.map(entry => entry.id === id ? item : entry) : [...settled, item]
     return {
       ...state,
-      activeTurnAssistantBreak: true,
+      activeTurnAssistantBreak: state.activeTurnId === update.turnId ? true : state.activeTurnAssistantBreak,
       entries,
       toolSnapshots: { ...state.toolSnapshots, [id]: mergedTool },
       revision: state.revision + 1,
@@ -445,7 +446,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
         } : {}),
       }
     }
-    if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running") {
+    if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running" && !entry.id.includes(":tool:project-memory:")) {
       return { ...entry, status: "failed" as const }
     }
     if (entry.kind === "reasoning" && entry.id.startsWith(`${entryPrefix}:reasoning:`) && entry.active) {

@@ -46,6 +46,7 @@ export type TasksContext = {
   readonly scope: ProjectNavigationScope
   readonly projectName: string
   readonly projectActive: boolean
+  readonly canActForCreator?: (creatorId: string) => boolean
   readonly ownerName: (id: string) => string
   readonly localDeviceId: string | null
   readonly sessions: SessionIntegrationApi
@@ -216,7 +217,7 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
   </section>
 
   const task = detail.task
-  const creator = projectActive && task.creatorId === accountId
+  const creator = projectActive && (task.creatorId === accountId || context.canActForCreator?.(task.creatorId))
   const assignee = projectActive && task.assigneeId === accountId
   const currentLocal = sessions.listMyLocalConversations(scope)
   const canStart = assignee && task.status === "doing" && Boolean(localDeviceId)
@@ -317,6 +318,7 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
       <ol className="project-task-transitions">{detail.transitions.map(item => <li key={item.version}>
         {ownerName(item.actorId)} · {item.fromStatus ? `${labels[item.fromStatus]} → ` : ""}{labels[item.toStatus]} · v{item.version}
         {" · "}<time dateTime={new Date(item.occurredAtMs).toISOString()}>{new Date(item.occurredAtMs).toLocaleString()}</time>
+        {item.handoff && <p>工作由 {ownerName(item.handoff.fromAssigneeId)} 转交给 {ownerName(item.handoff.toAssigneeId)}；原会话保留只读。{item.handoff.previousConversationId && <button className="wb-button wb-button-quiet" onClick={() => { if (!navigator.locateConversation(item.handoff!.previousConversationId!)) setNotice("原会话当前不可用。") }}>查看原会话</button>}</p>}
         {item.note && <p className="project-task-text">{item.note}</p>}
         {item.commitSha && <p><code>{item.commitSha}</code></p>}
       </li>)}</ol>
