@@ -22,7 +22,9 @@ import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "../../../
 import type {
   CollaborationContextView,
   NavigationPageKind,
+  NavigationSpaceKind,
   NavigationWorkspaceItem,
+  PersonalNavigationDirectoryGroup,
   ProjectNavigationActions,
 } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
@@ -250,6 +252,33 @@ export function useProjectShell({
 
 export type ProjectShellState = ReturnType<typeof useProjectShell>
 
+export type DualTrackNavigationProps = {
+  readonly activeSpace: NavigationSpaceKind
+  readonly hasTeamUpdates?: boolean
+  readonly offline?: boolean
+  readonly canPublishPersonal?: boolean
+  readonly personalGroups?: readonly PersonalNavigationDirectoryGroup[]
+  readonly personalSearch?: string
+  readonly selectedPersonalConversationId?: string | null
+  readonly publishedSessionCount?: number
+  selectSpace(space: NavigationSpaceKind): void
+  createPersonalSession(): void
+  selectPersonalConversation(conversationId: string): void
+  renamePersonalConversation(conversationId: string, title: string): Promise<string | null>
+  publishPersonalConversation(conversationId: string): void
+  stopSharingConversation(
+    conversationId: string,
+    fallback?: {
+      readonly workspaceId?: string
+      readonly projectId?: string
+      readonly title?: string
+      readonly projectName?: string | null
+    },
+  ): void
+  setPersonalSearch(text: string): void
+  reconnect(): void
+}
+
 export type ProjectWorkbenchProps = {
   shell: ProjectShellState
   organization: OrganizationHost
@@ -275,6 +304,7 @@ export type ProjectWorkbenchProps = {
   taskCount?: number | null
   knowledgeCount?: number | null
   providers?: ProjectPageProviders
+  dualTrack?: DualTrackNavigationProps
   onSelectKnowledge?(knowledgeId: string): void
 }
 
@@ -303,9 +333,18 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   )
   const [collabPopoverOpen, setCollabPopoverOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const pendingSettingsProjectIdRef = useRef<string | null>(null)
 
   // 项目切换后关闭旧结果浮层，避免用户在新项目点击旧任务或知识。
   useEffect(() => { setPaletteOpen(false); setCollabPopoverOpen(false) }, [shell.scope])
+
+  // 当在团队空间点击未激活 Project 的齿轮时，切到该项目后自动打开其资料与成员设置页。
+  useEffect(() => {
+    const targetProjectId = pendingSettingsProjectIdRef.current
+    if (!targetProjectId || shell.projectId !== targetProjectId) return
+    pendingSettingsProjectIdRef.current = null
+    shell.openPage({ kind: "info" })
+  }, [shell.projectId, shell.openPage])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -372,12 +411,33 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
 
   const actions: ProjectNavigationActions = {
     ...(props.onSelectWorkspace ? { selectWorkspace: props.onSelectWorkspace } : {}),
+    ...(props.dualTrack
+      ? {
+          selectSpace: props.dualTrack.selectSpace,
+          createPersonalSession: props.dualTrack.createPersonalSession,
+          selectPersonalConversation: props.dualTrack.selectPersonalConversation,
+          renamePersonalConversation: props.dualTrack.renamePersonalConversation,
+          publishPersonalConversation: props.dualTrack.publishPersonalConversation,
+          stopSharingConversation: props.dualTrack.stopSharingConversation,
+          setPersonalSearch: props.dualTrack.setPersonalSearch,
+          reconnect: props.dualTrack.reconnect,
+        }
+      : {}),
     selectProject: id => {
       setCollabPopoverOpen(false)
       shell.selectProject(id)
     },
     createProject: shell.openCreateDialog,
     openProjectSettings: () => shell.openPage({ kind: "info" }),
+    openProjectSettingsFor: targetProjectId => {
+      setCollabPopoverOpen(false)
+      if (targetProjectId === shell.projectId) {
+        shell.openPage({ kind: "info" })
+        return
+      }
+      pendingSettingsProjectIdRef.current = targetProjectId
+      shell.selectProject(targetProjectId)
+    },
     openPage: kind => {
       setCollabPopoverOpen(false)
       shell.openPage({ kind })
@@ -655,6 +715,18 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
               : props.knowledge
                 ? props.knowledge.filter(k => !k.archived).length
                 : null,
+          ...(props.dualTrack
+            ? {
+                activeSpace: props.dualTrack.activeSpace,
+                hasTeamUpdates: props.dualTrack.hasTeamUpdates,
+                offline: props.dualTrack.offline,
+                canPublishPersonal: props.dualTrack.canPublishPersonal,
+                personalGroups: props.dualTrack.personalGroups,
+                personalSearch: props.dualTrack.personalSearch,
+                selectedPersonalConversationId: props.dualTrack.selectedPersonalConversationId,
+                publishedSessionCount: props.dualTrack.publishedSessionCount,
+              }
+            : {}),
         }} actions={actions} />
         {shell.notice && <p className="desktop-navigation-note" role="status">{shell.notice}</p>}
         {props.personalError && <p className="desktop-navigation-note" role="alert">{props.personalError}{" "}

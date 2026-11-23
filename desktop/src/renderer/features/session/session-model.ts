@@ -67,9 +67,23 @@ export function buildSessionBadge(input: {
   readonly kind: SessionKind
   readonly syncStatus: SessionSyncStatus
   readonly remoteSyncedSequence: number
+  readonly shareMode?: ProjectConversationSummary["shareMode"]
+  readonly shareStatus?: ProjectConversationSummary["shareStatus"]
 }): NavigationSessionEntry["badge"] {
-  const { kind, syncStatus, remoteSyncedSequence } = input
-  if (kind === "local") return { text: "本机", tone: "neutral" }
+  const { kind, syncStatus, remoteSyncedSequence, shareMode, shareStatus } = input
+  if (kind === "local") {
+    if (shareStatus === "stopped") return { text: "已停止同步", tone: "warning" }
+    if (shareMode === "summary_only") return { text: "仅共享摘要", tone: "neutral" }
+    return { text: "本机", tone: "neutral" }
+  }
+  if (shareMode === "summary_only") {
+    return shareStatus === "stopped"
+      ? { text: "已停止同步", tone: "warning" }
+      : { text: "仅共享摘要", tone: "neutral" }
+  }
+  if (shareStatus === "stopped" && syncStatus !== "syncing" && syncStatus !== "has_update") {
+    return { text: "已停止同步", tone: "warning" }
+  }
   if (kind === "remote_self") {
     switch (syncStatus) {
       case "syncing": return { text: "同步中", tone: "accent" }
@@ -110,7 +124,13 @@ export function toNavigationSessionEntries(
       ownerUserId: item.ownerUserId,
       title: item.title || "未命名会话",
       timeLabel: formatShortTime(item.updatedAt, nowMs),
-      badge: buildSessionBadge({ kind, syncStatus, remoteSyncedSequence: item.syncedSequence }),
+      badge: buildSessionBadge({
+        kind,
+        syncStatus,
+        remoteSyncedSequence: item.syncedSequence,
+        shareMode: item.shareMode,
+        shareStatus: item.shareStatus,
+      }),
     }
   })
 }

@@ -33,6 +33,7 @@ import type {
   LocalSessionExecutionPort,
   NewSessionDraft,
   ProjectConversationSummary,
+  SessionExecutionScope,
   SessionIntegrationApi,
   SessionSyncState,
 } from "./contracts.js"
@@ -1010,9 +1011,15 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const selectedDirectoryPath = selectedIsLocal && selectedConversationId
     ? (currentDirectories[selectedConversationId] ?? null)
     : null
-  const commitAcceptedDraft = useCallback((source: ProjectNavigationScope, id: string, revision: number) => {
-    if (!mountedRef.current) return
-    updateRecord(source, makeScopeKey(source), id, previous => ({
+  const commitAcceptedDraft = useCallback((source: SessionExecutionScope, id: string, revision: number) => {
+    if (!mountedRef.current || source.workspaceId === null || source.projectId === null) return
+    const navScope: ProjectNavigationScope = {
+      namespace: source.namespace,
+      accountId: source.accountId,
+      workspaceId: source.workspaceId,
+      projectId: source.projectId,
+    }
+    updateRecord(navScope, makeScopeKey(navScope), id, previous => ({
       ...previous,
       personal: applyConversationPersonalChange(previous.personal, { kind: "clear-draft", expectedRevision: revision }),
     }), true)
@@ -1056,8 +1063,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
       }
     }, true)
   }, [scope, currentScopeKey, updateRecord])
-  const refreshWorkspaceRef = useRef<((source: ProjectNavigationScope, id: string) => Promise<void>) | null>(null)
-  const refreshExecutionWorkspace = useCallback((source: ProjectNavigationScope, id: string) => {
+  const refreshWorkspaceRef = useRef<((source: SessionExecutionScope, id: string) => Promise<void>) | null>(null)
+  const refreshExecutionWorkspace = useCallback((source: SessionExecutionScope, id: string) => {
     if (!mountedRef.current) return
     void refreshWorkspaceRef.current?.(source, id)
   }, [])

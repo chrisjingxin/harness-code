@@ -15,6 +15,7 @@ createRoot(document.getElementById("root")!).render(
     projectUpdates={window.projectUpdates}
     organization={window.organization}
     projectConversations={window.projectConversations}
+    localConversations={window.localConversations}
     localDirectory={window.localDirectory}
     localExecution={window.localExecution}
     personalHost={window.personal}

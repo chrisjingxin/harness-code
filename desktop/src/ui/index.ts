@@ -72,8 +72,9 @@ export type {
 export { MemberAvatar, ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
 export type {
   MemberGroupInput, NavigationAvailability, NavigationMember, NavigationMemberGroup, NavigationPageKind,
-  NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, NavigationWorkspaceItem,
-  ProjectNavigationActions, ProjectNavigationProps, ProjectNavigationView,
+  NavigationPersonalEntry, NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, NavigationSpaceKind,
+  NavigationWorkspaceItem, PersonalNavigationDirectoryGroup, ProjectNavigationActions, ProjectNavigationProps,
+  ProjectNavigationView,
 } from "./navigation/index.js"
 export { WorkbenchLayout } from "./layout/index.js"
 export type { CollaborationContextView, WorkbenchLayoutProps, WorkbenchPanelMode, WorkbenchRightSlot } from "./layout/index.js"

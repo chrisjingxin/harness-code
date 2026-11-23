@@ -39,8 +39,12 @@ export function getBoardSyncLabel(
   localDeviceId: string | null,
   state: SessionSyncState = emptySyncState(),
 ): string {
+  const isStopped = row.conversation.shareStatus === "stopped"
+  if (row.conversation.shareMode === "summary_only") {
+    return isStopped ? "已停止同步 · 仅共享摘要" : "仅共享摘要"
+  }
   const kind = classifyConversation(row.conversation, accountId)
-  if (kind === "local") return "本机会话"
+  if (kind === "local") return isStopped ? "已停止同步 · 本机保留" : "本机会话"
   const status = deriveSyncStatus({
     kind,
     remoteSyncedSequence: row.conversation.syncedSequence,
@@ -48,11 +52,12 @@ export function getBoardSyncLabel(
     syncing: state.syncing,
     syncError: state.syncError,
   })
+  const prefix = isStopped ? "已停止同步 · " : ""
   switch (status) {
-    case "unsynced": return row.conversation.syncedSequence ? "本机未同步正文" : "仅有简报"
-    case "syncing": return "本机同步中"
-    case "synced": return "本机已同步正文"
-    case "has_update": return "正文有更新"
-    case "sync_failed": return "本机同步失败"
+    case "unsynced": return `${prefix}${row.conversation.syncedSequence ? "本机未同步正文" : "仅有简报"}`
+    case "syncing": return `${prefix}本机同步中`
+    case "synced": return `${prefix}本机已同步正文`
+    case "has_update": return `${prefix}正文有更新`
+    case "sync_failed": return `${prefix}本机同步失败`
   }
 }

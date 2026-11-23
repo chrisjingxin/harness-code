@@ -80,6 +80,7 @@ export type SessionPageController = {
   onOpenFile?: ConversationActions["onOpenFile"]
   renderLocalRight?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary; slot: WorkbenchRightSlot }): ReactNode | null
   getCentralFiles?(context: { scope: ProjectNavigationScope; conversation: ProjectConversationSummary }): SessionCentralFilesState | undefined
+  renderSessionHeader?(conversation: ProjectConversationSummary): ReactNode
 }
 
 /** 根据实时控制器构造符合 HC-217 协议的会话页面提供者。 */
@@ -185,6 +186,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         return (
           <LocalSessionPage
             scope={convScope}
+            headerBar={controller.renderSessionHeader?.(conversation)}
             visible={visible}
             conversation={conversation}
             directoryPath={controller.directories[conversation.conversationId] ?? null}
@@ -313,15 +315,21 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         syncError: syncState.syncError,
       })
       const hasDownloadedMessages = syncState.messages.length > 0 || (syncState.localSyncedSequence > 0 && syncStatus !== "unsynced")
-      const stateBadge = syncStatus === "syncing"
-        ? <span className="tb-state sync"><span className="d" aria-hidden="true" />同步中… · 只读</span>
-        : syncStatus === "has_update"
-          ? <span className="tb-state sync"><span className="d" aria-hidden="true" />有更新 · 只读</span>
-          : syncStatus === "sync_failed"
-            ? <span className="tb-state failed"><span className="d" aria-hidden="true" />同步失败 · 只读</span>
-            : hasDownloadedMessages
-              ? <span className="tb-state ro">已同步 · 只读</span>
-              : <span className="tb-state sync"><span className="d" aria-hidden="true" />未同步 · 只读</span>
+      const isSummaryOnly = conversation.shareMode === "summary_only"
+      const isStopped = conversation.shareStatus === "stopped"
+      const stateBadge = isSummaryOnly
+        ? <span className="tb-state ro">{isStopped ? "仅共享摘要 · 已停止同步 · 只读" : "仅共享摘要 · 只读"}</span>
+        : syncStatus === "syncing"
+          ? <span className="tb-state sync"><span className="d" aria-hidden="true" />同步中… · 只读</span>
+          : syncStatus === "has_update"
+            ? <span className="tb-state sync"><span className="d" aria-hidden="true" />有更新 · 只读</span>
+            : syncStatus === "sync_failed"
+              ? <span className="tb-state failed"><span className="d" aria-hidden="true" />同步失败 · 只读</span>
+              : isStopped
+                ? <span className="tb-state ro">已停止同步 · 只读</span>
+                : hasDownloadedMessages
+                  ? <span className="tb-state ro">已同步 · 只读</span>
+                  : <span className="tb-state sync"><span className="d" aria-hidden="true" />未同步 · 只读</span>
 
       return (
         <>

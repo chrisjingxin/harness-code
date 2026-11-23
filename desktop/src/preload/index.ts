@@ -58,6 +58,11 @@ const localConversations: LocalConversationsHost = {
   markPublished: (conversationId, binding) => ipcRenderer.invoke("workbench:local-conversations:mark-published", conversationId, binding),
   markSharingStopped: (conversationId, stoppedAtMs) => ipcRenderer.invoke("workbench:local-conversations:mark-sharing-stopped", conversationId, stoppedAtMs),
   remove: conversationId => ipcRenderer.invoke("workbench:local-conversations:remove", conversationId),
+  onChanged: listener => {
+    const receive = (_event: unknown, payload: { readonly conversationId: string }) => listener(payload)
+    ipcRenderer.on("workbench:local-conversations:changed", receive)
+    return () => { ipcRenderer.removeListener("workbench:local-conversations:changed", receive) }
+  },
 }
 contextBridge.exposeInMainWorld("localConversations", localConversations)
 

@@ -30,7 +30,7 @@ import type {
   WorkbenchRightSlot,
 } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
-import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
+import type { SessionExecutionScope } from "./contracts.js"
 
 const MAX_DOCK_TABS = 12
 const MAX_CENTRAL_TABS = 12
@@ -113,7 +113,7 @@ const DEFAULT_RUNTIME: SessionWorkspaceRuntime = {
   changes: { status: "loading", busy: false },
 }
 
-function makeKey(scope: ProjectNavigationScope, conversationId: string): string {
+function makeKey(scope: SessionExecutionScope, conversationId: string): string {
   return `${scope.namespace}::${scope.accountId}::${scope.workspaceId}::${scope.projectId}::${conversationId}`
 }
 
@@ -196,7 +196,7 @@ function flattenTreeRows(
 export type UseLocalDirectoryOptions = {
   readonly localDirectory?: LocalDirectoryHost
   readonly persistence: PersonalPersistence
-  readonly scope: ProjectNavigationScope | null
+  readonly scope: SessionExecutionScope | null
   readonly selectedConversationId: string | null
   readonly selectedDirectoryPath: string | null
   readonly selectedIsLocal: boolean
@@ -229,7 +229,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   const targetSeqRef = useRef(0)
 
   const mutateRuntime = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     updater: (prev: SessionWorkspaceRuntime) => SessionWorkspaceRuntime,
     persist = false,
@@ -253,7 +253,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [persistence])
 
   const loadDirectoryEntries = useCallback(async (
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     directory: string,
   ) => {
@@ -322,7 +322,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [localDirectory, mutateRuntime])
 
   const loadFilePreview = useCallback(async (
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     path: string,
   ) => {
@@ -393,7 +393,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [localDirectory, mutateRuntime])
 
   const loadDiff = useCallback(async (
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     snapshot: string,
     path: string,
@@ -439,7 +439,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [localDirectory, mutateRuntime])
 
   const loadGitStatus = useCallback(async (
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
   ) => {
     if (!localDirectory) return
@@ -652,7 +652,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   ])
 
   const openFileTab = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     path: string,
     destination: "preview" | "central",
@@ -712,21 +712,21 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     void loadFilePreview(targetScope, conversationId, path)
   }, [mutateRuntime, loadFilePreview])
 
-  const selectConversationCentralTab = useCallback((targetScope: ProjectNavigationScope, conversationId: string) => {
+  const selectConversationCentralTab = useCallback((targetScope: SessionExecutionScope, conversationId: string) => {
     mutateRuntime(targetScope, conversationId, prev => ({
       ...prev,
       personal: { ...prev.personal, activeCentral: null },
     }), true)
   }, [mutateRuntime])
 
-  const selectCentralFileTab = useCallback((targetScope: ProjectNavigationScope, conversationId: string, path: string) => {
+  const selectCentralFileTab = useCallback((targetScope: SessionExecutionScope, conversationId: string, path: string) => {
     mutateRuntime(targetScope, conversationId, prev => ({
       ...prev,
       personal: { ...prev.personal, activeCentral: path },
     }), true)
   }, [mutateRuntime])
 
-  const closeCentralFileTab = useCallback((targetScope: ProjectNavigationScope, conversationId: string, path: string) => {
+  const closeCentralFileTab = useCallback((targetScope: SessionExecutionScope, conversationId: string, path: string) => {
     mutateRuntime(targetScope, conversationId, prev => {
       const idx = prev.personal.centralPaths.indexOf(path)
       if (idx < 0) return prev
@@ -742,7 +742,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     }, true)
   }, [mutateRuntime])
 
-  const refreshFile = useCallback((targetScope: ProjectNavigationScope, conversationId: string, path: string) => {
+  const refreshFile = useCallback((targetScope: SessionExecutionScope, conversationId: string, path: string) => {
     void loadFilePreview(targetScope, conversationId, path)
   }, [loadFilePreview])
 
@@ -750,7 +750,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
    * 仅刷新当前会话已展开目录、已打开预览标签与 Git 变更快照，不重置用户的选中和折叠位置。
    * 供本机 Agent 工具完成写文件/命令执行后调用，让右侧文件栏与中央差异视图实时反映磁盘改动。
    */
-  const refreshWorkspace = useCallback(async (targetScope: ProjectNavigationScope, conversationId: string) => {
+  const refreshWorkspace = useCallback(async (targetScope: SessionExecutionScope, conversationId: string) => {
     const key = makeKey(targetScope, conversationId)
     const runtime = runtimesRef.current[key]
     if (!runtime || runtime.directory.status !== "ready" || !localDirectory) return
@@ -774,7 +774,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [localDirectory, loadDirectoryEntries, loadFilePreview, loadGitStatus, loadDiff])
 
   const savePosition = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     area: ScrollArea,
     path: string,
@@ -793,7 +793,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [mutateRuntime])
 
   const requestFileCandidates = useCallback(async (
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     request: ConversationFileCandidateRequest,
   ): Promise<ConversationFileCandidateResult> => {
@@ -838,14 +838,14 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [localDirectory])
 
   const getRuntime = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
   ): SessionWorkspaceRuntime => {
     return runtimes[makeKey(targetScope, conversationId)] ?? DEFAULT_RUNTIME
   }, [runtimes])
 
   const buildDockProps = useCallback((input: {
-    readonly scope: ProjectNavigationScope
+    readonly scope: SessionExecutionScope
     readonly conversationId: string
     readonly deviceId: string
     readonly projectName: string
@@ -858,9 +858,9 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     const uiScope: ProjectScope = {
       namespace: targetScope.namespace,
       accountId: targetScope.accountId,
-      workspaceId: targetScope.workspaceId,
+      workspaceId: targetScope.workspaceId ?? "__solo__",
       deviceId: input.deviceId,
-      projectId: targetScope.projectId,
+      projectId: targetScope.projectId ?? "__personal__",
     }
 
     const availability: ProjectAvailability = runtime.directory.status === "error"
@@ -1032,7 +1032,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [getRuntime, mutateRuntime, loadDirectoryEntries, loadFilePreview, loadGitStatus, loadDiff, openFileTab])
 
   const setCentralMode = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     mode: "code" | "diff",
   ) => {
@@ -1047,7 +1047,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [mutateRuntime, loadDiff])
 
   const openDiffFile = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
     path: string,
   ) => {
@@ -1057,7 +1057,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
     if (snapshot) void loadDiff(targetScope, conversationId, snapshot, path)
   }, [openFileTab, loadDiff])
 
-  const getCentralState = useCallback((targetScope: ProjectNavigationScope, conversationId: string) => {
+  const getCentralState = useCallback((targetScope: SessionExecutionScope, conversationId: string) => {
     const runtime = getRuntime(targetScope, conversationId)
     return {
       centralTabs: runtime.personal.centralPaths.map(path => ({ path, name: basenameOf(path) })),
@@ -1074,7 +1074,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [getRuntime])
 
   const getGitSummary = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
   ): LocalDirectoryGitSummary | null => {
     const runtime = getRuntime(targetScope, conversationId)
@@ -1092,7 +1092,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [getRuntime])
 
   const openChangesPanel = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
   ) => {
     mutateRuntime(targetScope, conversationId, prev => ({
@@ -1106,7 +1106,7 @@ export function useLocalDirectory(options: UseLocalDirectoryOptions) {
   }, [mutateRuntime, loadGitStatus])
 
   const refreshGitStatus = useCallback((
-    targetScope: ProjectNavigationScope,
+    targetScope: SessionExecutionScope,
     conversationId: string,
   ) => {
     const runtime = runtimesRef.current[makeKey(targetScope, conversationId)]

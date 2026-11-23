@@ -1628,16 +1628,22 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
         assembledCalls.push(input.turnId)
         return { contextBlocks: [{ type: "text" as const, text: "TEAM_CTX_BLOCK" }] }
       },
-      async onTurnSettled(input: { turnId: string; outcome: "completed" | "failed" | "cancelled" }) {
-        settledCalls.push(`${input.turnId}:${input.outcome}`)
+      async onTurnSettled(input: {
+        scope: { workspaceId: string | null; projectId: string | null }
+        turnId: string
+        outcome: "completed" | "failed" | "cancelled"
+      }) {
+        settledCalls.push(`${input.turnId}:${input.outcome}:${input.scope.workspaceId ?? "null"}:${input.scope.projectId ?? "null"}`)
       },
     }
 
+    const changedEvents: string[] = []
     const coordinator1 = createLocalExecutionCoordinator(window, identity, uploads, mockRuntime, {
       grantsDir,
       checkpointsDir,
       origin: ORIGIN,
       localConversations,
+      onLocalConversationChanged: id => { changedEvents.push(id) },
       contextAssembler: assembler,
     })
     const unbindExec = bindLocalExecutionIpc(trustedWindow, `${ORIGIN}/index.html`, coordinator1, fakeIpc as never)
@@ -1654,6 +1660,9 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
       listener({ turnId: send1.value.turnId, sequence: 1, type: "text-delta", text: "离线第一答", messageId: "m1" })
       listener({ turnId: send1.value.turnId, sequence: 2, type: "completed", shareable: true })
     }
+    await waitFor(() => changedEvents.includes(soloConvId))
+    const persistedOnChanged = await localConversations.get(USER_A, soloConvId)
+    assert.equal(persistedOnChanged.ok && persistedOnChanged.value.turns.length, 1)
     await coordinator1.dispose()
     unbindExec()
 
@@ -1772,9 +1781,48 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
         listener({ turnId: sendAfterStop.value.turnId, sequence: 2, type: "completed", shareable: true })
       }
     }
+    await waitFor(() => uploadedBatches.length === 1)
+    assert.equal(uploadedBatches.length, 1)
+
+    // HC-239 停点 4：将无团队会话 soloConvId 发布（仅带入第 2 轮历史），并验证原绑定不断链继续第 3 轮随动新 scope
+    const soloPublished = await registered.get("workbench:local-conversations:mark-published")!(senderEvent, soloConvId, {
+      workspaceId: WORKSPACE_ID,
+      projectId: PROJECT_ID,
+      shareMode: "full",
+      historyFromTurnIndex: 1,
+    }) as { ok: true; value: { workspaceId: string | null; projectId: string | null; shareStatus: string } }
+    assert.equal(soloPublished.ok, true)
+    assert.equal(soloPublished.value.workspaceId, WORKSPACE_ID)
+    assert.equal(soloPublished.value.projectId, PROJECT_ID)
+    assert.equal(soloPublished.value.shareStatus, "active")
+
+    await waitFor(() => uploadedBatches.length >= 2)
+    assert.equal(uploadedBatches.length, 2)
+    assert.equal(uploadedBatches[1]!.messages.length, 2)
+    assert.match(uploadedBatches[1]!.messages[0]!.payload, /继续第二问/)
+
+    // 不重新 prepare，直接沿用原 bindingId 与新绑定作用域发出第 3 轮
+    const soloPublishedScope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: soloConvId }
+    const send3 = await coordinator2.send(
+      soloPublishedScope,
+      prep2.value.bindingId,
+      "99999999-9999-4999-8999-999999999993",
+      "发布后不断链第三问",
+      [],
+    )
+    assert.equal(send3.ok && send3.value.status === "accepted", true)
+    if (send3.ok && send3.value.status === "accepted") {
+      for (const listener of listeners) {
+        listener({ turnId: send3.value.turnId, sequence: 1, type: "text-delta", text: "第三轮新团队答复", messageId: "m6" })
+        listener({ turnId: send3.value.turnId, sequence: 2, type: "completed", shareable: true })
+      }
+      await waitFor(() => settledCalls.some(entry => entry === `${send3.value.turnId}:completed:${WORKSPACE_ID}:${PROJECT_ID}`))
+    }
+    await waitFor(() => uploadedBatches.length >= 3)
+    assert.match(uploadedBatches[2]!.messages[0]!.payload, /发布后不断链第三问/)
+
     await coordinator2.dispose()
     await uploads.flush()
-    assert.equal(uploadedBatches.length, 1)
     const finalDetail = await localConversations.get(USER_A, teamConvId)
     assert.equal(finalDetail.ok && finalDetail.value.turns.length, 3)
 

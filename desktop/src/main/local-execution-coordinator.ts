@@ -109,6 +109,7 @@ export type LocalExecutionCoordinatorOptions = {
   readonly origin?: string
   readonly personal?: PersonalStore
   readonly localConversations?: LocalConversationStore
+  readonly onLocalConversationChanged?: (conversationId: string) => void
   readonly contextAssembler?: LocalExecutionContextAssembler
   readonly confirmDirectoryPrompt?: (path: string) => Promise<boolean>
 }
@@ -150,6 +151,7 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
 type Binding = {
   readonly id: string
   readonly login: Login
+  currentScope: LocalExecutionScope
   readonly selectedPath: string
   readonly directory: DirectoryGrant
   readonly providerId: string
@@ -616,6 +618,7 @@ export function createLocalExecutionCoordinator(
   async function sendBound(
     scope: LocalExecutionScope, binding: Binding, item: QueuedPrompt, prompt: string, queued = false,
   ): Promise<CollaborationResult<LocalExecutionReceipt>> {
+    binding.currentScope = scope
     const { login } = binding
     const { requestId, text, referenceIds: ids, attachments, images = [] } = item
     let attachmentBlocks: readonly LocalAcpPromptBlock[] = []
@@ -927,6 +930,7 @@ export function createLocalExecutionCoordinator(
         const authorized = await authorize(scope, login)
         if (!authorized.ok) return authorized
         const binding = bindings.get(localExecutionKey(scope))
+        if (binding) binding.currentScope = scope
         const current = await store.conversationPromptQueue(scope)
         if (!current.ok) return identityError("INTERNAL_ERROR", current.message)
         if (!isCurrent(login)) return forbidden()
@@ -1225,6 +1229,7 @@ export function createLocalExecutionCoordinator(
           if (existing?.login.generation === login.generation && existing.selectedPath === path && existing.directory.path === directory.path
             && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino
             && providerMatches) {
+            existing.currentScope = scope
             if (options?.localConversations) {
               const localRecord = await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
               if (localRecord && (localRecord.directoryPath !== path || localRecord.providerId !== resolvedProviderId)) {
@@ -1258,6 +1263,7 @@ export function createLocalExecutionCoordinator(
           const binding: Binding = {
             id: bindingId,
             login,
+            currentScope: scope,
             selectedPath: path,
             directory,
             providerId: resolvedProviderId,
@@ -1265,7 +1271,8 @@ export function createLocalExecutionCoordinator(
             providerReason,
             session,
             unsubscribe: session.subscribe(event => {
-              const source = { scope, bindingId, turnId: event.turnId, sequence: event.sequence }
+              const activeScope = binding.currentScope
+              const source = { scope: activeScope, bindingId, turnId: event.turnId, sequence: event.sequence }
               const turn = binding.activeTurn
               if (!turn || turn.turnId !== event.turnId || turn.sequence + 1 !== event.sequence) return
               turn.sequence = event.sequence
@@ -1347,10 +1354,10 @@ export function createLocalExecutionCoordinator(
                 } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
               })
               if (options?.contextAssembler?.onTurnSettled
-                && scope.workspaceId !== null
-                && login.workspaces.includes(scope.workspaceId)) {
+                && activeScope.workspaceId !== null
+                && login.workspaces.includes(activeScope.workspaceId)) {
                 void options.contextAssembler.onTurnSettled({
-                  scope,
+                  scope: activeScope,
                   turnId: turn.turnId,
                   outcome: event.type,
                 }).catch(() => {})
@@ -1367,10 +1374,10 @@ export function createLocalExecutionCoordinator(
                   await steering
                   if (!sameSessionIdentity()) return
                   const localRecord = options?.localConversations
-                    ? await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
+                    ? await options.localConversations.getRecord(login.accountId, activeScope.conversationId).catch(() => null)
                     : null
                   if (localRecord && options?.localConversations) {
-                    const persisted = await options.localConversations.appendTurn(login.accountId, scope.conversationId, {
+                    const persisted = await options.localConversations.appendTurn(login.accountId, activeScope.conversationId, {
                       turnId: turn.turnId,
                       userText: turn.userText,
                       ...(turn.referenceIds?.length ? { referenceIds: turn.referenceIds } : {}),
@@ -1384,7 +1391,9 @@ export function createLocalExecutionCoordinator(
                       completedAtMs,
                     })
                     if (!persisted.ok) {
-                      publish(login, { scope, turnId: turn.turnId, kind: "upload", failure: persisted.error.message })
+                      publish(login, { scope: activeScope, turnId: turn.turnId, kind: "upload", failure: persisted.error.message })
+                    } else {
+                      options.onLocalConversationChanged?.(activeScope.conversationId)
                     }
                   }
                   if (!uploads) return
@@ -1395,21 +1404,21 @@ export function createLocalExecutionCoordinator(
                         && login.workspaces.includes(localRecord.workspaceId)
                         ? {
                             scope: {
-                              accountId: scope.accountId,
+                              accountId: activeScope.accountId,
                               workspaceId: localRecord.workspaceId,
                               projectId: localRecord.projectId,
-                              conversationId: scope.conversationId,
+                              conversationId: activeScope.conversationId,
                             },
                             shareMode: localRecord.shareMode ?? ("full" as const),
                           }
                         : null)
-                    : (scope.workspaceId !== null && scope.projectId !== null
+                    : (activeScope.workspaceId !== null && activeScope.projectId !== null
                         ? {
                             scope: {
-                              accountId: scope.accountId,
-                              workspaceId: scope.workspaceId,
-                              projectId: scope.projectId,
-                              conversationId: scope.conversationId,
+                              accountId: activeScope.accountId,
+                              workspaceId: activeScope.workspaceId,
+                              projectId: activeScope.projectId,
+                              conversationId: activeScope.conversationId,
                             },
                             shareMode: "full" as const,
                           }
@@ -1434,12 +1443,13 @@ export function createLocalExecutionCoordinator(
                   })
                 }).catch(() => {})
               }
-              settlePromptQueue(scope, binding, event.type === "completed" && event.shareable)
+              settlePromptQueue(activeScope, binding, event.type === "completed" && event.shareable)
             }),
             unsubscribeSession: session.subscribeSession?.(sessionEvent => {
+              const activeScope = binding.currentScope
               if (sessionEvent.type === "elicitation") {
                 publish(login, {
-                  scope,
+                  scope: activeScope,
                   bindingId,
                   kind: "elicitation",
                   request: sessionEvent.request,
@@ -1449,14 +1459,14 @@ export function createLocalExecutionCoordinator(
               if (sessionEvent.type === "replay") return
               if (sessionEvent.type === "initialized" || sessionEvent.type === "session-opened") {
                 publish(login, {
-                  scope,
+                  scope: activeScope,
                   bindingId,
                   kind: "session-state",
                   state: toExecutionSessionState(resolvedProviderId, sessionEvent.state),
                 })
                 return
               }
-              publishSessionSnapshot(login, scope, binding)
+              publishSessionSnapshot(login, activeScope, binding)
             }),
           }
           bindings.set(key, binding)

@@ -37,6 +37,14 @@ export type ProjectConversationRepositoryItem = ConversationRepositoryItem
 export type ProjectConversationSummary = ConversationSummary
 export type ProjectHistoryMessage = HistoryMessage
 
+/** 本机执行与本地目录端口消费的作用域：个人会话在未入团或未发布时允许 `workspaceId` / `projectId` 为 null。 */
+export type SessionExecutionScope = {
+  readonly namespace: string
+  readonly accountId: string
+  readonly workspaceId: string | null
+  readonly projectId: string | null
+}
+
 /** 本机对单条会话的身份归属判定结果。 */
 export type SessionKind = "local" | "remote_self" | "remote_other"
 
@@ -97,13 +105,15 @@ export interface LocalSessionExecutionPort {
   promptQueue?(conversationId: string, action: Exclude<PromptQueueAction, { kind: "add" | "resume" }> | { kind: "resume" }): Promise<void>
   steerQueued?(conversationId: string, requestId: string): Promise<void>
   getProviders?(): AcpAgentList | undefined
+  refreshProviders?(): Promise<AcpAgentList | undefined>
+  clearEntries?(conversationId: string): void
   getSelectedProviderId?(conversationId: string): string | undefined
   selectProvider?(conversationId: string, providerId: string): Promise<void>
   setMode?(conversationId: string, modeId: string): Promise<void>
   setConfigOption?(conversationId: string, configId: string, value: string | boolean): Promise<void>
   answerElicitation?(conversationId: string, requestId: string, answer: LocalAcpElicitationAnswer): Promise<void>
   send?(input: {
-    readonly scope: ProjectNavigationScope
+    readonly scope: SessionExecutionScope
     readonly conversationId: string
     readonly directoryPath: string | null
     readonly draftRevision: number
@@ -117,7 +127,7 @@ export interface LocalSessionExecutionPort {
   stageImage?(input: StageLocalImageInput): Promise<PersonalDraftImage>
   readImage?(imageId: string): Promise<ReadLocalImageResult | null>
   removeStagedImage?(imageId: string): Promise<void>
-  cancel?(scope: ProjectNavigationScope, conversationId: string): Promise<void>
+  cancel?(scope: SessionExecutionScope, conversationId: string): Promise<void>
   answerPermission?(conversationId: string, id: string, optionId: string): Promise<void>
 }
 

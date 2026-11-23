@@ -29,8 +29,7 @@ import {
   type PromptQueueView,
 } from "../../../shared/index.js"
 import { MAX_QUEUED_PROMPT_CHARS } from "../../../ui/conversation/annotations-codec.js"
-import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
-import type { LocalSessionExecutionPort } from "./contracts.js"
+import type { LocalSessionExecutionPort, SessionExecutionScope } from "./contracts.js"
 import { toConversationInteraction } from "./elicitation-form.js"
 import {
   applyLocalExecutionUpdate,
@@ -57,7 +56,7 @@ type Target = {
 }
 
 type Flight = {
-  readonly scope: ProjectNavigationScope
+  readonly scope: SessionExecutionScope
   readonly bindingId: string
   readonly draftRevision?: number
   readonly referenceIds: readonly string[]
@@ -121,26 +120,28 @@ function pushBufferedNotice(
 /** 只为当前选中的本人会话准备执行，其他本人会话仍可完成已受理的一轮。 */
 export function useLocalExecution(
   host: DesktopLocalExecutionHost | undefined,
-  project: ProjectNavigationScope | null,
+  project: SessionExecutionScope | null,
   conversationId: string | null,
   directory: string | null,
   selectionRevision: number,
   ownerName: string,
-  onAccepted: (scope: ProjectNavigationScope, conversationId: string, revision: number) => void,
-  onWorkspaceRefresh?: (scope: ProjectNavigationScope, conversationId: string) => void,
+  onAccepted: (scope: SessionExecutionScope, conversationId: string, revision: number) => void,
+  onWorkspaceRefresh?: (scope: SessionExecutionScope, conversationId: string) => void,
   preferredProviders?: Readonly<Record<string, string>>,
   onSessionTitleChange?: (scope: LocalExecutionScope, title: string | undefined) => void,
   onProviderChange?: (scope: LocalExecutionScope, providerId: string) => void,
   onTurnUploaded?: (scope: LocalExecutionScope, userSequence: number, images: readonly PersonalDraftImage[]) => void,
+  onTurnFinished?: (scope: LocalExecutionScope) => void,
+  onSharingStopped?: (scope: LocalExecutionScope) => void,
 ): LocalSessionExecutionPort | undefined {
   const accountId = project?.accountId
-  const workspaceId = project?.workspaceId
-  const projectId = project?.projectId
+  const workspaceId = project?.workspaceId ?? null
+  const projectId = project?.projectId ?? null
   const namespace = project?.namespace
   const [confirmationRevision, retryPreparation] = useReducer(revision => revision + 1, 0)
   const confirming = useRef(false)
   const target = useMemo<Target | null>(() => {
-    if (!accountId || !workspaceId || !projectId || !conversationId || namespace === undefined) return null
+    if (!accountId || !conversationId || namespace === undefined) return null
     const scope = { accountId, workspaceId, projectId, conversationId }
     return { scope, namespace, key: localExecutionKey(scope), directory, selectionRevision: selectionRevision + confirmationRevision }
   }, [accountId, workspaceId, projectId, conversationId, directory, selectionRevision, confirmationRevision, namespace])
@@ -148,13 +149,19 @@ export function useLocalExecution(
   const screens = useRef(new Map<string, Screen>())
   const providersRef = useRef<AcpAgentList | undefined>(undefined)
   const providerOverrides = useRef(new Map<string, string>())
-  const current = useRef({ target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded })
+  const current = useRef({
+    target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded,
+    onTurnFinished, onSharingStopped,
+  })
   const mounted = useRef(false)
   const [, refresh] = useReducer(revision => revision + 1, 0)
 
   useLayoutEffect(() => {
-    current.current = { target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded }
-  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded])
+    current.current = {
+      target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded,
+      onTurnFinished, onSharingStopped,
+    }
+  }, [target, onAccepted, onWorkspaceRefresh, ownerName, preferredProviders, onSessionTitleChange, onProviderChange, onTurnUploaded, onTurnFinished, onSharingStopped])
 
   function applySessionStateNotice(
     scope: LocalExecutionScope,
@@ -241,6 +248,9 @@ export function useLocalExecution(
       const key = localExecutionKey(notice.scope)
       const screen = screens.current.get(key)
       if (notice.kind === "upload") {
+        if (notice.sharingStopped) {
+          current.current.onSharingStopped?.(notice.scope)
+        }
         if (!screen && !notice.failure) return
         const nextScreen = screen ?? { timeline: emptyLocalExecutionView }
         nextScreen.timeline = applyLocalExecutionUpdate(nextScreen.timeline, notice)
@@ -304,13 +314,10 @@ export function useLocalExecution(
       }
 
       if (notice.kind === "accepted" && notice.queued && screen.binding?.bindingId === notice.bindingId
-        && screen.preparedFor && !screen.flight
-        && notice.scope.workspaceId !== null && notice.scope.projectId !== null) {
+        && screen.preparedFor && !screen.flight) {
         const flight: Flight = {
           scope: {
             ...notice.scope,
-            workspaceId: notice.scope.workspaceId,
-            projectId: notice.scope.projectId,
             namespace: screen.preparedFor.namespace,
           },
           bindingId: notice.bindingId, requestId: notice.requestId, referenceIds: notice.referenceIds ?? [],
@@ -329,6 +336,7 @@ export function useLocalExecution(
           if (screen.binding?.bindingId === notice.bindingId) {
             screen.availability = notice.availability
             screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
+            current.current.onTurnFinished?.(notice.scope)
             refresh()
           }
         }
@@ -364,6 +372,7 @@ export function useLocalExecution(
         if (screen.binding?.bindingId === notice.bindingId) screen.availability = notice.availability
         screen.directoryStatus = notice.availability.directoryStatus ?? screen.directoryStatus
         current.current.onWorkspaceRefresh?.(flight.scope, notice.scope.conversationId)
+        current.current.onTurnFinished?.(notice.scope)
       }
       refresh()
     })
@@ -537,6 +546,19 @@ export function useLocalExecution(
       applyQueue(screen, result.value)
     },
     getProviders: () => providersRef.current,
+    async refreshProviders() {
+      const result = await host.listProviders?.()
+      if (!mounted.current || !result?.ok) return providersRef.current
+      providersRef.current = result.value
+      refresh()
+      return result.value
+    },
+    clearEntries(id) {
+      const screen = target?.scope.conversationId === id ? screens.current.get(target.key) : undefined
+      if (!screen || screen.flight || screen.timeline.entries.length === 0) return
+      screen.timeline = { ...screen.timeline, entries: [] }
+      refresh()
+    },
     getSelectedProviderId: id => {
       if (!target || target.scope.conversationId !== id) return providersRef.current?.defaultProviderId ?? undefined
       const screen = screens.current.get(target.key)

@@ -19,6 +19,7 @@ import {
   toNavigationSessionEntries,
 } from "../src/renderer/features/session/session-model.ts"
 import { MAX_DRAFT_IMAGES } from "../src/shared/personal.ts"
+import { getBoardSyncLabel } from "../src/renderer/features/board/board-model.ts"
 import type { ProjectConversationSummary, ProjectHistoryMessage } from "../src/renderer/features/session/contracts.ts"
 
 const sampleConversation = (overrides: Partial<ProjectConversationSummary> = {}): ProjectConversationSummary => ({
@@ -238,5 +239,30 @@ test("HC-238 draft-images 维护草稿图片与 clear-draft 重置，历史解�
   if (entries[2]?.kind === "message") {
     assert.equal(entries[2].images, undefined)
   }
+})
+
+test("HC-239 summary_only 与 stopped 状态正确反映在会话徽标与看板标签", () => {
+  assert.deepEqual(
+    buildSessionBadge({ kind: "local", syncStatus: "synced", remoteSyncedSequence: 0, shareMode: "summary_only", shareStatus: "active" }),
+    { text: "仅共享摘要", tone: "neutral" },
+  )
+  assert.deepEqual(
+    buildSessionBadge({ kind: "local", syncStatus: "synced", remoteSyncedSequence: 2, shareMode: "full", shareStatus: "stopped" }),
+    { text: "已停止同步", tone: "warning" },
+  )
+  assert.deepEqual(
+    buildSessionBadge({ kind: "remote_other", syncStatus: "unsynced", remoteSyncedSequence: 0, shareMode: "summary_only", shareStatus: "active" }),
+    { text: "仅共享摘要", tone: "neutral" },
+  )
+  assert.deepEqual(
+    buildSessionBadge({ kind: "remote_other", syncStatus: "synced", remoteSyncedSequence: 4, shareMode: "full", shareStatus: "stopped" }),
+    { text: "已停止同步", tone: "warning" },
+  )
+
+  const peerSummaryOnly = sampleConversation({ ownerUserId: "user-peer", shareMode: "summary_only", syncedSequence: 0 })
+  assert.equal(getBoardSyncLabel({ conversation: peerSummaryOnly, deviceOnline: true }, "user-self", null), "仅共享摘要")
+
+  const peerStopped = sampleConversation({ ownerUserId: "user-peer", shareMode: "full", shareStatus: "stopped", syncedSequence: 2 })
+  assert.equal(getBoardSyncLabel({ conversation: peerStopped, deviceOnline: false }, "user-self", null), "已停止同步 · 本机未同步正文")
 })
 

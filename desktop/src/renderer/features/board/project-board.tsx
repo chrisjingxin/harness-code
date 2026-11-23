@@ -93,12 +93,18 @@ export function ProjectBoard(props: ProjectBoardProps) {
                     <strong>{item.title || "未命名会话"}</strong>
                     {item.briefText && <span className="project-board-brief">{item.briefText}</span>}
                     <span className="project-board-meta">
-                      {conversationLabels[item.status]} · {row.deviceOnline ? "原设备在线" : "原设备离线"}
+                      {item.shareMode === "summary_only" ? "仅共享状态与成果摘要" : conversationLabels[item.status]}
+                      {" · "}
+                      {item.shareStatus === "stopped"
+                        ? "已停止同步（只读）"
+                        : row.deviceOnline ? "原设备在线" : "原设备离线"}
                     </span>
                     <span className="project-board-meta">
-                      {item.syncedSequence > 0 && item.briefUpdatedAtMs > 0
-                        ? `最近上传 ${formatShortTime(item.briefUpdatedAtMs)}`
-                        : "暂无上传记录"}
+                      {item.shareMode === "summary_only"
+                        ? (item.briefUpdatedAtMs > 0 ? `摘要更新 ${formatShortTime(item.briefUpdatedAtMs)}` : "暂无摘要记录")
+                        : item.syncedSequence > 0 && item.briefUpdatedAtMs > 0
+                          ? `最近上传 ${formatShortTime(item.briefUpdatedAtMs)}`
+                          : "暂无上传记录"}
                     </span>
                     <span className="project-board-sync">{getBoardSyncLabel(row, props.accountId, props.localDeviceId,
                       props.syncStates[item.conversationId])}</span>

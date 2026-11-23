@@ -7,7 +7,7 @@
  *    以及 `elicitation-form.ts` 的通用表单映射器；不得直接调用 Node/Electron 或改动公共 `@workbench/ui`。
  */
 import { useEffect, useRef, useState } from "react"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 import {
   IconAlertTriangle,
   IconArrowsMaximize,
@@ -45,7 +45,7 @@ import type {
   ConversationTimelineEntry,
   RenderingActions,
 } from "../../../ui/index.js"
-import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExternalHooks } from "./contracts.js"
+import type { LocalSessionExecutionPort, ProjectConversationSummary, SessionExecutionScope, SessionExternalHooks } from "./contracts.js"
 import { toConversationInteraction, toElicitationAnswer } from "./elicitation-form.js"
 import { createImagePreviewCache } from "./image-preview-cache.js"
 import { SessionCentralFilePanels } from "./session-center.js"
@@ -64,6 +64,10 @@ import { PromptQueuePanel } from "./prompt-queue-panel.js"
 
 export type LocalSessionPageProps = {
   readonly scope: ConversationScope
+  /** 个人未发布或无团队会话传入真实可空执行作用域；缺省时回退到 UI 作用域与 conversation.projectId。 */
+  readonly executionScope?: SessionExecutionScope
+  /** 可选顶部会话元信息栏（团队上下文芯片、可见性芯片与发布/停止共享操作）。 */
+  readonly headerBar?: ReactNode
   readonly visible: boolean
   readonly conversation: ProjectConversationSummary
   readonly directoryPath: string | null
@@ -96,6 +100,8 @@ const PLAN_PRIORITY_LABEL = {
 
 export function LocalSessionPage({
   scope,
+  executionScope,
+  headerBar,
   visible,
   conversation,
   directoryPath,
@@ -362,7 +368,7 @@ export function LocalSessionPage({
           }))
         : undefined
       return execution.send!({
-        scope: {
+        scope: executionScope ?? {
           namespace: targetScope.namespace,
           accountId: targetScope.accountId,
           workspaceId: targetScope.workspaceId,
@@ -810,6 +816,7 @@ export function LocalSessionPage({
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
       <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
+          {headerBar}
           <div className="session-conversation-wrap">
             <ConversationView
               {...view}
@@ -851,7 +858,7 @@ export function LocalSessionPage({
                   ? {
                       onCancel: async targetScope =>
                         execution.cancel!(
-                          {
+                          executionScope ?? {
                             namespace: targetScope.namespace,
                             accountId: targetScope.accountId,
                             workspaceId: targetScope.workspaceId,

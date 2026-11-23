@@ -104,6 +104,8 @@ export type MarkLocalConversationPublishedInput = {
   readonly projectId: string
   readonly shareMode: ConversationShareMode
   readonly syncedSequence?: number
+  /** 当选择完整正文且需要同步发布前已定稿轮次时，指定起始轮次下标（0 表示全部历史）。 */
+  readonly historyFromTurnIndex?: number
 }
 
 /** 渲染进程访问主进程 `LocalConversationStore` 的具名安全端口。 */
@@ -123,4 +125,6 @@ export interface LocalConversationsHost {
   ): Promise<CollaborationResult<LocalConversationRecord>>
   markSharingStopped(conversationId: string, stoppedAtMs?: number): Promise<CollaborationResult<LocalConversationRecord>>
   remove(conversationId: string): Promise<CollaborationResult<null>>
+  /** 监听主进程落盘完成（如一轮定稿写入）后的会话索引与轮次变更事件。 */
+  onChanged?(listener: (event: { readonly conversationId: string }) => void): () => void
 }

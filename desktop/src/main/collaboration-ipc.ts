@@ -243,6 +243,11 @@ export function bindCollaborationIpc(
     origin: origin ?? "",
     personal,
     localConversations,
+    onLocalConversationChanged: conversationId => {
+      if (identity.personalIdentity() && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+        try { window.webContents.send("workbench:local-conversations:changed", { conversationId }) } catch { /* 窗口可能正在关闭。 */ }
+      }
+    },
     confirmDirectoryPrompt: async path => {
       const result = await dialog.showMessageBox(window, {
         type: "question",
