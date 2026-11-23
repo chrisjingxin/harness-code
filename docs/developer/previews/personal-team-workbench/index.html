@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-accent="violet" data-density="standard">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Code · 方案B（个人 / 团队协同工作台）</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b63d3'/%3E%3Cpath d='M7 7v10M17 7v10M7 12h10' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<meta name="description" content="Harness Code 独立桌面协同工作台 — Workspace / Project / 会话同步 / 双层知识 / 任务派发">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/></symbol>
+  <symbol id="i-task" viewBox="0 0 24 24"><path d="M4 7h11M4 12h11M4 17h7"/><path d="m16 15 2.5 2.5L23 13"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4h9a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3Z"/><path d="M17 7h2v13H8"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h4m4 0h8M4 12h9m4 0h3M4 17h3m4 0h9"/><circle cx="10" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-14.6 5.9M3.5 12A8.5 8.5 0 0 1 18.1 6.1"/><path d="M20.5 5v5h-5M3.5 19v-5h5"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a2.5 2.5 0 0 0 5 0v-1a9 9 0 1 0-3.6 7.2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h13M12 6l6 6-6 6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.5a3.5 3.5 0 0 1 0 7M18 20a5.5 5.5 0 0 0-2-4.3"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 5h15v10.5h-8L7 19.5v-4H4.5z"/></symbol>
+  <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="3.5"/><circle cx="9.5" cy="10.5" r="1"/><circle cx="14.5" cy="10.5" r="1"/><path d="M9.5 14.5h5"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5h5.6l1.9 2.4h9.5v9.6h-17z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.5M4.5 12h.5M4.5 18h.5"/></symbol>
+  <symbol id="i-tree" viewBox="0 0 24 24"><path d="M6 4v13M6 9h5M6 16h5"/><rect x="11.5" y="6.5" width="8.5" height="5" rx="1"/><rect x="11.5" y="13.5" width="8.5" height="5" rx="1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></symbol>
+  <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M9 4v5H4M15 20v-5h5M15 4v5h5M9 20v-5H4"/></symbol>
+  <symbol id="i-git" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="12" r="2.2"/><path d="M6 8.2v7.6"/><path d="M8.2 6c3 0 7.6.4 7.6 6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="m7 10 2.5 2.5L7 15M13 15h4"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l4.5-1.2 9.3-9.3a2.1 2.1 0 0 0-3-3l-9.3 9.3Z"/><path d="M14 6.5l3 3"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5.5a3 3 0 0 0-5.7 1.3A2.8 2.8 0 0 0 4.5 12a2.9 2.9 0 0 0 2 4.6A3 3 0 0 0 12 18.5Z"/><path d="M12 5.5a3 3 0 0 1 5.7 1.3A2.8 2.8 0 0 1 19.5 12a2.9 2.9 0 0 1-2 4.6A3 3 0 0 1 12 18.5Z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 2.8v5.4c0 4.4-2.9 7.6-7 9.3-4.1-1.7-7-4.9-7-9.3V6.3Z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5Z"/></symbol>
+  <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5V20"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar" aria-label="工作台导航"></aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="icon-btn side-toggle" id="sideToggle" data-act="side-toggle" aria-pressed="true" aria-label="收起左栏" title="收起 / 展开左栏"></button>
+      <button type="button" class="icon-btn menu-btn" data-act="drawer" aria-label="打开侧栏" id="drawerBtn"></button>
+      <button type="button" class="icon-btn" data-act="back-home" id="backHomeBtn" hidden aria-label="返回我的会话"></button>
+      <div class="tb-title" id="tbTitle"></div>
+      <div class="tb-spacer"></div>
+      <div class="tb-collab" id="tbCollab"></div>
+      <div class="tb-right" id="tbRight"></div>
+    </header>
+
+    <div class="content">
+      <main class="stage" id="stage" tabindex="-1"></main>
+      <aside class="rail" id="rail" aria-label="本机文件"></aside>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden data-act="drawer-close"></div>
+<div class="menu" id="menu" role="menu" hidden></div>
+<div class="popover" id="popover" role="dialog" aria-label="协作成员与队友会话" hidden></div>
+<div class="palette-wrap" id="palette" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- 新建 Project -->
+<dialog id="dlgProject" aria-labelledby="dlgProjectTitle">
+  <form class="dlg" id="formProject" novalidate>
+    <div class="dlg-head">
+      <div class="od-stack" style="--od-gap:2px">
+        <h2 id="dlgProjectTitle">新建 Project</h2>
+        <p class="dlg-sub" id="dlgProjectSub"></p>
+      </div>
+      <button type="button" class="icon-btn" data-act="dlg-close" data-dlg="dlgProject" aria-label="关闭" style="margin-left:auto"><svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div class="fld">
+        <label for="projName">项目名称<span class="req" aria-hidden="true">*</span></label>
+        <input type="text" id="projName" name="projName" autocomplete="off" placeholder="例如：结账台拆分支付重构" required aria-describedby="projNameErr">
+        <p class="err" id="projNameErr" hidden></p>
+      </div>
+      <div class="fld">
+        <label for="projDesc">项目说明</label>
+        <textarea id="projDesc" name="projDesc" placeholder="简述项目目标、负责模块或协作边界（可选）"></textarea>
+      </div>
+      <div class="fld">
+        <span id="projMemberLabel" style="font-size:var(--text-sm);font-weight:600">从当前 Workspace 勾选成员</span>
+        <p class="help">创建者张景新默认是项目管理员，不可取消。</p>
+        <div id="projMemberList" role="group" aria-labelledby="projMemberLabel"></div>
+      </div>
+      <div class="fld">
+        <label for="projRepo">关联仓库（可选）</label>
+        <input type="text" id="projRepo" name="projRepo" autocomplete="off" placeholder="pay/checkout-split">
+        <p class="help">留空也可以，之后在项目资料里补充。</p>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" data-act="dlg-close" data-dlg="dlgProject">取消</button>
+      <button type="submit" class="btn btn-primary">创建并进入</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 新建会话 -->
+<dialog id="dlgSession" aria-labelledby="dlgSessionTitle">
+  <form class="dlg" id="formSession" novalidate>
+    <div class="dlg-head">
+      <div class="od-stack" style="--od-gap:2px">
+        <h2 id="dlgSessionTitle">新建会话</h2>
+        <p class="dlg-sub" id="dlgSessionSub"></p>
+      </div>
+      <button type="button" class="icon-btn" data-act="dlg-close" data-dlg="dlgSession" aria-label="关闭" style="margin-left:auto"><svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div class="fld">
+        <label for="sessTitle">会话标题<span class="req" aria-hidden="true">*</span></label>
+        <input type="text" id="sessTitle" autocomplete="off" placeholder="例如：灰度开关回滚预案" required aria-describedby="sessTitleErr">
+        <p class="err" id="sessTitleErr" hidden></p>
+      </div>
+      <div class="fld" id="sessTeamWrap">
+        <label for="sessTeamSel">团队上下文</label>
+        <select id="sessTeamSel" class="c4-select"></select>
+        <p class="help">首条消息发送前可调整团队上下文；选「无团队」时不会读取团队知识。</p>
+      </div>
+      <div class="fld">
+        <label for="sessDir">主目录</label>
+        <input type="text" id="sessDir" autocomplete="off">
+        <p class="help">只在本机执行，不会远程启动队友机器。</p>
+      </div>
+      <label class="c4-check" id="sessPublishRow"><input type="checkbox" id="sessPublish"> <span id="sessPublishLabel">发布到当前 Project</span></label>
+      <div id="sessSuggestions"></div>
+    </div>
+    <div class="dlg-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" data-act="dlg-close" data-dlg="dlgSession">取消</button>
+      <button type="button" data-act="session-create" class="btn btn-primary">创建会话</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 在本机开始 -->
+<dialog id="dlgStart" aria-labelledby="dlgStartTitle">
+  <form class="dlg" id="formStart" novalidate>
+    <div class="dlg-head">
+      <div class="od-stack" style="--od-gap:2px">
+        <h2 id="dlgStartTitle">在本机开始</h2>
+        <p class="dlg-sub" id="dlgStartSub"></p>
+      </div>
+      <button type="button" class="icon-btn" data-act="dlg-close" data-dlg="dlgStart" aria-label="关闭" style="margin-left:auto"><svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div class="fld">
+        <span id="startModeLabel" style="font-size:var(--text-sm);font-weight:600">选择执行会话</span>
+        <div class="choice-list" id="startModeList" role="radiogroup" aria-labelledby="startModeLabel"></div>
+      </div>
+      <div class="fld" id="startPickWrap" hidden>
+        <label for="startPick">已有会话</label>
+        <select id="startPick"></select>
+      </div>
+      <div class="fld" id="startNewWrap" hidden>
+        <label for="startNewTitle">新会话标题</label>
+        <input type="text" id="startNewTitle" autocomplete="off" placeholder="例如：灰度白名单接口补齐">
+        <p class="err" id="startNewErr" hidden></p>
+      </div>
+      <div class="fld" id="startDirWrap">
+        <label for="startDir">工作目录</label>
+        <input type="text" id="startDir" autocomplete="off">
+        <p class="help">只会在这台机器上启动会话进程。</p>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" data-act="dlg-close" data-dlg="dlgStart">取消</button>
+      <button type="submit" class="btn btn-primary">开始执行</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 派发任务 -->
+<dialog id="dlgDispatch" aria-labelledby="dlgDispatchTitle">
+  <form class="dlg" id="formDispatch" novalidate>
+    <div class="dlg-head">
+      <div class="od-stack" style="--od-gap:2px">
+        <h2 id="dlgDispatchTitle">@成员 派发任务</h2>
+        <p class="dlg-sub" id="dlgDispatchSub"></p>
+      </div>
+      <button type="button" class="icon-btn" data-act="dlg-close" data-dlg="dlgDispatch" aria-label="关闭" style="margin-left:auto"><svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dlg-body">
+      <div class="fld">
+        <label for="disTitle">任务标题<span class="req" aria-hidden="true">*</span></label>
+        <input type="text" id="disTitle" autocomplete="off" placeholder="例如：支付方式列表接口补 3 个字段" required aria-describedby="disTitleErr">
+        <p class="err" id="disTitleErr" hidden></p>
+      </div>
+      <div class="fld">
+        <label for="disTo">指派给</label>
+        <select id="disTo"></select>
+      </div>
+      <div class="fld">
+        <label for="disDesc">背景说明</label>
+        <textarea id="disDesc" placeholder="为什么需要这个改动、验收标准是什么"></textarea>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" data-act="dlg-close" data-dlg="dlgDispatch">取消</button>
+      <button type="submit" class="btn btn-primary">派发任务</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 系统设置(居中弹窗) -->
+<dialog id="dlgSettings" aria-labelledby="dlgSettingsTitle">
+  <div class="dlg">
+    <div class="dlg-head">
+      <div class="od-stack" style="--od-gap:2px">
+        <h2 id="dlgSettingsTitle">系统设置</h2>
+        <p class="dlg-sub">外观、强调色、界面密度与缩放、账号与团队</p>
+      </div>
+      <button type="button" class="icon-btn" data-act="dlg-close" data-dlg="dlgSettings" aria-label="关闭" style="margin-left:auto">
+        <svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dlg-body" id="settingsBody"></div>
+    <div class="dlg-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" data-act="dlg-close" data-dlg="dlgSettings">完成</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dlgJourney" aria-labelledby="journeyTitle"></dialog>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

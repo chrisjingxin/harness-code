@@ -2,7 +2,7 @@
 
 本分支以 Electron + React/TypeScript 建立独立桌面产品，保留已实现的三栏、主题、对话和文件组件。2026-11-12 远端 Java 服务已改为 Project 成员制、HTTPS 上传定稿消息/工具摘要、简报与按需历史读取；旧远端执行、WSS、正文 SSE 及实时文件/Git 路由已移除。桌面和 Runner 的旧业务装配仍需适配，不能把既有界面冒烟当作新版端到端已通。轻量 SSE、Task、知识和看板由 HC-212 承接；后端与 ACP 以当前远端为准。见[顶层设计](docs/developer/architecture/多人协作工作台顶层设计.md)及[任务衔接](docs/developer/project/项目协作设计任务衔接.md)。
 
-前端已登记四张待认领任务：HC-217 项目导航、HC-218 会话只读与主动同步、HC-219 引用/任务/知识、HC-220 看板与轻量通知。职责、依赖和并行接点见[前端任务分工](docs/developer/project/项目协作设计任务衔接.md#3-前端任务与并行顺序)，外观对照见[保留的视觉预览](docs/developer/previews/project-collaboration/README.md)。当前仅完成设计与建卡，生产实现按各卡 Spec → Plan → Todo 推进，服务端和 ACP 由同事负责。
+前端已登记四张待认领任务：HC-217 项目导航、HC-218 会话只读与主动同步、HC-219 引用/任务/知识、HC-220 看板与轻量通知。职责、依赖和并行接点见[前端任务分工](docs/developer/project/项目协作设计任务衔接.md#3-前端任务与并行顺序)，外观对照见[个人与团队协同工作台交互原型](docs/developer/previews/personal-team-workbench/README.md)。当前仅完成设计与建卡，生产实现按各卡 Spec → Plan → Todo 推进，服务端和 ACP 由同事负责。
 
 ## 从源码启动
 

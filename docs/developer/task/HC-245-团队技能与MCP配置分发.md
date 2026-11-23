@@ -57,8 +57,7 @@ completed_at: -
 
 ## 职责与前置
 
-- 服务端（由后端同事维护）负责团队 Skill 包与受控 MCP 目录的存储、版本、安全扫描门禁与审核流接口；缺口按分工交同事，桌面端不私自新增后端 API。
-- 桌面端负责资产中心界面、上传预检、审核差异展示、本机 Skill 缓存目录物化以及向既有 `LocalAcpSessionSetup` 装配启用的 MCP/Skill。
+- 本卡全栈实施：服务端（`contracts/` + `server/` + `packages/collaboration-client/`）负责团队 Skill 包与受控 MCP 目录的存储、版本、安全扫描门禁与审核流接口；桌面端负责资产中心界面、上传预检、审核差异展示、本机 Skill 缓存目录物化以及向既有 `LocalAcpSessionSetup` 装配启用的 MCP/Skill。
 - 依赖 [HC-234](HC-234-桌面通用能力上移与ACP收口.md) 的通用 ACP MCP 透传能力与 [HC-240](HC-240-Workspace角色管理.md) 的管理员角色。
 
 ## 待定问题（Spec 阶段确定）
