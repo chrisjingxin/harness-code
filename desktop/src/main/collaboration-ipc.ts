@@ -48,6 +48,8 @@ import { bindLocalExecutionIpc } from "./local-execution-ipc.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
 import { PersonalStore } from "./personal-store.js"
 import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
+import { bindWorkbenchContextIpc } from "./workbench-context/context-ipc.js"
+import { WorkbenchContextService } from "./workbench-context/service.js"
 
 const CONVERSATION_STATUSES = new Set(["idle", "running", "waiting_approval", "error"])
 const TASK_STATUSES = new Set(["todo", "doing", "review", "done", "cancelled"])
@@ -225,6 +227,32 @@ export function bindCollaborationIpc(
         },
       )
     : null
+  const context = new WorkbenchContextService({
+    origin: origin ?? "http://unconfigured.invalid",
+    identity,
+    authorizeBinding: async scope => {
+      const local = await localConversations.getRecord(scope.accountId, scope.conversationId).catch(() => null)
+      if (local) return local.workspaceId === scope.workspaceId && local.projectId === scope.projectId
+      if (scope.workspaceId === null || scope.projectId === null) return false
+      const detail = await identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId)
+      return detail.ok && detail.value.conversation.ownerUserId === scope.accountId
+    },
+    onFeedback: feedback => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return
+      const result = feedback.result
+      const pending = result.status === "pending" || result.status === "saving"
+      const failed = ["error", "conflict", "cancelled"].includes(result.status)
+      window.webContents.send("workbench:local-execution:notice", {
+        kind: "context-tool", scope: feedback.scope, bindingId: feedback.bindingId, requestId: feedback.turnId,
+        tool: {
+          id: feedback.toolId, kind: "other", title: result.message,
+          status: pending ? "in_progress" : failed ? "failed" : "completed",
+          output: JSON.stringify(result, null, 2),
+        },
+      })
+    },
+  })
+  const unbindContext = bindWorkbenchContextIpc(window, trustedUrl, identity, context)
   const localImages = new LocalImageStore(join(app.getPath("userData"), "local-images"))
   const execution = createLocalExecutionCoordinator(window, identity, uploads, runtime, {
     grantsDir: join(app.getPath("userData"), "local-execution-grants"),
@@ -243,6 +271,11 @@ export function bindCollaborationIpc(
     origin: origin ?? "",
     personal,
     localConversations,
+    contextAssembler: context,
+    contextSession: {
+      prepare: (scope, bindingId) => context.prepareSession(scope, bindingId),
+      release: (scope, bindingId) => context.revokeSession(scope, bindingId),
+    },
     confirmDirectoryPrompt: async path => {
       const result = await dialog.showMessageBox(window, {
         type: "question",
@@ -259,7 +292,7 @@ export function bindCollaborationIpc(
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
-  const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "")
+  const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "", workspaceId => context.knowledge.invalidate(workspaceId))
   const unsubscribe = identity.onStateChanged(state => {
     uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
@@ -292,7 +325,11 @@ export function bindCollaborationIpc(
       if (!isUuid(workspaceId)) return formatIpcError("INVALID_REQUEST", "工作区标识无效。")
       return identity.withWorkspace(
         workspaceId,
-        (networkClient): Promise<CollaborationResult<unknown>> => invoke(networkClient, workspaceId, args),
+        async (networkClient): Promise<CollaborationResult<unknown>> => {
+          const result = await invoke(networkClient, workspaceId, args)
+          if (result.ok && ["createKnowledge", "editKnowledge", "archiveKnowledge"].includes(name)) context.knowledge.invalidate(workspaceId)
+          return result
+        },
         { publishConnectionError: false },
       )
     })
@@ -406,6 +443,8 @@ export function bindCollaborationIpc(
 
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
+    unbindContext()
+    void context.dispose().catch(() => {})
     void execution.dispose().catch(() => {})
     unsubscribe()
     unbindExecution()

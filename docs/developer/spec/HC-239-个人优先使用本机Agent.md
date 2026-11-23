@@ -20,7 +20,7 @@
 ### 1.2 解决思路与改后收益
 
 - **一套会话模型，执行权与可见性解耦**：把“谁能在本机运行 Agent”（执行权 = 当前登录账号 + 本机会话归属 + 用户授权目录）与“谁能看到这段对话”（可见性 = 是否主动发布到某个 Project）彻底拆开。云端同步只是挂在会话上的可选“发布器”，不再是本机执行的门槛。
-- **团队上下文与共享范围分离**：会话在新建时绑定当时选中的团队上下文（或“无团队”），之后不变；是否对他人可见完全取决于是否发布到所属团队的某个 Project。
+- **团队上下文与共享范围分离**：会话新建时记录选中的团队上下文（或“无团队”）；已有团队绑定保持固定。无团队会话主动发布到 Project 并确认后可显式绑定目标 Workspace；是否对他人可见由发布范围决定。
 - **改后收益**：
   - 任何已登录员工哪怕未加入任何团队、或协作服务端暂时离线，也能立即完成 Agent 预检并新建、续接个人会话；
   - 个人试验过程只存本机、不制造 Project 噪音；需要协作时可按“完整定稿正文”或“仅共享状态与成果摘要”一键发布到 Project，也可随时“停止共享”（已同步部分保留只读并标注“已停止同步”）；
@@ -217,7 +217,7 @@ export type LocalExecutionContextAssembler = {
 
 - **`index.json` 单条元数据字段（`LocalConversationRecord`）**：
   - `conversationId`: UUID v4
-  - `workspaceId`: `string | null`（新建时锁定的团队上下文）
+  - `workspaceId`: `string | null`（新建时记录的团队上下文；无团队会话仅在主动发布并确认后显式绑定目标 Workspace，已有团队绑定保持固定）
   - `projectId`: `string | null`（当前或曾经发布关联的 Project ID；未发布过为 `null`）
   - `shareMode`: `"full" | "summary_only" | null`
   - `shareStatus`: `"local_only" | "active" | "stopped"`

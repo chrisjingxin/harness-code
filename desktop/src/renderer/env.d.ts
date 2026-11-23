@@ -1,7 +1,7 @@
 import type { CollaborationHost } from "@workbench/collaboration-client/types"
 import type {
   CollaborationAppsHost, DesktopHost, DesktopLocalExecutionHost, LocalConversationsHost, LocalDirectoryHost, OrganizationHost, PersonalHost,
-  ProjectConversationHost, ProjectUpdatesHost,
+  ProjectConversationHost, ProjectUpdatesHost, WorkbenchContextHost,
 } from "../shared/index.js"
 
 declare module "*.jpg" {
@@ -19,6 +19,7 @@ declare global {
     localConversations: LocalConversationsHost
     localDirectory: LocalDirectoryHost
     localExecution: DesktopLocalExecutionHost
+    workbenchContext: WorkbenchContextHost
     personal: PersonalHost
     organization: OrganizationHost
   }

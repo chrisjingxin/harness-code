@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, IdentityState } from "@workbench/collaboration-client/types"
 import type {
   CollaborationAppsHost, DesktopHost, LocalConversationsHost, LocalDirectoryHost,
-  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState,
+  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState, WorkbenchContextHost,
 } from "../shared/index.js"
 import { createLocalExecutionHost } from "./local-execution-api.js"
 import { createProjectUpdatesHost } from "./project-updates-api.js"
@@ -60,6 +60,13 @@ const localConversations: LocalConversationsHost = {
   remove: conversationId => ipcRenderer.invoke("workbench:local-conversations:remove", conversationId),
 }
 contextBridge.exposeInMainWorld("localConversations", localConversations)
+
+const workbenchContext: WorkbenchContextHost = {
+  listDirectories: scope => ipcRenderer.invoke("workbench:context:list-directories", scope),
+  confirmDirectory: (scope, input) => ipcRenderer.invoke("workbench:context:confirm-directory", scope, input),
+  removeDirectory: (scope, entryId, revision) => ipcRenderer.invoke("workbench:context:remove-directory", scope, entryId, revision),
+}
+contextBridge.exposeInMainWorld("workbenchContext", workbenchContext)
 
 const collaborationApps: CollaborationAppsHost = {
   createSnapshot: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createSnapshot", workspaceId, projectId, request),

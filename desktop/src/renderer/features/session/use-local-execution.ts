@@ -74,6 +74,7 @@ type BufferedBindingNotices = {
 }
 
 type Screen = {
+  contextTurns?: Map<string, string>
   timeline: LocalExecutionView
   queue?: PromptQueueView
   preparedFor?: Target
@@ -207,6 +208,9 @@ export function useLocalExecution(
   ): void {
     if (flight.turnId !== undefined) return
     flight.turnId = turnId
+    screen.contextTurns ??= new Map()
+    screen.contextTurns.set(flight.requestId, turnId)
+    if (screen.contextTurns.size > 200) screen.contextTurns.delete(screen.contextTurns.keys().next().value!)
     const finalImages = images && images.length > 0 ? images : flight.images
     screen.timeline = applyLocalExecutionUpdate(screen.timeline, {
       kind: "accepted",
@@ -265,6 +269,14 @@ export function useLocalExecution(
         return
       }
       if (!screen) return
+      if (notice.kind === "context-tool") {
+        const turnId = screen.contextTurns?.get(notice.requestId)
+        if (turnId && screen.binding?.bindingId === notice.bindingId) {
+          screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "context-tool", turnId, tool: notice.tool })
+          refresh()
+        }
+        return
+      }
       if (notice.kind === "prompt-queue") {
         applyQueue(screen, notice.queue)
         return

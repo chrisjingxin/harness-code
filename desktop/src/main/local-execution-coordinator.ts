@@ -19,6 +19,7 @@ import type {
   LocalAcpPermission,
   LocalAcpPromptBlock,
   LocalAcpSession,
+  LocalAcpSessionSetup,
   LocalAcpSessionState,
   LocalAcpTool,
   UnavailableReason,
@@ -110,6 +111,11 @@ export type LocalExecutionCoordinatorOptions = {
   readonly personal?: PersonalStore
   readonly localConversations?: LocalConversationStore
   readonly contextAssembler?: LocalExecutionContextAssembler
+  /** 仅管理桌面上下文工具的建会配置与凭据；准备授权不依赖尚未建立的执行绑定。 */
+  readonly contextSession?: {
+    prepare(scope: LocalExecutionScope, bindingId: string): Promise<LocalAcpSessionSetup>
+    release(scope: LocalExecutionScope, bindingId: string): void
+  }
   readonly confirmDirectoryPrompt?: (path: string) => Promise<boolean>
 }
 
@@ -149,6 +155,8 @@ type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
 }
 type Binding = {
   readonly id: string
+  readonly scope: LocalExecutionScope
+  readonly contextDiagnostic?: string
   readonly login: Login
   readonly selectedPath: string
   readonly directory: DirectoryGrant
@@ -228,8 +236,9 @@ function kiroInsertionId(update: unknown): string | undefined {
     ? known.messageId : undefined
 }
 
-function toExecutionSessionState(providerId: string, state: LocalAcpSessionState): LocalExecutionSessionState {
+function toExecutionSessionState(providerId: string, state: LocalAcpSessionState, contextDiagnostic?: string): LocalExecutionSessionState {
   const { connected, modes, currentModeId, models, configOptions, availableCommands, plans, usage, restoreStatus, sessionInfo } = state
+  const setupDiagnostics = [...(state.setupDiagnostics ?? []), ...(contextDiagnostic ? [contextDiagnostic] : [])]
   return {
     providerId,
     connected,
@@ -242,7 +251,7 @@ function toExecutionSessionState(providerId: string, state: LocalAcpSessionState
     plans,
     ...(usage ? { usage } : {}),
     restoreStatus,
-    ...(state.setupDiagnostics?.length ? { setupDiagnostics: state.setupDiagnostics } : {}),
+    ...(setupDiagnostics.length ? { setupDiagnostics } : {}),
     ...(sessionInfo?.title !== undefined ? { sessionTitle: sessionInfo.title } : {}),
   }
 }
@@ -467,7 +476,7 @@ export function createLocalExecutionCoordinator(
       scope,
       bindingId: binding.id,
       kind: "session-state",
-      state: toExecutionSessionState(binding.providerId, state),
+      state: toExecutionSessionState(binding.providerId, state, binding.contextDiagnostic),
     })
   }
 
@@ -476,6 +485,8 @@ export function createLocalExecutionCoordinator(
   }
 
   async function release(key: string, binding: Binding): Promise<void> {
+    // 先撤销工具凭据，再等待Agent退出，关闭期间的迟到工具请求不能继续读取或提交。
+    options?.contextSession?.release(binding.scope, binding.id)
     await binding.session.close()
     await binding.checkpointPending
     await binding.shareTail?.catch(() => {})
@@ -1222,9 +1233,11 @@ export function createLocalExecutionCoordinator(
             resolvedProviderId = providerId ?? "default"
           }
           const providerMatches = existing?.providerId === resolvedProviderId
+          const contextScopeMatches = !options?.contextSession || existing?.scope.workspaceId === scope.workspaceId
+            && existing.scope.projectId === scope.projectId
           if (existing?.login.generation === login.generation && existing.selectedPath === path && existing.directory.path === directory.path
             && existing.directory.dev === directory.dev && existing.directory.ino === directory.ino
-            && providerMatches) {
+            && providerMatches && contextScopeMatches) {
             if (options?.localConversations) {
               const localRecord = await options.localConversations.getRecord(login.accountId, scope.conversationId).catch(() => null)
               if (localRecord && (localRecord.directoryPath !== path || localRecord.providerId !== resolvedProviderId)) {
@@ -1236,6 +1249,10 @@ export function createLocalExecutionCoordinator(
             }
             if (existing.session.getAvailability().available && existing.session.connect && !existing.session.getState?.()?.connected) {
               try { await existing.session.connect() } catch { /* 初始化失败时保留绑定等待下次重试。 */ }
+            }
+            if (!isCurrent(login)) {
+              await release(key, existing)
+              return { ...forbidden(), directoryStatus: "unavailable" }
             }
             publishSessionSnapshot(login, scope, existing)
             return {
@@ -1249,14 +1266,35 @@ export function createLocalExecutionCoordinator(
           }
           if (existing) await release(key, existing)
           if (!isCurrent(login)) return { ...forbidden(), directoryStatus: "unavailable" }
-          const session = await targetHost.bind(scope, directory.path)
-          if (!isCurrent(login)) { await session.close(); return { ...forbidden(), directoryStatus: "unavailable" } }
           const bindingId = randomUUID()
+          let setup: LocalAcpSessionSetup | undefined
+          let contextDiagnostic: string | undefined
+          if (options?.contextSession && scope.workspaceId !== null) {
+            try { setup = await options.contextSession.prepare(scope, bindingId) }
+            catch (error) {
+              options.contextSession.release(scope, bindingId)
+              contextDiagnostic = `项目记忆工具暂不可用：${error instanceof Error ? error.message : "无法准备本机MCP服务。"} 普通会话可以继续。`
+            }
+          }
+          if (!isCurrent(login)) {
+            options?.contextSession?.release(scope, bindingId)
+            return { ...forbidden(), directoryStatus: "unavailable" }
+          }
+          let session: LocalAcpSession
+          try { session = await targetHost.bind(scope, directory.path, setup) }
+          catch (error) { options?.contextSession?.release(scope, bindingId); throw error }
+          if (!isCurrent(login)) {
+            options?.contextSession?.release(scope, bindingId)
+            await session.close()
+            return { ...forbidden(), directoryStatus: "unavailable" }
+          }
           const clientCapabilities = resolvedProviderId === "harness" ? parseHarnessAgentCapabilitiesMeta(clientMeta)?.capabilities ?? [] : []
           const enabled = (capability: string) => clientCapabilities.includes(capability)
             && Boolean(parseHarnessAgentCapabilitiesMeta(session.getState?.()?.agentCapabilities)?.capabilities.includes(capability))
           const binding: Binding = {
             id: bindingId,
+            scope: { ...scope },
+            contextDiagnostic,
             login,
             selectedPath: path,
             directory,
@@ -1452,7 +1490,7 @@ export function createLocalExecutionCoordinator(
                   scope,
                   bindingId,
                   kind: "session-state",
-                  state: toExecutionSessionState(resolvedProviderId, sessionEvent.state),
+                  state: toExecutionSessionState(resolvedProviderId, sessionEvent.state, contextDiagnostic),
                 })
                 return
               }
@@ -1475,10 +1513,10 @@ export function createLocalExecutionCoordinator(
             } catch {
               // 冷启动连接或认证未完成时保留绑定，交由后续发送或切换代理处理。
             }
-            if (!isCurrent(login) || disposed) {
-              await release(key, binding)
-              return { ...forbidden(), directoryStatus: "unavailable" }
-            }
+          }
+          if (!isCurrent(login)) {
+            await release(key, binding)
+            return { ...forbidden(), directoryStatus: "unavailable" }
           }
           publishSessionSnapshot(login, scope, binding)
           return {

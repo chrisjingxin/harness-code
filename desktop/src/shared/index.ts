@@ -10,3 +10,5 @@ export * from "./personal.js"
 export * from "./collaboration-reference.js"
 export * from "./local-execution-host.js"
 export * from "./local-conversations-host.js"
+
+export type * from "./workbench-context-host.js"
