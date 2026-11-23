@@ -26,6 +26,12 @@ const host: DesktopHost = {
 contextBridge.exposeInMainWorld("workbench", host)
 
 const collaboration: CollaborationHost = {
+  refreshIdentity: () => ipcRenderer.invoke("collaboration:refresh-identity"),
+  getWorkspaceAccess: workspace => ipcRenderer.invoke("workspace:access", workspace),
+  addWorkspaceMember: (workspace, request) => ipcRenderer.invoke("workspace:add-member", workspace, request),
+  changeWorkspaceRole: (workspace, user, request) => ipcRenderer.invoke("workspace:role", workspace, user, request),
+  previewWorkspaceRemoval: (workspace, user, after = null, version) => ipcRenderer.invoke("workspace:removal-preview", workspace, user, after, version),
+  removeWorkspaceMember: (workspace, user, request) => ipcRenderer.invoke("workspace:remove", workspace, user, request),
   getState: () => ipcRenderer.invoke("collaboration:get-state"),
   listDemoUsers: () => ipcRenderer.invoke("collaboration:demo-users"),
   signIn: userNo => ipcRenderer.invoke("collaboration:sign-in", userNo),
@@ -98,6 +104,8 @@ contextBridge.exposeInMainWorld("localDirectory", localDirectory)
 contextBridge.exposeInMainWorld("localExecution", createLocalExecutionHost(ipcRenderer))
 
 const organization: OrganizationHost = {
+  createRepository: (workspace, request) => ipcRenderer.invoke("workspace:create-repository", workspace, request),
+  updateRepository: (workspace, repository, request) => ipcRenderer.invoke("workspace:update-repository", workspace, repository, request),
   listProjects: workspaceId => ipcRenderer.invoke("organization:list-projects", workspaceId),
   createProject: (workspaceId, request) => ipcRenderer.invoke("organization:create-project", workspaceId, request),
   getProject: (workspaceId, projectId) => ipcRenderer.invoke("organization:get-project", workspaceId, projectId),

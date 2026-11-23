@@ -112,6 +112,8 @@ final class IdentityConverter {
         po.setSlug(workspace.slug());
         po.setName(workspace.name());
         po.setCreatedAt(Times.ofMs(workspace.createdAtMs()));
+        po.setCreatorUserId(workspace.creatorUserId());
+        po.setAccessVersion(workspace.accessVersion());
         return po;
     }
 
@@ -120,6 +122,7 @@ final class IdentityConverter {
                 po.getWorkspaceId(),
                 po.getSlug(),
                 po.getName(),
+                po.getCreatorUserId(), po.getAccessVersion(),
                 Times.ms(po.getCreatedAt())
         );
     }
@@ -129,6 +132,16 @@ final class IdentityConverter {
         po.setWorkspaceId(member.workspaceId());
         po.setUserId(member.userId());
         po.setCreatedAt(Times.ofMs(member.createdAtMs()));
+        po.setRole(member.role().db);
+        po.setStatus(member.active() ? 1 : 2);
+        po.setVersion(member.version());
+        po.setUpdatedAt(Times.ofMs(member.updatedAtMs()));
+        po.setLeftAt(Times.ofMs(member.leftAtMs()));
         return po;
+    }
+    static WorkspaceMember toMember(WorkspaceMemberPO po) {
+        return new WorkspaceMember(po.getWorkspaceId(), po.getUserId(),
+                workbench.collaboration.domain.identity.WorkspaceRole.fromDb(po.getRole()), po.getStatus()==1,
+                po.getVersion(), Times.ms(po.getCreatedAt()), Times.ms(po.getUpdatedAt()), Times.ms(po.getLeftAt()));
     }
 }

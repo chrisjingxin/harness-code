@@ -1,3 +1,4 @@
+import { bindWorkspaceIpc } from "./workspace-ipc.js"
 /**
  * 【功能定义】桌面身份、项目会话、协作应用与个人视图 IPC 装配入口：
  * 统一经 `ipc-guard.ts` 校验来源与参数数量 → 强类型参数/请求体守卫 → 窗口工作区守卫 → 不含凭据的安全结果。
@@ -291,6 +292,7 @@ export function bindCollaborationIpc(
   })
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads)
+  const unbindWorkspace = bindWorkspaceIpc(window, trustedUrl, identity)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "", workspaceId => context.knowledge.invalidate(workspaceId))
   const unsubscribe = identity.onStateChanged(state => {
@@ -449,6 +451,7 @@ export function bindCollaborationIpc(
     unsubscribe()
     unbindExecution()
     unbindLocalConversations()
+    unbindWorkspace()
     unbindOrganization()
     unbindProjectUpdates()
     identity.dispose()

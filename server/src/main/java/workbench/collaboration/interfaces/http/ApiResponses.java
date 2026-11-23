@@ -84,6 +84,13 @@ public final class ApiResponses {
             Map.entry("KNOWLEDGE_ARCHIVED", "CLB3014"),
             Map.entry("CONVERSATION_CONFLICT", "CLB3015"),
             Map.entry("CONVERSATION_SHARING_STOPPED", "CLB3016"),
+            Map.entry("WORKSPACE_ADMIN_REQUIRED", "CLB2008"),
+            Map.entry("LAST_WORKSPACE_ADMIN", "CLB3017"),
+            Map.entry("TARGET_UNAVAILABLE", "CLB3018"),
+            Map.entry("HANDOFF_PREVIEW_STALE", "CLB3019"),
+            Map.entry("HANDOFF_INCOMPLETE", "CLB3020"),
+            Map.entry("PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED", "CLB3021"),
+            Map.entry("WORKSPACE_MEMBER_LIMIT", "CLB3022"),
             Map.entry("INTERNAL_ERROR", "CLB5001"),
             Map.entry("SERVICE_UNAVAILABLE", "CLB5002")
     );
@@ -209,6 +216,13 @@ public final class ApiResponses {
             case "REPOSITORY_ARCHIVED" -> "仓库已归档";
             case "OWNER_CANNOT_LEAVE" -> "项目负责人不能移出自己";
             case "SEQUENCE_CONFLICT" -> "消息序号与服务端水位不一致，请按 expectedSequence 续传";
+            case "WORKSPACE_ADMIN_REQUIRED" -> "此操作需要团队管理员权限";
+            case "LAST_WORKSPACE_ADMIN" -> "团队至少需要一名有效管理员，请先设置另一名管理员";
+            case "TARGET_UNAVAILABLE" -> "接手人或目标成员已不可用，请刷新选择";
+            case "HANDOFF_PREVIEW_STALE" -> "工作或成员权限已变化，请重新查看交接清单";
+            case "HANDOFF_INCOMPLETE" -> "仍有任务或项目需要接手人";
+            case "PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED" -> "接手人尚不在该项目，请明确确认其阅读权限";
+            case "WORKSPACE_MEMBER_LIMIT" -> "团队成员数量已达上限";
             case "INVALID_REQUEST" -> "请求参数无效";
             default -> "服务暂时无法处理请求";
         };

@@ -1163,7 +1163,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     execution: localExecutionPort ?? execution ?? defaultExecutionPort,
     rendering,
     resolveOwner: ownerId => memberById.get(ownerId),
-    resolveOwnerName: ownerId => memberById.get(ownerId)?.userName ?? `成员 (${ownerId.slice(0, 6)})`,
+    resolveOwnerName: ownerId => { const member = memberById.get(ownerId); return member ? `${member.userName}${members.find(m => m.user.id === ownerId)?.status === "removed" ? "（原成员已离开）" : ""}` : `成员 (${ownerId.slice(0, 6)})` },
     onChooseNewDirectory,
     onSelectNewDirectory,
     onSelectNewProvider: providerId => setNewProviderId(providerId),

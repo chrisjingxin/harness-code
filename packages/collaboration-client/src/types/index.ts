@@ -6,3 +6,5 @@ export type * from "./identity.js"
 export type * from "./organization.js"
 export type * from "./collaboration.js"
 export * from "./scope.js"
+
+export * from "./workspace.js"

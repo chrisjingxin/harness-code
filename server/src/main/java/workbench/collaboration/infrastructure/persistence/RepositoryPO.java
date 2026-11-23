@@ -65,6 +65,16 @@ public class RepositoryPO {
     @TableField("updated_at")
     private LocalDateTime updatedAt;
 
+    /** 当前负责人独立于登记者；空串表示待认领。 */
+    @TableField("owner_user_id")
+    private String ownerUserId;
+    @TableField("version")
+    private Long version;
+    public String getOwnerUserId() { return ownerUserId; }
+    public void setOwnerUserId(String value) { ownerUserId=value; }
+    public Long getVersion() { return version; }
+    public void setVersion(Long value) { version=value; }
+
     public Long getId() {
         return id;
     }

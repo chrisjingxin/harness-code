@@ -1,9 +1,10 @@
+import { TeamSettings } from "./features/workspace/team-settings.js"
 /**
  * 正式窗口装配：宿主确认的身份 → 恢复账号记录并确定团队 → Project 外壳与会话协调器。
  * 个人记录按身份重新创建，退出前先保存；业务读取只走 preload 暴露的具名端口。
  */
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { CollaborationHost, UserSummary } from "@workbench/collaboration-client/types"
+import type { CollaborationHost, UserSummary, WorkspaceRole } from "@workbench/collaboration-client/types"
 import type {
   AccountPersonal,
   CollaborationAppsHost,
@@ -137,6 +138,7 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     </div>
     <div className="desktop-set-section">账号与团队</div>
     <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />
+    {settingsOpen && workspace && signedIn && <TeamSettings host={props.collaboration} organization={props.organization} workspace={workspace} accountId={signedIn.user.id} />}
   </>
 
   if (signedIn && account === "ready" && workspace) {
@@ -155,6 +157,8 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       persistence={persistence}
       workspaceId={workspace.id}
       workspaceName={workspace.name}
+      workspaceRole={workspace.role}
+      workspaceAccessVersion={workspace.accessVersion}
       workspaces={workspaceItems}
       onSelectWorkspace={selectWorkspace}
       colorScheme={props.preferences.state.colorScheme}
@@ -238,6 +242,8 @@ function WorkspaceProjectWorkbench(props: {
   persistence: PersonalPersistence
   workspaceId: string
   workspaceName: string
+  workspaceRole: WorkspaceRole
+  workspaceAccessVersion: number
   workspaces?: readonly NavigationWorkspaceItem[]
   onSelectWorkspace?(workspaceId: string): void
   colorScheme?: "light" | "dark"
@@ -257,6 +263,7 @@ function WorkspaceProjectWorkbench(props: {
     workspaceId: props.workspaceId,
     user: props.user,
   })
+  useEffect(() => { void shell.team.reload(); void shell.projects.reload(); void shell.detail.reload() }, [props.workspaceAccessVersion])
   const currentProject = shell.projects.projects.find(item => item.projectId === shell.projectId)
   const selectedConversationId = shell.personal.page.kind === "conversation"
     ? shell.personal.page.conversationId
@@ -354,6 +361,7 @@ function WorkspaceProjectWorkbench(props: {
   const taskContext: TasksContext | undefined = props.collaborationApps && shell.scope ? {
     host: props.collaborationApps, scope: shell.scope, projectName: currentProject?.name ?? "当前项目", projectActive: canPublish,
     ownerName: pageController.resolveOwnerName, localDeviceId: props.user.id,
+    canActForCreator: creatorId => shell.team.availability.state === "ready" && currentProject?.role === "owner" && !shell.team.members.some(m => m.user.id === creatorId && m.status === "active" && m.enabled),
     sessions: integration, directories: pageController.directories,
     chooseDirectory, locateConversation, refreshTaskMetadata,
   } : undefined
@@ -419,7 +427,7 @@ function WorkspaceProjectWorkbench(props: {
         render({ scope, page, visible }) {
           if (!visible || page.kind !== "knowledge") return null
           return <div className="collaboration-page-scroll" key={JSON.stringify(scope)}>
-            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName}
+            <LiveTeamKnowledge host={taskContext.host} scope={scope} teamName={props.workspaceName} canManage={props.workspaceRole === "admin"}
               ownerName={pageController.resolveOwnerName} rendering={pageController.rendering}
               revision={knowledgeRevision} refreshMetadata={refreshKnowledgeMetadata}
               requestedItem={knowledgeRequest}

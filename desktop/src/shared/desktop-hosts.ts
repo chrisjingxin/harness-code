@@ -19,7 +19,7 @@ import type {
   ProjectMemberChangeResponse,
   ProjectPatchRequest,
   ProjectResponse,
-  RepositoryListResponse,
+  RepositoryListResponse, RepositorySummary, RepositoryPatchRequest, RepositoryCreateRequest,
   SnapshotCreateRequest,
   SnapshotResponse,
   TaskConversationRequest,
@@ -38,6 +38,8 @@ export interface OrganizationHost {
   updateProject(workspaceId: string, projectId: string, request: ProjectPatchRequest): Promise<CollaborationResult<ProjectResponse>>
   addMember(workspaceId: string, projectId: string, request: ProjectMemberAddRequest): Promise<CollaborationResult<ProjectMemberChangeResponse>>
   removeMember(workspaceId: string, projectId: string, userId: string): Promise<CollaborationResult<ProjectMemberChangeResponse>>
+  createRepository(workspaceId: string, request: RepositoryCreateRequest): Promise<CollaborationResult<RepositorySummary>>
+  updateRepository(workspaceId: string, repositoryId: string, request: RepositoryPatchRequest): Promise<CollaborationResult<RepositorySummary>>
   listRepositories(workspaceId: string): Promise<CollaborationResult<RepositoryListResponse>>
   linkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>>
   unlinkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>>

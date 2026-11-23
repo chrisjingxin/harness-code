@@ -22,6 +22,8 @@ export class CollaborationState {
   #client: CollaborationClient | null = null
   #state: IdentityState = { status: "signedOut" }
   #lastKnownWorkspaces: WorkspaceSummary[] = []
+  #refresh: Promise<CollaborationResult<CurrentUserResponse>> | null = null
+  #workspaceRevisions = new Map<string, number>()
   #generation = 0
   #disposed = false
   #exiting = false
@@ -40,6 +42,12 @@ export class CollaborationState {
   #cancelled() { return identityError("AUTHENTICATION_REQUIRED", "身份操作已结束，请确认当前账号。") }
   #unavailable() { return identityError("NETWORK_UNAVAILABLE", "协作服务不可用，请检查连接后重试。") }
   #publish(state: IdentityState) {
+    const previous = this.#state.status === "signedIn" ? this.#state.workspaces : this.#lastKnownWorkspaces
+    const next = state.status === "signedIn" ? state.workspaces : []
+    for (const id of new Set([...previous.map(w => w.id), ...next.map(w => w.id)])) {
+      const a = previous.find(w => w.id === id), b = next.find(w => w.id === id)
+      if (a?.accessVersion !== b?.accessVersion || a?.role !== b?.role || a?.memberVersion !== b?.memberVersion) this.#workspaceRevisions.set(id, (this.#workspaceRevisions.get(id) ?? 0) + 1)
+    }
     this.#state = state
     if (state.status === "signedIn") {
       this.#lastKnownWorkspaces = structuredClone(state.workspaces)
@@ -76,6 +84,21 @@ export class CollaborationState {
       else this.#failure(result.error)
     }
     return { ok: true, value: structuredClone(this.#state) }
+  }
+
+  /** 实际请求身份接口；合并并发刷新，账号代次与团队修订分别隔离。 */
+  refreshIdentity(): Promise<CollaborationResult<CurrentUserResponse>> {
+    if (this.#refresh) return this.#refresh
+    if (this.#disposed || !this.#client || this.#state.status === "signedOut" || this.#state.status === "loading") return Promise.resolve(this.#cancelled())
+    const generation = this.#generation
+    const pending = this.#client.getCurrentUser().then(result => {
+      if (!this.#current(generation)) return this.#cancelled()
+      if (result.ok) this.#publish({ status: "signedIn", ...result.value })
+      else this.#failure(result.error)
+      return result
+    }).finally(() => { if (this.#refresh === pending) this.#refresh = null })
+    this.#refresh = pending
+    return pending
   }
 
   /** 匿名演示列表也来自服务；读取失败不生成本地账号。 */
@@ -125,8 +148,10 @@ export class CollaborationState {
   async listMembers(workspaceId: string): Promise<CollaborationResult<MembersResponse>> {
     if (this.#disposed || this.#state.status !== "signedIn" || !this.#client) return this.#cancelled()
     const generation = this.#generation
+    const revision = this.#workspaceRevisions.get(workspaceId) ?? 0
     const result = await this.#client.listMembers(workspaceId)
     if (!this.#current(generation)) return this.#cancelled()
+    if (revision !== (this.#workspaceRevisions.get(workspaceId) ?? 0)) return identityError("VERSION_CONFLICT", "团队权限已变化，请重新读取。")
     if (!result.ok) this.#failure(result.error)
     return result
   }
@@ -144,8 +169,11 @@ export class CollaborationState {
     if (!this.#state.workspaces.some(workspace => workspace.id === workspaceId)) return identityError("RESOURCE_NOT_FOUND", "工作区不可用。")
     if (!this.#client) return this.#unavailable()
     const generation = this.#generation
+    const revision = this.#workspaceRevisions.get(workspaceId) ?? 0
     const result = await fn(this.#client)
     if (!this.#current(generation)) return this.#cancelled()
+    if (revision !== (this.#workspaceRevisions.get(workspaceId) ?? 0)) return identityError("VERSION_CONFLICT", "团队权限已变化，请重新读取。")
+    if (!result.ok && ["WORKSPACE_MEMBER_REQUIRED", "WORKSPACE_ADMIN_REQUIRED"].includes(result.error.code)) await this.refreshIdentity()
     const publishConnectionError = options?.publishConnectionError ?? true
     if (!result.ok && (publishConnectionError || result.error.code === "AUTHENTICATION_REQUIRED")) this.#failure(result.error)
     return result

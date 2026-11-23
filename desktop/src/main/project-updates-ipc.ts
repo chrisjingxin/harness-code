@@ -85,6 +85,11 @@ export function bindProjectUpdatesIpc(
           && contents.mainFrame.url === trustedUrl
       },
       publish: notice => {
+        if (notice.kind === "event" && notice.event.type === "workspace.member_changed"
+            || notice.kind === "status" && ["connected", "unavailable"].includes(notice.status)) {
+          onKnowledgeUpdated?.(workspaceId)
+          void identity.refreshIdentity()
+        }
         if (notice.kind === "event" && notice.event.type === "knowledge.updated") onKnowledgeUpdated?.(workspaceId)
         try { contents.send(projectUpdatesChannels.notice, notice) }
         catch { updates.stop(subscriptionId) }

@@ -32,7 +32,7 @@ class FoundationTest {
     }
 
     private static Set<String> compliantTables() {
-        return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member",
+        return Set.of("wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_workspace_request",
                 "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
                 "wb_conversation", "wb_conversation_repository", "wb_snapshot",
                 "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
@@ -46,9 +46,11 @@ class FoundationTest {
                 "wb_user_org.org_no", "wb_user_org.status", "wb_user_org.updated_at",
                 "wb_org.org_id", "wb_org.org_no", "wb_org.org_name",
                 "wb_org.parent_org_id", "wb_org.path_id", "wb_org.path_name", "wb_org.updated_at",
-                "wb_workspace.workspace_id",
+                "wb_workspace.workspace_id", "wb_workspace.creator_user_id", "wb_workspace.access_version",
+                "wb_workspace_member.role", "wb_workspace_member.status", "wb_workspace_member.version", "wb_workspace_member.updated_at", "wb_workspace_member.left_at",
+                "wb_workspace_request.workspace_id", "wb_workspace_request.actor_id", "wb_workspace_request.request_id", "wb_workspace_request.fingerprint", "wb_workspace_request.response",
                 "wb_repository.repository_id", "wb_repository.remote_url", "wb_repository.remote_url_sha256",
-                "wb_repository.status", "wb_project.project_id", "wb_project.owner_user_id", "wb_project.version",
+                "wb_repository.status", "wb_repository.owner_user_id", "wb_repository.version", "wb_project.project_id", "wb_project.owner_user_id", "wb_project.version",
                 "wb_conversation.conversation_id", "wb_conversation.project_id", "wb_conversation.owner_user_id",
                 "wb_conversation.status", "wb_conversation.brief_source", "wb_conversation.brief_updated_at",
                 "wb_conversation.synced_sequence", "wb_conversation.share_mode", "wb_conversation.share_status",
@@ -61,7 +63,7 @@ class FoundationTest {
                 "wb_snapshot.created_by_user_id", "wb_snapshot.created_at",
                 "wb_task.task_id", "wb_task.project_id", "wb_task.assignee_id", "wb_task.status", "wb_task.version", "wb_task.conversation_id",
                 "wb_task_transition.task_id", "wb_task_transition.version", "wb_task_transition.actor_id",
-                "wb_task_transition.from_status", "wb_task_transition.to_status", "wb_task_transition.commit_sha",
+                "wb_task_transition.from_status", "wb_task_transition.to_status", "wb_task_transition.commit_sha", "wb_task_transition.from_assignee_id", "wb_task_transition.to_assignee_id", "wb_task_transition.previous_conversation_id",
                 "wb_task_link.task_id", "wb_task_link.link_type", "wb_task_link.version_id", "wb_task_link.knowledge_id",
                 "wb_task_request.project_id", "wb_task_request.actor_id", "wb_task_request.request_id", "wb_task_request.fingerprint", "wb_task_request.response",
                 "wb_knowledge_item.workspace_id", "wb_knowledge_item.knowledge_id", "wb_knowledge_item.term_key",
@@ -75,7 +77,7 @@ class FoundationTest {
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("19"));
+        assertTrue(error.getMessage().contains("20"));
     }
 
     @Test

@@ -55,7 +55,7 @@ export interface TaskSummary {
 }
 
 export interface TaskTransition {
-  kind: "created" | "edited" | "transition" | "conversation_linked"
+  kind: "created" | "edited" | "transition" | "conversation_linked" | "reassigned"
   actorId: string
   fromStatus: TaskStatus | null
   toStatus: TaskStatus
@@ -63,6 +63,7 @@ export interface TaskTransition {
   note: string
   commitSha: string
   occurredAtMs: number
+  handoff: { fromAssigneeId: string; toAssigneeId: string; previousConversationId: string | null } | null
 }
 
 export interface TaskDetail {
@@ -166,7 +167,7 @@ export interface NotificationEvent {
   id: number
   eventId: string
   type: "task.assigned" | "task.changed" | "conversation.brief_updated" | "snapshot.created" |
-    "knowledge.updated" | "project.member_changed"
+    "knowledge.updated" | "project.member_changed" | "workspace.member_changed"
   objectId: string
   projectId: string | null
   occurredAtMs: number

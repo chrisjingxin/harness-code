@@ -69,6 +69,8 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     return { origin: this.options.origin, accountId: session.scope.accountId, workspaceId: session.scope.workspaceId }
   }
   async #authorize(session: Session) {
+    const fresh = await this.options.identity.refreshIdentity()
+    if (!fresh.ok) throw new Error("无法确认当前团队资格，暂停团队资料读取与写回。")
     if (!this.#current(session) || !await this.options.authorizeBinding(session.scope, session.bindingId) || !this.#current(session)) throw new Error("登录身份或会话绑定已失效。")
   }
   #revoke(session: Session) {

@@ -52,6 +52,7 @@ public class SnapshotAppService {
     /** 校验来源和范围，保存完整正文。空材料或超预算时不分配可读取的快照。 */
     @Transactional
     public String create(String userId, String workspaceId, String projectId, String rawBody) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         var project = policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         if (project.status() == ProjectStatus.ARCHIVED) {
@@ -80,6 +81,7 @@ public class SnapshotAppService {
     /** 按当前项目读权限返回原始快照。项目归档后仍可读。 */
     @Transactional(readOnly = true)
     public String read(String userId, String workspaceId, String projectId, String snapshotId) {
+        policy.requireWorkspaceMember(workspaceId, userId);
         policy.requireProject(workspaceId, projectId);
         policy.requireActiveMember(projectId, userId);
         return encode(snapshots.findInProject(projectId, snapshotId)

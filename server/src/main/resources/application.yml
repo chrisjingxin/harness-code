@@ -32,6 +32,8 @@ server:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    # 团队交接在同一事务混合 JDBC/Mapper，语句间必须读取最新资格。
+    local-cache-scope: statement
   global-config:
     banner: false
     db-config:

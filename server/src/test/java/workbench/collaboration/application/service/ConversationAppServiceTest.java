@@ -71,7 +71,7 @@ class ConversationAppServiceTest {
         projects.insertReference(new ProjectRepositoryRef(PROJECT, REPO, 1L));
         repositories.items.put(REPO, new Repository(
                 REPO, WS, "中台服务", "git@example.com:team/middle.git", "main",
-                RepositoryStatus.ACTIVE, OWNER, 1L, 1L));
+                RepositoryStatus.ACTIVE, OWNER, null, 1L, 1L, 1L));
         NotificationPort notificationPort = (eventType, subjectId, payload) -> notifications.add(eventType + ":" + subjectId);
         SearchIndexBus indexBus = (workspaceId, docJson) -> indexedDocs.add(docJson);
         service = new ConversationAppService(

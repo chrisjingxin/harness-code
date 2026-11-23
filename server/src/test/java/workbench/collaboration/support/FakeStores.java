@@ -47,6 +47,11 @@ public final class FakeStores {
             members.add(workspaceId + ":" + userId);
         }
 
+        @Override public void lockWorkspace(String workspaceId) {}
+        @Override public Optional<workbench.collaboration.domain.identity.WorkspaceMember> findMember(String workspaceId,String userId) {
+            return memberExists(workspaceId,userId) ? Optional.of(new workbench.collaboration.domain.identity.WorkspaceMember(workspaceId,userId,
+                workbench.collaboration.domain.identity.WorkspaceRole.DEVELOPER,true,1,1,1,1)) : Optional.empty();
+        }
         @Override public Optional<User> findUserById(String id) { return Optional.ofNullable(users.get(id)); }
         @Override public Optional<User> findUserByUserNo(String userNo) { return Optional.empty(); }
         @Override public void insertUser(User user) { users.put(user.id(), user); }

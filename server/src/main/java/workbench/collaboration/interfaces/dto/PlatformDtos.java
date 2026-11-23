@@ -36,10 +36,10 @@ public final class PlatformDtos {
     ) {}
 
     /** 工作区展示资料 */
-    public record WorkspaceSummary(String id, String slug, String name) {}
+    public record WorkspaceSummary(String id, String slug, String name, String role, long memberVersion, long accessVersion) {}
 
     /** 工作区成员摘要 */
-    public record MemberSummary(UserSummary user) {}
+    public record MemberSummary(UserSummary user, String role, String status, boolean enabled, long version, String joinedAt, String leftAt) {}
 
     /** 当前登录用户及其工作区响应 */
     public record CurrentUserResponse(UserSummary user, List<WorkspaceSummary> workspaces) {}
@@ -51,7 +51,7 @@ public final class PlatformDtos {
     public record WorkspaceListResponse(List<WorkspaceSummary> workspaces) {}
 
     /** 成员列表响应 */
-    public record MembersResponse(String workspaceId, List<MemberSummary> members) {}
+    public record MembersResponse(String workspaceId, List<MemberSummary> members, long accessVersion) {}
 
     /** 演示快捷登录请求 */
     public record DemoLoginRequest(String userNo) {}

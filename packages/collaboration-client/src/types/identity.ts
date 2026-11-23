@@ -1,3 +1,4 @@
+import type { WorkspaceRole, WorkspaceAccess, WorkspaceMemberAddRequest, WorkspaceRoleChangeRequest, WorkspaceMemberChangeResponse, WorkspaceRemovalPreview, WorkspaceMemberRemovalRequest, WorkspaceMemberRemovalResponse } from "./workspace.js"
 /**
  * 【功能定义】云端平台身份与统一错误/结果契约类型定义。
  * 【协作边界】纯前端安全纯类型定义，零 Node/Electron 运行时依赖；供协调层 SDK 与桌面/Web UI 共用。
@@ -13,12 +14,12 @@ export interface UserSummary {
   orgPathName: string
 }
 /** 工作区展示资料；访问权每次由服务端成员关系判断。 */
-export interface WorkspaceSummary { id: string; slug: string; name: string }
-export interface MemberSummary { user: UserSummary }
+export interface WorkspaceSummary { id: string; slug: string; name: string; role: WorkspaceRole; memberVersion: number; accessVersion: number }
+export interface MemberSummary { user: UserSummary; role: WorkspaceRole; status: "active" | "removed"; enabled: boolean; version: number; joinedAt: string; leftAt: string | null }
 export interface CurrentUserResponse { user: UserSummary; workspaces: WorkspaceSummary[] }
 export interface DemoUsersResponse { users: UserSummary[] }
 export interface WorkspaceListResponse { workspaces: WorkspaceSummary[] }
-export interface MembersResponse { workspaceId: string; members: MemberSummary[] }
+export interface MembersResponse { workspaceId: string; members: MemberSummary[]; accessVersion: number }
 export interface DemoLoginRequest { userNo: string }
 /** CSRF 数据仅供宿主传输消费，不作为 CollaborationHost 的返回值。 */
 export interface CsrfResponse { headerName: "X-CSRF-TOKEN"; token: string }
@@ -39,6 +40,7 @@ export type ServerErrorCode =
   | "CONVERSATION_FORBIDDEN" | "CONVERSATION_CONFLICT" | "CONVERSATION_SHARING_STOPPED" | "REPOSITORY_CONFLICT" | "VERSION_CONFLICT" | "PROJECT_ARCHIVED" | "REPOSITORY_ARCHIVED"
   | "OWNER_CANNOT_LEAVE" | "SEQUENCE_CONFLICT" | "SNAPSHOT_EMPTY" | "SNAPSHOT_TOO_LARGE"
   | "TASK_STATE_CONFLICT" | "TASK_ROLE_REQUIRED" | "TASK_CONVERSATION_CONFLICT"
+  | "WORKSPACE_ADMIN_REQUIRED" | "LAST_WORKSPACE_ADMIN" | "HANDOFF_PREVIEW_STALE" | "HANDOFF_INCOMPLETE" | "PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED" | "WORKSPACE_MEMBER_LIMIT"
   | "KNOWLEDGE_TERM_CONFLICT" | "KNOWLEDGE_ARCHIVED"
 /** 安全错误不包含响应头、Cookie、数据库诊断或原生 Error 对象。 */
 export interface CollaborationError { code: ServerErrorCode | "NETWORK_UNAVAILABLE" | "TLS_ERROR" | "INVALID_SERVER_RESPONSE"; message: string; requestId: string; retryable: boolean; expectedSequence?: number }
@@ -54,6 +56,12 @@ export type IdentityState = { status: "signedOut" } | { status: "loading" } | { 
 /** 具名身份接口；监听必须解绑，账号切换先退出再登录，不接受任意网络参数。 */
 export interface CollaborationHost {
   getState(): Promise<CollaborationResult<IdentityState>>
+  refreshIdentity(): Promise<CollaborationResult<CurrentUserResponse>>
+  getWorkspaceAccess(workspaceId: string): Promise<CollaborationResult<WorkspaceAccess>>
+  addWorkspaceMember(workspaceId: string, request: WorkspaceMemberAddRequest): Promise<CollaborationResult<WorkspaceMemberChangeResponse>>
+  changeWorkspaceRole(workspaceId: string, userId: string, request: WorkspaceRoleChangeRequest): Promise<CollaborationResult<WorkspaceMemberChangeResponse>>
+  previewWorkspaceRemoval(workspaceId: string, userId: string, afterId?: string | null, previewVersion?: string): Promise<CollaborationResult<WorkspaceRemovalPreview>>
+  removeWorkspaceMember(workspaceId: string, userId: string, request: WorkspaceMemberRemovalRequest): Promise<CollaborationResult<WorkspaceMemberRemovalResponse>>
   listDemoUsers(): Promise<CollaborationResult<DemoUsersResponse>>
   signIn(userNo: string): Promise<CollaborationResult<CurrentUserResponse>>
   signOut(): Promise<CollaborationResult<null>>

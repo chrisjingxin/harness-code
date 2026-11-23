@@ -183,6 +183,7 @@ public final class Contracts {
     public void smoke() {
         List<Map<String, Object>> results = new ArrayList<>();
         Map<String, Class<?>> records = Map.ofEntries(
+                Map.entry("WorkspaceRoleChangeRequest", workbench.collaboration.interfaces.dto.WorkspaceDtos.WorkspaceRoleChangeRequest.class),
                 Map.entry("CurrentUserResponse", PlatformDtos.CurrentUserResponse.class),
                 Map.entry("DemoUsersResponse", PlatformDtos.DemoUsersResponse.class),
                 Map.entry("WorkspaceListResponse", PlatformDtos.WorkspaceListResponse.class),

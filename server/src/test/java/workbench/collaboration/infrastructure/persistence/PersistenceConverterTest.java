@@ -90,7 +90,7 @@ class PersistenceConverterTest {
 
   @Test
   void repositoryRoundTrips() {
-    Repository repository = new Repository("r1", "w1", "中台", "git@x:y.git", "main", RepositoryStatus.ACTIVE, "u1", 1L, 2L);
+    Repository repository = new Repository("r1", "w1", "中台", "git@x:y.git", "main", RepositoryStatus.ACTIVE, "u1", null, 1L, 1L, 2L);
     RepositoryPO po = RepositoryConverter.toPo(repository);
     assertThat(po.getStatus()).isEqualTo(1);
     // remote_url 唯一约束落摘要列：写入侧必须算好 SHA-256

@@ -50,7 +50,7 @@ class ProjectAppServiceTest {
         identity.addMember(WS, MEMBER);
         repositories.items.put(REPO, new Repository(
                 REPO, WS, "中台服务", "git@example.com:team/middle.git", "main",
-                RepositoryStatus.ACTIVE, OWNER, 1L, 1L));
+                RepositoryStatus.ACTIVE, OWNER, null, 1L, 1L, 1L));
         service = new ProjectAppService(
                 new ProjectAccessPolicy(identity, projects, repositories),
                 projects, repositories, identity,
@@ -190,7 +190,7 @@ class ProjectAppServiceTest {
         String projectId = projectIdOf(service.create(OWNER, WS, createBody()));
         repositories.items.put("archived-repo", new Repository(
                 "archived-repo", WS, "旧库", "git@example.com:team/old.git", "main",
-                RepositoryStatus.ARCHIVED, OWNER, 1L, 1L));
+                RepositoryStatus.ARCHIVED, OWNER, null, 1L, 1L, 1L));
 
         assertThatThrownBy(() -> service.addReference(OWNER, WS, projectId, "archived-repo"))
                 .isInstanceOf(ApiProblem.class).extracting("status", "code")

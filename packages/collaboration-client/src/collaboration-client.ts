@@ -13,7 +13,7 @@ import organizationSchema from "./schema/organization.schema.json" with { type: 
 import collaborationSchema from "./schema/collaboration.schema.json" with { type: "json" }
 import type {
   BeeResponseEntity, BoardResponse, CollaborationError, CollaborationResult, CsrfResponse, CurrentUserResponse, DemoUsersResponse, ErrorEnvelope,
-  MembersResponse, MetaResponse, WorkspaceListResponse,
+  MembersResponse, MetaResponse, WorkspaceListResponse, WorkspaceAccess, WorkspaceMemberAddRequest, WorkspaceRoleChangeRequest, WorkspaceMemberChangeResponse, WorkspaceRemovalPreview, WorkspaceMemberRemovalRequest, WorkspaceMemberRemovalResponse, RepositoryPatchRequest, RepositoryCreateRequest, RepositorySummary,
   ConversationDetailResponse, ConversationHistoryResponse, ConversationListResponse, ConversationRegisterRequest, ConversationStatus,
   ConversationSyncRequest, ConversationSyncResponse,
   ProjectCreateRequest, ProjectDetailResponse, ProjectListResponse, ProjectMemberAddRequest, ProjectMemberChangeResponse,
@@ -29,6 +29,9 @@ type Transport = typeof fetch
 type WriteMethod = "POST" | "PATCH" | "PUT" | "DELETE"
 type Session = { jar: CookieJar; csrf: string | null; abort: AbortController }
 const messages: Record<CollaborationError["code"], string> = {
+  WORKSPACE_ADMIN_REQUIRED: "此操作需要团队管理员权限", LAST_WORKSPACE_ADMIN: "团队至少需要一名有效管理员，请先设置另一名管理员",
+  HANDOFF_PREVIEW_STALE: "工作或成员权限已变化，请重新查看交接清单", HANDOFF_INCOMPLETE: "仍有任务或项目需要接手人",
+  PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED: "接手人尚不在该项目，请明确确认其阅读权限", WORKSPACE_MEMBER_LIMIT: "团队成员数量已达上限",
   INVALID_REQUEST: "请求参数无效", AUTHENTICATION_REQUIRED: "请先登录", DEMO_LOGIN_REJECTED: "演示账号不存在或已停用",
   CSRF_INVALID: "请求凭据已刷新，请重新执行操作", REQUEST_SOURCE_REJECTED: "请求来源不允许", RESOURCE_NOT_FOUND: "资源不可用",
   METHOD_NOT_ALLOWED: "请求方法不支持", UNSUPPORTED_MEDIA_TYPE: "请求正文必须使用 JSON", ALREADY_AUTHENTICATED: "请先退出当前账号",
@@ -38,7 +41,7 @@ const messages: Record<CollaborationError["code"], string> = {
   REGISTRATION_CONFLICT: "设备标识已被占用",
   DEVICE_AUTHENTICATION_REQUIRED: "设备凭据已失效", DEVICE_ACTION_REJECTED: "当前账号不能管理该设备",
   CURSOR_AHEAD: "事件位置超出已提交范围", PROJECT_NOT_SHARED: "项目未共享或已停止共享",
-  TARGET_UNAVAILABLE: "目标设备或执行配置不可用", EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新",
+  TARGET_UNAVAILABLE: "接手人或目标成员已不可用，请刷新选择", EXECUTION_STATE_CONFLICT: "执行状态已变化，请刷新",
   SHARE_VERSION_CONFLICT: "共享版本已变化，请刷新后重试",
   WORKSPACE_MEMBER_REQUIRED: "请先加入该团队", PROJECT_OWNER_REQUIRED: "仅项目负责人可执行该操作",
   DEVICE_FORBIDDEN: "设备无权执行该操作", CONVERSATION_FORBIDDEN: "仅会话创建者可执行该操作",
@@ -522,6 +525,36 @@ export class CollaborationClient {
       "organization#ConversationSyncResponse",
       { body: request, inputSchema: "organization#ConversationSyncRequest", signal },
     )
+  }
+
+  /** 角色管理都通过固定路径与封闭 Schema，服务端重复核对最新权限。 */
+  getWorkspaceAccess(workspaceId: string): Promise<CollaborationResult<WorkspaceAccess>> {
+    if (!this.#validIds(workspaceId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#call(`/api/v1/workspaces/${workspaceId}/access`, "WorkspaceAccess")
+  }
+  addWorkspaceMember(workspaceId: string, request: WorkspaceMemberAddRequest): Promise<CollaborationResult<WorkspaceMemberChangeResponse>> {
+    if (!this.#validIds(workspaceId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(`/api/v1/workspaces/${workspaceId}/members`, "WorkspaceMemberChangeResponse", { body: request, inputSchema: "WorkspaceMemberAddRequest" })
+  }
+  changeWorkspaceRole(workspaceId: string, userId: string, request: WorkspaceRoleChangeRequest): Promise<CollaborationResult<WorkspaceMemberChangeResponse>> {
+    if (!this.#validIds(workspaceId) || !this.#validator("UserId")(userId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(`/api/v1/workspaces/${workspaceId}/members/${userId}/role`, "WorkspaceMemberChangeResponse", { body: request, inputSchema: "WorkspaceRoleChangeRequest" }, "PATCH")
+  }
+  previewWorkspaceRemoval(workspaceId: string, userId: string, afterId: string | null = null, previewVersion?: string): Promise<CollaborationResult<WorkspaceRemovalPreview>> {
+    if (!this.#validIds(workspaceId) || !this.#validator("UserId")(userId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#call(`/api/v1/workspaces/${workspaceId}/members/${userId}/removal-preview`, "WorkspaceRemovalPreview", "GET", { query: { ...(afterId ? { afterId } : {}), ...(previewVersion ? { previewVersion } : {}) } })
+  }
+  removeWorkspaceMember(workspaceId: string, userId: string, request: WorkspaceMemberRemovalRequest): Promise<CollaborationResult<WorkspaceMemberRemovalResponse>> {
+    if (!this.#validIds(workspaceId) || !this.#validator("UserId")(userId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(`/api/v1/workspaces/${workspaceId}/members/${userId}/removal`, "WorkspaceMemberRemovalResponse", { body: request, inputSchema: "WorkspaceMemberRemovalRequest" })
+  }
+  createRepository(workspaceId: string, request: RepositoryCreateRequest): Promise<CollaborationResult<RepositorySummary>> {
+    if (!this.#validIds(workspaceId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(`/api/v1/workspaces/${workspaceId}/repositories`, "organization#RepositorySummary", { body: request, inputSchema: "organization#RepositoryCreateRequest" })
+  }
+  updateRepository(workspaceId: string, repositoryId: string, request: RepositoryPatchRequest): Promise<CollaborationResult<RepositorySummary>> {
+    if (!this.#validIds(workspaceId, repositoryId)) return Promise.resolve(this.#error("INVALID_REQUEST"))
+    return this.#write(`/api/v1/workspaces/${workspaceId}/repositories/${repositoryId}`, "organization#RepositorySummary", { body: request, inputSchema: "organization#RepositoryPatchRequest" }, "PATCH")
   }
 
   /** 组织层：项目、成员与仓库目录。路径参数由调用方或宿主校验为 UUID，请求体按组织层 Schema 校验。 */

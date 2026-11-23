@@ -47,13 +47,14 @@ public class RepositoryCatalogImpl implements RepositoryCatalog {
     @Override
     public void update(Repository repository) {
         int rows = repositories.update(null, new UpdateWrapper<RepositoryPO>()
-                .eq("repository_id", repository.id())
+                .eq("repository_id", repository.id()).eq("version", repository.version()-1)
                 .set("name", repository.name())
                 .set("default_branch", repository.defaultBranch())
                 .set("status", repository.status().db())
+                .set("owner_user_id", repository.ownerUserId()==null?"":repository.ownerUserId()).set("version",repository.version())
                 .set("updated_at", Times.ofMs(repository.updatedAtMs())));
         if (rows != 1) {
-            throw new IllegalStateException("仓库目录条目不存在");
+            throw new workbench.collaboration.interfaces.ApiProblem(409,"VERSION_CONFLICT");
         }
     }
 

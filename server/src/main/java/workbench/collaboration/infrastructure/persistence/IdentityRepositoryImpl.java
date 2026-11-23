@@ -121,8 +121,22 @@ public class IdentityRepositoryImpl implements IdentityRepository {
     public boolean memberExists(String workspaceId, String userId) {
         Long count = members.selectCount(new QueryWrapper<WorkspaceMemberPO>()
                 .eq("workspace_id", workspaceId)
-                .eq("user_id", userId));
+                .eq("user_id", userId).eq("status", 1));
         return count != null && count > 0;
+    }
+
+    @Override
+    public void lockWorkspace(String workspaceId) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            workspaces.selectOne(new QueryWrapper<WorkspacePO>().eq("workspace_id", workspaceId).last("FOR UPDATE"));
+        }
+    }
+
+    @Override
+    public Optional<WorkspaceMember> findMember(String workspaceId, String userId) {
+        return Optional.ofNullable(members.selectOne(new QueryWrapper<WorkspaceMemberPO>()
+                .eq("workspace_id", workspaceId).eq("user_id", userId))).map(IdentityConverter::toMember);
     }
 
     @Override
@@ -146,7 +160,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
 
     @Override
     public List<Workspace> listWorkspacesForUser(String userId) {
-        List<String> ids = members.selectList(new QueryWrapper<WorkspaceMemberPO>().eq("user_id", userId))
+        List<String> ids = members.selectList(new QueryWrapper<WorkspaceMemberPO>().eq("user_id", userId).eq("status", 1))
                 .stream()
                 .map(WorkspaceMemberPO::getWorkspaceId)
                 .toList();
@@ -168,7 +182,7 @@ public class IdentityRepositoryImpl implements IdentityRepository {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return users.selectList(new QueryWrapper<UserPO>().in("user_id", ids).eq("enabled", 1).orderByAsc("user_no"))
+        return users.selectList(new QueryWrapper<UserPO>().in("user_id", ids).orderByAsc("user_no"))
                 .stream()
                 .map(IdentityConverter::toUser)
                 .toList();

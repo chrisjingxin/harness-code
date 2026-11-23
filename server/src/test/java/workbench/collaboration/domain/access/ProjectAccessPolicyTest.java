@@ -138,13 +138,13 @@ class ProjectAccessPolicyTest {
     @Test
     void 仓库不存在或跨团队均404() {
         assertEquals(404, assertThrows(ApiProblem.class, () -> policy.requireRepository(WS, "r-none")).status);
-        repositories.items.put("r-1", new Repository("r-1", OTHER_WS, "x", "u", "main", RepositoryStatus.ACTIVE, OWNER, 1L, 1L));
+        repositories.items.put("r-1", new Repository("r-1", OTHER_WS, "x", "u", "main", RepositoryStatus.ACTIVE, OWNER, null, 1L, 1L, 1L));
         assertEquals(404, assertThrows(ApiProblem.class, () -> policy.requireRepository(WS, "r-1")).status);
     }
 
     @Test
     void 归档仓库拒绝被新引用409() {
-        repositories.items.put("r-1", new Repository("r-1", WS, "x", "u", "main", RepositoryStatus.ARCHIVED, OWNER, 1L, 1L));
+        repositories.items.put("r-1", new Repository("r-1", WS, "x", "u", "main", RepositoryStatus.ARCHIVED, OWNER, null, 1L, 1L, 1L));
         ApiProblem error = assertThrows(ApiProblem.class, () -> policy.requireActiveRepository(WS, "r-1"));
         assertEquals(409, error.status);
         assertEquals("REPOSITORY_ARCHIVED", error.code);
@@ -171,6 +171,11 @@ class ProjectAccessPolicyTest {
         final Map<String, User> users = new HashMap<>();
         final List<String> members = new ArrayList<>();
 
+        @Override public void lockWorkspace(String workspaceId) {}
+        @Override public Optional<workbench.collaboration.domain.identity.WorkspaceMember> findMember(String workspaceId,String userId) {
+            return memberExists(workspaceId,userId) ? Optional.of(new workbench.collaboration.domain.identity.WorkspaceMember(workspaceId,userId,
+                workbench.collaboration.domain.identity.WorkspaceRole.DEVELOPER,true,1,1,1,1)) : Optional.empty();
+        }
         @Override public Optional<User> findUserById(String id) { return Optional.ofNullable(users.get(id)); }
         @Override public Optional<User> findUserByUserNo(String userNo) { return Optional.empty(); }
         @Override public void insertUser(User user) { users.put(user.id(), user); }

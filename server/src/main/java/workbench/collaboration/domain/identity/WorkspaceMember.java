@@ -19,5 +19,10 @@ package workbench.collaboration.domain.identity;
 public record WorkspaceMember(
         String workspaceId,
         String userId,
-        long createdAtMs
+        WorkspaceRole role,
+        boolean active,
+        long version,
+        long createdAtMs,
+        long updatedAtMs,
+        long leftAtMs
 ) {}

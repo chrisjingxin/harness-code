@@ -31,6 +31,8 @@ public record Repository(
         String defaultBranch,
         RepositoryStatus status,
         String createdByUserId,
+        String ownerUserId,
+        long version,
         long createdAtMs,
         long updatedAtMs
 ) {}
