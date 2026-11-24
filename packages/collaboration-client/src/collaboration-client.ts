@@ -21,6 +21,8 @@ import type {
   KnowledgeCreateRequest, KnowledgeDetail, KnowledgeListResponse, KnowledgeUpdateRequest, KnowledgeVersion,
   KnowledgeVersionListResponse, NotificationEvent, SnapshotCreateRequest, SnapshotResponse, TaskConversationRequest, TaskCreateRequest,
   TaskDetail, TaskListResponse, TaskPatchRequest, TaskTransitionRequest,
+  InboxQuery, InboxResponse, UserNotificationEvent, UserNotificationPage,
+  NotificationPreferences, NotificationPreferencesUpdateRequest,
 } from "./types/index.js"
 import { InvalidProjectNotification, readProjectNotifications } from "./project-notification-stream.js"
 import { isNotificationCursor } from "./project-notification-cursor.js"
@@ -79,6 +81,7 @@ interface CallOptions {
   signal?: AbortSignal
   notifications?: {
     afterId: number
+    schema?: string
     onConnected(): void
     onEvent(event: NotificationEvent): Promise<void>
   }
@@ -202,7 +205,7 @@ export class CollaborationClient {
           if (response.status !== 200 || mediaType !== "text/event-stream" || !response.body) {
             throw new ClientProblem("INVALID_SERVER_RESPONSE")
           }
-          const validate = this.#validator("collaboration#NotificationEvent")
+          const validate = this.#validator(notifications.schema ?? "collaboration#NotificationEvent")
           const isEvent = (value: unknown): value is NotificationEvent => validate(value)
           notifications.onConnected()
           for await (const event of readProjectNotifications(response.body, isEvent)) {
@@ -584,5 +587,69 @@ export class CollaborationClient {
   }
   unlinkRepository(workspaceId: string, projectId: string, repositoryId: string): Promise<CollaborationResult<null>> {
     return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/repositories/${repositoryId}`, null, {}, "DELETE")
+  }
+
+  /** 全局待办收件箱聚合查询：跨 Workspace / 跨 Project 返回当前用户待拍板、我发起及最近 30 天已处理条目。 */
+  async getInbox(query: InboxQuery = {}): Promise<CollaborationResult<InboxResponse>> {
+    const params: Record<string, string> = {}
+    if (query.bucket !== undefined) {
+      if (!this.#validator("collaboration#InboxBucket")(query.bucket)) return this.#error("INVALID_REQUEST")
+      params.bucket = query.bucket
+    }
+    if (query.category !== undefined) {
+      if (typeof query.category !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(query.category)) return this.#error("INVALID_REQUEST")
+      params.category = query.category
+    }
+    if (query.workspaceId !== undefined) {
+      if (!this.#validator("Id")(query.workspaceId)) return this.#error("INVALID_REQUEST")
+      params.workspaceId = query.workspaceId
+    }
+    if (query.limit !== undefined) {
+      if (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 200) return this.#error("INVALID_REQUEST")
+      params.limit = String(query.limit)
+    }
+    return this.#call("/api/v1/me/inbox", "collaboration#InboxResponse", "GET", Object.keys(params).length ? { query: params } : {})
+  }
+
+  /** 分页补读当前账号跨所有活跃团队的轻量通知。 */
+  async listUserNotifications(afterId = 0, limit = 50): Promise<CollaborationResult<UserNotificationPage>> {
+    if (!isNotificationCursor(afterId) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#call("/api/v1/me/notifications", "collaboration#UserNotificationPage", "GET", {
+      query: { afterId: String(afterId), limit: String(limit) },
+    })
+  }
+
+  /** 订阅跨所有活跃团队的用户级 SSE 通知流（携带 workspaceId）。 */
+  async streamUserNotifications(
+    afterId: number,
+    signal: AbortSignal,
+    onConnected: () => void,
+    onEvent: (event: UserNotificationEvent) => Promise<void>,
+  ): Promise<CollaborationResult<null>> {
+    if (!isNotificationCursor(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call("/api/v1/me/notifications/stream", null, "GET", {
+      signal,
+      notifications: {
+        afterId,
+        schema: "collaboration#UserNotificationEvent",
+        onConnected,
+        onEvent: event => onEvent(event as UserNotificationEvent),
+      },
+    })
+  }
+
+  /** 读取当前登录账号的通知降噪与外部通道偏好。 */
+  getNotificationPreferences(): Promise<CollaborationResult<NotificationPreferences>> {
+    return this.#call("/api/v1/me/notification-preferences", "collaboration#NotificationPreferences")
+  }
+
+  /** 更新当前登录账号的通知降噪与外部通道偏好（带 expectedVersion 乐观锁校验）。 */
+  async updateNotificationPreferences(request: NotificationPreferencesUpdateRequest): Promise<CollaborationResult<NotificationPreferences>> {
+    if (!this.#validator("collaboration#NotificationPreferencesUpdateRequest")(request)) {
+      return this.#error("INVALID_REQUEST")
+    }
+    return this.#write("/api/v1/me/notification-preferences", "collaboration#NotificationPreferences", { body: request }, "PUT")
   }
 }

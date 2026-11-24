@@ -247,7 +247,8 @@ CREATE TABLE wb_task (
   UNIQUE KEY uk_task_id (task_id),
   KEY idx_project_id_task_id (project_id, task_id),
   KEY idx_project_id_updated_at (project_id, updated_at),
-  KEY idx_assignee_id_status (assignee_id, status)
+  KEY idx_assignee_id_status (assignee_id, status),
+  KEY idx_creator_id_status (creator_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE wb_task_transition (
@@ -338,7 +339,8 @@ CREATE TABLE wb_notification_outbox (
   created_at DATETIME(3) NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_event_id_user_id (event_id, user_id),
-  KEY idx_workspace_id_user_id_id (workspace_id, user_id, id)
+  KEY idx_workspace_id_user_id_id (workspace_id, user_id, id),
+  KEY idx_user_id_id (user_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 团队管理回执与最小事实记录；与权限/交接业务同事务提交。
@@ -356,3 +358,50 @@ CREATE TABLE wb_workspace_request (
   PRIMARY KEY (id),
   UNIQUE KEY uk_workspace_actor_request (workspace_id, actor_id, request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ 用户级通知降噪偏好与外部IM轻通知出站队列（HC-246） ============
+
+CREATE TABLE wb_user_notification_pref (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '用户全局唯一业务标识',
+  external_enabled TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否允许外部IM轻通知：1=启用,2=停用',
+  subscribed_events VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '逗号分隔订阅事件类型白名单',
+  dnd_enabled TINYINT UNSIGNED NOT NULL DEFAULT 2 COMMENT '免打扰开关：1=开启,2=关闭',
+  dnd_start_minute SMALLINT UNSIGNED NOT NULL DEFAULT 1320 COMMENT '免打扰开始分钟(0-1439，默认22:00=1320)',
+  dnd_end_minute SMALLINT UNSIGNED NOT NULL DEFAULT 540 COMMENT '免打扰结束分钟(0-1439，默认09:00=540)',
+  dnd_timezone VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'Asia/Shanghai' COMMENT 'IANA时区标识',
+  merge_window_sec INT UNSIGNED NOT NULL DEFAULT 60 COMMENT '同项目同类事件合批等待窗口秒数(0-600，默认60)',
+  version BIGINT NOT NULL DEFAULT 1 COMMENT '乐观并发版本号',
+  created_at DATETIME(3) NOT NULL COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL COMMENT '最近更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户通知降噪与外部通道偏好表';
+
+CREATE TABLE wb_external_notification_delivery (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '物理主键',
+  delivery_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '外部投递幂等业务标识(UUID)',
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '目标接收人用户标识',
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '所属团队标识',
+  project_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '所属项目标识(团队级事件为空串)',
+  event_type VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '通知事件类型(如task.assigned)',
+  object_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '目标对象业务标识(如taskId)',
+  actor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '触发操作人用户标识',
+  urgency TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '紧迫度：1=normal,2=urgent',
+  title_snapshot VARCHAR(120) NOT NULL COMMENT '经截断脱敏的对象标题快照(严禁含正文)',
+  merge_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '合批键(如projectId:eventType)',
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '投递状态：1=pending,2=sending,3=sent,4=skipped,5=failed',
+  skip_reason VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '' COMMENT '跳过原因(如already_resolved/disabled/unsubscribed)',
+  attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '已尝试投递次数',
+  max_attempts TINYINT UNSIGNED NOT NULL DEFAULT 3 COMMENT '最大重试次数',
+  available_at DATETIME(3) NOT NULL COMMENT '最早可投递时间(含合批窗口/免打扰顺延/退避时间)',
+  last_error VARCHAR(256) NOT NULL DEFAULT '' COMMENT '最近一次投递失败摘要(不含敏感正文)',
+  occurred_at DATETIME(3) NOT NULL COMMENT '业务事件发生时间',
+  created_at DATETIME(3) NOT NULL COMMENT '入队时间',
+  updated_at DATETIME(3) NOT NULL COMMENT '状态更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_delivery_id (delivery_id),
+  KEY idx_status_available_at (status, available_at, id),
+  KEY idx_user_merge_status (user_id, merge_key, status, available_at),
+  KEY idx_object_user_status (object_id, user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部IM轻通知出站队列与投递元数据表';

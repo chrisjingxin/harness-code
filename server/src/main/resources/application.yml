@@ -64,3 +64,12 @@ workbench:
       bootstrap-servers: 127.0.0.1:9092
     elasticsearch:
       url: http://127.0.0.1:9200
+  notifications:
+    external:
+      # 全局外部IM出站开关（默认关闭；企业接入自研IM时开启）
+      enabled: false
+      # 激活的外部通知通道：noop | logging | <企业自定义channelType>
+      channel: noop
+      dispatch-interval-ms: 2000
+      default-merge-window-sec: 60
+      max-attempts: 3

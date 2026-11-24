@@ -5,6 +5,7 @@
 import { join } from "node:path"
 import { CollaborationState, identityError } from "./collaboration-state.js"
 import { ProjectUpdatesService } from "./project-updates-service.js"
+import { UserUpdatesService } from "./user-updates-service.js"
 import { ConversationUploads, type ConversationUploadPort } from "./conversation-uploads.js"
 import type { ConversationUploadNotice } from "./scope.js"
 
@@ -17,6 +18,7 @@ export { CollaborationState, identityError } from "./collaboration-state.js"
 export { isNotificationCursor, notificationCursor } from "./project-notification-cursor.js"
 export { InvalidProjectNotification, readProjectNotifications } from "./project-notification-stream.js"
 export { ProjectUpdatesService, type ProjectUpdatesNetwork } from "./project-updates-service.js"
+export { UserUpdatesService, type UserUpdatesNetwork } from "./user-updates-service.js"
 export {
   ConversationUploads,
   syncPayloadLimit,
@@ -40,6 +42,7 @@ export function createCollaborationSdk(options: CollaborationSdkOptions) {
   const state = new CollaborationState(options.origin, options.transport)
   const client = state.network()
   const updates = new ProjectUpdatesService(join(options.storageDir, "notification-cursors"), options.origin ?? "")
+  const userUpdates = new UserUpdatesService(join(options.storageDir, "notification-cursors"), options.origin ?? "")
   const uploadPort: ConversationUploadPort | null = client
     ? {
         watermark: async (scope, signal) => {
@@ -65,17 +68,22 @@ export function createCollaborationSdk(options: CollaborationSdkOptions) {
   const unsubscribeState = state.onStateChanged(nextState => {
     const accountId = nextState.status === "signedIn" ? nextState.user.id : null
     uploads?.useAccount(accountId)
-    if (accountId === null) updates.stop()
+    if (accountId === null) {
+      updates.stop()
+      userUpdates.stop()
+    }
   })
 
   return {
     state,
     client,
     updates,
+    userUpdates,
     uploads,
     async dispose(): Promise<void> {
       unsubscribeState()
       updates.stop()
+      userUpdates.stop()
       uploads?.useAccount(null)
       await uploads?.flush()
       state.dispose()

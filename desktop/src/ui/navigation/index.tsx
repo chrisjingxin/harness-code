@@ -12,6 +12,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconDots,
+  IconInbox,
   IconLayoutGrid,
   IconListCheck,
   IconLock,
@@ -67,6 +68,13 @@ export type NavigationRetryArea = "projects" | "members" | "sessions";
 /** 双轨左栏当前激活空间：个人空间（本机优先）或团队空间（Project 协同）。 */
 export type NavigationSpaceKind = "personal" | "team";
 
+/** 跨空间顶置「收件箱」入口状态：云端红点角标与本机等待确认计数绝不混算。 */
+export type NavigationInboxView = {
+  readonly active: boolean;
+  readonly cloudActionCount: number;
+  readonly localAttentionCount: number;
+};
+
 /** 个人空间左栏中的单条本机个人会话索引。 */
 export type NavigationPersonalEntry = {
   conversationId: string;
@@ -116,6 +124,8 @@ export type ProjectNavigationView = {
   personalSearch?: string;
   selectedPersonalConversationId?: string | null;
   publishedSessionCount?: number;
+  /** 跨空间全局收件箱状态。 */
+  inbox?: NavigationInboxView;
 };
 
 export type ProjectNavigationActions = {
@@ -138,6 +148,7 @@ export type ProjectNavigationActions = {
   stopSharingConversation?(conversationId: string): void;
   setPersonalSearch?(text: string): void;
   reconnect?(): void;
+  openInbox?(): void;
   toggleMember(userId: string): void;
   setSearch(text: string): void;
   openCommandPalette?(): void;
@@ -592,7 +603,24 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   const mySessions = selfGroup?.sessions ?? [];
   const peerGroups = view.groups.filter((g) => !g.self && g.sessions.length > 0);
   const activeTeamSessionCount = mySessions.length + peerGroups.reduce((sum, g) => sum + g.sessions.length, 0);
-  const knowActive = view.activePage === "knowledge";
+  const inboxActive = Boolean(view.inbox?.active);
+  const cloudActionCount = view.inbox?.cloudActionCount ?? 0;
+  const localAttentionCount = view.inbox?.localAttentionCount ?? 0;
+  const prevCloudCountRef = useRef<number | null>(null);
+  const [badgeTicking, setBadgeTicking] = useState(false);
+  useEffect(() => {
+    const prev = prevCloudCountRef.current;
+    prevCloudCountRef.current = cloudActionCount;
+    if (prev !== null && cloudActionCount > prev) {
+      setBadgeTicking(true);
+      const timer = setTimeout(() => setBadgeTicking(false), 320);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [cloudActionCount]);
+
+  const effectiveActivePage = inboxActive ? null : view.activePage;
+  const knowActive = effectiveActivePage === "knowledge";
   const isSearchingLocalOnly = !actions.openCommandPalette && view.search.trim() !== "";
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -726,6 +754,44 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
         </div>
       )}
 
+      {/* 0.5 跨空间顶置全局收件箱入口（个人 | 团队双轨下始终可见，云端红点与本机提示绝不混算） */}
+      {view.inbox && actions.openInbox && (
+        <div className="sb-inbox-wrap">
+          <button
+            type="button"
+            className="pnav-nav-item pnav-inbox-btn"
+            data-active={inboxActive ? "true" : undefined}
+            aria-current={inboxActive ? "page" : undefined}
+            onClick={actions.openInbox}
+          >
+            <IconInbox size={15} aria-hidden="true" />
+            <span className="pnav-nav-label">收件箱</span>
+            {(localAttentionCount > 0 || cloudActionCount > 0) && (
+              <span className="pnav-inbox-indicators">
+                {localAttentionCount > 0 && (
+                  <span
+                    className="pnav-inbox-local"
+                    title={`本机有 ${localAttentionCount} 个等待你确认或出错的会话`}
+                  >
+                    <span className="pnav-inbox-amber-dot" aria-hidden="true" />
+                    <span>本机 {localAttentionCount}</span>
+                  </span>
+                )}
+                {cloudActionCount > 0 && (
+                  <span
+                    className={`pnav-inbox-badge${badgeTicking ? " is-ticking" : ""}`}
+                    aria-label={`${cloudActionCount} 项云端待办`}
+                    title={`跨团队待我处理：${cloudActionCount} 项`}
+                  >
+                    {cloudActionCount > 99 ? "99+" : cloudActionCount}
+                  </span>
+                )}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {isPersonalSpace ? (
         <>
           <div className="pnav-actions">
@@ -733,7 +799,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               <button
                 type="button"
                 className="pnav-new"
-                data-active={view.selectedPersonalConversationId === null}
+                data-active={!inboxActive && view.selectedPersonalConversationId === null}
                 onClick={() => actions.createPersonalSession?.()}
               >
                 <IconPencil size={14} aria-hidden="true" />
@@ -810,7 +876,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                             <PersonalSessionRow
                               key={entry.conversationId}
                               entry={entry}
-                              active={view.selectedPersonalConversationId === entry.conversationId}
+                              active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
                               select={actions.selectPersonalConversation}
                               canOpenMenu={Boolean(
                                 actions.renamePersonalConversation
@@ -912,8 +978,8 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 type="button"
                 className="pnav-nav-item"
                 disabled={!hasProject}
-                data-active={view.activePage === "board"}
-                aria-current={view.activePage === "board" ? "page" : undefined}
+                data-active={effectiveActivePage === "board"}
+                aria-current={effectiveActivePage === "board" ? "page" : undefined}
                 onClick={() => actions.openPage("board")}
               >
                 <IconLayoutGrid size={15} aria-hidden="true" />
@@ -923,8 +989,8 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 type="button"
                 className="pnav-nav-item"
                 disabled={!hasProject}
-                data-active={view.activePage === "tasks"}
-                aria-current={view.activePage === "tasks" ? "page" : undefined}
+                data-active={effectiveActivePage === "tasks"}
+                aria-current={effectiveActivePage === "tasks" ? "page" : undefined}
                 onClick={() => actions.openPage("tasks")}
               >
                 <IconListCheck size={15} aria-hidden="true" />
@@ -941,8 +1007,8 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             <button
               type="button"
               className="pnav-new"
-              data-active={view.activePage === "new"}
-              aria-current={view.activePage === "new" ? "page" : undefined}
+              data-active={effectiveActivePage === "new"}
+              aria-current={effectiveActivePage === "new" ? "page" : undefined}
               disabled={!hasProject}
               onClick={() => (actions.createSession ? actions.createSession() : actions.openPage("new"))}
             >
@@ -1070,7 +1136,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                   <SessionRow
                                     key={`${project.projectId}:${entry.conversationId}`}
                                     entry={entry}
-                                    active={view.activePage === "conversation" && view.selectedConversationId === entry.conversationId}
+                                    active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
                                     localDeviceName={view.localDeviceName}
                                     select={actions.selectConversation}
                                     canOpenMenu={canOpenMenu}
@@ -1089,9 +1155,9 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                     <button
                                       key={`${project.projectId}:${entry.conversationId}`}
                                       type="button"
-                                      className={`sess-item pnav-session${view.activePage === "conversation" && view.selectedConversationId === entry.conversationId ? " is-active" : ""}`}
+                                      className={`sess-item pnav-session${effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId ? " is-active" : ""}`}
                                       title={entry.title}
-                                      data-active={view.activePage === "conversation" && view.selectedConversationId === entry.conversationId}
+                                      data-active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
                                       onClick={() => actions.selectConversation(entry.conversationId)}
                                     >
                                       <span className="sess-title pnav-ellipsis">{entry.title}</span>
@@ -1146,7 +1212,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                       <SessionRow
                         key={`${view.currentProjectId}:${entry.conversationId}`}
                         entry={entry}
-                        active={view.activePage === "conversation" && view.selectedConversationId === entry.conversationId}
+                        active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
                         localDeviceName={view.localDeviceName}
                         select={actions.selectConversation}
                         canOpenMenu={Boolean(actions.renameConversation && !isOtherDevice)}

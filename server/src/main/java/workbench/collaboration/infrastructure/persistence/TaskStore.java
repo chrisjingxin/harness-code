@@ -3,6 +3,7 @@ package workbench.collaboration.infrastructure.persistence;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import workbench.collaboration.application.port.TaskInboxRepository;
 import workbench.collaboration.domain.task.TaskStatus;
 import workbench.collaboration.interfaces.dto.TaskDtos;
 
@@ -18,12 +19,25 @@ import static workbench.collaboration.interfaces.dto.TaskDtos.*;
  * 版本条件保护业务行；回执行只序列化同项目、同用户和同编号的请求。
  */
 @Repository
-public class TaskStore {
+public class TaskStore implements TaskInboxRepository {
     private static final RowMapper<TaskSummary> SUMMARY = (row, index) -> new TaskSummary(
             row.getString("task_id"), row.getString("project_id"), row.getString("title"),
             row.getString("creator_id"), row.getString("assignee_id"), TaskStatus.fromCode(row.getInt("status")).wire,
             row.getLong("version"), emptyToNull(row.getString("conversation_id")),
             Times.ms(row.getObject("created_at", LocalDateTime.class)),
+            Times.ms(row.getObject("updated_at", LocalDateTime.class)));
+    private static final RowMapper<InboxTaskRow> INBOX_ROW = (row, index) -> new InboxTaskRow(
+            row.getString("task_id"),
+            row.getString("workspace_id"),
+            row.getString("project_id"),
+            row.getString("project_name"),
+            row.getString("owner_user_id"),
+            row.getInt("project_status"),
+            row.getString("title"),
+            row.getString("creator_id"),
+            row.getInt("creator_active") == 1,
+            row.getString("assignee_id"),
+            row.getInt("task_status"),
             Times.ms(row.getObject("updated_at", LocalDateTime.class)));
     private final JdbcTemplate jdbc;
 
@@ -143,6 +157,49 @@ public class TaskStore {
     public void remember(String projectId, String userId, String requestId, String response) {
         jdbc.update("UPDATE wb_task_request SET response=? WHERE project_id=? AND actor_id=? AND request_id=?",
                 response, projectId, userId, requestId);
+    }
+
+    @Override
+    public List<InboxTaskRow> listVisibleTasksForUser(String userId, String workspaceIdFilter) {
+        return jdbc.query("""
+                SELECT t.task_id, p.workspace_id, p.project_id, p.name AS project_name,
+                       p.owner_user_id, p.status AS project_status,
+                       t.title, t.creator_id,
+                       EXISTS (
+                         SELECT 1 FROM wb_workspace_member cwm
+                         JOIN wb_user cu ON cu.user_id = cwm.user_id AND cu.enabled = 1
+                         WHERE cwm.workspace_id = p.workspace_id AND cwm.user_id = t.creator_id AND cwm.status = 1
+                       ) AS creator_active,
+                       t.assignee_id, t.status AS task_status, t.updated_at
+                FROM wb_task t
+                JOIN wb_project p ON p.project_id = t.project_id
+                JOIN wb_workspace_member wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ? AND wm.status = 1
+                JOIN wb_user u ON u.user_id = wm.user_id AND u.enabled = 1
+                JOIN wb_project_member pm ON pm.project_id = p.project_id AND pm.user_id = ? AND pm.status = 1
+                WHERE (? IS NULL OR p.workspace_id = ?)
+                  AND (t.assignee_id = ? OR t.creator_id = ? OR p.owner_user_id = ?)
+                """, INBOX_ROW, userId, userId, workspaceIdFilter, workspaceIdFilter, userId, userId, userId);
+    }
+
+    @Override
+    public Optional<InboxTaskRow> findVisibleTaskForUser(String userId, String workspaceId, String projectId, String taskId) {
+        return jdbc.query("""
+                SELECT t.task_id, p.workspace_id, p.project_id, p.name AS project_name,
+                       p.owner_user_id, p.status AS project_status,
+                       t.title, t.creator_id,
+                       EXISTS (
+                         SELECT 1 FROM wb_workspace_member cwm
+                         JOIN wb_user cu ON cu.user_id = cwm.user_id AND cu.enabled = 1
+                         WHERE cwm.workspace_id = p.workspace_id AND cwm.user_id = t.creator_id AND cwm.status = 1
+                       ) AS creator_active,
+                       t.assignee_id, t.status AS task_status, t.updated_at
+                FROM wb_task t
+                JOIN wb_project p ON p.project_id = t.project_id
+                JOIN wb_workspace_member wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ? AND wm.status = 1
+                JOIN wb_user u ON u.user_id = wm.user_id AND u.enabled = 1
+                JOIN wb_project_member pm ON pm.project_id = p.project_id AND pm.user_id = ? AND pm.status = 1
+                WHERE p.workspace_id = ? AND p.project_id = ? AND t.task_id = ?
+                """, INBOX_ROW, userId, userId, workspaceId, projectId, taskId).stream().findFirst();
     }
 
     private static String emptyToNull(String value) {

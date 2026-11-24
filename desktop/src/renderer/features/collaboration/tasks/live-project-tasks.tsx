@@ -123,6 +123,12 @@ export function ProjectTaskPublication({ context, members, draftMaterials, sourc
 }
 
 const uncertain = (code: string) => ["NETWORK_UNAVAILABLE", "INVALID_SERVER_RESPONSE", "INTERNAL_ERROR"].includes(code)
+const TASK_INACCESSIBLE_ERROR_CODES = new Set<string>([
+  "RESOURCE_NOT_FOUND",
+  "WORKSPACE_MEMBER_REQUIRED",
+  "PROJECT_MEMBER_REQUIRED",
+  "FORBIDDEN",
+])
 
 export function LiveProjectTasks({ context, rows, taskId, detailRevision, navigator, onCreate }: {
   readonly context: TasksContext
@@ -176,9 +182,10 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
     void host.readTask(workspaceId, projectId, taskId).then(result => {
       if (!current) return
       if (!result.ok) {
-        // 后台轻量通知触发刷新遇到瞬时网络报错时保留已打开详情，仅在首次加载或资源已不可用时清空。
-        if (!detailRef.current || result.error.code === "RESOURCE_NOT_FOUND") setDetail(null)
-        setNotice(result.error.message)
+        const inaccessible = TASK_INACCESSIBLE_ERROR_CODES.has(result.error.code)
+        // 后台轻量通知触发刷新遇到瞬时网络报错时保留已打开详情，首次加载、资源不可用或无权限时清空详情并收敛提示。
+        if (!detailRef.current || inaccessible) setDetail(null)
+        setNotice(inaccessible ? "当前账号无权访问该任务或已不在对应项目。" : result.error.message)
         return
       }
       if (result.value.task.projectId !== projectId || result.value.task.taskId !== taskId) {

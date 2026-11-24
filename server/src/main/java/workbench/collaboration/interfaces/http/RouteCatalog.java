@@ -53,6 +53,12 @@ public final class RouteCatalog {
     private static final Map<String, Pattern> KNOWLEDGE_PAGE = Map.of("afterId", ID, "limit", LIMIT,
             "category", Pattern.compile(".{1,80}"), "q", Pattern.compile(".{1,200}"));
     private static final Map<String, Pattern> NOTIFICATION_PAGE = Map.of("afterId", SEQUENCE, "limit", LIMIT);
+    private static final Map<String, Pattern> INBOX_PAGE = Map.of(
+            "bucket", Pattern.compile("action_required|sent|resolved"),
+            "category", Pattern.compile("[a-z][a-z0-9_]{0,63}"),
+            "workspaceId", ID,
+            "limit", LIMIT
+    );
 
     private final List<Route> routes = List.of(
             new Route("/health", Set.of("GET"), Auth.PUBLIC, 0, NONE),
@@ -95,7 +101,11 @@ public final class RouteCatalog {
             new Route("/api/v1/workspaces/{workspaceId}/notifications", Set.of("GET"), Auth.USER, 0, NOTIFICATION_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/notifications/stream", Set.of("GET"), Auth.USER, 0, Map.of("afterId", SEQUENCE)),
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/sync", Set.of("POST"), Auth.USER, 1048576, NONE),
-            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/stop-sharing", Set.of("POST"), Auth.USER, 0, NONE)
+            new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/conversations/{conversationId}/stop-sharing", Set.of("POST"), Auth.USER, 0, NONE),
+            new Route("/api/v1/me/inbox", Set.of("GET"), Auth.USER, 0, INBOX_PAGE),
+            new Route("/api/v1/me/notifications", Set.of("GET"), Auth.USER, 0, NOTIFICATION_PAGE),
+            new Route("/api/v1/me/notifications/stream", Set.of("GET"), Auth.USER, 0, Map.of("afterId", SEQUENCE)),
+            new Route("/api/v1/me/notification-preferences", Set.of("GET", "PUT"), Auth.USER, 4096, NONE)
     );
 
     public RouteCatalog() {

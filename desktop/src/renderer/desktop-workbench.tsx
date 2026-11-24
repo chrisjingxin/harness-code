@@ -5,15 +5,16 @@ import { TeamSettings } from "./features/workspace/team-settings.js"
  * 2. 左栏遵循方案 B「个人 | 团队」双轨隔离导航，「个人」空间严格按当前选中团队过滤，绝不展示跨团队全部会话；
  * 3. 支持个人会话（含无团队会话）两档发布到 Project、发布/停止共享自动切轨且不断链、以及离线非阻塞重连提示。
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { IconArrowLeft, IconRefresh, IconWifiOff } from "@tabler/icons-react"
-import type { CollaborationHost, UserSummary, WorkspaceRole, WorkspaceSummary } from "@workbench/collaboration-client/types"
+import type { CollaborationHost, InboxItem, UserSummary, WorkspaceRole, WorkspaceSummary } from "@workbench/collaboration-client/types"
 import type {
   AccountPersonal,
   CollaborationAppsHost,
   DesktopHost,
   DesktopLocalExecutionHost,
+  InboxHost,
   LocalConversationsHost,
   LocalDirectoryHost,
   OrganizationHost,
@@ -22,10 +23,12 @@ import type {
   ProjectUpdatesHost,
   ThemeMode,
   WindowState,
+  WorkbenchDeepLinkEvent,
+  WorkbenchDeepLinkTarget,
   ZoomAction,
 } from "../shared/index.js"
 import { ACCENT_OPTIONS, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "../ui/index.js"
-import type { AccentId, NavigationSpaceKind, NavigationWorkspaceItem } from "../ui/index.js"
+import type { AccentId, NavigationInboxView, NavigationSpaceKind, NavigationWorkspaceItem } from "../ui/index.js"
 import { ProjectWorkbench, useProjectShell } from "./features/project-navigation/index.js"
 import type { DualTrackNavigationProps, ProjectPageProviders } from "./features/project-navigation/index.js"
 import { LocalSessionPage, createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
@@ -37,6 +40,14 @@ import {
   StopSharingDialog,
   usePersonalSessions,
 } from "./features/personal-sessions/index.js"
+import {
+  InboxPage,
+  NotificationPreferencesSection,
+  resolveDeepLinkNavigation,
+  useInbox,
+  useLocalAttention,
+  type LocalAttentionItem,
+} from "./features/inbox/index.js"
 import { directoryBasename, formatShortTime } from "./features/session/session-model.js"
 import { createCollaborationPageProviders } from "./features/collaboration/collaboration-pages.js"
 import { useCollaborationMetadata } from "./features/collaboration/metadata.js"
@@ -61,6 +72,7 @@ type Hosts = {
   collaboration: CollaborationHost
   collaborationApps?: CollaborationAppsHost
   projectUpdates?: ProjectUpdatesHost
+  inbox?: InboxHost
   organization: OrganizationHost
   projectConversations: ProjectConversationHost
   localConversations?: LocalConversationsHost
@@ -73,12 +85,21 @@ type Hosts = {
 type Identity = ReturnType<typeof useCollaborationIdentity>
 type Preferences = ReturnType<typeof useWindowPreferences>
 
-type PendingReveal = {
-  readonly workspaceId: string
-  readonly projectId: string
-  readonly conversationId: string
-  readonly token: number
-}
+type PendingReveal =
+  | {
+      readonly kind: "conversation"
+      readonly workspaceId: string
+      readonly projectId: string
+      readonly conversationId: string
+      readonly token: number
+    }
+  | {
+      readonly kind: "task"
+      readonly workspaceId: string
+      readonly projectId: string
+      readonly taskId: string
+      readonly token: number
+    }
 
 const noop = () => {}
 const fallbackExecutionPort: LocalSessionExecutionPort = {
@@ -91,6 +112,39 @@ export function DesktopWorkbench(hosts: Hosts) {
   const identity = useCollaborationIdentity(collaboration)
   const preferences = useWindowPreferences(host)
   const [personalError, setPersonalError] = useState("")
+  const [queuedDeepLink, setQueuedDeepLink] = useState<{
+    readonly target: WorkbenchDeepLinkTarget
+    readonly token: number
+  } | null>(null)
+  const [deepLinkNotice, setDeepLinkNotice] = useState("")
+  const deepLinkTokenRef = useRef(0)
+
+  const acceptDeepLinkEvent = useCallback((event: WorkbenchDeepLinkEvent | null | undefined) => {
+    if (!event) return
+    if (!event.ok) {
+      setDeepLinkNotice(event.message)
+      return
+    }
+    setDeepLinkNotice("")
+    setQueuedDeepLink({ target: event.target, token: ++deepLinkTokenRef.current })
+  }, [])
+
+  useEffect(() => {
+    const stop = host.onDeepLink?.(acceptDeepLinkEvent)
+    void host.consumePendingDeepLink?.().then(acceptDeepLinkEvent).catch(() => {})
+    return () => { stop?.() }
+  }, [host, acceptDeepLinkEvent])
+
+  useEffect(() => {
+    if (identity.state.status === "signedOut") {
+      setQueuedDeepLink(null)
+      return
+    }
+    if (identity.state.status === "signedIn") {
+      void host.consumePendingDeepLink?.().then(acceptDeepLinkEvent).catch(() => {})
+    }
+  }, [host, identity.state.status, acceptDeepLinkEvent])
+
   const identityKey = identity.state.status === "signedIn" ? `signed:${identity.state.user.id}`
     : identity.state.status === "connectionError" && identity.state.lastKnownUser ? `signed:${identity.state.lastKnownUser.id}` : identity.state.status
   const persistence = useMemo(() => new PersonalPersistence(personalHost, setPersonalError), [personalHost, identityKey])
@@ -98,16 +152,31 @@ export function DesktopWorkbench(hosts: Hosts) {
   const guardedIdentity = {
     ...identity,
     signOut: async () => {
+      setQueuedDeepLink(null)
+      setDeepLinkNotice("")
       try { await persistence.flush() } catch { /* 退出前尽力落盘，保存失败不阻断账号退出。 */ }
       persistence.reset()
       await identity.signOut()
     },
   }
   return <DesktopSession key={identityKey} {...hosts} identity={guardedIdentity} preferences={preferences}
-    persistence={persistence} personalError={personalError} />
+    persistence={persistence} personalError={personalError}
+    queuedDeepLink={queuedDeepLink}
+    onConsumeQueuedDeepLink={() => setQueuedDeepLink(null)}
+    deepLinkNotice={deepLinkNotice}
+    onClearDeepLinkNotice={() => setDeepLinkNotice("")} />
 }
 
-function DesktopSession(props: Hosts & { identity: Identity; preferences: Preferences; persistence: PersonalPersistence; personalError: string }) {
+function DesktopSession(props: Hosts & {
+  identity: Identity
+  preferences: Preferences
+  persistence: PersonalPersistence
+  personalError: string
+  queuedDeepLink: { readonly target: WorkbenchDeepLinkTarget; readonly token: number } | null
+  onConsumeQueuedDeepLink: () => void
+  deepLinkNotice: string
+  onClearDeepLinkNotice: () => void
+}) {
   const { identity, persistence } = props
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chosen, setChosen] = useState<string | null>(null)
@@ -170,13 +239,24 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
     <div className="desktop-settings-head">
       <div>
         <h2>系统设置</h2>
-        <p className="desktop-settings-sub">外观、强调色、界面密度、快捷键、账号与团队</p>
+        <p className="desktop-settings-sub">外观、强调色、界面密度、通知与提醒、快捷键、账号与团队</p>
       </div>
     </div>
   )
   const settingsBody = <>
     <div className="desktop-set-section">外观与布局</div>
     <WindowPreferences {...props.preferences} />
+    {activeUser && (
+      <>
+        <div className="desktop-set-section">通知与提醒</div>
+        <NotificationPreferencesSection
+          host={props.inbox}
+          signedIn={Boolean(activeUser)}
+          isOffline={isOffline}
+          open={settingsOpen}
+        />
+      </>
+    )}
     <div className="desktop-set-section">快捷键</div>
     <div className="kbd-grid" aria-label="快捷键一览">
       <div className="kbd-item"><span>命令面板</span><span className="kbd-combo"><kbd>⌘</kbd><kbd>K</kbd></span></div>
@@ -252,7 +332,9 @@ function DesktopSession(props: Hosts & { identity: Identity; preferences: Prefer
       {activeUser && account === "failed" && (
         <button className="wb-button wb-button-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button>
       )}
-      {!settingsOpen && identity.notice && <p className="error" role="alert">{identity.notice}</p>}
+      {!settingsOpen && (props.deepLinkNotice || identity.notice) && (
+        <p className="error" role="alert">{props.deepLinkNotice || identity.notice}</p>
+      )}
     </section>}
     right={() => null}
     leftOpen
@@ -279,6 +361,10 @@ function ConfirmedUserWorkbench(props: Hosts & {
   isOffline: boolean
   onSelectWorkspace: (workspaceId: string) => void
   onSelectSpace: (space: NavigationSpaceKind) => void
+  queuedDeepLink: { readonly target: WorkbenchDeepLinkTarget; readonly token: number } | null
+  onConsumeQueuedDeepLink: () => void
+  deepLinkNotice: string
+  onClearDeepLinkNotice: () => void
   titleBarClassName: string
   settingsHead: ReactNode
   settingsBody: ReactNode
@@ -288,6 +374,10 @@ function ConfirmedUserWorkbench(props: Hosts & {
   const { user, workspaces, workspace, activeSpace, isOffline } = props
   const [personalSearch, setPersonalSearch] = useState("")
   const [pendingReveal, setPendingReveal] = useState<PendingReveal | null>(null)
+  const [inboxOpen, setInboxOpen] = useState(false)
+  const [returnToInbox, setReturnToInbox] = useState(false)
+  const [teamActiveConversationId, setTeamActiveConversationId] = useState<string | null>(null)
+  const [knownProjectNames, setKnownProjectNames] = useState<Readonly<Record<string, string>>>({})
   const [toast, setToast] = useState<string | null>(null)
   const [leftOpen, setLeftOpen] = useState(true)
   const [leftWidthPx, setLeftWidthPx] = useState(280)
@@ -323,9 +413,12 @@ function ConfirmedUserWorkbench(props: Hosts & {
     activeSpace,
     offline: isOffline,
     onPublished: result => {
+      setInboxOpen(false)
+      setReturnToInbox(false)
       props.onSelectWorkspace(result.workspaceId)
       props.onSelectSpace("team")
       setPendingReveal({
+        kind: "conversation",
         workspaceId: result.workspaceId,
         projectId: result.projectId,
         conversationId: result.conversationId,
@@ -333,6 +426,8 @@ function ConfirmedUserWorkbench(props: Hosts & {
       })
     },
     onStoppedSharing: result => {
+      setInboxOpen(false)
+      setReturnToInbox(false)
       if (result.workspaceId !== null) {
         props.onSelectWorkspace(result.workspaceId)
       }
@@ -341,6 +436,173 @@ function ConfirmedUserWorkbench(props: Hosts & {
     onOpenRightPanel: () => setRightOpen(true),
     onNotify: msg => setToast(msg),
   })
+
+  const inbox = useInbox({
+    host: props.inbox,
+    accountId: user.id,
+    online: !isOffline,
+  })
+
+  const activeViewedConversationId = inboxOpen
+    ? null
+    : activeSpace === "personal"
+      ? personalSessions.selectedConversationId
+      : !isOffline && workspace
+        ? teamActiveConversationId
+        : null
+
+  const localAttentionItems = useLocalAttention({
+    localExecution: props.localExecution,
+    accountId: user.id,
+    personalRecords: personalSessions.records,
+    activeViewedConversationId,
+    projectNamesById: knownProjectNames,
+  })
+
+  const navInboxView: NavigationInboxView = {
+    active: inboxOpen,
+    cloudActionCount: isOffline ? 0 : (inbox.data?.counts.actionRequired ?? 0),
+    localAttentionCount: localAttentionItems.length,
+  }
+
+  const handleOpenInbox = useCallback(() => {
+    setInboxOpen(true)
+    setReturnToInbox(false)
+  }, [])
+
+  const handleCloseInbox = useCallback(() => {
+    setInboxOpen(false)
+  }, [])
+
+  const handleReturnToInbox = useCallback(() => {
+    setReturnToInbox(false)
+    setInboxOpen(true)
+  }, [])
+
+  useEffect(() => {
+    if (!props.deepLinkNotice) return
+    setToast(props.deepLinkNotice)
+    props.onClearDeepLinkNotice()
+  }, [props.deepLinkNotice, props.onClearDeepLinkNotice])
+
+  // 仅做只读页面跳转，绝不自动触发 Agent 执行或写操作；跨团队/无权任务弹窗提示且不暴露多余信息。
+  useEffect(() => {
+    const queued = props.queuedDeepLink
+    if (!queued) return
+    const decision = resolveDeepLinkNavigation({
+      target: queued.target,
+      offline: isOffline,
+      workspaceIds: workspaces.map(w => w.id),
+    })
+    if (decision.action === "open_inbox") {
+      setInboxOpen(true)
+      setReturnToInbox(false)
+      if (decision.shouldRefreshInbox) void inbox.refresh()
+      props.onConsumeQueuedDeepLink()
+      return
+    }
+    if (decision.action === "deny") {
+      setToast(decision.message)
+      props.onConsumeQueuedDeepLink()
+      return
+    }
+    setInboxOpen(false)
+    setReturnToInbox(true)
+    props.onSelectWorkspace(decision.workspaceId)
+    props.onSelectSpace("team")
+    setPendingReveal({
+      kind: "task",
+      workspaceId: decision.workspaceId,
+      projectId: decision.projectId,
+      taskId: decision.taskId,
+      token: queued.token,
+    })
+    props.onConsumeQueuedDeepLink()
+  }, [props.queuedDeepLink, isOffline, workspaces, props.onSelectWorkspace, props.onSelectSpace, props.onConsumeQueuedDeepLink])
+
+  const handleProjectsLoaded = useCallback((projectNames: Readonly<Record<string, string>>) => {
+    setKnownProjectNames(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const [id, name] of Object.entries(projectNames)) {
+        if (next[id] !== name) {
+          next[id] = name
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [])
+
+  const handleOpenLocalItem = useCallback((item: LocalAttentionItem) => {
+    setInboxOpen(false)
+    setReturnToInbox(false)
+    if (item.workspaceId && item.projectId && !isOffline && workspaces.some(w => w.id === item.workspaceId)) {
+      props.onSelectWorkspace(item.workspaceId)
+      props.onSelectSpace("team")
+      setPendingReveal({
+        kind: "conversation",
+        workspaceId: item.workspaceId,
+        projectId: item.projectId,
+        conversationId: item.conversationId,
+        token: Date.now(),
+      })
+      return
+    }
+    personalSessions.selectConversation(item.conversationId)
+    props.onSelectSpace("personal")
+  }, [isOffline, workspaces, props.onSelectWorkspace, props.onSelectSpace, personalSessions])
+
+  const handleOpenCloudItem = useCallback((item: InboxItem) => {
+    if (isOffline) {
+      setToast("当前处于离线状态，重连协作服务后可打开团队任务。")
+      return
+    }
+    if (item.sourceType !== "task" || !item.projectId || !workspaces.some(w => w.id === item.workspaceId)) {
+      setToast("当前账号无权访问该任务或已不在对应团队。")
+      return
+    }
+    setInboxOpen(false)
+    setReturnToInbox(true)
+    props.onSelectWorkspace(item.workspaceId)
+    props.onSelectSpace("team")
+    setPendingReveal({
+      kind: "task",
+      workspaceId: item.workspaceId,
+      projectId: item.projectId,
+      taskId: item.objectId,
+      token: Date.now(),
+    })
+  }, [isOffline, workspaces, props.onSelectWorkspace, props.onSelectSpace])
+
+  const inboxPageNode = (
+    <InboxPage
+      currentUserId={user.id}
+      collaborationApps={props.collaborationApps}
+      online={!isOffline}
+      workspaces={workspaces}
+      localItems={localAttentionItems}
+      bucket={inbox.bucket}
+      workspaceFilter={inbox.workspaceFilter}
+      categoryFilter={inbox.categoryFilter}
+      data={inbox.data}
+      loading={inbox.loading}
+      refreshing={inbox.refreshing}
+      error={inbox.error}
+      streamStatus={inbox.streamStatus}
+      onChangeBucket={inbox.setBucket}
+      onChangeWorkspaceFilter={inbox.setWorkspaceFilter}
+      onChangeCategoryFilter={inbox.setCategoryFilter}
+      onRefresh={() => { void inbox.refresh() }}
+      onReconnect={() => { void props.identity.refresh() }}
+      onOpenLocalItem={handleOpenLocalItem}
+      onOpenCloudItem={handleOpenCloudItem}
+      onTaskMutated={msg => {
+        void inbox.refresh()
+        if (msg) setToast(msg)
+      }}
+    />
+  )
 
   const personalPartition = personalSessions.personalPartition
 
@@ -373,12 +635,20 @@ function ConfirmedUserWorkbench(props: Hosts & {
     personalSearch,
     selectedPersonalConversationId: personalSessions.selectedConversationId,
     publishedSessionCount: personalPartition.publishedCount,
-    selectSpace: space => props.onSelectSpace(space),
+    selectSpace: space => {
+      setInboxOpen(false)
+      setReturnToInbox(false)
+      props.onSelectSpace(space)
+    },
     createPersonalSession: () => {
+      setInboxOpen(false)
+      setReturnToInbox(false)
       personalSessions.startNewDraft()
       props.onSelectSpace("personal")
     },
     selectPersonalConversation: id => {
+      setInboxOpen(false)
+      setReturnToInbox(false)
       personalSessions.selectConversation(id)
       props.onSelectSpace("personal")
     },
@@ -467,10 +737,23 @@ function ConfirmedUserWorkbench(props: Hosts & {
         workspaceRole={workspace.role}
         workspaceAccessVersion={workspace.accessVersion}
         workspaces={workspaceItems}
-        onSelectWorkspace={props.onSelectWorkspace}
+        onSelectWorkspace={id => {
+          setReturnToInbox(false)
+          props.onSelectWorkspace(id)
+        }}
         dualTrack={dualTrack}
+        inboxView={navInboxView}
+        inboxPage={inboxPageNode}
+        returnToInbox={returnToInbox}
+        onOpenInbox={handleOpenInbox}
+        onCloseInbox={handleCloseInbox}
+        onReturnToInbox={handleReturnToInbox}
+        onActiveConversationChange={setTeamActiveConversationId}
+        onProjectsLoaded={handleProjectsLoaded}
+        onTaskMutated={() => { void inbox.refresh() }}
         pendingReveal={pendingReveal?.workspaceId === workspace.id ? pendingReveal : null}
         onConsumeReveal={() => setPendingReveal(null)}
+        onRevealUnavailable={msg => setToast(msg)}
         onRenderSessionHeader={renderSessionHeaderForTeam}
         colorScheme={props.preferences.state.colorScheme}
         onToggleTheme={props.preferences.toggleTheme}
@@ -495,10 +778,12 @@ function ConfirmedUserWorkbench(props: Hosts & {
 
   const selectedRecord = personalSessions.selectedRecord
   const selectedSummary = personalSessions.selectedSummary
-  const showPersonalConversation = Boolean(activeSpace === "personal" && selectedRecord && selectedSummary)
+  const showPersonalConversation = Boolean(!inboxOpen && activeSpace === "personal" && selectedRecord && selectedSummary)
 
   let centerContent: ReactNode
-  if (activeSpace === "team" && isOffline) {
+  if (inboxOpen) {
+    centerContent = inboxPageNode
+  } else if (activeSpace === "team" && isOffline) {
     centerContent = (
       <section className="desktop-empty desktop-conversation" aria-label="团队空间离线">
         <h1>团队空间暂不可达</h1>
@@ -604,18 +889,32 @@ function ConfirmedUserWorkbench(props: Hosts & {
     <WorkbenchLayout
       titleBarClassName={props.titleBarClassName}
       context={{
-        title: showPersonalConversation && selectedSummary
-          ? selectedSummary.title
-          : activeSpace === "team"
-            ? "团队空间"
-            : "个人工作台",
-        subtitle: showPersonalConversation
-          ? (selectedRecord?.directoryPath
-              ? (directoryBasename(selectedRecord.directoryPath) || selectedRecord.directoryPath)
-              : "仅本机")
-          : "仅本机",
+        title: inboxOpen
+          ? "收件箱"
+          : showPersonalConversation && selectedSummary
+            ? selectedSummary.title
+            : activeSpace === "team"
+              ? "团队空间"
+              : "个人工作台",
+        subtitle: inboxOpen
+          ? (isOffline ? "离线 · 仅本机提醒" : "跨团队待办与本机提醒")
+          : showPersonalConversation
+            ? (selectedRecord?.directoryPath
+                ? (directoryBasename(selectedRecord.directoryPath) || selectedRecord.directoryPath)
+                : "仅本机")
+            : "仅本机",
       }}
       renderHeaderTitle={() => {
+        if (inboxOpen) {
+          return (
+            <>
+              <span className="tb-name">Inbox · 待办与审批</span>
+              {!isOffline ? (
+                <span className="tb-count">{navInboxView.cloudActionCount} 项待你拍板</span>
+              ) : null}
+            </>
+          )
+        }
         if (activeSpace === "team") {
           return (
             <>
@@ -639,7 +938,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
           </>
         )
       }}
-      backButton={activeSpace === "team" ? (
+      backButton={!inboxOpen && activeSpace === "team" ? (
         <button type="button" className="collab-back-btn" onClick={() => props.onSelectSpace("personal")}>
           <IconArrowLeft size={14} aria-hidden="true" />
           <span>回到个人空间</span>
@@ -673,6 +972,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
           personalSearch,
           selectedPersonalConversationId: personalSessions.selectedConversationId,
           publishedSessionCount: personalPartition.publishedCount,
+          inbox: navInboxView,
         }} actions={{
           selectSpace: dualTrack.selectSpace,
           createPersonalSession: dualTrack.createPersonalSession,
@@ -682,7 +982,12 @@ function ConfirmedUserWorkbench(props: Hosts & {
           stopSharingConversation: id => dualTrack.stopSharingConversation(id),
           setPersonalSearch: dualTrack.setPersonalSearch,
           reconnect: dualTrack.reconnect,
-          selectWorkspace: props.onSelectWorkspace,
+          openInbox: handleOpenInbox,
+          selectWorkspace: id => {
+            setInboxOpen(false)
+            setReturnToInbox(false)
+            props.onSelectWorkspace(id)
+          },
           selectProject: noop,
           createProject: noop,
           openProjectSettings: noop,
@@ -737,8 +1042,18 @@ function WorkspaceProjectWorkbench(props: {
   workspaces?: readonly NavigationWorkspaceItem[]
   onSelectWorkspace?(workspaceId: string): void
   dualTrack?: DualTrackNavigationProps
+  inboxView?: NavigationInboxView
+  inboxPage?: ReactNode
+  returnToInbox?: boolean
+  onOpenInbox?(): void
+  onCloseInbox?(): void
+  onReturnToInbox?(): void
+  onActiveConversationChange?(conversationId: string | null): void
+  onProjectsLoaded?(projectNames: Readonly<Record<string, string>>): void
+  onTaskMutated?(): void
   pendingReveal?: PendingReveal | null
   onConsumeReveal?: () => void
+  onRevealUnavailable?: (message: string) => void
   onRenderSessionHeader?: (conversation: ProjectConversationSummary, projectName: string | null) => ReactNode
   colorScheme?: "light" | "dark"
   onToggleTheme?(): void
@@ -762,6 +1077,16 @@ function WorkspaceProjectWorkbench(props: {
   const selectedConversationId = shell.personal.page.kind === "conversation"
     ? shell.personal.page.conversationId
     : null
+  useEffect(() => {
+    props.onActiveConversationChange?.(selectedConversationId)
+    return () => { props.onActiveConversationChange?.(null) }
+  }, [selectedConversationId])
+  useEffect(() => {
+    if (!shell.projects.projects.length) return
+    props.onProjectsLoaded?.(
+      Object.fromEntries(shell.projects.projects.map(item => [item.projectId, item.name])),
+    )
+  }, [shell.projects.projects])
   const currentPage = shell.personal.page
   const { taskRevision, knowledgeRevision, refreshTaskMetadata, refreshKnowledgeMetadata } = useCollaborationMetadata(shell.scope)
   const taskRows = useProjectTaskMetadata(props.collaborationApps, shell.scope, taskRevision)
@@ -814,23 +1139,46 @@ function WorkspaceProjectWorkbench(props: {
   })
   const { pageController, integration } = projectSessions
 
-  // 发布成功后自动切换到对应 Project，刷新列表并定位停留在同一条 conversationId。
+  // 发布成功后自动定位会话，或从全局收件箱跨团队/跨项目直达目标任务与对话。
   useEffect(() => {
     const reveal = props.pendingReveal
-    if (!reveal || shell.workspace.status !== "ready") return
+    if (!reveal) return
+    if (shell.projects.availability.state === "failed") {
+      props.onRevealUnavailable?.("无法确认目标项目访问权限，请重连后重试。")
+      props.onConsumeReveal?.()
+      return
+    }
+    if (shell.workspace.status !== "ready" || shell.projects.availability.state !== "ready") return
     if (shell.projectId !== reveal.projectId) {
       if (shell.projects.projects.some(p => p.projectId === reveal.projectId)) {
         shell.selectProject(reveal.projectId)
+      } else {
+        props.onRevealUnavailable?.("当前账号无权访问目标项目或项目已移除。")
+        props.onConsumeReveal?.()
       }
       return
     }
     if (!shell.scope || shell.scope.projectId !== reveal.projectId) return
     const targetScope = shell.scope
+    if (reveal.kind === "task") {
+      refreshTaskMetadata(targetScope)
+      setTaskDetailRevision(value => value + 1)
+      shell.openPage({ kind: "task", taskId: reveal.taskId })
+      props.onConsumeReveal?.()
+      return
+    }
     void integration.refreshMetadata(targetScope).finally(() => {
       shell.openPage({ kind: "conversation", conversationId: reveal.conversationId })
       props.onConsumeReveal?.()
     })
-  }, [props.pendingReveal, shell.workspace.status, shell.projectId, shell.projects.projects, shell.scope])
+  }, [
+    props.pendingReveal,
+    shell.workspace.status,
+    shell.projects.availability.state,
+    shell.projectId,
+    shell.projects.projects,
+    shell.scope,
+  ])
 
   const [lastLocalConversationId, setLastLocalConversationId] = useState<string | null>(null)
   useEffect(() => {
@@ -876,7 +1224,11 @@ function WorkspaceProjectWorkbench(props: {
     ownerName: pageController.resolveOwnerName, localDeviceId: props.user.id,
     canActForCreator: creatorId => shell.team.availability.state === "ready" && currentProject?.role === "owner" && !shell.team.members.some(m => m.user.id === creatorId && m.status === "active" && m.enabled),
     sessions: integration, directories: pageController.directories,
-    chooseDirectory, locateConversation, refreshTaskMetadata,
+    chooseDirectory, locateConversation,
+    refreshTaskMetadata: targetScope => {
+      refreshTaskMetadata(targetScope)
+      props.onTaskMutated?.()
+    },
   } : undefined
   const openTask = (taskId: string) => shell.openPage({ kind: "task", taskId })
   const references = useWorkbenchReferences({
@@ -994,6 +1346,12 @@ function WorkspaceProjectWorkbench(props: {
       workspaces={props.workspaces}
       onSelectWorkspace={props.onSelectWorkspace}
       dualTrack={teamDualTrack}
+      inboxView={props.inboxView}
+      inboxPage={props.inboxPage}
+      returnToInbox={Boolean(props.returnToInbox && currentPage.kind === "task")}
+      onOpenInbox={props.onOpenInbox}
+      onCloseInbox={props.onCloseInbox}
+      onReturnToInbox={props.onReturnToInbox}
       colorScheme={props.colorScheme}
       onToggleTheme={props.onToggleTheme}
       user={props.user}

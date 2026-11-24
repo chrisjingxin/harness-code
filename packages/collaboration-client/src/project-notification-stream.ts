@@ -13,10 +13,10 @@ export class InvalidProjectNotification extends Error {}
  * 在空行处分发完整帧。断线时丢弃未完成的帧，由服务器从上个已确认位置重发。
  * 心跳注释不产生事件。校验失败会上抛并关闭流，宿主仍使用上个已确认位置。
  */
-export async function* readProjectNotifications(
+export async function* readProjectNotifications<T extends NotificationEvent = NotificationEvent>(
   body: ReadableStream<Uint8Array>,
-  isEvent: (value: unknown) => value is NotificationEvent,
-): AsyncGenerator<NotificationEvent> {
+  isEvent: (value: unknown) => value is T,
+): AsyncGenerator<T> {
   const reader = body.getReader()
   const decoder = new TextDecoder("utf-8", { fatal: true })
   let buffered = ""

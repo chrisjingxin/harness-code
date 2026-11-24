@@ -828,6 +828,453 @@
         "hasMore"
       ],
       "additionalProperties": false
+    },
+    "InboxBucket": {
+      "type": "string",
+      "enum": [
+        "action_required",
+        "sent",
+        "resolved"
+      ]
+    },
+    "InboxUrgency": {
+      "type": "string",
+      "enum": [
+        "urgent",
+        "normal"
+      ]
+    },
+    "InboxItem": {
+      "type": "object",
+      "properties": {
+        "itemKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sourceType": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "urgency": {
+          "$ref": "#/$defs/InboxUrgency"
+        },
+        "workspaceId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "objectId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "actorId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "delegated": {
+          "type": "boolean"
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "itemKey",
+        "sourceType",
+        "category",
+        "urgency",
+        "workspaceId",
+        "projectId",
+        "projectName",
+        "objectId",
+        "title",
+        "status",
+        "actorId",
+        "delegated",
+        "updatedAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "InboxCounts": {
+      "type": "object",
+      "properties": {
+        "actionRequired": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "urgent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "actionRequired",
+        "urgent",
+        "sent"
+      ],
+      "additionalProperties": false
+    },
+    "InboxWorkspaceSummary": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "workspaceId",
+        "name",
+        "slug"
+      ],
+      "additionalProperties": false
+    },
+    "InboxActorSummary": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+        },
+        "userNo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "userId",
+        "userNo",
+        "name",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "InboxResponse": {
+      "type": "object",
+      "properties": {
+        "bucket": {
+          "$ref": "#/$defs/InboxBucket"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxItem"
+          }
+        },
+        "counts": {
+          "$ref": "#/$defs/InboxCounts"
+        },
+        "notificationCursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxWorkspaceSummary"
+          }
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxActorSummary"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bucket",
+        "items",
+        "counts",
+        "notificationCursor",
+        "workspaces",
+        "actors",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "UserNotificationEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "eventId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "workspaceId": {
+          "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+        },
+        "type": {
+          "enum": [
+            "task.assigned",
+            "task.changed",
+            "conversation.brief_updated",
+            "snapshot.created",
+            "knowledge.updated",
+            "project.member_changed",
+            "workspace.member_changed"
+          ]
+        },
+        "objectId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+            }
+          ]
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "eventId",
+        "workspaceId",
+        "type",
+        "objectId",
+        "projectId",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "workspace.member_changed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "objectId": {
+                "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/UserId"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "objectId": {
+                "$ref": "https://workbench.invalid/schema/platform.schema.json#/$defs/Id"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "UserNotificationPage": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UserNotificationEvent"
+          }
+        },
+        "nextAfterId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "events",
+        "nextAfterId",
+        "hasMore"
+      ],
+      "additionalProperties": false
+    },
+    "ExternalNotificationEventType": {
+      "type": "string",
+      "enum": [
+        "task.assigned",
+        "task.review_requested",
+        "task.returned"
+      ]
+    },
+    "NotificationPreferences": {
+      "type": "object",
+      "properties": {
+        "externalEnabled": {
+          "type": "boolean"
+        },
+        "subscribedEvents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalNotificationEventType"
+          },
+          "uniqueItems": true,
+          "maxItems": 32
+        },
+        "dndEnabled": {
+          "type": "boolean"
+        },
+        "dndStartMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1439
+        },
+        "dndEndMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1439
+        },
+        "dndTimezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "mergeWindowSec": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "externalEnabled",
+        "subscribedEvents",
+        "dndEnabled",
+        "dndStartMinute",
+        "dndEndMinute",
+        "dndTimezone",
+        "mergeWindowSec",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "NotificationPreferencesUpdateRequest": {
+      "type": "object",
+      "properties": {
+        "externalEnabled": {
+          "type": "boolean"
+        },
+        "subscribedEvents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalNotificationEventType"
+          },
+          "uniqueItems": true,
+          "maxItems": 32
+        },
+        "dndEnabled": {
+          "type": "boolean"
+        },
+        "dndStartMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1439
+        },
+        "dndEndMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1439
+        },
+        "dndTimezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "mergeWindowSec": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "externalEnabled",
+        "subscribedEvents",
+        "dndEnabled",
+        "dndStartMinute",
+        "dndEndMinute",
+        "dndTimezone",
+        "mergeWindowSec",
+        "expectedVersion"
+      ],
+      "additionalProperties": false
     }
   }
 }

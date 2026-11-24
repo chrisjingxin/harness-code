@@ -2,6 +2,7 @@ package workbench.collaboration.application.service;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import workbench.collaboration.application.port.ExternalNotificationRepository;
 import workbench.collaboration.application.port.NotificationPort;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.conversation.ConversationRepository;
@@ -37,11 +38,13 @@ public class TaskAppService {
     private final KnowledgeStore knowledge;
     private final TaskStore tasks;
     private final NotificationPort notifications;
+    private final ExternalNotificationEnqueuer externalEnqueuer;
     private final Contracts contracts;
 
     public TaskAppService(ProjectAccessPolicy policy, IdentityRepository identity, ConversationRepository conversations,
                           SnapshotRepository snapshots, KnowledgeStore knowledge, TaskStore tasks,
-                          NotificationPort notifications, Contracts contracts) {
+                          NotificationPort notifications, ExternalNotificationEnqueuer externalEnqueuer,
+                          Contracts contracts) {
         this.policy = policy;
         this.identity = identity;
         this.conversations = conversations;
@@ -49,6 +52,7 @@ public class TaskAppService {
         this.knowledge = knowledge;
         this.tasks = tasks;
         this.notifications = notifications;
+        this.externalEnqueuer = externalEnqueuer;
         this.contracts = contracts;
     }
 
@@ -83,6 +87,9 @@ public class TaskAppService {
             knowledgeRefs.forEach(ref -> tasks.addKnowledge(id, ref));
             tasks.append(id, new TaskTransition("created", actor, null, task.status(), 1, "", "", now, null));
             publish("task.assigned", actor, workspace, task);
+            externalEnqueuer.enqueueTaskEvent(
+                    workspace, project, id, "task.assigned", assignee, actor,
+                    ExternalNotificationRepository.URGENCY_NORMAL, title, now);
             return encode(new TaskStore.StoredTask(task, description));
         });
     }
@@ -158,10 +165,15 @@ public class TaskAppService {
     }
 
     /** 原发起人离开或停用后，当前有效 Project owner 承接职责，原作者不转名。 */
-    private boolean canActForCreator(String actor,String workspace,String project,String creator) {
+    private boolean canActForCreator(String actor, String workspace, String project, String creator) {
         if (actor.equals(creator)) return true;
-        boolean creatorActive=identity.memberExists(workspace,creator) && identity.findUserById(creator).filter(User::enabled).isPresent();
-        return !creatorActive && policy.requireProject(workspace,project).ownerUserId().equals(actor);
+        return !isActiveWorkspaceMember(workspace, creator)
+                && policy.requireProject(workspace, project).ownerUserId().equals(actor);
+    }
+
+    private boolean isActiveWorkspaceMember(String workspace, String userId) {
+        return identity.memberExists(workspace, userId)
+                && identity.findUserById(userId).filter(User::enabled).isPresent();
     }
 
     private void authorize(String actor, String workspace, String project, boolean writing) {
@@ -193,13 +205,46 @@ public class TaskAppService {
         tasks.append(after.taskId(), new TaskTransition(kind, actor, before.status(), target.wire, after.version(),
                 note, commitSha, now, null));
         publish("task.changed", actor, workspace, after);
+        if ("transition".equals(kind)) {
+            syncExternalQueueOnTransition(actor, workspace, before, after, target, now);
+        }
         return encode(new TaskStore.StoredTask(after, description));
     }
 
+    private void syncExternalQueueOnTransition(String actor, String workspace, TaskSummary before,
+                                               TaskSummary after, TaskStatus target, long now) {
+        TaskStatus from = TaskStatus.parse(before.status());
+        if (from == TaskStatus.TODO && target == TaskStatus.DOING) {
+            externalEnqueuer.cancelPendingForTaskAndUser(after.taskId(), actor, now);
+        } else if (from == TaskStatus.DOING && target == TaskStatus.REVIEW) {
+            String effectiveCreator = resolveEffectiveCreator(workspace, after.projectId(), after.creatorId());
+            externalEnqueuer.enqueueTaskEvent(
+                    workspace, after.projectId(), after.taskId(), "task.review_requested",
+                    effectiveCreator, actor, ExternalNotificationRepository.URGENCY_URGENT,
+                    after.title(), now);
+        } else if (from == TaskStatus.REVIEW && target == TaskStatus.TODO) {
+            externalEnqueuer.cancelPendingForTask(after.taskId(), now);
+            externalEnqueuer.enqueueTaskEvent(
+                    workspace, after.projectId(), after.taskId(), "task.returned",
+                    after.assigneeId(), actor, ExternalNotificationRepository.URGENCY_NORMAL,
+                    after.title(), now);
+        } else if (target == TaskStatus.DONE || target == TaskStatus.CANCELLED) {
+            externalEnqueuer.cancelPendingForTask(after.taskId(), now);
+        }
+    }
+
+    private String resolveEffectiveCreator(String workspace, String projectId, String creatorId) {
+        return isActiveWorkspaceMember(workspace, creatorId)
+                ? creatorId
+                : policy.requireProject(workspace, projectId).ownerUserId();
+    }
+
     private void publish(String type, String actor, String workspace, TaskSummary task) {
+        // 原发起人离开团队或停用后，将验收/变更通知投递给当前有效的 Project owner 代管，不改任务原作者归属。
+        String effectiveCreator = resolveEffectiveCreator(workspace, task.projectId(), task.creatorId());
         notifications.publish(type, task.taskId(), Map.of(
                 "workspaceId", workspace, "projectId", task.projectId(), "actorId", actor,
-                "creatorId", task.creatorId(), "assigneeId", task.assigneeId()));
+                "creatorId", effectiveCreator, "assigneeId", task.assigneeId()));
     }
 
     private String encode(TaskStore.StoredTask task) {

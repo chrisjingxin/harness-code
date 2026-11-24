@@ -5,6 +5,8 @@
 import type {
   BoardResponse,
   CollaborationResult,
+  InboxQuery,
+  InboxResponse,
   KnowledgeCreateRequest,
   KnowledgeDetail,
   KnowledgeListResponse,
@@ -12,6 +14,8 @@ import type {
   KnowledgeVersion,
   KnowledgeVersionListResponse,
   NotificationEvent,
+  NotificationPreferences,
+  NotificationPreferencesUpdateRequest,
   ProjectCreateRequest,
   ProjectDetailResponse,
   ProjectListResponse,
@@ -28,6 +32,8 @@ import type {
   TaskListResponse,
   TaskPatchRequest,
   TaskTransitionRequest,
+  UserNotificationPage,
+  UserUpdatesNotice,
 } from "@workbench/collaboration-client/types"
 
 /** 页面可见的组织层窄端口：项目、成员与仓库目录。凭据、服务地址和请求细节只在主进程。 */
@@ -87,4 +93,28 @@ export interface ProjectUpdatesHost {
   acknowledge(subscriptionId: string, eventId: number): Promise<void>
   unsubscribe(subscriptionId: string): Promise<void>
   onNotice(listener: (notice: ProjectUpdatesNotice) => void): () => void
+}
+
+/** 跨团队全局收件箱、用户级通知流与通知偏好的固定 IPC 通道名，供主进程与预加载桥统一引用。 */
+export const inboxChannels = {
+  getInbox: "workbench:inbox:get",
+  listNotifications: "workbench:inbox:list-notifications",
+  getPreferences: "workbench:inbox:get-preferences",
+  updatePreferences: "workbench:inbox:update-preferences",
+  subscribe: "workbench:inbox:subscribe",
+  acknowledge: "workbench:inbox:acknowledge",
+  unsubscribe: "workbench:inbox:unsubscribe",
+  notice: "workbench:inbox:notice",
+} as const
+
+/** 桌面端跨团队收件箱、用户级通知流与偏好设置窄端口。 */
+export interface InboxHost {
+  getInbox(query?: InboxQuery): Promise<CollaborationResult<InboxResponse>>
+  listUserNotifications(query?: { afterId?: number; limit?: number }): Promise<CollaborationResult<UserNotificationPage>>
+  getNotificationPreferences(): Promise<CollaborationResult<NotificationPreferences>>
+  updateNotificationPreferences(input: NotificationPreferencesUpdateRequest): Promise<CollaborationResult<NotificationPreferences>>
+  subscribe(subscriptionId: string, initialCursor?: number): Promise<CollaborationResult<null>>
+  acknowledge(subscriptionId: string, id: number): Promise<void>
+  unsubscribe(subscriptionId: string): Promise<void>
+  onNotice(listener: (notice: UserUpdatesNotice) => void): () => void
 }

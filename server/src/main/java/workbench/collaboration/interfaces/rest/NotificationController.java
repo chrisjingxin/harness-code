@@ -76,8 +76,13 @@ public class NotificationController {
             streams.release();
             throw new ApiProblem(503, "SERVICE_UNAVAILABLE");
         }
-        request.setAttribute(AUTHORIZED_STREAM, request.getRequestURI());
+        markAuthorizedStream(request);
         return ResponseEntity.ok().header("X-Accel-Buffering", "no").body(emitter);
+    }
+
+    /** 标记当前请求为已鉴权的 SSE 异步流，确保容器异步收尾时不会触发无 Cookie 401。 */
+    public static void markAuthorizedStream(HttpServletRequest request) {
+        request.setAttribute(AUTHORIZED_STREAM, request.getRequestURI());
     }
 
     /** Spring 已有异步结果时仅收尾。注销已清除登录态，不能再用旧 Cookie 给收尾请求鉴权。 */
@@ -103,9 +108,18 @@ public class NotificationController {
                 }
                 for (var event : page.events()) {
                     if (!open.get() || !signedIn(session, user)) return;
-                    emitter.send(SseEmitter.event().id(Long.toString(event.id())).name(event.type())
-                            .data(notifications.encodeEvent(event)));
                     cursor = event.id();
+                    String payload;
+                    try {
+                        payload = notifications.encodeEvent(event);
+                    } catch (RuntimeException invalidEvent) {
+                        // 单条异常/契约不合规事件只记日志并跳过，避免阻塞后续合法通知推送。
+                        LOGGER.error("跳过不符合契约的团队通知事件 id={} workspaceId={} type={}",
+                                event.id(), workspace, event.type(), invalidEvent);
+                        continue;
+                    }
+                    emitter.send(SseEmitter.event().id(Long.toString(event.id())).name(event.type())
+                            .data(payload));
                 }
                 if (!page.hasMore()) signal.await(generation);
             }
@@ -127,7 +141,7 @@ public class NotificationController {
         }
     }
 
-    private static boolean signedIn(HttpSession session, String user) {
+    public static boolean signedIn(HttpSession session, String user) {
         try {
             return session != null && session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY)
                     instanceof SecurityContext context && context.getAuthentication() != null

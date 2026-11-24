@@ -25,7 +25,7 @@ import java.util.UUID;
  * 本服务从不执行任何 DDL——库表结构唯一来源是 classpath:db/schema.sql，由运维手工建库。
  *
  * <p>【核心架构底线与校验规则 (Invariants)】
- * 1. 核对当前 20 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量）：
+ * 1. 核对当前 22 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量、HC-246 通知偏好与外部出站）：
  *    - 完整集合见 REQUIRED_TABLES，与唯一 schema.sql 对齐；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
@@ -48,13 +48,14 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 20 张控制面表 */
+    /** 必须存在的 22 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
             "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_workspace_request",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
             "wb_conversation", "wb_conversation_repository", "wb_snapshot",
             "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
-            "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox"
+            "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox",
+            "wb_user_notification_pref", "wb_external_notification_delivery"
     );
 
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
@@ -80,7 +81,14 @@ public final class Foundation {
             Map.entry("wb_knowledge_item", List.of("workspace_id", "knowledge_id", "term_key", "current_version_id",
                     "version", "indexed_version", "archived")),
             Map.entry("wb_knowledge_version", List.of("knowledge_id", "version_id", "version", "text")),
-            Map.entry("wb_notification_outbox", List.of("workspace_id", "user_id", "project_id", "event_id", "event_type", "object_id"))
+            Map.entry("wb_notification_outbox", List.of("workspace_id", "user_id", "project_id", "event_id", "event_type", "object_id")),
+            Map.entry("wb_user_notification_pref", List.of("user_id", "external_enabled", "subscribed_events",
+                    "dnd_enabled", "dnd_start_minute", "dnd_end_minute", "dnd_timezone",
+                    "merge_window_sec", "version", "created_at", "updated_at")),
+            Map.entry("wb_external_notification_delivery", List.of("delivery_id", "user_id", "workspace_id", "project_id",
+                    "event_type", "object_id", "actor_id", "urgency", "title_snapshot", "merge_key",
+                    "status", "skip_reason", "attempt_count", "max_attempts", "available_at",
+                    "last_error", "occurred_at", "created_at", "updated_at"))
     );
 
     /** 严禁存在的已废弃表集合（历史流水表 + 旧协作模型表，防架构倒退） */

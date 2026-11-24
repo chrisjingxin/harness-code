@@ -7,8 +7,17 @@ public final class PageInput {
     private PageInput() {}
 
     public static int limit(String raw) {
-        int value = raw == null ? 50 : Integer.parseInt(raw);
-        if (value < 1 || value > 100) throw new ApiProblem(400, "INVALID_REQUEST");
+        return limit(raw, 50, 100);
+    }
+
+    public static int limit(String raw, int defaultValue, int max) {
+        int value;
+        try {
+            value = raw == null ? defaultValue : Integer.parseInt(raw);
+        } catch (NumberFormatException invalid) {
+            throw new ApiProblem(400, "INVALID_REQUEST");
+        }
+        if (value < 1 || value > max) throw new ApiProblem(400, "INVALID_REQUEST");
         return value;
     }
 

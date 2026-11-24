@@ -3,8 +3,9 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, IdentityState } from "@workbench/collaboration-client/types"
 import type {
   CollaborationAppsHost, DesktopHost, LocalConversationsHost, LocalDirectoryHost,
-  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState, WorkbenchContextHost,
+  OrganizationHost, PersonalHost, ProjectConversationHost, WindowState, WorkbenchContextHost, WorkbenchDeepLinkEvent,
 } from "../shared/index.js"
+import { createInboxHost } from "./inbox-api.js"
 import { createLocalExecutionHost } from "./local-execution-api.js"
 import { createProjectUpdatesHost } from "./project-updates-api.js"
 
@@ -21,6 +22,12 @@ const host: DesktopHost = {
     const receive = (_event: unknown, state: WindowState) => listener(state)
     ipcRenderer.on("workbench:window-state", receive)
     return () => { ipcRenderer.removeListener("workbench:window-state", receive) }
+  },
+  consumePendingDeepLink: () => ipcRenderer.invoke("workbench:consume-deep-link"),
+  onDeepLink: listener => {
+    const receive = (_event: unknown, event: WorkbenchDeepLinkEvent) => listener(event)
+    ipcRenderer.on("workbench:deep-link", receive)
+    return () => { ipcRenderer.removeListener("workbench:deep-link", receive) }
   },
 }
 contextBridge.exposeInMainWorld("workbench", host)
@@ -98,6 +105,7 @@ const collaborationApps: CollaborationAppsHost = {
 }
 contextBridge.exposeInMainWorld("collaborationApps", collaborationApps)
 contextBridge.exposeInMainWorld("projectUpdates", createProjectUpdatesHost(ipcRenderer))
+contextBridge.exposeInMainWorld("inbox", createInboxHost(ipcRenderer))
 
 const localDirectory: LocalDirectoryHost = {
   bindDirectory: (workspaceId, projectId, conversationKey, directoryPath) =>

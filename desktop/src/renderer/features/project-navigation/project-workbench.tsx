@@ -21,6 +21,7 @@ import type {
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "../../../ui/index.js"
 import type {
   CollaborationContextView,
+  NavigationInboxView,
   NavigationPageKind,
   NavigationSpaceKind,
   NavigationWorkspaceItem,
@@ -305,6 +306,12 @@ export type ProjectWorkbenchProps = {
   knowledgeCount?: number | null
   providers?: ProjectPageProviders
   dualTrack?: DualTrackNavigationProps
+  inboxView?: NavigationInboxView
+  inboxPage?: ReactNode
+  returnToInbox?: boolean
+  onOpenInbox?(): void
+  onCloseInbox?(): void
+  onReturnToInbox?(): void
   onSelectKnowledge?(knowledgeId: string): void
 }
 
@@ -404,18 +411,34 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const myLocalEntries = sessions.entries.filter(item => item.ownerUserId === user.id && item.badge?.text === "本机")
 
   const activePage: NavigationPageKind | null = !projectId ? null : page.kind === "task" ? "tasks" : page.kind
+  const inboxActive = Boolean(props.inboxView?.active && props.inboxPage)
   const current = shell.projects.projects.find(item => item.projectId === projectId)
   const currentRepoLabel = shell.detail.detail?.repositories?.length
     ? shell.detail.detail.repositories.map(r => r.name).join(" · ")
     : undefined
 
   const actions: ProjectNavigationActions = {
-    ...(props.onSelectWorkspace ? { selectWorkspace: props.onSelectWorkspace } : {}),
+    ...(props.onSelectWorkspace ? {
+      selectWorkspace: id => {
+        props.onCloseInbox?.()
+        props.onSelectWorkspace!(id)
+      },
+    } : {}),
+    ...(props.onOpenInbox ? { openInbox: props.onOpenInbox } : {}),
     ...(props.dualTrack
       ? {
-          selectSpace: props.dualTrack.selectSpace,
-          createPersonalSession: props.dualTrack.createPersonalSession,
-          selectPersonalConversation: props.dualTrack.selectPersonalConversation,
+          selectSpace: space => {
+            props.onCloseInbox?.()
+            props.dualTrack!.selectSpace(space)
+          },
+          createPersonalSession: () => {
+            props.onCloseInbox?.()
+            props.dualTrack!.createPersonalSession()
+          },
+          selectPersonalConversation: id => {
+            props.onCloseInbox?.()
+            props.dualTrack!.selectPersonalConversation(id)
+          },
           renamePersonalConversation: props.dualTrack.renamePersonalConversation,
           publishPersonalConversation: props.dualTrack.publishPersonalConversation,
           stopSharingConversation: props.dualTrack.stopSharingConversation,
@@ -424,12 +447,17 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         }
       : {}),
     selectProject: id => {
+      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       shell.selectProject(id)
     },
     createProject: shell.openCreateDialog,
-    openProjectSettings: () => shell.openPage({ kind: "info" }),
+    openProjectSettings: () => {
+      props.onCloseInbox?.()
+      shell.openPage({ kind: "info" })
+    },
     openProjectSettingsFor: targetProjectId => {
+      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       if (targetProjectId === shell.projectId) {
         shell.openPage({ kind: "info" })
@@ -439,14 +467,17 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       shell.selectProject(targetProjectId)
     },
     openPage: kind => {
+      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       shell.openPage({ kind })
     },
     createSession: () => {
+      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       shell.openPage({ kind: "new" })
     },
     selectConversation: conversationId => {
+      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       shell.openPage({ kind: "conversation", conversationId })
     },
@@ -472,15 +503,17 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const isSessionPage = page.kind === "new" || page.kind === "conversation"
   const activeProvider = resolveProvider(page, providers)
 
-  // 会话提供者在整个项目范围内保持挂载，切到看板/任务/资料/知识时只隐藏，保证草稿与阅读位置不丢。
+  // 会话提供者在整个项目范围内保持挂载，切到看板/任务/资料/知识/收件箱时只隐藏，保证草稿与阅读位置不丢。
   const sessionSlot = projectId && scope && providers.session
-    ? <div key={projectId} className="pnav-page-slot" hidden={!isSessionPage}>
-        {providers.session.render({ scope, page, navigator, visible: isSessionPage })}
+    ? <div key={projectId} className="pnav-page-slot" hidden={!isSessionPage || inboxActive}>
+        {providers.session.render({ scope, page, navigator, visible: isSessionPage && !inboxActive })}
       </div>
     : null
 
   let pageView: ReactNode = null
-  if (!projectId) {
+  if (inboxActive) {
+    pageView = <div className="pnav-page-slot">{props.inboxPage}</div>
+  } else if (!projectId) {
     pageView = <section className="pnav-page" aria-label="项目">
       {shell.projects.availability.state === "failed" ? <>
         <p className="pnav-page-status" role="alert">{shell.projects.availability.message}</p>
@@ -531,23 +564,34 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       && !(selectedEntry.ownerUserId === user.id && selectedEntry.badge?.text === "本机"),
   )
 
-  const headerContext: CollaborationContextView = !current
-    ? { title: "协作工作台" }
-    : page.kind === "knowledge"
-      ? {
-          title: "团队知识库",
-          subtitle: `${props.workspaceName} · 双层沉淀`,
-        }
-      : {
-          title: current.name,
-          subtitle: isRemoteSession
-            ? selectedEntry?.ownerUserId !== user.id
-              ? `${props.workspaceName} · ${selectedOwner?.userName ?? "队友"} · 跨机只读同步`
-              : `${props.workspaceName} · 本人其他设备 · 只读`
-            : `${props.workspaceName}${currentRepoLabel ? ` · ${currentRepoLabel}` : ""}`,
-        }
+  const headerContext: CollaborationContextView = inboxActive
+    ? { title: "收件箱", subtitle: `${props.workspaceName} · 跨团队待办与本机提醒` }
+    : !current
+      ? { title: "协作工作台" }
+      : page.kind === "knowledge"
+        ? {
+            title: "团队知识库",
+            subtitle: `${props.workspaceName} · 双层沉淀`,
+          }
+        : {
+            title: current.name,
+            subtitle: isRemoteSession
+              ? selectedEntry?.ownerUserId !== user.id
+                ? `${props.workspaceName} · ${selectedOwner?.userName ?? "队友"} · 跨机只读同步`
+                : `${props.workspaceName} · 本人其他设备 · 只读`
+              : `${props.workspaceName}${currentRepoLabel ? ` · ${currentRepoLabel}` : ""}`,
+          }
 
-  const backButton = isRemoteSession ? (
+  const backButton = !inboxActive && props.returnToInbox && props.onReturnToInbox ? (
+    <button
+      type="button"
+      className="collab-back-btn"
+      onClick={props.onReturnToInbox}
+    >
+      <IconArrowLeft size={14} aria-hidden="true" />
+      <span>返回收件箱</span>
+    </button>
+  ) : !inboxActive && isRemoteSession ? (
     <button
       type="button"
       className="collab-back-btn"
@@ -583,6 +627,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           peerEntries={peerEntries}
           onClose={() => setCollabPopoverOpen(false)}
           onOpenConversation={conversationId => {
+            props.onCloseInbox?.()
             setCollabPopoverOpen(false)
             shell.openPage({ kind: "conversation", conversationId })
           }}
@@ -599,9 +644,16 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           knowledge={props.knowledge ?? []}
           metadataMessage={props.metadataMessage}
           onClose={() => setPaletteOpen(false)}
-          onSelectSession={conversationId => shell.openPage({ kind: "conversation", conversationId })}
-          onSelectTask={taskId => shell.openPage({ kind: "task", taskId })}
+          onSelectSession={conversationId => {
+            props.onCloseInbox?.()
+            shell.openPage({ kind: "conversation", conversationId })
+          }}
+          onSelectTask={taskId => {
+            props.onCloseInbox?.()
+            shell.openPage({ kind: "task", taskId })
+          }}
           onSelectKnowledge={knowledgeId => {
+            props.onCloseInbox?.()
             if (props.onSelectKnowledge) props.onSelectKnowledge(knowledgeId)
             else shell.openPage({ kind: "knowledge" })
           }}
@@ -630,6 +682,15 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       titleBarClassName={props.titleBarClassName}
       context={headerContext}
       renderHeaderTitle={({ leftCollapsed }) => {
+        if (inboxActive) {
+          const cloudCount = props.inboxView?.cloudActionCount ?? 0
+          return (
+            <>
+              <span className="tb-name">Inbox · 待办与审批</span>
+              <span className="tb-count">{cloudCount} 项待你拍板</span>
+            </>
+          )
+        }
         if (scope && activeProvider?.headerTitle) {
           const custom = activeProvider.headerTitle({ scope, page, leftCollapsed })
           if (custom !== null && custom !== undefined) return custom
@@ -727,6 +788,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
                 publishedSessionCount: props.dualTrack.publishedSessionCount,
               }
             : {}),
+          ...(props.inboxView ? { inbox: props.inboxView } : {}),
         }} actions={actions} />
         {shell.notice && <p className="desktop-navigation-note" role="status">{shell.notice}</p>}
         {props.personalError && <p className="desktop-navigation-note" role="alert">{props.personalError}{" "}
@@ -734,10 +796,10 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
         </p>}
       </div>}
       center={<>{sessionSlot}{pageView}</>}
-      right={slot => (scope && activeProvider?.right ? activeProvider.right({ scope, page, slot }) : null)}
+      right={slot => (!inboxActive && scope && activeProvider?.right ? activeProvider.right({ scope, page, slot }) : null)}
       leftOpen={workspace.panels.left.open}
       leftWidthPx={workspace.panels.left.width}
-      rightOpen={Boolean(scope && activeProvider?.right) && workspace.panels.right.open}
+      rightOpen={Boolean(!inboxActive && scope && activeProvider?.right) && workspace.panels.right.open}
       rightWidthPx={workspace.panels.right.width}
       setPanelOpen={(side, open) => shell.saveWorkspace({ ...workspace, panels: { ...workspace.panels, [side]: { ...workspace.panels[side], open } } })}
       setPanelWidth={(side, width) => shell.saveWorkspace({ ...workspace, panels: { ...workspace.panels, [side]: { ...workspace.panels[side], width } } })}

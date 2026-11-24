@@ -12,6 +12,21 @@ export interface WindowState {
   zoomPercent: number
 }
 
+/** `workbench://` 白名单只读跳转目标；首期仅放行收件箱首页与指定任务详情。 */
+export type WorkbenchDeepLinkTarget =
+  | { readonly kind: "inbox" }
+  | {
+      readonly kind: "task"
+      readonly workspaceId: string
+      readonly projectId: string
+      readonly taskId: string
+    }
+
+/** 主进程校验后的深链接投递载荷；畸形/未声明路径在主进程拦截并返回安全错误。 */
+export type WorkbenchDeepLinkEvent =
+  | { readonly ok: true; readonly target: WorkbenchDeepLinkTarget }
+  | { readonly ok: false; readonly message: string }
+
 /** 窄原生接口；请求失败时拒绝 Promise，UI 显示错误，订阅销毁时必须解绑。 */
 export interface DesktopHost {
   /** 单选目录；取消返回 null，路径仅用于显示，不构成后续文件授权。 */
@@ -29,4 +44,8 @@ export interface DesktopHost {
   /** 用户主动打开 http、https 或 mailto 地址；无效地址和系统失败均拒绝。 */
   openExternal(href: string): Promise<void>
   onWindowStateChanged(listener: (state: WindowState) => void): () => void
+  /** 读取并消费冷启动或未登录期间挂起的只读 Deep-Link。 */
+  consumePendingDeepLink?(): Promise<WorkbenchDeepLinkEvent | null>
+  /** 监听主窗口运行期收到的热启动 Deep-Link 路由。 */
+  onDeepLink?(listener: (event: WorkbenchDeepLinkEvent) => void): () => void
 }

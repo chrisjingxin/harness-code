@@ -1,8 +1,11 @@
 package workbench.collaboration.infrastructure.persistence;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import workbench.collaboration.application.port.UserNotificationQueryPort;
 import workbench.collaboration.interfaces.dto.NotificationDtos.NotificationEvent;
+import workbench.collaboration.interfaces.dto.NotificationDtos.UserNotificationEvent;
 
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
@@ -13,7 +16,23 @@ import java.util.List;
  * 同团队先分配的游标必先提交，客户端推进游标时不会漏掉晚提交的旧编号。
  */
 @Repository
-public class NotificationStore {
+public class NotificationStore implements UserNotificationQueryPort {
+    private static final RowMapper<UserNotificationEvent> USER_EVENT = (row, index) -> {
+        String project = trim(row.getString("project_id"));
+        return new UserNotificationEvent(
+                row.getLong("id"),
+                trim(row.getString("event_id")),
+                trim(row.getString("workspace_id")),
+                trim(row.getString("event_type")),
+                trim(row.getString("object_id")),
+                project.isEmpty() ? null : project,
+                Times.ms(row.getObject("created_at", LocalDateTime.class))
+        );
+    };
+
+    private static String trim(String value) {
+        return value == null ? "" : value.trim();
+    }
     private final JdbcTemplate jdbc;
 
     public NotificationStore(DataSource dataSource) {
@@ -54,10 +73,66 @@ public class NotificationStore {
                        WHERE p.project_id=n.project_id AND p.user_id=n.user_id AND p.status=1))
                 ORDER BY n.id LIMIT ?
                 """, (row, index) -> {
-            String project = row.getString("project_id");
-            return new NotificationEvent(row.getLong("id"), row.getString("event_id"), row.getString("event_type"),
-                    row.getString("object_id"), project.isEmpty() ? null : project,
-                    Times.ms(row.getObject("created_at", LocalDateTime.class)));
+            String project = trim(row.getString("project_id"));
+            return new NotificationEvent(
+                    row.getLong("id"),
+                    trim(row.getString("event_id")),
+                    trim(row.getString("event_type")),
+                    trim(row.getString("object_id")),
+                    project.isEmpty() ? null : project,
+                    Times.ms(row.getObject("created_at", LocalDateTime.class))
+            );
         }, workspace, user, cursor, limit);
+    }
+
+    /** 跨所有有效团队按全局游标翻页读取用户可见通知，每次查询在线核对团队及项目活跃成员资格。 */
+    @Override
+    public List<UserNotificationEvent> afterForUser(String userId, long cursor, int limit) {
+        return jdbc.query("""
+                SELECT n.id, n.event_id, n.workspace_id, n.event_type, n.object_id, n.project_id, n.created_at
+                FROM wb_notification_outbox n
+                JOIN wb_workspace_member wm ON wm.workspace_id = n.workspace_id AND wm.user_id = n.user_id AND wm.status = 1
+                JOIN wb_user u ON u.user_id = n.user_id AND u.enabled = 1
+                WHERE n.user_id = ? AND n.id > ?
+                  AND (n.project_id = '' OR EXISTS (
+                    SELECT 1 FROM wb_project_member p
+                    WHERE p.project_id = n.project_id AND p.user_id = n.user_id AND p.status = 1
+                  ))
+                ORDER BY n.id LIMIT ?
+                """, USER_EVENT, userId, cursor, limit);
+    }
+
+    /** 按指定团队独立游标读取可见通知，消除跨团队事务提交 id 交错导致的漏读风险。 */
+    @Override
+    public List<UserNotificationEvent> afterInWorkspace(String workspaceId, String userId, long cursor, int limit) {
+        return jdbc.query("""
+                SELECT n.id, n.event_id, n.workspace_id, n.event_type, n.object_id, n.project_id, n.created_at
+                FROM wb_notification_outbox n
+                JOIN wb_workspace_member wm ON wm.workspace_id = n.workspace_id AND wm.user_id = n.user_id AND wm.status = 1
+                JOIN wb_user u ON u.user_id = n.user_id AND u.enabled = 1
+                WHERE n.workspace_id = ? AND n.user_id = ? AND n.id > ?
+                  AND (n.project_id = '' OR EXISTS (
+                    SELECT 1 FROM wb_project_member p
+                    WHERE p.project_id = n.project_id AND p.user_id = n.user_id AND p.status = 1
+                  ))
+                ORDER BY n.id LIMIT ?
+                """, USER_EVENT, workspaceId, userId, cursor, limit);
+    }
+
+    /** 查询用户当前可见通知的最大 outbox id 水位，供全局 Inbox 初始化后续 SSE 起点。 */
+    @Override
+    public long latestCursorForUser(String userId) {
+        Long cursor = jdbc.queryForObject("""
+                SELECT COALESCE(MAX(n.id), 0)
+                FROM wb_notification_outbox n
+                JOIN wb_workspace_member wm ON wm.workspace_id = n.workspace_id AND wm.user_id = n.user_id AND wm.status = 1
+                JOIN wb_user u ON u.user_id = n.user_id AND u.enabled = 1
+                WHERE n.user_id = ?
+                  AND (n.project_id = '' OR EXISTS (
+                    SELECT 1 FROM wb_project_member p
+                    WHERE p.project_id = n.project_id AND p.user_id = n.user_id AND p.status = 1
+                  ))
+                """, Long.class, userId);
+        return cursor == null ? 0L : cursor;
     }
 }

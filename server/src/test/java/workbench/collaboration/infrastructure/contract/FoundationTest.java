@@ -36,7 +36,8 @@ class FoundationTest {
                 "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
                 "wb_conversation", "wb_conversation_repository", "wb_snapshot",
                 "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
-                "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox");
+                "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox",
+                "wb_user_notification_pref", "wb_external_notification_delivery");
     }
 
     private static Set<String> compliantColumns() {
@@ -70,14 +71,28 @@ class FoundationTest {
                 "wb_knowledge_item.current_version_id", "wb_knowledge_item.version", "wb_knowledge_item.indexed_version", "wb_knowledge_item.archived",
                 "wb_knowledge_version.knowledge_id", "wb_knowledge_version.version_id", "wb_knowledge_version.version", "wb_knowledge_version.text",
                 "wb_notification_outbox.workspace_id", "wb_notification_outbox.user_id", "wb_notification_outbox.project_id",
-                "wb_notification_outbox.event_id", "wb_notification_outbox.event_type", "wb_notification_outbox.object_id");
+                "wb_notification_outbox.event_id", "wb_notification_outbox.event_type", "wb_notification_outbox.object_id",
+                "wb_user_notification_pref.user_id", "wb_user_notification_pref.external_enabled", "wb_user_notification_pref.subscribed_events",
+                "wb_user_notification_pref.dnd_enabled", "wb_user_notification_pref.dnd_start_minute", "wb_user_notification_pref.dnd_end_minute",
+                "wb_user_notification_pref.dnd_timezone", "wb_user_notification_pref.merge_window_sec", "wb_user_notification_pref.version",
+                "wb_user_notification_pref.created_at", "wb_user_notification_pref.updated_at",
+                "wb_external_notification_delivery.delivery_id", "wb_external_notification_delivery.user_id",
+                "wb_external_notification_delivery.workspace_id", "wb_external_notification_delivery.project_id",
+                "wb_external_notification_delivery.event_type", "wb_external_notification_delivery.object_id",
+                "wb_external_notification_delivery.actor_id", "wb_external_notification_delivery.urgency",
+                "wb_external_notification_delivery.title_snapshot", "wb_external_notification_delivery.merge_key",
+                "wb_external_notification_delivery.status", "wb_external_notification_delivery.skip_reason",
+                "wb_external_notification_delivery.attempt_count", "wb_external_notification_delivery.max_attempts",
+                "wb_external_notification_delivery.available_at", "wb_external_notification_delivery.last_error",
+                "wb_external_notification_delivery.occurred_at", "wb_external_notification_delivery.created_at",
+                "wb_external_notification_delivery.updated_at");
     }
 
     @Test
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("20"));
+        assertTrue(error.getMessage().contains("22"));
     }
 
     @Test

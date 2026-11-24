@@ -1,6 +1,7 @@
 package workbench.collaboration.infrastructure.contract;
 
 import workbench.collaboration.interfaces.dto.ConversationDtos;
+import workbench.collaboration.interfaces.dto.InboxDtos;
 import workbench.collaboration.interfaces.dto.PlatformDtos;
 import workbench.collaboration.interfaces.dto.ProjectDtos;
 import workbench.collaboration.interfaces.dto.RepositoryDtos;
@@ -215,7 +216,12 @@ public final class Contracts {
                 Map.entry("TaskTransitionRequest", TaskDtos.TaskTransitionRequest.class),
                 Map.entry("KnowledgeCreateRequest", KnowledgeDtos.KnowledgeCreateRequest.class),
                 Map.entry("BoardResponse", BoardDtos.BoardResponse.class),
-                Map.entry("NotificationEvent", NotificationDtos.NotificationEvent.class)
+                Map.entry("NotificationEvent", NotificationDtos.NotificationEvent.class),
+                Map.entry("InboxResponse", InboxDtos.InboxResponse.class),
+                Map.entry("UserNotificationEvent", NotificationDtos.UserNotificationEvent.class),
+                Map.entry("UserNotificationPage", NotificationDtos.UserNotificationPage.class),
+                Map.entry("NotificationPreferences", InboxDtos.NotificationPreferences.class),
+                Map.entry("NotificationPreferencesUpdateRequest", InboxDtos.NotificationPreferencesUpdateRequest.class)
         );
 
         for (JsonNode file : catalog.get("fixtures")) {

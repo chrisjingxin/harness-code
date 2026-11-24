@@ -49,8 +49,10 @@ import { bindLocalExecutionIpc } from "./local-execution-ipc.js"
 import { bindOrganizationIpc } from "./organization-ipc.js"
 import { PersonalStore } from "./personal-store.js"
 import { bindProjectUpdatesIpc } from "./project-updates-ipc.js"
+import { bindInboxIpc } from "./inbox-ipc.js"
 import { bindWorkbenchContextIpc } from "./workbench-context/context-ipc.js"
 import { WorkbenchContextService } from "./workbench-context/service.js"
+import type { DeepLinkBroker } from "./deep-link.js"
 
 const CONVERSATION_STATUSES = new Set(["idle", "running", "waiting_approval", "error"])
 const TASK_STATUSES = new Set(["todo", "doing", "review", "done", "cancelled"])
@@ -187,6 +189,7 @@ export function bindCollaborationIpc(
   trustedUrl: string,
   onCloseAborted: () => void,
   runtime: LocalExecutionRuntime,
+  deepLinkBroker?: DeepLinkBroker,
 ) {
   const origin = process.env.WORKBENCH_SERVICE_ORIGIN
   const identity = new CollaborationState(origin)
@@ -300,8 +303,10 @@ export function bindCollaborationIpc(
   const unbindWorkspace = bindWorkspaceIpc(window, trustedUrl, identity)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "", workspaceId => context.knowledge.invalidate(workspaceId))
+  const unbindInbox = bindInboxIpc(window, trustedUrl, identity, origin ?? "")
   const unsubscribe = identity.onStateChanged(state => {
     uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
+    deepLinkBroker?.setSignedIn(state.status === "signedIn")
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
   })
 
@@ -459,6 +464,8 @@ export function bindCollaborationIpc(
     unbindWorkspace()
     unbindOrganization()
     unbindProjectUpdates()
+    unbindInbox()
+    deepLinkBroker?.setSignedIn(false)
     identity.dispose()
     ipc.dispose()
   })

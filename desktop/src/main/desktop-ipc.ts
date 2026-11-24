@@ -7,6 +7,7 @@ import type { BrowserWindow } from "electron"
 import type { ThemeMode, WindowState } from "../shared/index.js"
 import { nativeTheme as workbenchNativeTheme } from "../shared/native-theme.js"
 import { createStrictIpcRegistrar, isNonEmptyString } from "./ipc-guard.js"
+import type { DeepLinkBroker } from "./deep-link.js"
 
 export type DesktopSelectionCapture = {
   readonly captureDirectorySelection?: () => (path: string) => Promise<void>
@@ -14,7 +15,13 @@ export type DesktopSelectionCapture = {
 }
 
 /** 绑定可信主窗口；窗口销毁时移除 IPC 和系统主题监听，允许 macOS 重开。 */
-export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, selectionCapture?: DesktopSelectionCapture): void {
+export function bindDesktopIpc(
+  window: BrowserWindow,
+  trustedUrl: string,
+  selectionCapture?: DesktopSelectionCapture,
+  deepLinkBroker?: DeepLinkBroker,
+): void {
+  const contents = window.webContents
   let themeMode: ThemeMode = "system"
   let zoomPercent = 100
   let choosing = false
@@ -94,6 +101,22 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, select
     if (url.protocol !== "http:" && url.protocol !== "https:" && url.protocol !== "mailto:") throw new Error("链接协议不受支持")
     await shell.openExternal(url.href)
   })
+  ipc.handle("workbench:consume-deep-link", 0, () => deepLinkBroker?.consumePending() ?? null)
+  deepLinkBroker?.attachDeliver(event => {
+    if (window.isDestroyed() || contents.isDestroyed() || contents.mainFrame.url !== trustedUrl) return false
+    try {
+      contents.send("workbench:deep-link", event)
+      return true
+    } catch {
+      return false
+    }
+  })
+  const resetDeepLinkReady = (details: Electron.WebContentsDidStartNavigationEventParams) => {
+    if (details.isMainFrame && !details.isSameDocument) deepLinkBroker?.markRendererNotReady()
+  }
+  const onRendererGone = () => deepLinkBroker?.markRendererNotReady()
+  contents.on("did-start-navigation", resetDeepLinkReady)
+  contents.on("render-process-gone", onRendererGone)
   nativeTheme.on("updated", publish)
   window.webContents.on("did-finish-load", () => {
     window.webContents.setZoomFactor(zoomPercent / 100)
@@ -102,6 +125,11 @@ export function bindDesktopIpc(window: BrowserWindow, trustedUrl: string, select
   })
   window.once("closed", () => {
     nativeTheme.removeListener("updated", publish)
+    deepLinkBroker?.detachDeliver()
+    if (!contents.isDestroyed()) {
+      contents.removeListener("did-start-navigation", resetDeepLinkReady)
+      contents.removeListener("render-process-gone", onRendererGone)
+    }
     ipc.dispose()
   })
 }

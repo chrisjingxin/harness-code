@@ -71,7 +71,7 @@ export type {
 } from "./conversation/index.js"
 export { MemberAvatar, ProjectNavigation, buildMemberGroups } from "./navigation/index.js"
 export type {
-  MemberGroupInput, NavigationAvailability, NavigationMember, NavigationMemberGroup, NavigationPageKind,
+  MemberGroupInput, NavigationAvailability, NavigationInboxView, NavigationMember, NavigationMemberGroup, NavigationPageKind,
   NavigationPersonalEntry, NavigationProjectItem, NavigationRetryArea, NavigationSessionEntry, NavigationSpaceKind,
   NavigationWorkspaceItem, PersonalNavigationDirectoryGroup, ProjectNavigationActions, ProjectNavigationProps,
   ProjectNavigationView,

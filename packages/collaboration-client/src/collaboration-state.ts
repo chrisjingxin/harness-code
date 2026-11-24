@@ -179,6 +179,27 @@ export class CollaborationState {
     return result
   }
 
+  /**
+   * 在当前已登录账号的身份代次下执行跨工作区账号级请求（如收件箱聚合、跨团队通知流与通知偏好）；
+   * 退出或切换账号后旧代次迟到的回包直接拦截，认证失效立即收回当前身份。
+   */
+  async withAccount<T>(
+    fn: (client: CollaborationClient) => Promise<CollaborationResult<T>>,
+    options?: { publishConnectionError?: boolean },
+  ): Promise<CollaborationResult<T>> {
+    if (this.#disposed || this.#state.status !== "signedIn") return this.#cancelled()
+    if (!this.#client) return this.#unavailable()
+    const generation = this.#generation
+    const result = await fn(this.#client)
+    if (!this.#current(generation)) return this.#cancelled()
+    if (!result.ok && ["WORKSPACE_MEMBER_REQUIRED", "WORKSPACE_ADMIN_REQUIRED"].includes(result.error.code)) {
+      await this.refreshIdentity()
+    }
+    const publishConnectionError = options?.publishConnectionError ?? true
+    if (!result.ok && (publishConnectionError || result.error.code === "AUTHENTICATION_REQUIRED")) this.#failure(result.error)
+    return result
+  }
+
   /** 业务错误留在当前调用处理，认证失效仍立即收回身份。 */
   applicationWorkspace<T>(workspaceId: string, request: (client: CollaborationClient) => Promise<CollaborationResult<T>>): Promise<CollaborationResult<T>> {
     return this.withWorkspace(workspaceId, request, { publishConnectionError: false })

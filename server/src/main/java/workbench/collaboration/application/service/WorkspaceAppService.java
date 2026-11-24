@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import workbench.collaboration.domain.access.ProjectAccessPolicy;
 import workbench.collaboration.domain.identity.*;
+import workbench.collaboration.application.port.ExternalNotificationRepository;
 import workbench.collaboration.application.port.NotificationPort;
 import workbench.collaboration.infrastructure.persistence.WorkspaceStore;
 import workbench.collaboration.infrastructure.persistence.WorkspaceStore.*;
@@ -26,11 +27,12 @@ public class WorkspaceAppService {
     private final ProjectAccessPolicy policy;
     private final WorkspaceStore store;
     private final NotificationPort notifications;
+    private final ExternalNotificationEnqueuer externalEnqueuer;
     private final Contracts contracts;
     private final JsonMapper json=JsonMapper.builder().build();
     public WorkspaceAppService(IdentityRepository identity,IdentityAppService views,ProjectAccessPolicy policy,
-            WorkspaceStore store,NotificationPort notifications,Contracts contracts) {
-        this.identity=identity;this.views=views;this.policy=policy;this.store=store;this.notifications=notifications;this.contracts=contracts;
+            WorkspaceStore store,NotificationPort notifications,ExternalNotificationEnqueuer externalEnqueuer,Contracts contracts) {
+        this.identity=identity;this.views=views;this.policy=policy;this.store=store;this.notifications=notifications;this.externalEnqueuer=externalEnqueuer;this.contracts=contracts;
     }
     @Transactional(readOnly=true)
     public String access(String actor,String workspace) {
@@ -158,14 +160,19 @@ public class WorkspaceAppService {
             if(!confirmations.containsAll(neededConfirmations))throw new ApiProblem(409,"PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED");
             if(!neededConfirmations.containsAll(confirmations))throw new ApiProblem(400,"INVALID_REQUEST");
             // 所有选择验证完毕才开始写；后续任意异常由事务整笔回滚。
+            long now=System.currentTimeMillis();
             for(var p:input.addToProjects())store.addProjectMember(p.projectId(),p.userId());
             for(var p:work.projects())if(owners.containsKey(p.id()))store.transferProject(p,owners.get(p.id()));
             for(var t:work.tasks())if(assignees.containsKey(t.id())) {
-                store.transferTask(t,actor,assignees.get(t.id()));
-                notifications.publish("task.assigned",t.id(),Map.of("workspaceId",workspace,"projectId",t.project(),"actorId",actor,"creatorId",t.creator(),"assigneeId",assignees.get(t.id())));
+                String successor=assignees.get(t.id());
+                store.transferTask(t,actor,successor);
+                notifications.publish("task.assigned",t.id(),Map.of("workspaceId",workspace,"projectId",t.project(),"actorId",actor,"creatorId",t.creator(),"assigneeId",successor));
+                externalEnqueuer.cancelPendingForTaskAndUser(t.id(),target,now);
+                externalEnqueuer.enqueueTaskEvent(workspace,t.project(),t.id(),"task.assigned",successor,actor,ExternalNotificationRepository.URGENCY_NORMAL,t.title(),now);
             }
             for(var r:work.repositories())if(repoOwners.containsKey(r.id()))store.transferRepository(r,repoOwners.get(r.id()));
             int stopped=store.remove(workspace,target);
+            externalEnqueuer.cancelPendingForWorkspaceMember(workspace,target,now);
             for(var p:work.projects())if(p.targetIsMember() || owners.containsKey(p.id()))notifications.publish("project.member_changed",p.id(),Map.of("workspaceId",workspace,"projectId",p.id(),"actorId",actor));
             notifyMembers(actor,workspace,target);
             return contracts.encode("WorkspaceMemberRemovalResponse",new WorkspaceMemberRemovalResponse(workspace,views.member(workspace,target),views.workspaceVersion(workspace),input.requestId(),assignees.size(),owners.size(),repoOwners.size(),(int)repoOwners.values().stream().filter(Objects::isNull).count(),stopped));

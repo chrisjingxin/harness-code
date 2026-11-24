@@ -1,0 +1,804 @@
+/* 全局收件箱（对齐 LoopForge 宽屏双栏审阅 + 统一徽标语义 + 方案 A 本机置顶隔离），消费工作台主题令牌。 */
+.inbox-page {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.inbox-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 28px 40px;
+}
+
+.inbox-wrap {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inbox-mono {
+  font-family: var(--font-mono);
+}
+
+.inbox-muted {
+  color: var(--meta);
+  font-size: var(--text-xs);
+}
+
+/* 统一 Status Badge（对齐 LoopForge .hui-badge[data-tone]） */
+.inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--fg-2, var(--text-soft));
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+
+.inbox-badge[data-size="xs"] {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.inbox-badge[data-tone="accent"] {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-border, var(--line));
+}
+
+.inbox-badge[data-tone="info"] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-border, var(--line));
+}
+
+.inbox-badge[data-tone="success"] {
+  background: var(--success-tint);
+  color: var(--success-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success, #15803d) 24%, transparent);
+}
+
+.inbox-badge[data-tone="warn"] {
+  background: var(--warn-tint);
+  color: var(--warn-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #b45309) 24%, transparent);
+}
+
+.inbox-badge[data-tone="danger"] {
+  background: var(--danger-tint);
+  color: var(--danger-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 24%, transparent);
+}
+
+.inbox-badge[data-tone="muted"] {
+  background: var(--surface-2);
+  color: var(--meta);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+
+/* 1. 方案 A 本机等待确认置顶区 */
+.inbox-local-banner {
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  background: var(--warn-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #d97706) 32%, var(--line));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inbox-local-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.inbox-local-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--warn-fg);
+}
+
+.inbox-local-note {
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-local-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-local-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-ring, 0 0 0 1px var(--line));
+}
+
+.inbox-local-row.is-error {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 36%, var(--line));
+}
+
+.inbox-local-main {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inbox-local-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inbox-local-loc {
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-local-session {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-local-summary {
+  font-size: var(--text-xs);
+  color: var(--fg-2, var(--text-soft));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-local-cta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* 2. LoopForge 无眉标页头与分段控制 */
+.inbox-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inbox-page-head h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fg, var(--text));
+}
+
+.inbox-page-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--meta);
+}
+
+.inbox-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+
+.inbox-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.inbox-seg button:hover {
+  color: var(--fg, var(--text));
+}
+
+.inbox-seg button.is-active {
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--border, var(--line));
+}
+
+.inbox-seg-count {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-seg-count.is-strong {
+  background: var(--danger-vivid, #dc2626);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* 3. 工具栏与类别按钮 */
+.inbox-view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-cat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inbox-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  box-shadow: inset 0 0 0 1px var(--border-strong, var(--line-strong));
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.inbox-filter-btn:hover {
+  background: var(--hover);
+}
+
+.inbox-filter-btn.is-soft {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent-border, var(--line));
+}
+
+.inbox-bar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inbox-bucket-note {
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-ws-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.inbox-ws-filter select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-strong, var(--line-strong));
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-size: var(--text-xs);
+}
+
+.inbox-stream-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  color: var(--meta);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}
+
+.inbox-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.inbox-stream-pill.is-connected .inbox-stream-dot {
+  background: var(--success, #15803d);
+}
+
+.inbox-stream-pill.is-retrying .inbox-stream-dot,
+.inbox-stream-pill.is-connecting .inbox-stream-dot {
+  background: var(--warn, #d97706);
+}
+
+.inbox-stream-pill.is-offline .inbox-stream-dot,
+.inbox-stream-pill.is-unavailable .inbox-stream-dot {
+  background: var(--danger, #b91c1c);
+}
+
+/* 4. LoopForge 双栏主从审阅布局 (.review-layout -> .k-side + .k-doc) */
+.inbox-review-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.18fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.inbox-side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.inbox-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-row:hover {
+  background: var(--hover);
+}
+
+.inbox-row.is-active {
+  background: var(--selected);
+  box-shadow: inset 0 0 0 1px var(--border-strong, var(--line-strong));
+}
+
+.inbox-row.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.inbox-row-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-row-loc {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧审阅详情卡 */
+.inbox-doc {
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px var(--border, var(--line));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inbox-doc-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inbox-doc-loc {
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-doc-spacer {
+  flex: 1 1 auto;
+}
+
+.inbox-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--meta);
+  cursor: pointer;
+}
+
+.inbox-icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg, var(--text));
+}
+
+.inbox-doc-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg, var(--text));
+}
+
+.inbox-doc-people {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-doc-people strong {
+  color: var(--fg-2, var(--text-soft));
+  font-weight: 600;
+}
+
+.inbox-doc-body {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+
+.inbox-doc-desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  color: var(--fg, var(--text));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inbox-doc-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--danger-fg);
+  font-size: var(--text-xs);
+}
+
+.inbox-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.inbox-review-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 320px;
+}
+
+.inbox-review-note {
+  flex: 1 1 180px;
+  min-width: 140px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-strong, var(--line-strong));
+  font-size: var(--text-xs);
+  color: var(--fg, var(--text));
+}
+
+.inbox-confirm-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--danger-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 28%, transparent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.inbox-btn-danger:hover:not(:disabled) {
+  background: var(--danger-tint);
+}
+
+.inbox-btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.inbox-open-full {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.inbox-transitions {
+  margin-top: 4px;
+  padding-top: 12px;
+  box-shadow: inset 0 1px 0 var(--border-soft, var(--line-soft));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-transitions h3 {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--meta);
+}
+
+.inbox-transitions ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-tr-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--fg-2, var(--text-soft));
+}
+
+.inbox-tr-actor {
+  font-weight: 600;
+  color: var(--fg, var(--text));
+}
+
+.inbox-tr-note {
+  margin: 3px 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-actor-left {
+  color: var(--warn-fg);
+}
+
+.inbox-time {
+  font-size: var(--text-xs);
+  color: var(--meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 5. LoopForge 空态与异常卡片 */
+.inbox-empty-block {
+  padding: 36px 20px;
+  text-align: center;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px var(--border, var(--line));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  color: var(--meta);
+}
+
+.inbox-empty-block strong {
+  color: var(--fg, var(--text));
+  font-size: var(--text-base);
+}
+
+.inbox-empty-block p {
+  margin: 0;
+  font-size: var(--text-xs);
+  max-width: 480px;
+  line-height: 1.55;
+}
+
+.inbox-empty-block.is-error {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 35%, var(--line));
+}
+
+.inbox-truncated-note,
+.inbox-inline-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--meta);
+}
+
+.inbox-inline-error {
+  color: var(--danger-fg);
+}
+
+@media (max-width: 980px) {
+  .inbox-review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 6. 系统设置中的「通知与提醒」分组 */
+.desktop-notif-prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desktop-notif-events-row,
+.desktop-notif-dnd-row {
+  align-items: flex-start;
+}
+
+.desktop-notif-checks {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.desktop-notif-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.desktop-notif-check input {
+  margin-top: 2px;
+}
+
+.desktop-notif-check-text {
+  display: grid;
+  gap: 1px;
+}
+
+.desktop-notif-check-text strong {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.desktop-notif-check-text small {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.desktop-notif-dnd-times {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-soft);
+}
+
+.desktop-notif-dnd-times label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.desktop-notif-dnd-times input[type="time"],
+.desktop-notif-prefs select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+.desktop-notif-dnd-preview {
+  color: var(--muted);
+}
+
+.desktop-notif-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.desktop-notif-saved {
+  font-size: var(--text-xs);
+  color: var(--success-fg, #166534);
+  font-weight: 500;
+}

@@ -6,9 +6,14 @@ import { fileURLToPath } from "node:url"
 import { bindDesktopIpc } from "./desktop-ipc.js"
 import { bindCollaborationIpc } from "./collaboration-ipc.js"
 import type { LocalExecutionRuntime } from "./local-execution-coordinator.js"
+import type { DeepLinkBroker } from "./deep-link.js"
 
 /** 创建基础窗口；开发 URL 必须是实际 electron-vite 本机端口，生产只读取本地页面。 */
-export function createWindow(onCloseAborted: () => void, execution?: LocalExecutionRuntime): BrowserWindow {
+export function createWindow(
+  onCloseAborted: () => void,
+  execution?: LocalExecutionRuntime,
+  deepLinkBroker?: DeepLinkBroker,
+): BrowserWindow {
   // 构建时固定开发标志，避免预览或生产进程继承开发环境变量后加载网络页面。
   const developmentUrl = import.meta.env.DEV ? process.env.ELECTRON_RENDERER_URL : undefined
   let trustedUrl = new URL("../renderer/index.html", import.meta.url).href
@@ -29,9 +34,9 @@ export function createWindow(onCloseAborted: () => void, execution?: LocalExecut
   })
   // 预览不挂载身份或执行端口，避免接触现有服务和本机执行。
   const selectionCapture = execution
-    ? bindCollaborationIpc(window, trustedUrl, onCloseAborted, execution)
+    ? bindCollaborationIpc(window, trustedUrl, onCloseAborted, execution, deepLinkBroker)
     : undefined
-  bindDesktopIpc(window, trustedUrl, selectionCapture)
+  bindDesktopIpc(window, trustedUrl, selectionCapture, deepLinkBroker)
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", event => { event.preventDefault() })
   window.webContents.on("will-frame-navigate", event => { event.preventDefault() })

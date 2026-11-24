@@ -185,3 +185,98 @@ export type ProjectUpdatesNotice = { readonly subscriptionId: string } & (
   | { readonly kind: "status"; readonly status: ProjectUpdatesStatus }
   | { readonly kind: "event"; readonly event: NotificationEvent }
 )
+
+export type InboxBucket = "action_required" | "sent" | "resolved"
+export type InboxUrgency = "urgent" | "normal"
+
+export interface InboxItem {
+  itemKey: string
+  sourceType: string
+  category: string
+  urgency: InboxUrgency
+  workspaceId: string
+  projectId: string | null
+  projectName: string
+  objectId: string
+  title: string
+  status: string
+  actorId: string
+  delegated: boolean
+  updatedAtMs: number
+}
+
+export interface InboxCounts {
+  actionRequired: number
+  urgent: number
+  sent: number
+}
+
+export interface InboxWorkspaceSummary {
+  workspaceId: string
+  name: string
+  slug: string
+}
+
+export interface InboxActorSummary {
+  userId: string
+  userNo: string
+  name: string
+  active: boolean
+}
+
+export interface InboxResponse {
+  bucket: InboxBucket
+  items: InboxItem[]
+  counts: InboxCounts
+  notificationCursor: number
+  workspaces: InboxWorkspaceSummary[]
+  actors: InboxActorSummary[]
+  truncated: boolean
+}
+
+export interface InboxQuery {
+  bucket?: InboxBucket
+  category?: string
+  workspaceId?: string
+  limit?: number
+}
+
+/** 跨团队用户级轻量通知事件，附带 workspaceId 以便桌面全局收件箱精准更新。 */
+export interface UserNotificationEvent extends NotificationEvent {
+  workspaceId: string
+}
+
+export interface UserNotificationPage {
+  events: UserNotificationEvent[]
+  nextAfterId: number
+  hasMore: boolean
+}
+
+export type ExternalNotificationEventType = "task.assigned" | "task.review_requested" | "task.returned"
+
+export interface NotificationPreferences {
+  externalEnabled: boolean
+  subscribedEvents: ExternalNotificationEventType[]
+  dndEnabled: boolean
+  dndStartMinute: number
+  dndEndMinute: number
+  dndTimezone: string
+  mergeWindowSec: number
+  version: number
+}
+
+export interface NotificationPreferencesUpdateRequest {
+  externalEnabled: boolean
+  subscribedEvents: ExternalNotificationEventType[]
+  dndEnabled: boolean
+  dndStartMinute: number
+  dndEndMinute: number
+  dndTimezone: string
+  mergeWindowSec: number
+  expectedVersion: number
+}
+
+export type UserUpdatesNotice = { readonly subscriptionId: string } & (
+  | { readonly kind: "status"; readonly status: ProjectUpdatesStatus }
+  | { readonly kind: "event"; readonly event: UserNotificationEvent }
+)

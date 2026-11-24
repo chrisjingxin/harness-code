@@ -92,5 +92,148 @@
       "conversationsTruncated": false,
       "tasksTruncated": false
     }
+  },
+  {
+    "name": "inbox-response",
+    "schema": "InboxResponse",
+    "valid": true,
+    "data": {
+      "bucket": "action_required",
+      "items": [
+        {
+          "itemKey": "task:00000000-0000-4000-8000-0000000000b1",
+          "sourceType": "task",
+          "category": "task_review",
+          "urgency": "urgent",
+          "workspaceId": "00000000-0000-4000-8000-0000000000a1",
+          "projectId": "00000000-0000-4000-8000-0000000000a2",
+          "projectName": "支付重构",
+          "objectId": "00000000-0000-4000-8000-0000000000b1",
+          "title": "核对账单",
+          "status": "review",
+          "actorId": "000000000000400080000000000000d1",
+          "delegated": false,
+          "updatedAtMs": 12000
+        }
+      ],
+      "counts": {
+        "actionRequired": 1,
+        "urgent": 1,
+        "sent": 0
+      },
+      "notificationCursor": 4,
+      "workspaces": [
+        {
+          "workspaceId": "00000000-0000-4000-8000-0000000000a1",
+          "name": "平台架构二组",
+          "slug": "platform-team"
+        }
+      ],
+      "actors": [
+        {
+          "userId": "000000000000400080000000000000d1",
+          "userNo": "80278668",
+          "name": "张景新",
+          "active": true
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "name": "user-notification-metadata",
+    "schema": "UserNotificationEvent",
+    "valid": true,
+    "data": {
+      "id": 5,
+      "eventId": "00000000-0000-4000-8000-0000000000a1",
+      "workspaceId": "00000000-0000-4000-8000-0000000000a9",
+      "type": "task.assigned",
+      "objectId": "00000000-0000-4000-8000-0000000000a2",
+      "projectId": "00000000-0000-4000-8000-0000000000a3",
+      "occurredAtMs": 12000
+    }
+  },
+  {
+    "name": "user-notification-rejects-text",
+    "schema": "UserNotificationEvent",
+    "valid": false,
+    "data": {
+      "id": 5,
+      "eventId": "00000000-0000-4000-8000-0000000000a1",
+      "workspaceId": "00000000-0000-4000-8000-0000000000a9",
+      "type": "task.assigned",
+      "objectId": "00000000-0000-4000-8000-0000000000a2",
+      "projectId": "00000000-0000-4000-8000-0000000000a3",
+      "occurredAtMs": 12000,
+      "text": "不能进入通知的正文"
+    }
+  },
+  {
+    "name": "user-notification-requires-workspace",
+    "schema": "UserNotificationEvent",
+    "valid": false,
+    "data": {
+      "id": 5,
+      "eventId": "00000000-0000-4000-8000-0000000000a1",
+      "type": "task.assigned",
+      "objectId": "00000000-0000-4000-8000-0000000000a2",
+      "projectId": "00000000-0000-4000-8000-0000000000a3",
+      "occurredAtMs": 12000
+    }
+  },
+  {
+    "name": "notification-preferences",
+    "schema": "NotificationPreferences",
+    "valid": true,
+    "data": {
+      "externalEnabled": true,
+      "subscribedEvents": [
+        "task.assigned",
+        "task.review_requested",
+        "task.returned"
+      ],
+      "dndEnabled": false,
+      "dndStartMinute": 1320,
+      "dndEndMinute": 540,
+      "dndTimezone": "Asia/Shanghai",
+      "mergeWindowSec": 60,
+      "version": 1
+    }
+  },
+  {
+    "name": "notification-preferences-update",
+    "schema": "NotificationPreferencesUpdateRequest",
+    "valid": true,
+    "data": {
+      "externalEnabled": true,
+      "subscribedEvents": [
+        "task.assigned",
+        "task.review_requested"
+      ],
+      "dndEnabled": true,
+      "dndStartMinute": 1320,
+      "dndEndMinute": 540,
+      "dndTimezone": "Asia/Shanghai",
+      "mergeWindowSec": 60,
+      "expectedVersion": 0
+    }
+  },
+  {
+    "name": "notification-preferences-rejects-minute",
+    "schema": "NotificationPreferencesUpdateRequest",
+    "valid": false,
+    "data": {
+      "externalEnabled": true,
+      "subscribedEvents": [
+        "task.assigned"
+      ],
+      "dndEnabled": true,
+      "dndStartMinute": 1500,
+      "dndEndMinute": 540,
+      "dndTimezone": "Asia/Shanghai",
+      "mergeWindowSec": 60,
+      "expectedVersion": 0
+    }
   }
 ]

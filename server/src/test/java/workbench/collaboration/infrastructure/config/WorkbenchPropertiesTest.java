@@ -41,6 +41,36 @@ class WorkbenchPropertiesTest {
     });
   }
 
+  @Test
+  void bindsExternalNotificationsDefaultsAndOverrides() {
+    runner.run(context -> {
+      WorkbenchProperties.ExternalNotifications external = context.getBean(WorkbenchProperties.class)
+          .getNotifications()
+          .getExternal();
+      assertThat(external.isEnabled()).isFalse();
+      assertThat(external.getChannel()).isEqualTo("noop");
+      assertThat(external.getDispatchIntervalMs()).isEqualTo(2000L);
+      assertThat(external.getDefaultMergeWindowSec()).isEqualTo(60);
+      assertThat(external.getMaxAttempts()).isEqualTo(3);
+    });
+    runner.withPropertyValues(
+        "workbench.notifications.external.enabled=true",
+        "workbench.notifications.external.channel=corp-im",
+        "workbench.notifications.external.dispatch-interval-ms=5000",
+        "workbench.notifications.external.default-merge-window-sec=120",
+        "workbench.notifications.external.max-attempts=5"
+    ).run(context -> {
+      WorkbenchProperties.ExternalNotifications external = context.getBean(WorkbenchProperties.class)
+          .getNotifications()
+          .getExternal();
+      assertThat(external.isEnabled()).isTrue();
+      assertThat(external.getChannel()).isEqualTo("corp-im");
+      assertThat(external.getDispatchIntervalMs()).isEqualTo(5000L);
+      assertThat(external.getDefaultMergeWindowSec()).isEqualTo(120);
+      assertThat(external.getMaxAttempts()).isEqualTo(5);
+    });
+  }
+
   @Configuration
   @EnableConfigurationProperties(WorkbenchProperties.class)
   static class Enable {}

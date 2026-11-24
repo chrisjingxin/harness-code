@@ -29,6 +29,9 @@ public class WorkbenchProperties {
     /** 分布式中间件运行模式与网络端点配置 */
     private Middleware middleware = new Middleware();
 
+    /** 跨团队与企业自研 IM 外部轻通知配置 */
+    private Notifications notifications = new Notifications();
+
     public String getCommand() {
         return command;
     }
@@ -59,6 +62,14 @@ public class WorkbenchProperties {
 
     public void setMiddleware(Middleware middleware) {
         this.middleware = middleware;
+    }
+
+    public Notifications getNotifications() {
+        return notifications;
+    }
+
+    public void setNotifications(Notifications notifications) {
+        this.notifications = notifications;
     }
 
     /**
@@ -247,6 +258,77 @@ public class WorkbenchProperties {
 
         public void setUrl(String url) {
             this.url = url;
+        }
+    }
+
+    /**
+     * 通知与提醒配置分组。
+     */
+    public static class Notifications {
+        private ExternalNotifications external = new ExternalNotifications();
+
+        public ExternalNotifications getExternal() {
+            return external;
+        }
+
+        public void setExternal(ExternalNotifications external) {
+            this.external = external;
+        }
+    }
+
+    /**
+     * 面向企业自研 IM 的可插拔外部通知出站引擎配置。
+     */
+    public static class ExternalNotifications {
+        /** 是否开启后台定时出站调度；默认关闭，避免未接入企业通道时产生空轮询 */
+        private boolean enabled = false;
+        /** 激活的通道标识，需与 ExternalNotificationChannel.channelType() 匹配（如 noop / logging / corp-im） */
+        private String channel = "noop";
+        /** 出站调度轮询间隔（毫秒） */
+        private long dispatchIntervalMs = 2000L;
+        /** 用户未自定义偏好时的同项目同类事件默认合批窗口（秒） */
+        private int defaultMergeWindowSec = 60;
+        /** 可重试故障最大投递尝试次数（含首次） */
+        private int maxAttempts = 3;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getChannel() {
+            return channel;
+        }
+
+        public void setChannel(String channel) {
+            this.channel = channel;
+        }
+
+        public long getDispatchIntervalMs() {
+            return dispatchIntervalMs;
+        }
+
+        public void setDispatchIntervalMs(long dispatchIntervalMs) {
+            this.dispatchIntervalMs = dispatchIntervalMs;
+        }
+
+        public int getDefaultMergeWindowSec() {
+            return defaultMergeWindowSec;
+        }
+
+        public void setDefaultMergeWindowSec(int defaultMergeWindowSec) {
+            this.defaultMergeWindowSec = defaultMergeWindowSec;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
         }
     }
 }
