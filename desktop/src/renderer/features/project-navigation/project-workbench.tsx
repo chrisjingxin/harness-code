@@ -366,10 +366,9 @@ function resolveProvider(page: ProjectPage, providers: ProjectPageProviders): Pr
     case "conversation":
       return providers.session
     case "board":
-      return providers.board
     case "tasks":
     case "task":
-      return providers.tasks
+      return providers.board ?? providers.tasks
     case "knowledge":
       return providers.knowledge
     case "info":
@@ -783,25 +782,22 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
       if (custom !== null && custom !== undefined) return custom
     }
     if (!current) return <span className="tb-name">协作工作台</span>
-    const viewTitle = pageNames[page.kind]
+    const isBoardFamily = page.kind === "board" || page.kind === "tasks" || page.kind === "task"
+    const viewTitle = isBoardFamily ? pageNames.board : pageNames[page.kind]
     const effectiveTaskCount = props.taskCount !== null && props.taskCount !== undefined
       ? props.taskCount
       : props.tasks?.length ?? null
     const countLabel = page.kind === "info"
       ? `${members.length} 位成员`
-      : page.kind === "board"
+      : isBoardFamily
         ? effectiveTaskCount !== null
           ? `${effectiveTaskCount} 项待办 · ${members.length} 人`
           : `${members.length} 位成员`
-        : page.kind === "tasks" || page.kind === "task"
-          ? effectiveTaskCount !== null
-            ? `${effectiveTaskCount} 项待办`
-            : ""
-          : page.kind === "knowledge"
-            ? leftCollapsed
-              ? ""
-              : props.workspaceName
-            : ""
+        : page.kind === "knowledge"
+          ? leftCollapsed
+            ? ""
+            : props.workspaceName
+          : ""
     const crumbLabel = page.kind === "knowledge" ? props.workspaceName : current.name
     return (
       <>

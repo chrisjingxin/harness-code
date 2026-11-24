@@ -151,11 +151,28 @@ export function LiveProjectTasks({ context, rows, taskId, detailRevision, naviga
     onOpenTask={id => navigator.openPage({ kind: "task", taskId: id })} />
 }
 
-function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
+const statusBadgeTones: Record<TaskStatus, "muted" | "info" | "warn" | "success" | "danger"> = {
+  todo: "muted",
+  doing: "info",
+  review: "warn",
+  done: "success",
+  cancelled: "danger",
+}
+
+export function LiveTaskDetail({
+  context,
+  taskId,
+  detailRevision = 0,
+  navigator,
+  embeddedInDrawer = false,
+  onClose,
+}: {
   context: TasksContext
   taskId: string
   detailRevision?: number
   navigator: ProjectNavigator
+  embeddedInDrawer?: boolean
+  onClose?: () => void
 }) {
   const { host, scope, projectActive, ownerName, localDeviceId, sessions } = context
   const { workspaceId, projectId, accountId } = scope
@@ -174,7 +191,10 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
   const [commitSha, setCommitSha] = useState("")
   const [linkId, setLinkId] = useState("")
   const [draftAction, setDraftAction] = useState<"reference" | "start" | null>(null)
-  const back = () => navigator.openPage({ kind: "tasks" })
+  const back = () => {
+    if (onClose) onClose()
+    else navigator.openPage({ kind: "board" })
+  }
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     let current = true
@@ -216,15 +236,18 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
     return () => { current = false }
   }, [host, scope, materialKey, attempt])
 
-  if (!detail) return <section className="project-task-page">
-    <button type="button" className="wb-button wb-button-quiet wb-button-small project-task-back" onClick={back}>返回项目任务</button>
-    <h1>任务详情</h1>
-    <p role={notice ? "alert" : "status"}>{notice || "正在读取任务…"}</p>
-    {notice && <button type="button" className="wb-button wb-button-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button>}
+  if (!detail) return <section className={`project-task-page${embeddedInDrawer ? " is-drawer" : ""}`}>
+    {!embeddedInDrawer && (
+      <button type="button" className="wb-button wb-button-quiet wb-button-small project-task-back" onClick={back}>返回项目任务</button>
+    )}
+    {!embeddedInDrawer && <h1>任务详情</h1>}
+    <p className="project-task-empty" role={notice ? "alert" : "status"}>{notice || "正在读取任务…"}</p>
+    {notice && <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={() => setAttempt(value => value + 1)}>重试</button>}
   </section>
 
   const task = detail.task
   const creator = projectActive && (task.creatorId === accountId || context.canActForCreator?.(task.creatorId))
+  const isDelegated = Boolean(task.creatorId !== accountId && context.canActForCreator?.(task.creatorId))
   const assignee = projectActive && task.assigneeId === accountId
   const currentLocal = sessions.listMyLocalConversations(scope)
   const canStart = assignee && task.status === "doing" && Boolean(localDeviceId)
@@ -267,11 +290,17 @@ function LiveTaskDetail({ context, taskId, detailRevision = 0, navigator }: {
     }))
   }
 
-  return <ProjectTaskDetail task={display} onBack={back}>
+  return <ProjectTaskDetail
+    task={display}
+    onBack={back}
+    embeddedInDrawer={embeddedInDrawer}
+    statusTone={statusBadgeTones[task.status]}
+    delegated={isDelegated}
+  >
     <section className="project-task-detail-section">
       <div className="project-task-section-head">
         <h2>任务操作</h2>
-        <span className="project-task-version">版本 {task.version}</span>
+        <span className="hui-badge mono" data-tone="muted" data-size="xs">v{task.version}</span>
         <button type="button" className="wb-button wb-button-quiet wb-button-small" disabled={busy} onClick={() => setAttempt(value => value + 1)}>刷新任务</button>
       </div>
       {(canReference || linked) && (

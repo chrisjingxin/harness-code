@@ -12,6 +12,7 @@ import { readPages } from "../metadata.js"
 import type { KnowledgeMetadataScope } from "../metadata.js"
 import { knowledgeMaterial } from "../references/fixed-materials.js"
 import { snapshotReferenceView } from "../references/conversation-references.js"
+import { formatRelativeTime } from "../../inbox/inbox-model.js"
 import { resolveKnowledgeTermKey } from "./knowledge-key.js"
 import { TeamKnowledge } from "./team-knowledge.js"
 import type { KnowledgeList, KnowledgeResult, KnowledgeVersionContent } from "./team-knowledge.js"
@@ -93,7 +94,12 @@ export function LiveTeamKnowledge({
       .then(result => {
         if (current) setItems({
           status: "ready", value: result.filter(item => !item.archived).map(item => ({
-            id: item.knowledgeId, title: item.title, category: item.category, versionLabel: `v${item.version}`, detailLabel: `${levelNames[item.level]} · ${item.scope.kind==="workspace"?"全团队":`${item.scope.repositoryIds.length}个仓库`} · Agent工具读取${item.health.readCount}次${item.health.needsReview?" · 待复核":""}`,
+            id: item.knowledgeId,
+            title: item.title,
+            category: item.category,
+            versionLabel: `v${item.version}`,
+            detailLabel: `${levelNames[item.level]} · ${item.scope.kind === "workspace" ? "全团队" : `${item.scope.repositoryIds.length}个仓库`} · Agent工具读取${item.health.readCount}次${item.health.needsReview ? " · 待复核" : ""}`,
+            updatedAtLabel: formatRelativeTime(item.updatedAtMs),
           })),
         })
       }).catch(error => {
@@ -133,11 +139,26 @@ export function LiveTeamKnowledge({
       initialItemId={updated?.itemId}
       selectedRequest={targetRequest}
       rendering={rendering}
-      onEditItem={itemId=>{if(canManage)setEditing({itemId});else void host.readKnowledge(workspaceId,itemId).then(r=>{if(r.ok)setProposalInitial({...blankProposal(),intent:"supplement",targetKnowledgeId:r.value.item.knowledgeId,baseVersionId:r.value.item.currentVersionId,baseItemVersion:r.value.item.version,candidate:publishedCandidate(r.value)})})}}
-      versionExtras={v=><KnowledgeFeedback key={JSON.stringify([accountId,workspaceId,v.itemId,v.versionId])} host={host} workspaceId={workspaceId} knowledgeId={v.itemId} versionId={v.versionId}/>}
+      onEditItem={itemId => {
+        if (canManage) setEditing({ itemId })
+        else void host.readKnowledge(workspaceId, itemId).then(r => {
+          if (r.ok) setProposalInitial({ ...blankProposal(), intent: "supplement", targetKnowledgeId: r.value.item.knowledgeId, baseVersionId: r.value.item.currentVersionId, baseItemVersion: r.value.item.version, candidate: publishedCandidate(r.value) })
+        })
+      }}
+      versionExtras={v => <KnowledgeFeedback key={JSON.stringify([accountId, workspaceId, v.itemId, v.versionId])} host={host} workspaceId={workspaceId} knowledgeId={v.itemId} versionId={v.versionId} />}
+      headerActions={canManage ? (
+        <button className="wb-button wb-button-primary wb-button-small" type="button" onClick={() => setEditing({})}>
+          新建知识条目
+        </button>
+      ) : (
+        <button className="wb-button wb-button-primary wb-button-small" type="button" onClick={() => setProposalInitial(blankProposal())}>
+          提出新知识
+        </button>
+      )}
       controls={<form className="team-knowledge-toolbar" onSubmit={event => {
         event.preventDefault()
-        if (query !== queryInput.trim()) { setItems({ status: "loading" }); setQuery(queryInput.trim()) }
+        const trimmed = queryInput.trim()
+        if (query !== trimmed) { setItems({ status: "loading" }); setQuery(trimmed) }
         else refreshMetadata(scope)
       }}>
         <input
@@ -147,8 +168,20 @@ export function LiveTeamKnowledge({
           value={queryInput}
           onChange={event => setQueryInput(event.target.value)}
         />
-        <button className="wb-button wb-button-secondary" type="submit">搜索</button>
-        {canManage ? <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button> : <button className="wb-button wb-button-primary" type="button" onClick={()=>setProposalInitial(blankProposal())}>提出新知识</button>}
+        <button className="wb-button wb-button-secondary wb-button-small" type="submit">搜索</button>
+        {query && (
+          <button
+            className="wb-button wb-button-quiet wb-button-small"
+            type="button"
+            onClick={() => {
+              setQueryInput("")
+              setItems({ status: "loading" })
+              setQuery("")
+            }}
+          >
+            清空
+          </button>
+        )}
       </form>}
       actions={{
         async readCurrent(_source, itemId) {

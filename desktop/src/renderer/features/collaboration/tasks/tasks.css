@@ -178,3 +178,36 @@
 .project-task-fields textarea { resize: vertical; line-height: 1.7; }
 .project-task-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .project-task-error { margin: 8px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
+
+.project-task-status-cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 抽屉内嵌任务详情（对齐 460px .t-drawer 紧凑节奏） */
+.project-task-page.is-drawer {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+.project-task-page.is-drawer .project-task-detail-heading {
+  padding-right: 36px;
+  margin-bottom: 12px;
+}
+.project-task-page.is-drawer .project-task-detail-heading h1 {
+  font-size: var(--text-lg);
+}
+.project-task-page.is-drawer .project-task-properties {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  gap: 7px 16px;
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border));
+}
+.project-task-page.is-drawer .project-task-detail-section {
+  margin-top: 16px;
+}
+.project-task-page.is-drawer .project-task-transitions li {
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border));
+}

@@ -174,22 +174,22 @@ export function InboxPage(props: InboxPageProps) {
     const canTransition = Boolean(collaborationApps && online && detail)
 
     return (
-      <article className="inbox-doc" aria-label="待办详情审阅">
+      <article className="inbox-doc k-doc" aria-label="待办详情审阅">
         <div className="inbox-doc-bar">
-          <span className="inbox-badge" data-tone={badgeToneForCategory(selectedItem.category, selectedItem.urgency)}>
+          <span className="hui-badge" data-tone={badgeToneForCategory(selectedItem.category, selectedItem.urgency)}>
             {formatInboxCategoryLabel(selectedItem.category)}
           </span>
-          <span className="inbox-badge" data-tone={badgeToneForTaskStatus(activeStatus)}>
+          <span className="hui-badge" data-tone={badgeToneForTaskStatus(activeStatus)}>
             {formatInboxTaskStatusLabel(activeStatus)}
           </span>
           {selectedItem.delegated && (
-            <span className="inbox-badge" data-tone="accent" title="原创建人已离开团队，由项目负责人代管验收">
+            <span className="hui-badge" data-tone="accent" title="原创建人已离开团队，由项目负责人代管验收">
               代管验收
             </span>
           )}
           <span className="inbox-doc-loc">{location}</span>
           <span className="inbox-doc-spacer" />
-          {detail && <span className="inbox-badge inbox-mono" data-tone="muted" data-size="xs">v{detail.task.version}</span>}
+          {detail && <span className="hui-badge mono" data-tone="muted" data-size="xs">v{detail.task.version}</span>}
           {collaborationApps && online && (
             <button
               type="button"
@@ -289,7 +289,7 @@ export function InboxPage(props: InboxPageProps) {
               </button>
               <button
                 type="button"
-                className="inbox-btn-danger"
+                className="wb-button wb-button-danger wb-button-small"
                 disabled={taskDetail.busy}
                 onClick={() => { void taskDetail.transition("todo") }}
               >
@@ -303,7 +303,7 @@ export function InboxPage(props: InboxPageProps) {
               <div className="inbox-confirm-cancel">
                 <button
                   type="button"
-                  className="inbox-btn-danger"
+                  className="wb-button wb-button-danger wb-button-small"
                   disabled={taskDetail.busy}
                   onClick={() => { void taskDetail.transition("cancelled") }}
                 >
@@ -321,7 +321,7 @@ export function InboxPage(props: InboxPageProps) {
             ) : (
               <button
                 type="button"
-                className="inbox-btn-danger"
+                className="wb-button wb-button-danger wb-button-small"
                 disabled={taskDetail.busy}
                 onClick={() => taskDetail.setConfirmingCancel(true)}
               >
@@ -335,7 +335,7 @@ export function InboxPage(props: InboxPageProps) {
             className="wb-button wb-button-secondary wb-button-small inbox-open-full"
             onClick={() => props.onOpenCloudItem(selectedItem)}
           >
-            <span>在项目任务中打开</span>
+            <span>在看板查看</span>
             <IconExternalLink size={13} aria-hidden="true" />
           </button>
         </div>
@@ -349,7 +349,7 @@ export function InboxPage(props: InboxPageProps) {
                   <div className="inbox-tr-line">
                     <span className="inbox-tr-actor">{resolveActorName(tr.actorId)}</span>
                     <span>{tr.fromStatus ? `${formatInboxTaskStatusLabel(tr.fromStatus)} → ` : ""}{formatInboxTaskStatusLabel(tr.toStatus)}</span>
-                    <span className="inbox-badge inbox-mono" data-tone="muted" data-size="xs">v{tr.version}</span>
+                    <span className="hui-badge mono" data-tone="muted" data-size="xs">v{tr.version}</span>
                     <span className="inbox-time">{formatRelativeTime(tr.occurredAtMs)}</span>
                   </div>
                   {tr.note && <p className="inbox-tr-note">{tr.note}</p>}
@@ -365,7 +365,7 @@ export function InboxPage(props: InboxPageProps) {
   return (
     <section className="inbox-page" aria-label="收件箱">
       <div className="inbox-scroll">
-        <div className="inbox-wrap">
+        <div className="inbox-wrap page-wrap">
           {/* 1. 顶部方案 A 本机等待确认置顶区（绝不混入云端红点角标） */}
           {localItems.length > 0 && (
             <section className="inbox-local-banner" aria-label="本机等待你确认">
@@ -385,7 +385,7 @@ export function InboxPage(props: InboxPageProps) {
                     <div className="inbox-local-main">
                       <div className="inbox-local-meta">
                         <span
-                          className="inbox-badge"
+                          className="hui-badge"
                           data-tone={item.status === "error" ? "danger" : "warn"}
                           data-size="xs"
                         >
@@ -412,12 +412,12 @@ export function InboxPage(props: InboxPageProps) {
           )}
 
           {/* 2. LoopForge 风格无眉标页头 + 右侧分段标签 */}
-          <header className="inbox-page-head">
+          <header className="inbox-page-head page-head">
             <div>
               <h1>Inbox · 全局待办收件箱</h1>
               <p>收口跨团队任务指派与待验收拍板；本机工具审批留在原会话处理。</p>
             </div>
-            <div className="inbox-seg" role="tablist" aria-label="收件箱分组">
+            <div className="inbox-seg seg" role="tablist" aria-label="收件箱分组">
               {INBOX_BUCKETS.map(tab => {
                 const selected = bucket === tab.id
                 const badgeCount = tab.id === "action_required"
@@ -447,7 +447,7 @@ export function InboxPage(props: InboxPageProps) {
           </header>
 
           {/* 3. LoopForge 筛选与状态工具栏 */}
-          <div className="inbox-view-bar">
+          <div className="inbox-view-bar view-bar">
             {online && workspaceOptions.length > 0 && (
               <div className="inbox-cat-pills" role="group" aria-label="按类别筛选">
                 <button
@@ -555,9 +555,9 @@ export function InboxPage(props: InboxPageProps) {
                 </div>
               ) : (
                 <>
-                  <div className="inbox-review-layout">
+                  <div className="inbox-review-layout review-layout">
                     <div
-                      className="inbox-side"
+                      className="inbox-side k-side"
                       role="listbox"
                       aria-label="跨团队待办列表"
                       onKeyDown={handleListKeyDown}
@@ -572,27 +572,27 @@ export function InboxPage(props: InboxPageProps) {
                             type="button"
                             role="option"
                             aria-selected={active}
-                            className={`inbox-row${active ? " is-active" : ""}`}
+                            className={`inbox-row k-row${active ? " is-active" : ""}`}
                             onClick={() => setSelectedKey(item.itemKey)}
                           >
                             <span className="inbox-row-title">{item.title}</span>
                             <span className="inbox-row-meta">
                               <span
-                                className="inbox-badge"
+                                className="hui-badge"
                                 data-tone={badgeToneForCategory(item.category, item.urgency)}
                                 data-size="xs"
                               >
                                 {formatInboxCategoryLabel(item.category)}
                               </span>
                               <span
-                                className="inbox-badge"
+                                className="hui-badge"
                                 data-tone={badgeToneForTaskStatus(item.status)}
                                 data-size="xs"
                               >
                                 {formatInboxTaskStatusLabel(item.status)}
                               </span>
                               {item.delegated && (
-                                <span className="inbox-badge" data-tone="accent" data-size="xs">代管</span>
+                                <span className="hui-badge" data-tone="accent" data-size="xs">代管</span>
                               )}
                               <span>{actorName}</span>
                               <span aria-hidden="true">·</span>

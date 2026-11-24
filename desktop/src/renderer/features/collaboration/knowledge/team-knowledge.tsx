@@ -2,7 +2,7 @@
  * 团队知识阅读界面。装配方提供团队条目、正文、历史版本及引用动作。
  * 选择条目 → 读取正文 → 选择历史版本 → 预览固定材料。切换条目时丢弃旧读取结果。
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { Markdown } from "../../../../ui/index.js"
 import type { ConversationAvailability, ConversationReferenceView, RenderingActions } from "../../../../ui/index.js"
@@ -22,6 +22,7 @@ export interface KnowledgeItem {
   readonly category?: string
   readonly versionLabel?: string
   readonly detailLabel?: string
+  readonly updatedAtLabel?: string
 }
 
 /** 版本标识及其显示信息均来自装配方。 */
@@ -65,10 +66,12 @@ export interface KnowledgeActions {
 export interface TeamKnowledgeProps {
   readonly scope: KnowledgeScope
   readonly teamName: string
+  readonly subtitle?: string
   readonly items: KnowledgeList
   readonly actions: KnowledgeActions
   readonly rendering?: RenderingActions
   readonly controls?: ReactNode
+  readonly headerActions?: ReactNode
   readonly initialItemId?: string
   readonly selectedRequest?: { readonly itemId: string; readonly token: number }
   versionExtras?(version: KnowledgeVersionContent): ReactNode
@@ -95,26 +98,87 @@ export function TeamKnowledge(props: TeamKnowledgeProps) {
   return <KnowledgePage key={JSON.stringify([namespace, accountId, teamId])} {...props} />
 }
 
-function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, selectedRequest, onEditItem, versionExtras }: TeamKnowledgeProps) {
+function KnowledgePage({
+  scope,
+  teamName,
+  subtitle,
+  items,
+  actions,
+  rendering,
+  controls,
+  headerActions,
+  initialItemId,
+  selectedRequest,
+  onEditItem,
+  versionExtras,
+}: TeamKnowledgeProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedIdRef = useRef<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [content, setContent] = useState<Resource<KnowledgeVersionContent> | null>(null)
   const [history, setHistory] = useState<HistoryState>({ status: "closed" })
   const [preview, setPreview] = useState(false)
   const contentRequest = useRef<symbol | null>(null)
   const historyRequest = useRef<symbol | null>(null)
   const listRef = useRef<HTMLElement>(null)
+
+  const categories = useMemo(() => {
+    if (items.status !== "ready") return [] as string[]
+    const seen: string[] = []
+    for (const item of items.value) {
+      const cat = item.category?.trim()
+      if (cat && !seen.includes(cat)) seen.push(cat)
+    }
+    return seen
+  }, [items])
+
+  const activeCategory = selectedCategory && categories.includes(selectedCategory) ? selectedCategory : ""
+  const filteredItems = useMemo(() => {
+    if (items.status !== "ready") return [] as readonly KnowledgeItem[]
+    if (!activeCategory) return items.value
+    return items.value.filter(item => item.category?.trim() === activeCategory)
+  }, [items, activeCategory])
+
   const selected = items.status === "ready" ? items.value.find(item => item.id === selectedId) : undefined
+  const requestedTargetId = selectedRequest?.itemId || initialItemId
 
   useLayoutEffect(() => () => {
     contentRequest.current = null
     historyRequest.current = null
   }, [])
   useEffect(() => {
-    if (initialItemId) selectItem(initialItemId)
+    if (initialItemId) {
+      setSelectedCategory("")
+      selectItem(initialItemId)
+    }
   }, [initialItemId])
   useEffect(() => {
-    if (selectedRequest?.itemId) selectItem(selectedRequest.itemId)
+    if (selectedRequest?.itemId) {
+      setSelectedCategory("")
+      selectItem(selectedRequest.itemId)
+    }
   }, [selectedRequest?.itemId, selectedRequest?.token])
+  useEffect(() => {
+    if (items.status !== "ready") return
+    const currentId = selectedIdRef.current
+    if (currentId && filteredItems.some(item => item.id === currentId)) return
+    if (requestedTargetId && items.value.some(item => item.id === requestedTargetId)) {
+      if (activeCategory) setSelectedCategory("")
+      if (currentId !== requestedTargetId) selectItem(requestedTargetId)
+      return
+    }
+    const first = filteredItems[0]
+    if (first) {
+      selectItem(first.id)
+    } else if (currentId !== null) {
+      selectedIdRef.current = null
+      contentRequest.current = null
+      historyRequest.current = null
+      setSelectedId(null)
+      setContent(null)
+      setHistory({ status: "closed" })
+    }
+  }, [items, filteredItems, selectedId, requestedTargetId, activeCategory])
   useEffect(() => {
     if (!selectedId || items.status !== "ready") return
     const activeButton = listRef.current?.querySelector<HTMLButtonElement>('button[aria-current="true"]')
@@ -146,6 +210,7 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
   }
 
   function selectItem(itemId: string): void {
+    selectedIdRef.current = itemId
     historyRequest.current = null
     setSelectedId(itemId)
     setHistory({ status: "closed" })
@@ -166,99 +231,194 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
   const readable = Boolean(reference?.status === "ready")
   const historyAvailable = Boolean(actions.readHistory && actions.readVersion)
   return (
-    <section className="team-knowledge-page" aria-label="团队知识">
-      {controls ? <div className="view-bar">{controls}</div> : null}
-      <div className="team-knowledge-layout">
-        <nav className="team-knowledge-list" ref={listRef} aria-label="知识条目">
-          <h2>知识条目</h2>
-          {items.status === "loading" && <p role="status">正在读取条目…</p>}
-          {(items.status === "error" || items.status === "unavailable") && <p role="alert">{items.message}</p>}
-          {items.status === "error" && actions.retryList && (
-            <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={actions.retryList}>重试</button>
-          )}
-          {items.status === "ready" && (items.value.length ? (
-            <ul>
-              {items.value.map(item => (
-                <li key={item.id}>
-                  <button type="button" aria-current={selectedId === item.id ? "true" : undefined} onClick={() => selectItem(item.id)}>
-                    {item.title}{item.category && <small> · {item.category}</small>}
-                    {item.versionLabel && <small> · {item.versionLabel}</small>}{item.detailLabel&&<small> · {item.detailLabel}</small>}
-                  </button>
-                </li>
+    <section className="team-knowledge-page page-wrap" aria-label="团队知识库">
+      <header className="page-head team-knowledge-head">
+        <div>
+          <h1>团队知识库</h1>
+          <p>{subtitle ?? `${teamName} · 团队共享规范、架构与约定，按固定版本引用到当前会话`}</p>
+        </div>
+        {headerActions && <div className="team-knowledge-head-actions">{headerActions}</div>}
+      </header>
+
+      {(controls || categories.length > 0) && (
+        <div className="view-bar team-knowledge-bar">
+          {controls}
+          {categories.length > 0 && (
+            <div className="team-knowledge-cats" role="group" aria-label="按分类筛选">
+              <button
+                type="button"
+                className={`team-knowledge-cat-btn${activeCategory === "" ? " is-soft" : ""}`}
+                aria-pressed={activeCategory === ""}
+                onClick={() => setSelectedCategory("")}
+              >
+                全部
+              </button>
+              {categories.map(category => (
+                <button
+                  key={category}
+                  type="button"
+                  className={`team-knowledge-cat-btn${activeCategory === category ? " is-soft" : ""}`}
+                  aria-pressed={activeCategory === category}
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category}
+                </button>
               ))}
-            </ul>
-          ) : <p>暂无知识条目。</p>)}
-        </nav>
-        <div className="team-knowledge-content">
-          {items.status === "ready" && !selected && <p className="team-knowledge-empty">选择一个知识条目。</p>}
-          {selected && <>
-            <div className="team-knowledge-content-heading">
-              <h2>{selected.title}</h2>
-              <div className="team-knowledge-content-actions">
-                {actions.onReference && version && readable ? (
+            </div>
+          )}
+          <span className="vb-spacer" />
+          {items.status === "ready" && (
+            <span className="team-knowledge-count">{filteredItems.length} 项条目</span>
+          )}
+        </div>
+      )}
+
+      {items.status !== "ready" ? (
+        items.status === "loading" ? (
+          <div className="panel team-knowledge-state-panel" role="status">
+            <p className="team-knowledge-empty">正在读取团队知识条目…</p>
+          </div>
+        ) : (
+          <div className="panel team-knowledge-state-panel" role="alert">
+            <p className="team-knowledge-error">{items.message}</p>
+            {items.status === "error" && actions.retryList && (
+              <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={actions.retryList}>
+                重试
+              </button>
+            )}
+          </div>
+        )
+      ) : items.value.length === 0 ? (
+        <div className="panel team-knowledge-state-panel" role="status">
+          <p className="team-knowledge-empty">当前团队暂无知识条目。</p>
+        </div>
+      ) : (
+        <div className="team-knowledge-layout review-layout">
+          <nav className="team-knowledge-list k-side" ref={listRef} aria-label="知识条目">
+            {filteredItems.length ? (
+              <ul>
+                {filteredItems.map(item => {
+                  const isCurrent = selectedId === item.id
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className={`k-row${isCurrent ? " is-active" : ""}`}
+                        aria-current={isCurrent ? "true" : undefined}
+                        onClick={() => selectItem(item.id)}
+                      >
+                        <span className="kr-title">{item.title}</span>
+                        <span className="kr-meta">
+                          {item.category && (
+                            <span className="hui-badge" data-tone="accent" data-size="xs">{item.category}</span>
+                          )}
+                          {item.versionLabel && (
+                            <span className="hui-badge mono" data-tone="muted" data-size="xs">{item.versionLabel}</span>
+                          )}
+                          {item.updatedAtLabel && <span>{item.updatedAtLabel}</span>}
+                          {item.detailLabel && <span>{item.detailLabel}</span>}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <p className="team-knowledge-empty" role="status">当前分类下暂无知识条目。</p>
+            )}
+          </nav>
+
+          <div className="team-knowledge-content k-doc">
+            {!selected && <p className="team-knowledge-empty">从左侧选择一个知识条目以阅读正文。</p>}
+            {selected && <>
+              <div className="team-knowledge-doc-bar">
+                {selected.category && (
+                  <span className="hui-badge" data-tone="accent">{selected.category}</span>
+                )}
+                {(version?.versionLabel ?? selected.versionLabel) && (
+                  <span className="hui-badge mono" data-tone="muted" data-size="xs">
+                    {version?.versionLabel ?? selected.versionLabel}
+                  </span>
+                )}
+                <span className="team-knowledge-doc-spacer" />
+                <div className="team-knowledge-content-actions">
+                  {actions.onReference && version && readable ? (
+                    <button
+                      type="button"
+                      className="wb-button wb-button-primary wb-button-small"
+                      disabled={!version.referenceAvailability.enabled}
+                      title={version.referenceAvailability.reason ?? "将该版本固定内容引用到当前会话"}
+                      onClick={() => actions.onReference?.(scope, version.itemId, version.versionId, version.reference)}
+                    >
+                      引用到当前会话
+                    </button>
+                  ) : null}
+                  {onEditItem && (
+                    <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>
+                      提出修订 / 管理
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="wb-button wb-button-primary wb-button-small"
-                    disabled={!version.referenceAvailability.enabled}
-                    title={version.referenceAvailability.reason ?? "将该版本固定内容引用到当前会话"}
-                    onClick={() => actions.onReference?.(scope, version.itemId, version.versionId, version.reference)}
+                    className="wb-button wb-button-secondary wb-button-small"
+                    disabled={!historyAvailable || history.status === "loading"}
+                    title={historyAvailable ? undefined : "版本历史暂不可用"}
+                    aria-expanded={history.status !== "closed"}
+                    onClick={() => {
+                      if (history.status === "ready") setHistory({ status: "closed" })
+                      else void loadHistory(selected.id)
+                    }}
                   >
-                    引用到会话
+                    {history.status === "closed" ? "版本历史" : history.status === "loading" ? "读取历史…" : history.status === "ready" ? "收起历史" : "重试历史"}
                   </button>
-                ) : null}
-                {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>提出修订 / 管理</button>}
-                <button type="button" className="wb-button wb-button-secondary wb-button-small"
-                  disabled={!historyAvailable || history.status === "loading"}
-                  title={historyAvailable ? undefined : "版本历史暂不可用"}
-                  aria-expanded={history.status !== "closed"}
-                  onClick={() => {
-                    if (history.status === "ready") setHistory({ status: "closed" })
-                    else void loadHistory(selected.id)
-                  }}>
-                  {history.status === "closed" ? "查看版本历史" : history.status === "loading" ? "正在读取历史…" : history.status === "ready" ? "收起版本历史" : "重试版本历史"}
-                </button>
-              </div>
-            </div>
-            {history.status === "loading" && <p className="team-knowledge-message" role="status">正在读取版本历史…</p>}
-            {(history.status === "error" || history.status === "unavailable") &&
-              <p className="team-knowledge-error" role="alert">{history.message}</p>}
-            {history.status === "ready" && <div className="team-knowledge-history" aria-label="版本历史">
-              <h3>版本历史</h3>
-              {history.value.length ? <ul>
-                {history.value.map(item => (
-                  <li key={item.id}>
-                    <button type="button" aria-pressed={version?.versionId === item.id} onClick={() => void loadContent(selected.id, item.id)}>
-                      <strong>{item.label}</strong>
-                      <span>{item.author} · {item.updatedAt}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul> : <p className="team-knowledge-message">暂无历史版本。</p>}
-            </div>}
-            {content?.status === "loading" && <p className="team-knowledge-message" role="status">正在读取知识正文…</p>}
-            {(content?.status === "error" || content?.status === "unavailable") && <>
-              <p className="team-knowledge-error" role="alert">{content.message}</p>
-              {content.status === "error" && (
-                <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={() => void loadContent(selected.id)}>
-                  重新读取当前版本
-                </button>
-              )}
-            </>}
-            {version && <>
-              <VersionMetadata version={version} />
-              {versionExtras?.(version)}
-              {readable ? <>
-                <div className="team-knowledge-markdown" aria-label="知识正文">
-                  <Markdown text={version.reference.snapshotText} actions={rendering} />
                 </div>
-                <button type="button" className="wb-button wb-button-secondary team-knowledge-preview-button" onClick={() => setPreview(true)}>
-                  预览固定版本
-                </button>
-              </> : <p className="team-knowledge-error" role="status">{reference?.message || "知识版本暂不可用。"}</p>}
+              </div>
+              <div className="team-knowledge-content-heading">
+                <h2>{selected.title}</h2>
+              </div>
+              {history.status === "loading" && <p className="team-knowledge-message" role="status">正在读取版本历史…</p>}
+              {(history.status === "error" || history.status === "unavailable") &&
+                <p className="team-knowledge-error" role="alert">{history.message}</p>}
+              {history.status === "ready" && <div className="team-knowledge-history" aria-label="版本历史">
+                <h3>版本历史</h3>
+                {history.value.length ? <ul>
+                  {history.value.map(item => (
+                    <li key={item.id}>
+                      <button type="button" aria-pressed={version?.versionId === item.id} onClick={() => void loadContent(selected.id, item.id)}>
+                        <strong>{item.label}</strong>
+                        <span>{item.author} · {item.updatedAt}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul> : <p className="team-knowledge-message">暂无历史版本。</p>}
+              </div>}
+              {content?.status === "loading" && <p className="team-knowledge-message" role="status">正在读取知识正文…</p>}
+              {(content?.status === "error" || content?.status === "unavailable") && <>
+                <p className="team-knowledge-error" role="alert">{content.message}</p>
+                {content.status === "error" && (
+                  <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={() => void loadContent(selected.id)}>
+                    重新读取当前版本
+                  </button>
+                )}
+              </>}
+              {version && <>
+                <VersionMetadata version={version} />
+                {versionExtras?.(version)}
+                {readable ? <>
+                  <div className="team-knowledge-markdown" aria-label="知识正文">
+                    <Markdown text={version.reference.snapshotText} actions={rendering} />
+                  </div>
+                  <div className="team-knowledge-doc-footer">
+                    <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={() => setPreview(true)}>
+                      预览固定版本
+                    </button>
+                  </div>
+                </> : <p className="team-knowledge-error" role="status">{reference?.message || "知识版本暂不可用。"}</p>}
+              </>}
             </>}
-          </>}
+          </div>
         </div>
-      </div>
+      )}
       {preview && selected && version && readable && (
         <KnowledgePreview
           scope={scope}

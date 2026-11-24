@@ -81,14 +81,30 @@ export function ProjectTaskList({ accountId, tasks, onCreateTask, onOpenTask }: 
   )
 }
 
-/** 详情复用表单的引用预览，展示发布结果所关联的材料。 */
-export function ProjectTaskDetail({ task, onBack, children }: { readonly task: ProjectTaskDetails; onBack(): void; children?: ReactNode }) {
+/** 详情复用表单的引用预览，展示发布结果所关联的材料；支持嵌入 `.t-drawer` 抽屉或独立页展示。 */
+export function ProjectTaskDetail({
+  task,
+  onBack,
+  embeddedInDrawer = false,
+  statusTone = "accent",
+  delegated = false,
+  children,
+}: {
+  readonly task: ProjectTaskDetails
+  onBack(): void
+  readonly embeddedInDrawer?: boolean
+  readonly statusTone?: "accent" | "muted" | "info" | "warn" | "success" | "danger"
+  readonly delegated?: boolean
+  children?: ReactNode
+}) {
   const heading = useId()
   return (
-    <article className="project-task-page" aria-labelledby={heading}>
-      <button type="button" className="wb-button wb-button-quiet wb-button-small project-task-back" onClick={onBack}>
-        返回项目任务
-      </button>
+    <article className={`project-task-page${embeddedInDrawer ? " is-drawer" : ""}`} aria-labelledby={heading}>
+      {!embeddedInDrawer && (
+        <button type="button" className="wb-button wb-button-quiet wb-button-small project-task-back" onClick={onBack}>
+          返回项目任务
+        </button>
+      )}
       <header className="project-task-detail-heading">
         <p>{task.id}</p>
         <h1 id={heading}>{task.title}</h1>
@@ -96,7 +112,15 @@ export function ProjectTaskDetail({ task, onBack, children }: { readonly task: P
       <dl className="project-task-properties">
         <dt>发布人</dt><dd>{task.publisher.name}</dd>
         <dt>被指派人</dt><dd>{task.assignee.name}</dd>
-        <dt>状态</dt><dd><span className="project-task-status">{task.statusLabel}</span></dd>
+        <dt>状态</dt>
+        <dd className="project-task-status-cell">
+          <span className="hui-badge" data-tone={statusTone}>{task.statusLabel}</span>
+          {delegated && (
+            <span className="hui-badge" data-tone="accent" data-size="xs" title="原创建人已离开团队，由项目负责人代管验收">
+              代管验收
+            </span>
+          )}
+        </dd>
       </dl>
       <section className="project-task-detail-section">
         <h2>任务说明</h2>

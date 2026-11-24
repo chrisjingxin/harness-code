@@ -113,10 +113,18 @@ function UnavailablePage({ title, contextName, message, onBack }: {
   message: string
   onBack?: () => void
 }) {
-  return <section className="collaboration-unavailable" aria-label={title}>
-    {onBack && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={onBack}>返回项目任务</button>}
-    <h1>{title}</h1>
-    <p>{contextName}</p>
-    <p role="status">{message}</p>
-  </section>
+  return (
+    <section className="collaboration-unavailable page-wrap" aria-label={title}>
+      <header className="page-head">
+        <div>
+          {onBack && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={onBack}>返回看板</button>}
+          <h1>{title}</h1>
+          <p>{contextName}</p>
+        </div>
+      </header>
+      <div className="panel" role="status">
+        <p>{message}</p>
+      </div>
+    </section>
+  )
 }

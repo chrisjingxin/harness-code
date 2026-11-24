@@ -50,7 +50,7 @@ import {
 import { directoryBasename, formatShortTime } from "./features/session/session-model.js"
 import { createCollaborationPageProviders } from "./features/collaboration/collaboration-pages.js"
 import { useCollaborationMetadata } from "./features/collaboration/metadata.js"
-import { LiveProjectTasks, ProjectTaskPublication, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
+import { LiveProjectTasks, LiveTaskDetail, ProjectTaskPublication, useProjectTaskMetadata } from "./features/collaboration/tasks/live-project-tasks.js"
 import type { TasksContext } from "./features/collaboration/tasks/live-project-tasks.js"
 import { LiveTeamKnowledge, useWorkspaceKnowledgeMetadata } from "./features/collaboration/knowledge/live-team-knowledge.js"
 import { createBoardPageProvider } from "./features/board/board-provider.js"
@@ -1387,12 +1387,14 @@ function useTeamWorkspaceBridge(props: {
   }, [currentPage.kind])
 
   function locateConversation(conversation: ProjectConversationSummary): boolean {
-    return shell.locateConversation(conversation.conversationId, [{
+    const ok = shell.locateConversation(conversation.conversationId, [{
       conversationId: conversation.conversationId,
       ownerUserId: conversation.ownerUserId,
       title: conversation.title,
       timeLabel: "",
     }])
+    if (ok) props.onSelectNav("chat", "team")
+    return ok
   }
 
   const projectSessions = useProjectSessions({
@@ -1478,15 +1480,16 @@ function useTeamWorkspaceBridge(props: {
   const activeOwnConversationId = selectedOwnedBySelf ? selectedConversationId : lastLocalConversationId
   const preferredConversationId = selectedConversationId ?? lastLocalConversationId
   const scope = shell.scope
+  const isBoardPage = currentPage.kind === "board" || currentPage.kind === "tasks" || currentPage.kind === "task"
   const { refresh: refreshBoard, ...board } = useProjectBoard(
     props.projectUpdates,
     scope,
-    Boolean(props.isBoardActive && currentPage.kind === "board"),
+    Boolean(props.isBoardActive && isBoardPage),
   )
   // 订阅跟随团队外壳。切页面、切项目时只替换刷新目标，正文读取仍在原页面动作内。
   const notification = useProjectUpdates(props.projectUpdates, props.user.id, props.workspaceId, {
     projectId: scope?.projectId ?? null,
-    isBoardActive: Boolean(props.isBoardActive && currentPage.kind === "board"),
+    isBoardActive: Boolean(props.isBoardActive && isBoardPage),
     refreshProjectList: () => { void shell.projects.reload() },
     refreshProjectDetail: () => { void shell.detail.reload() },
     refreshConversations: () => {
@@ -1525,6 +1528,7 @@ function useTeamWorkspaceBridge(props: {
     locateConversation,
     refreshTaskMetadata: targetScope => {
       refreshTaskMetadata(targetScope)
+      refreshBoard()
       props.onTaskMutated?.()
     },
   } : undefined
@@ -1556,19 +1560,59 @@ function useTeamWorkspaceBridge(props: {
 
   const sourceConversations = pageController.conversations.filter(item => item.projectId === shell.scope?.projectId)
 
-  // 看板复用项目导航和任务发布表单，用会话模块已有的本机缓存水位显示同步状态。
+  // 看板复用项目导航与任务发布表单，合并四列流转、成员协同进展与右侧 .t-drawer 任务详情抽屉。
   const providers: ProjectPageProviders = {
-    ...(props.projectUpdates ? {
+    ...(props.projectUpdates || taskContext ? {
       board: createBoardPageProvider({
-        ...board,
+        ...(props.projectUpdates ? board : { data: null, updatedAt: null, busy: false, error: "" }),
         projectName: currentProject?.name ?? "当前项目",
         description: currentProject?.description,
         accountId: props.user.id,
         localDeviceId: props.user.id,
         syncStates: pageController.syncStates,
         notification,
-        onRefresh: refreshBoard,
+        projects: shell.projects.projects,
+        currentProjectId: shell.projectId,
+        onSelectProject: shell.selectProject,
+        allTasks: taskRows.status === "ready" ? taskRows.tasks : undefined,
+        tasksLoading: taskRows.status === "loading",
+        tasksError: taskRows.status === "error" ? taskRows.message : "",
+        resolveOwnerName: pageController.resolveOwnerName,
+        onRefresh: () => {
+          if (props.projectUpdates) refreshBoard()
+          if (scope) refreshTaskMetadata(scope)
+        },
         onCreateTask: canPublish ? () => setPublishing({ scope, page: currentPage }) : undefined,
+        onQuickAcceptTask: taskContext && canPublish
+          ? async task => {
+              const result = await taskContext.host.transitionTask(
+                taskContext.scope.workspaceId,
+                taskContext.scope.projectId,
+                task.taskId,
+                {
+                  targetStatus: "doing",
+                  expectedVersion: task.version,
+                  requestId: crypto.randomUUID(),
+                },
+              )
+              if (!result.ok) return result.error.message
+              taskContext.refreshTaskMetadata(taskContext.scope)
+              return null
+            }
+          : undefined,
+        renderTaskDrawer: taskContext
+          ? (taskId, onClose, navigator) => (
+              <LiveTaskDetail
+                key={taskId}
+                context={taskContext}
+                taskId={taskId}
+                detailRevision={taskDetailRevision}
+                navigator={navigator}
+                embeddedInDrawer
+                onClose={onClose}
+              />
+            )
+          : undefined,
       }),
     } : {}),
     session: createSessionPageProvider({
