@@ -119,6 +119,66 @@
   background: var(--muted);
 }
 
+/* 管理台「本机 Agent」Provider 清单 */
+.psess-provider-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.psess-provider-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.psess-provider-summary {
+  font-size: var(--text-sm);
+  color: var(--fg-2, var(--text-soft));
+}
+.psess-provider-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.psess-provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+.psess-provider-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.psess-provider-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.psess-provider-title strong {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+}
+.psess-provider-reason,
+.psess-provider-empty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .psess-publish-dialog {
   width: min(92vw, 520px);
 }

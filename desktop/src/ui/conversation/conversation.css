@@ -39,7 +39,7 @@
   line-height: 1.7;
   white-space: pre-wrap;
 }
-.wb-conversation-message-assistant .wb-conversation-message-content { max-width: 660px; padding-top: 2px; }
+.wb-conversation-message-assistant .wb-conversation-message-content { max-width: 100%; padding-top: 2px; }
 .wb-conversation-system { width: fit-content; max-width: 100%; margin: 0 auto 13px; padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--muted); font-size: var(--text-2xs); text-align: center; overflow-wrap: anywhere; }
 .wb-conversation-agent-group { width: 100%; margin: 0 0 14px; }
 .wb-conversation-agent-group > .wb-conversation-message { margin: 0; }
@@ -286,25 +286,26 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-conversation-view { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; width: 100%; overflow: hidden; overflow: clip; }
 .wb-conversation-view[hidden] { display: none; }
 .wb-composer-bar { flex: 0 0 auto; min-width: 0; background: transparent; }
-.wb-composer-inner { position: relative; width: 100%; max-width: 740px; margin-inline: auto; padding: 8px 6px 8px; }
+.wb-composer-inner { position: relative; width: 100%; max-width: 740px; margin-inline: auto; padding: 8px 0; }
 .wb-composer-shell {
   border: none;
-  border-radius: var(--radius-xl, 16px);
-  background: var(--field-bg, var(--surface-2));
-  padding: 0 4px 4px;
-  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border, var(--line)));
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 0;
+  box-shadow: inset 0 0 0 1px var(--border, var(--line)), 0 2px 12px -4px rgba(15, 23, 42, 0.06);
   transition: box-shadow var(--motion-fast, 140ms) var(--ease-standard, ease);
 }
 .wb-composer-shell:focus-within {
-  box-shadow: 0 0 0 1px var(--border-strong, var(--line-strong)), 0 0 0 3px var(--selected);
+  box-shadow: inset 0 0 0 1px var(--border-strong, var(--line-strong)), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 4px 16px -6px rgba(15, 23, 42, 0.09);
 }
 .wb-composer-context-bar {
   display: flex;
   align-items: center;
   gap: 4px;
   height: 36px;
-  padding: 0 8px;
+  padding: 0 12px;
   min-width: 0;
+  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
 }
 .wb-composer-context-item {
   position: relative;
@@ -497,14 +498,18 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 .wb-composer-shell > .wb-composer-box {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
+  padding: 12px 14px 10px;
 }
 .wb-composer-box:focus-within {
   border-color: var(--accent-border-strong, var(--line-strong));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), 0 4px 14px -6px rgba(15, 23, 42, 0.12);
 }
 .wb-composer-shell > .wb-composer-box:focus-within {
-  border-color: var(--border-strong, var(--line-strong));
+  border: 0;
   box-shadow: none;
 }
 .wb-composer-editor {
@@ -590,14 +595,14 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 }
 .wb-composer-textarea::placeholder { color: var(--meta, var(--subtle)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-composer-textarea:focus-visible { outline: 0; }
-.wb-composer-rail { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-top: 4px; }
+.wb-composer-rail { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-top: 8px; }
 .wb-composer-rail-left { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
 .wb-composer-rail-right { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; }
 .wb-composer-send, .wb-composer-cancel {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
@@ -638,15 +643,15 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--fg-2, var(--text-soft));
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
   transition: background-color 140ms ease, color 140ms ease;
 }
 .wb-composer-add-btn svg { transition: transform 160ms var(--ease-standard); }
 .wb-composer-add-btn:hover:not(:disabled),
 .wb-composer-add-btn[aria-expanded="true"] {
-  background: var(--selected);
+  background: var(--hover);
   color: var(--fg, var(--text));
 }
 .wb-composer-add-btn[aria-expanded="true"] svg { transform: rotate(45deg); }
@@ -740,7 +745,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-context-menu-badge[data-tone="accent"] { color: var(--accent); }
 .wb-context-menu-badge[data-tone="danger"] { color: var(--danger); }
 
-.wb-command-menu, .wb-mention-menu { position: absolute; inset-inline: 6px; bottom: calc(100% + 4px); z-index: 20; margin: 0; padding: 6px; border: 1px solid var(--border, var(--line)); border-radius: 14px; background: var(--surface); box-shadow: var(--elev-pop); }
+.wb-command-menu, .wb-mention-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 4px); z-index: 20; margin: 0; padding: 6px; border: 1px solid var(--border, var(--line)); border-radius: 14px; background: var(--surface); box-shadow: var(--elev-pop); }
 .wb-command-menu { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .wb-composer-menu-empty { margin: 8px; color: var(--muted); font-size: var(--text-sm, 12.5px); }
 .wb-command-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: center; gap: 8px; width: 100%; min-height: var(--control-standard); padding: 6px 8px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--fg, var(--text)); text-align: left; cursor: pointer; font-family: var(--font-mono); font-size: var(--text-xs, 12px); }
@@ -900,7 +905,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-conversation-terminal-command { padding: 3px 10px; color: var(--text); overflow-wrap: anywhere; }
 
 /* 沿用旧审批区的紧凑按钮和问题组；外层不抢高度，长表单在圆角描边卡片内部滚动，输入框始终可见。 */
-.wb-interaction-dock { flex: 0 0 auto; width: 100%; max-width: 740px; min-width: 0; margin-inline: auto; padding: 0 6px 8px; }
+.wb-interaction-dock { flex: 0 0 auto; width: 100%; max-width: 740px; min-width: 0; margin-inline: auto; padding: 0 0 8px; }
 /* 待处理请求：审批类用提醒色细边，提问/澄清类用柔和主色调细边；出现时上移淡入，内容过长时仅卡片内部滚动。 */
 .wb-interaction-form {
   display: grid;

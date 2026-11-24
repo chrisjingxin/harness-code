@@ -159,7 +159,7 @@ export function NewSessionPage({
           </span>
           <div className="home-heading">
             <h1>今天想推进什么？</h1>
-            <p className="home-sub">在“{projectName}”中创建自己的会话。</p>
+            <span className="hui-badge" data-tone="muted">{projectName}</span>
           </div>
         </div>
         <div className="session-new-composer">
@@ -193,18 +193,21 @@ export function NewSessionPage({
             sendBlocked={busy}
             cancelBlocked
             submitOnEnter={false}
+            placeholder="输入你想推进的事项，输入 @ 引用项目会话或团队知识…"
             onSend={() => { if (canSubmit) onStartSession() }}
             onCancel={() => {}}
           >
-            <span
-              className="hui-badge"
-              data-tone={agentAvailable ? "success" : "warn"}
-              data-size="xs"
-              title={agentLabel}
-            >
-              <span className="hui-lamp" aria-hidden="true" />
-              <span>{agentAvailable ? "本机可用" : agentLabel}</span>
-            </span>
+            {!agentAvailable && (
+              <span
+                className="hui-badge"
+                data-tone="warn"
+                data-size="xs"
+                title={agentLabel}
+              >
+                <span className="hui-lamp" aria-hidden="true" />
+                <span>{agentLabel}</span>
+              </span>
+            )}
             {hooks?.composerExtra}
           </ConversationComposer>
         </div>
@@ -219,7 +222,6 @@ export function NewSessionPage({
             </span>
           </div>
         ) : null}
-        <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹。</p>
       </div>
     </section>
   )

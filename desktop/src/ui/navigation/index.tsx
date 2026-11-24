@@ -889,7 +889,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           <div className="my-sessions" aria-label="个人会话">
             <div className="sb-scroll">
               <div className="sb-block-head">
-                <span>我的个人会话（按工程目录）</span>
+                <span>我的个人会话</span>
                 {totalPersonalCount > 0 && <span className="sb-block-act count">{totalPersonalCount}</span>}
               </div>
 
@@ -921,9 +921,9 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                         }))}
                       >
                         <span className="chev">
-                          <IconChevronDown size={11} aria-hidden="true" />
+                          <IconChevronDown size={13} aria-hidden="true" />
                         </span>
-                        <IconFolder size={13} aria-hidden="true" />
+                        <IconFolder size={15} aria-hidden="true" />
                         <span className="d pnav-ellipsis">{group.label}</span>
                         <span className="n">{group.records.length}</span>
                       </button>
@@ -1081,7 +1081,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                             }}
                           >
                             <span className="chev">
-                              <IconChevronDown size={11} aria-hidden="true" />
+                              <IconChevronDown size={13} aria-hidden="true" />
                             </span>
                             <span className="d pnav-ellipsis">{project.name}</span>
                             {project.archived && <span className="hui-badge" data-tone="muted" data-size="xs">已归档</span>}

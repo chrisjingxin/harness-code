@@ -158,11 +158,11 @@ export function PersonalNewSessionPage({
           </span>
           <div className="home-heading">
             <h1>今天想推进什么？</h1>
-            <p className="home-sub">个人会话优先在本机独立执行与保存；需要协作时随时可发布到 Project。</p>
           </div>
         </div>
 
         <AgentPreflightCard
+          mode="banner"
           providers={providers}
           checking={checkingProviders}
           onRefresh={onRefreshProviders}
@@ -211,18 +211,21 @@ export function PersonalNewSessionPage({
             sendBlocked={busy}
             cancelBlocked
             submitOnEnter={false}
+            placeholder="输入你想推进的事项…"
             onSend={() => { if (canSubmit) onStartSession() }}
             onCancel={() => {}}
           >
-            <span
-              className="hui-badge"
-              data-tone={agentAvailable ? "success" : "warn"}
-              data-size="xs"
-              title={agentLabel}
-            >
-              <span className="hui-lamp" aria-hidden="true" />
-              <span>{agentAvailable ? "本机可用" : agentLabel}</span>
-            </span>
+            {!agentAvailable && providers !== undefined && (
+              <span
+                className="hui-badge"
+                data-tone="warn"
+                data-size="xs"
+                title={agentLabel}
+              >
+                <span className="hui-lamp" aria-hidden="true" />
+                <span>{agentLabel}</span>
+              </span>
+            )}
           </ConversationComposer>
         </div>
 
@@ -233,7 +236,6 @@ export function PersonalNewSessionPage({
             </span>
           </div>
         )}
-        <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹；不加入团队或断网时也可直接使用。</p>
       </div>
     </section>
   )

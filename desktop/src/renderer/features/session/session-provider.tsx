@@ -264,13 +264,10 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
       ) : null
 
       if (page.kind === "new") {
-        return (
-          <>
-            {crumb}
-            <span className="tb-name">新建会话</span>
-            <span className="tb-count">本机执行</span>
-          </>
-        )
+        if (leftCollapsed && controller.projectName) {
+          return <span className="tb-name">{controller.projectName}</span>
+        }
+        return <></>
       }
 
       if (page.kind !== "conversation") return null

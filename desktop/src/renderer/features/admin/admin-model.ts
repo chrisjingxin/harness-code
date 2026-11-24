@@ -1,9 +1,9 @@
 /**
- * 管理与设置导航模型（HC-255 停点 2）：
+ * 管理与设置导航模型（HC-255）：
  * 仅收敛当前桌面端与服务端已真实落地的设置分区，不预留未接入后端的空壳占位项。
  */
 
-export type AdminSectionId = "appearance" | "notifications" | "memory" | "account" | "team"
+export type AdminSectionId = "appearance" | "agents" | "notifications" | "memory" | "account" | "team"
 
 export type AdminNavItem = {
   readonly id: AdminSectionId
@@ -20,6 +20,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     label: "个人与本机",
     items: [
       { id: "appearance", label: "外观、密度与快捷键" },
+      { id: "agents", label: "本机 Agent" },
       { id: "notifications", label: "通知与提醒" },
       { id: "memory", label: "本机目录记忆" },
     ],
@@ -37,6 +38,10 @@ export const ADMIN_SECTION_META: Readonly<Record<AdminSectionId, { readonly titl
   appearance: {
     title: "外观、密度与快捷键",
     subtitle: "设置浅/深色主题、全局强调色、界面阅读密度、窗口缩放比例与常用键盘快捷键。",
+  },
+  agents: {
+    title: "本机 Agent",
+    subtitle: "查看本机已探测的 ACP Agent 驱动连通状态，支持重新检测与排查可执行路径配置。",
   },
   notifications: {
     title: "通知与提醒",

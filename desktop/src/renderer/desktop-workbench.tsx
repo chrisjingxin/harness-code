@@ -54,6 +54,7 @@ import { LiveProjectTasks, LiveTaskDetail, ProjectTaskPublication, useProjectTas
 import type { TasksContext } from "./features/collaboration/tasks/live-project-tasks.js"
 import { LiveTeamKnowledge, useWorkspaceKnowledgeMetadata } from "./features/collaboration/knowledge/live-team-knowledge.js"
 import { createBoardPageProvider } from "./features/board/board-provider.js"
+import { isBoardRoutePage, shouldShowReturnToInbox } from "./features/board/board-model.js"
 import { useProjectBoard } from "./features/board/use-project-board.js"
 import { useProjectUpdates, shouldRefreshTaskDetail } from "./features/project-updates/use-project-updates.js"
 import { CommandPaletteModal } from "./features/collaboration-views/index.js"
@@ -263,8 +264,6 @@ function DesktopSession(props: Hosts & {
     titleBarClassName={titleBarClassName}
     noSidebar
     context={{ title: "协作工作台" }}
-    colorScheme={props.preferences.state.colorScheme}
-    onToggleTheme={props.preferences.toggleTheme}
     navigation={null}
     center={<section className="desktop-login-stage" aria-label="开始">
       <div className="desktop-login-card">
@@ -678,15 +677,15 @@ function ConfirmedUserWorkbench(props: Hosts & {
   }
 
   // 当项目列表稍后就绪时，同步当前一级页所需的团队子页（看板 / 团队知识）。
-  const teamPageKind = team.slots.page.kind
+  const teamPage = team.slots.page
   useEffect(() => {
     if (!hasTeamOnline || !team.shell.projectId) return
-    if (topNav === "board" && teamPageKind !== "board" && teamPageKind !== "tasks" && teamPageKind !== "task") {
+    if (topNav === "board" && !isBoardRoutePage(teamPage)) {
       team.shell.openPage({ kind: "board" })
-    } else if (topNav === "knowledge" && teamPageKind !== "knowledge") {
+    } else if (topNav === "knowledge" && teamPage.kind !== "knowledge") {
       team.shell.openPage({ kind: "knowledge" })
     }
-  }, [hasTeamOnline, team.shell.projectId, topNav, teamPageKind])
+  }, [hasTeamOnline, team.shell.projectId, topNav, teamPage.kind])
 
   // 只有在当前真正停留在某条对话上时才豁免该会话的等待通知。
   const activeViewedConversationId = topNav !== "chat"
@@ -915,7 +914,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
         recentDirectories={personalSessions.recentDirectories}
         rendering={personalSessions.rendering}
         onRefreshProviders={() => { void personalSessions.refreshProviders() }}
-        onOpenSettings={() => selectTopNav("admin")}
+        onOpenSettings={() => { setAdminSection("agents"); selectTopNav("admin") }}
         onChooseDirectory={personalSessions.chooseNewDirectory}
         onSelectDirectory={personalSessions.selectNewDirectory}
         onSelectProvider={personalSessions.selectNewProvider}
@@ -942,6 +941,9 @@ function ConfirmedUserWorkbench(props: Hosts & {
       <AdminPage
         activeSection={adminSection}
         appearanceContent={<WindowPreferences {...props.preferences} />}
+        providers={personalSessions.preflightProviders?.providers}
+        checkingProviders={personalSessions.checkingProviders}
+        onRefreshProviders={() => { void personalSessions.refreshProviders() }}
         inboxHost={props.inbox}
         collaboration={props.collaboration}
         organization={props.organization}
@@ -990,12 +992,12 @@ function ConfirmedUserWorkbench(props: Hosts & {
             : teamChatActive
               ? { title: "团队空间", subtitle: isOffline ? "离线" : "未入团" }
               : {
-                  title: showPersonalConversation && selectedSummary ? selectedSummary.title : "个人工作台",
+                  title: showPersonalConversation && selectedSummary ? selectedSummary.title : "",
                   subtitle: showPersonalConversation
                     ? (selectedRecord?.directoryPath
                         ? (directoryBasename(selectedRecord.directoryPath) || selectedRecord.directoryPath)
                         : "仅本机")
-                    : "仅本机",
+                    : undefined,
                 }
 
   const renderHeaderTitle = useTeamHeader
@@ -1041,7 +1043,9 @@ function ConfirmedUserWorkbench(props: Hosts & {
           return (
             <>
               <span className="tb-name" title={selectedSummary.title}>{selectedSummary.title}</span>
-              <span className="tb-count">{selectedRecord?.shareStatus === "stopped" ? "已停止同步" : "仅本机"}</span>
+              {selectedRecord?.shareStatus === "stopped" ? (
+                <span className="tb-count">已停止同步</span>
+              ) : null}
               {isRunning ? (
                 <span className="tb-state running">
                   <span className="d" aria-hidden="true" />
@@ -1051,12 +1055,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
             </>
           )
         }
-        return (
-          <>
-            <span className="tb-name">新建个人会话</span>
-            <span className="tb-count">仅本机</span>
-          </>
-        )
+        return <></>
       }
 
   const backButton = useTeamHeader
@@ -1265,8 +1264,6 @@ function ConfirmedUserWorkbench(props: Hosts & {
       renderHeaderTitle={renderHeaderTitle}
       backButton={backButton}
       headerExtra={headerExtra}
-      colorScheme={props.preferences.state.colorScheme}
-      onToggleTheme={props.preferences.toggleTheme}
       overlays={overlays}
       navigation={navigationNode}
       center={<>
@@ -1480,7 +1477,7 @@ function useTeamWorkspaceBridge(props: {
   const activeOwnConversationId = selectedOwnedBySelf ? selectedConversationId : lastLocalConversationId
   const preferredConversationId = selectedConversationId ?? lastLocalConversationId
   const scope = shell.scope
-  const isBoardPage = currentPage.kind === "board" || currentPage.kind === "tasks" || currentPage.kind === "task"
+  const isBoardPage = isBoardRoutePage(currentPage)
   const { refresh: refreshBoard, ...board } = useProjectBoard(
     props.projectUpdates,
     scope,
@@ -1692,7 +1689,7 @@ function useTeamWorkspaceBridge(props: {
     onSelectWorkspace: props.onSelectWorkspace,
     dualTrack: teamDualTrack,
     inboxView,
-    returnToInbox: Boolean(props.returnToInbox && currentPage.kind === "task"),
+    returnToInbox: shouldShowReturnToInbox(props.returnToInbox, currentPage),
     onOpenInbox: () => props.onSelectNav("inbox"),
     onCloseInbox: () => props.onSelectNav("chat"),
     onReturnToInbox: props.onReturnToInbox,

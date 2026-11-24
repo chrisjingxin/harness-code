@@ -112,6 +112,7 @@ interface ComposerProps {
   readonly onCancel: () => void
   /** 新建准备页使用 Enter 换行，提交仍由该页的明确开始动作处理。 */
   readonly submitOnEnter?: boolean
+  readonly placeholder?: string
   readonly children?: ReactNode
   readonly aboveComposer?: ReactNode
 }
@@ -935,7 +936,7 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
           rows={1}
           value={draft.text}
           disabled={!canEdit}
-          placeholder={canEdit ? (props.submitOnEnter === false ? "描述你想讨论或推进的事项，输入 @ 引用项目会话或团队知识…" : "输入消息 · @ 引用 · / 命令") : "当前无法编辑草稿"}
+          placeholder={canEdit ? (props.placeholder ?? (props.submitOnEnter === false ? "输入你想推进的事项…" : "输入消息 · @ 引用 · / 命令")) : "当前无法编辑草稿"}
           aria-label={props.submitOnEnter === false ? "新会话初始内容，Enter 换行" : "消息，Enter 发送，Shift+Enter 换行"}
           onChange={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}
           onSelect={event => updateSelection(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)}

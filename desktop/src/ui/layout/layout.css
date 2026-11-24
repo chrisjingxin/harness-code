@@ -1,16 +1,67 @@
-/* 工作台外壳：第一层 56px 全局图标栏（可选）+ 第二层 304px 次级侧栏 + 右侧 .main（48px 单行顶栏 + 居中舞台 + 右栏 ProjectDock）。 */
+/* 工作台外壳：第一行通栏顶栏（含平台红绿灯/控制按钮避让与左栏开关），第二行 56px 全局图标栏 + 304px 次级侧栏 + 中央舞台与右栏。 */
 .collaboration-layout {
   height: 100%;
   min-height: 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   background: var(--bg);
   color: var(--text);
   position: relative;
   overflow: hidden;
 }
 
-/* ─── 第一层：56px 固定全局图标栏 ─── */
+.collaboration-layout.is-macos {
+  --topbar-h: 40px;
+}
+
+/* ─── 第一行：跨平台窗口顶栏 ─── */
+.collaboration-topbar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: var(--topbar-h, 48px);
+  min-height: var(--topbar-h, 48px);
+  width: 100%;
+  background: var(--bg);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.collaboration-layout.is-macos .collaboration-topbar.desktop-titlebar-macos {
+  padding-left: 0;
+}
+.collaboration-layout.is-windows .collaboration-topbar.desktop-titlebar-windows {
+  padding-right: 0;
+}
+.collaboration-topbar-left {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 10px 0 12px;
+  background: var(--sidebar-surface, var(--sidebar-bg));
+  box-shadow: inset -1px 0 0 var(--line);
+  transition: width 200ms var(--ease-flow, var(--ease-standard));
+}
+.collaboration-topbar-left[data-dragging="true"] {
+  transition: none;
+}
+.collaboration-layout.is-macos .collaboration-topbar-left {
+  padding-left: 78px;
+}
+
+/* ─── 第二行：主体容器（56px Rail + 次级侧栏 + 中央舞台与右栏） ─── */
+.collaboration-shell-body {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+/* ─── 56px 固定全局图标栏（全平台统一宽度） ─── */
 .lf-rail {
   position: relative;
   flex: none;
@@ -19,31 +70,22 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 10px 0;
+  padding: 8px 0 10px;
   background: var(--rail-surface, var(--sidebar-bg));
   box-shadow: inset -1px 0 0 var(--border);
   user-select: none;
 }
 .lf-rail-macos-spacer { display: none; }
-.collaboration-layout.is-macos .lf-rail { padding-top: 0; }
-.collaboration-layout.is-macos .lf-rail-macos-spacer {
-  display: block;
-  width: 100%;
-  height: 38px;
-  flex: none;
-  -webkit-app-region: drag;
-}
 .lf-brand-mark {
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   border-radius: 9px;
   background: var(--surface);
   color: var(--accent-text, var(--accent));
   box-shadow: inset 0 0 0 1px var(--border);
-  -webkit-app-region: drag;
 }
 .rail-nav {
   display: flex;
@@ -73,16 +115,6 @@
   background: var(--selected);
   color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--border-soft);
-}
-.rail-btn.is-active::before {
-  content: "";
-  position: absolute;
-  left: -9px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
 }
 .rail-btn.is-active svg { color: var(--accent-text, var(--accent)); }
 .rail-badge {
@@ -222,6 +254,9 @@
   box-shadow: inset -1px 0 0 var(--line);
   transition: width 200ms var(--ease-flow, var(--ease-standard)), opacity var(--motion-fast) var(--ease-standard);
 }
+.collaboration-left[data-dragging="true"] {
+  transition: none;
+}
 .collaboration-left[data-mode="hidden"] {
   box-shadow: none;
   opacity: 0;
@@ -240,22 +275,13 @@
   left: var(--rail-w, 56px);
 }
 .collaboration-scrim {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 35;
   background: var(--scrim);
 }
 .collaboration-layout.has-rail .collaboration-scrim {
   left: var(--rail-w, 56px);
-}
-.collaboration-traffic-drag {
-  flex: none;
-  height: 40px;
-  width: 100%;
-  -webkit-app-region: drag;
-}
-.collaboration-layout.is-macos .collaboration-traffic-drag {
-  height: 36px;
 }
 
 .collaboration-left-resize {
@@ -285,19 +311,13 @@
   box-shadow: 0 0 0 1px var(--accent-tint);
 }
 
-.collaboration-main {
+.collaboration-header {
   flex: 1 1 0;
   min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: var(--topbar-h, 48px) minmax(0, 1fr);
-}
-
-.collaboration-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: var(--topbar-h, 48px);
+  height: 100%;
   padding: 0 12px 0 16px;
   box-shadow: inset 0 -1px 0 var(--line);
   background: var(--bg);
@@ -305,42 +325,23 @@
   line-height: 1.35;
   -webkit-app-region: drag;
   user-select: none;
-  min-width: 0;
 }
-/* 覆盖全局 .desktop-titlebar-macos 左侧大边距：仅当左栏收起或无侧栏时为红绿灯和固定折叠按钮留出空间 */
-.collaboration-layout.is-macos .collaboration-header.desktop-titlebar-macos {
-  padding-left: 16px;
+.collaboration-layout.is-macos:not([data-left-mode="docked"]) .collaboration-header {
+  padding-left: 78px;
 }
-.collaboration-layout.is-macos:not(.has-rail)[data-left-mode="hidden"] .collaboration-header.desktop-titlebar-macos {
-  padding-left: 122px;
+.collaboration-layout.is-macos.no-sidebar .collaboration-header {
+  padding-left: 84px;
 }
-.collaboration-layout.is-macos.has-rail[data-left-mode="hidden"]:not(.no-sidebar) .collaboration-header.desktop-titlebar-macos {
-  padding-left: 68px;
+.collaboration-layout:not(.is-macos):not([data-left-mode="docked"]):not(.no-sidebar) .collaboration-header {
+  padding-left: 12px;
 }
-.collaboration-layout.is-macos.has-rail.no-sidebar .collaboration-header.desktop-titlebar-macos {
-  padding-left: 36px;
-}
-.collaboration-layout:not(.is-macos)[data-left-mode="hidden"]:not(.no-sidebar) .collaboration-header {
-  padding-left: 50px;
-}
-.collaboration-layout.is-windows .collaboration-header.desktop-titlebar-windows {
+.collaboration-layout.is-windows .collaboration-topbar.desktop-titlebar-windows .collaboration-header {
   padding-right: max(148px, calc(100% - env(titlebar-area-width, 100%) - env(titlebar-area-x, 0px) + 12px));
 }
 
 .collaboration-header-toggle {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  z-index: 45;
   width: 28px;
   height: 28px;
-}
-.collaboration-layout:not(.is-macos).has-rail .collaboration-header-toggle {
-  left: calc(var(--rail-w, 56px) + 12px);
-}
-.collaboration-layout.is-macos .collaboration-header-toggle {
-  top: 4px;
-  left: 84px;
 }
 
 .collaboration-header-toggle,
@@ -555,9 +556,11 @@
   align-items: center;
   gap: 4px;
   flex: none;
+  -webkit-app-region: no-drag;
+}
+.collaboration-header-collab + .collaboration-header-right {
   padding-left: 8px;
   box-shadow: inset 1px 0 0 var(--line-soft);
-  -webkit-app-region: no-drag;
 }
 
 .collaboration-body {
@@ -655,6 +658,8 @@
   .user-popover { animation: lfPopIn 160ms var(--ease-flow, var(--ease-standard)); }
 }
 @media (prefers-reduced-motion: reduce) {
+  .collaboration-topbar-left { transition: none; }
+  .collaboration-left { transition: opacity 120ms linear; }
   .rail-btn:active,
   .rail-avatar-btn:active { transform: none; }
   .tb-state.running .d { animation: none; }

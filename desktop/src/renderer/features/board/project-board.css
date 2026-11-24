@@ -192,6 +192,10 @@
 .tcard-main:hover .t-title {
   color: var(--accent-text, var(--accent));
 }
+.tcard-main:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
 .t-title {
   font-size: var(--text-sm);
   font-weight: 600;
@@ -382,6 +386,9 @@
   flex-direction: column;
   background: var(--surface);
   box-shadow: -8px 0 28px rgba(0, 0, 0, 0.09), inset 1px 0 0 var(--border);
+}
+.t-drawer:focus {
+  outline: none;
 }
 .t-drawer-head {
   flex: none;

@@ -73,7 +73,7 @@ const LEFT_MIN = 240,
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
-/** 双层左栏工作台布局；面板保持挂载，宽屏隐藏或窄屏自动收合不修改宿主开合偏好。 */
+/** 双行三栏工作台布局：顶栏通栏置顶（macOS 红绿灯与折叠按钮同行），下方为 Rail + 次级侧栏 + 舞台/右栏，兼容 Windows 原生标题覆盖区。 */
 export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLElement>(null),
@@ -89,11 +89,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     null,
   );
   const [leftDragging, setLeftDragging] = useState(false);
+  const isMac = props.titleBarClassName?.includes("macos") ?? false;
+  const isWin = props.titleBarClassName?.includes("windows") ?? false;
   const hasRail = Boolean(props.rail);
   const noSidebar = Boolean(props.noSidebar);
   const railReserve = hasRail ? RAIL_W : 0;
   const leftWidth = clamp(props.leftWidthPx || 304, LEFT_MIN, LEFT_MAX);
   const rightWidth = clamp(props.rightWidthPx || 340, RIGHT_MIN, RIGHT_MAX);
+  const effectiveLeftWidth = Math.min(leftWidth, Math.max(0, width - railReserve - 32));
   const leftFits = !noSidebar && width >= railReserve + leftWidth + CENTER_MIN;
   const rightFits =
     width >= railReserve + (!noSidebar && props.leftOpen ? leftWidth : 0) + CENTER_MIN + rightWidth;
@@ -284,10 +287,22 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       : ""
   );
 
-  const isMac = props.titleBarClassName?.includes("macos") ?? false;
-  const isWin = props.titleBarClassName?.includes("windows") ?? false;
   const leftCollapsed = leftMode === "hidden";
   const customHeaderTitle = props.renderHeaderTitle?.({ leftCollapsed });
+  const leftToggleButton = !noSidebar ? (
+    <button
+      ref={leftButton}
+      type="button"
+      className="collaboration-header-toggle"
+      data-active={leftMode === "overlay" ? "true" : "false"}
+      onClick={() => toggle("left")}
+      aria-label="切换导航"
+      aria-expanded={leftMode !== "hidden"}
+      title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
+    >
+      {leftMode !== "hidden" ? <IconLayoutSidebarLeftCollapse size={16} aria-hidden="true" /> : <IconLayoutSidebar size={16} aria-hidden="true" />}
+    </button>
+  ) : null;
 
   return (
     <div
@@ -303,50 +318,26 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       ref={root}
       onKeyDown={keyDown}
     >
-      {props.rail}
-
-      {/* 第二层次级侧栏：宽屏业务页下平缓隐藏，保持挂载不丢失滚动与草稿 */}
-      <aside
-        ref={left}
-        className="collaboration-left"
-        data-mode={leftMode}
-        style={{
-          width:
-            leftMode === "hidden"
-              ? 0
-              : Math.min(leftWidth, Math.max(0, width - railReserve - 32)),
-        }}
-        aria-label="工作台次级导航"
-        aria-hidden={leftMode === "hidden" || undefined}
-        inert={leftMode === "hidden"}
+      {/* 第一行：跨平台窗口顶栏，docked 时左侧延展与侧栏等宽并容纳原生红绿灯与折叠按钮 */}
+      <div
+        className={
+          props.titleBarClassName
+            ? `collaboration-topbar ${props.titleBarClassName}`
+            : "collaboration-topbar"
+        }
       >
-        <div className="collaboration-traffic-drag" aria-hidden="true" />
-        {props.navigation}
         {leftMode === "docked" && (
           <div
-            className="collaboration-left-resize"
+            className="collaboration-topbar-left"
             data-dragging={leftDragging ? "true" : undefined}
-            role="separator"
-            aria-label="调整导航宽度"
-            aria-orientation="vertical"
-            onPointerDown={(event: ReactPointerEvent) => {
-              event.preventDefault();
-              drag.current = { x: event.clientX, width: leftWidth };
-              setLeftDragging(true);
-            }}
-          />
+            style={{ width: railReserve + effectiveLeftWidth }}
+          >
+            {leftToggleButton}
+          </div>
         )}
-      </aside>
 
-      {/* 右侧主容器：顶栏 + 舞台/右栏 */}
-      <div className="collaboration-main">
-        <header
-          className={
-            props.titleBarClassName
-              ? `collaboration-header ${props.titleBarClassName}`
-              : "collaboration-header"
-          }
-        >
+        <header className="collaboration-header">
+          {leftMode !== "docked" ? leftToggleButton : null}
           {props.backButton}
           <div className="collaboration-header-context tb-title">
             {customHeaderTitle !== null && customHeaderTitle !== undefined ? (
@@ -369,41 +360,75 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
           {props.headerExtra ? (
             <div className="collaboration-header-collab">{props.headerExtra}</div>
           ) : null}
-          <div className="collaboration-header-right">
-            {props.onToggleTheme && (
-              <button
-                type="button"
-                className="collaboration-header-icon"
-                onClick={props.onToggleTheme}
-                aria-label="切换浅色/深色"
-                title="切换浅色/深色"
-              >
-                {props.colorScheme === "dark" ? <IconSun size={16} aria-hidden="true" /> : <IconMoon size={16} aria-hidden="true" />}
-              </button>
-            )}
-            <button
-              ref={rightButton}
-              type="button"
-              className="collaboration-header-icon"
-              data-active={visibleRightMode !== "hidden" ? "true" : "false"}
-              onClick={() => toggle("right")}
-              disabled={!hasRight}
-              tabIndex={hasRight ? undefined : -1}
-              aria-hidden={!hasRight || undefined}
-              title={
-                !hasRight
-                  ? "当前页面无本机文件栏"
-                  : visibleRightMode !== "hidden"
-                    ? "收起本机文件栏"
-                    : "展开本机文件栏"
-              }
-              aria-label="切换项目面板"
-              aria-expanded={visibleRightMode !== "hidden"}
-            >
-              <IconLayoutSidebarRight size={16} aria-hidden="true" />
-            </button>
-          </div>
+          {(props.onToggleTheme || hasRight) && (
+            <div className="collaboration-header-right">
+              {props.onToggleTheme && (
+                <button
+                  type="button"
+                  className="collaboration-header-icon"
+                  onClick={props.onToggleTheme}
+                  aria-label="切换浅色/深色"
+                  title="切换浅色/深色"
+                >
+                  {props.colorScheme === "dark" ? <IconSun size={16} aria-hidden="true" /> : <IconMoon size={16} aria-hidden="true" />}
+                </button>
+              )}
+              {hasRight && (
+                <button
+                  ref={rightButton}
+                  type="button"
+                  className="collaboration-header-icon"
+                  data-active={visibleRightMode !== "hidden" ? "true" : "false"}
+                  onClick={() => toggle("right")}
+                  title={
+                    visibleRightMode !== "hidden"
+                      ? "收起本机文件栏"
+                      : "展开本机文件栏"
+                  }
+                  aria-label="切换项目面板"
+                  aria-expanded={visibleRightMode !== "hidden"}
+                >
+                  <IconLayoutSidebarRight size={16} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
         </header>
+      </div>
+
+      {/* 第二行：56px 全局图标栏 + 次级侧栏 + 中央舞台与右栏 */}
+      <div className="collaboration-shell-body">
+        {props.rail}
+
+        {/* 第二层次级侧栏：宽屏业务页下平缓隐藏，保持挂载不丢失滚动与草稿 */}
+        <aside
+          ref={left}
+          className="collaboration-left"
+          data-mode={leftMode}
+          data-dragging={leftDragging ? "true" : undefined}
+          style={{
+            width: leftMode === "hidden" ? 0 : effectiveLeftWidth,
+          }}
+          aria-label="工作台次级导航"
+          aria-hidden={leftMode === "hidden" || undefined}
+          inert={leftMode === "hidden"}
+        >
+          {props.navigation}
+          {leftMode === "docked" && (
+            <div
+              className="collaboration-left-resize"
+              data-dragging={leftDragging ? "true" : undefined}
+              role="separator"
+              aria-label="调整导航宽度"
+              aria-orientation="vertical"
+              onPointerDown={(event: ReactPointerEvent) => {
+                event.preventDefault();
+                drag.current = { x: event.clientX, width: leftWidth };
+                setLeftDragging(true);
+              }}
+            />
+          )}
+        </aside>
 
         <div className="collaboration-body">
           <main className="collaboration-center" tabIndex={-1}>
@@ -420,36 +445,20 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
             {rightContent}
           </div>
         </div>
+
+        {(leftMode === "overlay" || visibleRightMode === "overlay") && (
+          <div
+            className="collaboration-scrim"
+            aria-hidden="true"
+            onClick={() => {
+              const side = overlay;
+              setOverlay(null);
+              if (side === "left") leftButton.current?.focus();
+              else if (side === "right") rightButton.current?.focus();
+            }}
+          />
+        )}
       </div>
-
-      {(leftMode === "overlay" || visibleRightMode === "overlay") && (
-        <div
-          className="collaboration-scrim"
-          aria-hidden="true"
-          onClick={() => {
-            const side = overlay;
-            setOverlay(null);
-            if (side === "left") leftButton.current?.focus();
-            else if (side === "right") rightButton.current?.focus();
-          }}
-        />
-      )}
-
-      {/* 左栏折叠/展开按钮固定于左上角红绿灯旁；DOM 必须位于含 -webkit-app-region: drag 的左侧栏与顶栏之后，否则 Electron 会按 DOM 顺序将按钮区域覆盖为拖动区导致点击失效 */}
-      {!noSidebar && (
-        <button
-          ref={leftButton}
-          type="button"
-          className="collaboration-header-toggle"
-          data-active={leftMode === "overlay" ? "true" : "false"}
-          onClick={() => toggle("left")}
-          aria-label="切换导航"
-          aria-expanded={leftMode !== "hidden"}
-          title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
-        >
-          {leftMode !== "hidden" ? <IconLayoutSidebarLeftCollapse size={16} aria-hidden="true" /> : <IconLayoutSidebar size={16} aria-hidden="true" />}
-        </button>
-      )}
 
       {props.overlays}
 

@@ -1,5 +1,6 @@
 /** 看板按同一份服务响应的 ID 组织成员和任务，复用 HC-218 的本机同步规则。 */
 import type { BoardConversation, BoardResponse, TaskStatus, TaskSummary } from "@workbench/collaboration-client/types"
+import type { ProjectPage } from "../../../shared/index.js"
 import type { SessionSyncState } from "../session/contracts.js"
 import { classifyConversation, deriveSyncStatus, emptySyncState } from "../session/session-model.js"
 
@@ -7,6 +8,21 @@ export type BoardViewMode = "status" | "members"
 export type BoardTaskScope = "all" | "assigned" | "published"
 
 export const BOARD_PRIMARY_STATUSES: readonly TaskStatus[] = ["todo", "doing", "review", "done"]
+
+/** 判定当前项目子页是否归属于融合看板家族（原 tasks/task 一并映射到看板主视图）。 */
+export function isBoardRoutePage(page: Pick<ProjectPage, "kind">): boolean {
+  return page.kind === "board" || page.kind === "tasks" || page.kind === "task"
+}
+
+/** 仅当路由指向具体任务时返回对应 taskId 以展开右侧 `.t-drawer` 抽屉；其余返回 null。 */
+export function resolveBoardDrawerTaskId(page: ProjectPage): string | null {
+  return page.kind === "task" ? page.taskId : null
+}
+
+/** 从收件箱/深链接跳转进入任务抽屉时保留顶栏「返回收件箱」按钮；关闭抽屉或切离时自动隐藏。 */
+export function shouldShowReturnToInbox(returnToInbox: boolean, page: Pick<ProjectPage, "kind">): boolean {
+  return Boolean(returnToInbox && page.kind === "task")
+}
 
 export const boardTaskStatuses = {
   todo: "待接收", doing: "进行中", review: "待验收", done: "已完成", cancelled: "已取消",

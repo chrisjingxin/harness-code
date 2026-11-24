@@ -85,7 +85,7 @@
 .session-remote-brief,
 .brief-card {
   width: 100%;
-  max-width: 780px;
+  max-width: 740px;
   margin: 0 auto 14px;
   background: var(--surface);
   border: none;
@@ -189,7 +189,7 @@
 
 .session-remote-note-card {
   width: 100%;
-  max-width: 780px;
+  max-width: 740px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -289,7 +289,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  max-width: 780px;
+  max-width: 740px;
   margin: 0 auto;
   padding: 7px 12px;
   border: none;
@@ -327,7 +327,7 @@
 .session-peer-foot-inner,
 .peer-foot-inner {
   width: 100%;
-  max-width: 780px;
+  max-width: 740px;
   margin: 0 auto;
   display: flex;
   flex-wrap: wrap;
@@ -353,7 +353,7 @@
 
 .session-inline-notice {
   flex: none;
-  max-width: 780px;
+  max-width: 740px;
   width: 100%;
   margin: 4px auto 0;
   padding: 6px 12px;
@@ -391,40 +391,45 @@
 }
 
 .home-welcome {
-  width: min(760px, 100%);
+  width: min(680px, 100%);
   margin: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
 .home-brand-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 12px;
 }
 
 .home-logo {
   flex: none;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   background: var(--accent);
   color: var(--accent-fg);
-  box-shadow: 0 6px 16px -8px var(--accent-ring, var(--accent-border));
+  box-shadow: 0 4px 12px -6px var(--accent-ring, var(--accent-border));
 }
 
 .home-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   min-width: 0;
 }
 
 .home-heading h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
   line-height: var(--leading-tight, 1.35);
   color: var(--fg, var(--text));
   text-wrap: balance;
@@ -449,12 +454,12 @@
 
 .session-new-composer .wb-composer-backdrop,
 .session-new-composer .wb-composer-textarea {
-  min-height: 88px;
+  min-height: 76px;
   max-height: 220px;
 }
 
 .session-new-composer .wb-composer-textarea {
-  resize: vertical;
+  resize: none;
 }
 
 .session-new-send {
@@ -803,7 +808,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 18px 0;
+  width: 100%;
+  max-width: 740px;
+  margin-inline: auto;
+  padding: 10px 0 0;
 }
 
 .session-restore-banner {

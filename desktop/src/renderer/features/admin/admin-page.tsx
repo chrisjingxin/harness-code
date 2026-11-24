@@ -5,11 +5,13 @@
  * 不虚构任何未接后端的占位选项。
  */
 import { IconRefresh } from "@tabler/icons-react"
+import type { AcpAgentInfo } from "@workbench/acp-runtime/types"
 import type { CollaborationHost, WorkspaceSummary } from "@workbench/collaboration-client/types"
 import type { ReactElement, ReactNode } from "react"
 import type { InboxHost, LocalExecutionScope, OrganizationHost } from "../../../shared/index.js"
 import { IdentityPanel, type useCollaborationIdentity } from "../../../ui/index.js"
 import { NotificationPreferencesSection } from "../inbox/index.js"
+import { AgentPreflightCard } from "../personal-sessions/agent-preflight-card.js"
 import { DirectoryMemory } from "../workbench-context/directory-memory.js"
 import { TeamSettings } from "../workspace/team-settings.js"
 import { ADMIN_SECTION_META, type AdminSectionId } from "./admin-model.js"
@@ -20,6 +22,9 @@ type IdentityState = ReturnType<typeof useCollaborationIdentity>
 export type AdminPageProps = {
   readonly activeSection: AdminSectionId
   readonly appearanceContent: ReactNode
+  readonly providers?: readonly AcpAgentInfo[]
+  readonly checkingProviders?: boolean
+  readonly onRefreshProviders?: () => void
   readonly inboxHost?: InboxHost
   readonly collaboration: CollaborationHost
   readonly organization: OrganizationHost
@@ -38,6 +43,9 @@ export type AdminPageProps = {
 export function AdminPage({
   activeSection,
   appearanceContent,
+  providers,
+  checkingProviders = false,
+  onRefreshProviders,
   inboxHost,
   collaboration,
   organization,
@@ -53,6 +61,7 @@ export function AdminPage({
   onSelectSection,
 }: AdminPageProps): ReactElement {
   const meta = ADMIN_SECTION_META[activeSection]
+  const availableProviders = (providers ?? []).filter(item => item.available)
 
   let body: ReactNode = null
 
@@ -80,6 +89,30 @@ export function AdminPage({
           </div>
         </div>
       </>
+    )
+  } else if (activeSection === "agents") {
+    body = (
+      <div className="panel admin-panel">
+        <div className="panel-head">
+          <h2>本机 ACP Agent 探测状态</h2>
+          <span
+            className="hui-badge"
+            data-tone={providers === undefined ? "muted" : availableProviders.length > 0 ? "success" : "warn"}
+            data-size="xs"
+          >
+            {providers === undefined ? "检测中" : availableProviders.length > 0 ? "就绪" : "待配置"}
+          </span>
+        </div>
+        <p className="admin-panel-desc">
+          默认自动探测本机 Harness Code；如需切换或调试自定义 ACP Agent，可在启动环境配置 <code>WORKBENCH_ACP_EXECUTABLE</code> 与 <code>WORKBENCH_ACP_ARGS_JSON</code> 后点击「重新检测」。
+        </p>
+        <AgentPreflightCard
+          mode="panel"
+          providers={providers}
+          checking={checkingProviders}
+          onRefresh={onRefreshProviders ?? (() => {})}
+        />
+      </div>
     )
   } else if (activeSection === "notifications") {
     body = (

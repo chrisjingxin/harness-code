@@ -1,5 +1,5 @@
 /** 统一项目看板：合并 HC-220 看板与 HC-219 任务管理，支持状态四列 / 成员进展视角切换与右侧滑出任务抽屉。 */
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { IconRefresh, IconX } from "@tabler/icons-react"
 import type { BoardConversation, BoardResponse, TaskSummary } from "@workbench/collaboration-client/types"
@@ -106,6 +106,7 @@ export function ProjectBoard(props: ProjectBoardProps) {
   const [locateError, setLocateError] = useState("")
   const [actionError, setActionError] = useState("")
   const [acceptingTaskId, setAcceptingTaskId] = useState<string | null>(null)
+  const drawerRef = useRef<HTMLElement>(null)
 
   const model = useMemo(() => (data ? buildBoardModel(data) : null), [data])
   const taskSource = allTasks ?? data?.tasks ?? []
@@ -118,6 +119,15 @@ export function ProjectBoard(props: ProjectBoardProps) {
     setActionError("")
     setLocateError("")
   }, [currentProjectId])
+
+  useEffect(() => {
+    if (!activeTaskId) return
+    const drawer = drawerRef.current
+    if (!drawer) return
+    if (!drawer.contains(document.activeElement)) {
+      drawer.focus({ preventScroll: true })
+    }
+  }, [activeTaskId])
 
   // 当已有模态 <dialog>（如任务创建或本机开始弹窗）或全局命令面板打开时，交由上层优先处理 Esc。
   useEffect(() => {
@@ -490,7 +500,7 @@ export function ProjectBoard(props: ProjectBoardProps) {
       {activeTaskId && (
         <>
           <div className="t-drawer-backdrop" aria-hidden="true" onClick={handleCloseDrawer} />
-          <aside className="t-drawer" role="dialog" aria-modal="false" aria-label="任务详情抽屉">
+          <aside ref={drawerRef} tabIndex={-1} className="t-drawer" role="dialog" aria-modal="false" aria-label="任务详情抽屉">
             <div className="t-drawer-head">
               <span className="t-drawer-kicker">任务详情</span>
               <button

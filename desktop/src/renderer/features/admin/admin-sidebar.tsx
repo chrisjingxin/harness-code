@@ -5,6 +5,7 @@
 import {
   IconArrowLeft,
   IconBrain,
+  IconCpu,
   IconInbox,
   IconSun,
   IconUser,
@@ -15,6 +16,7 @@ import { ADMIN_NAV_GROUPS, type AdminSectionId } from "./admin-model.js"
 
 const SECTION_ICONS: Readonly<Record<AdminSectionId, typeof IconSun>> = {
   appearance: IconSun,
+  agents: IconCpu,
   notifications: IconInbox,
   memory: IconBrain,
   account: IconUser,
