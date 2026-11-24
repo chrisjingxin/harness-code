@@ -1,6 +1,6 @@
 # HC-239 个人优先使用本机 Agent · 执行清单
 
-[Task](../task/HC-239-个人优先使用本机Agent.md) · [Spec](../spec/HC-239-个人优先使用本机Agent.md) · [Plan](../plan/HC-239-个人优先使用本机Agent.md) · [方案 B 交互原型](../previews/personal-team-workbench/README.md)
+[Task](../task/HC-239-个人优先使用本机Agent.md) · [Spec](../spec/HC-239-个人优先使用本机Agent.md) · [Plan](../plan/HC-239-个人优先使用本机Agent.md) · [方案 B 交互原型（已过期）](../previews/personal-team-workbench/README.md) · [最新协作工作台原型](../previews/collaboration-workbench/README.md)
 
 ## 停点 1 · 全栈共享契约、服务端两档发布与停止共享
 

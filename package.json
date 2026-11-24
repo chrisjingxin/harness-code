@@ -34,7 +34,9 @@
     "server:contracts": "node scripts/workbench/server.mjs contracts",
     "contracts:smoke": "node scripts/workbench/check-contracts.mjs",
     "preview:personal-team": "node node_modules/vite/bin/vite.js --config docs/developer/previews/personal-team-workbench/vite.config.mjs",
-    "build:personal-team-preview": "node node_modules/vite/bin/vite.js build --config docs/developer/previews/personal-team-workbench/vite.config.mjs"
+    "build:personal-team-preview": "node node_modules/vite/bin/vite.js build --config docs/developer/previews/personal-team-workbench/vite.config.mjs",
+    "preview:workbench": "node node_modules/vite/bin/vite.js --config docs/developer/previews/collaboration-workbench/vite.config.mjs",
+    "build:workbench-preview": "node node_modules/vite/bin/vite.js build --config docs/developer/previews/collaboration-workbench/vite.config.mjs"
   },
   "devDependencies": {
     "typescript": "6.0.3",

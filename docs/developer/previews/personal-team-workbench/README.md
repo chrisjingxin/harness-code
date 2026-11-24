@@ -1,6 +1,9 @@
-# 个人与团队协同工作台交互原型（方案 B）
+# 个人与团队协同工作台交互原型（方案 B · 已过期）
 
-本目录迁自 Open Design `c4-personal-team-workbench/layout-b-vertical.html`（方案 B：单层纵向侧栏），已拆分为标准 Vite 前端工程，用于后续 [个人与团队协同用户旅程](../../architecture/个人与团队协同用户旅程.md)（`HC-233`、`HC-239`～`HC-254`）桌面前端开发的 UI 视觉与交互对照，**不进入正式桌面应用或服务端生产打包**。
+> **状态：已过期（2026-11-24）**
+> 本目录的方案 B（单层纵向侧栏）交互原型已标记为**已过期**，最新正式交互原型已切换为 [个人与团队协同工作台交互原型（双层导航 · collaboration-workbench）](../collaboration-workbench/README.md)。本目录仅保留作历史归档对照（供已交付的 `HC-239`、`HC-246` 等历史文档回溯链接使用），后续新增功能与 UI 改造一律以新版原型为准。
+
+本目录迁自 Open Design `c4-personal-team-workbench/layout-b-vertical.html`（方案 B：单层纵向侧栏），已拆分为标准 Vite 前端工程，原用于 [个人与团队协同用户旅程](../../architecture/个人与团队协同用户旅程.md)（`HC-233`、`HC-239`～`HC-254`）早期桌面前端开发的 UI 视觉与交互对照，**不进入正式桌面应用或服务端生产打包**。
 
 ## 本地运行与构建
 

@@ -1,6 +1,6 @@
 # HC-239 个人优先使用本机 Agent · 实施计划
 
-[Task](../task/HC-239-个人优先使用本机Agent.md) · [Spec](../spec/HC-239-个人优先使用本机Agent.md) · [Todo](../todo/HC-239-个人优先使用本机Agent.md) · [方案 B 交互原型](../previews/personal-team-workbench/README.md)
+[Task](../task/HC-239-个人优先使用本机Agent.md) · [Spec](../spec/HC-239-个人优先使用本机Agent.md) · [Todo](../todo/HC-239-个人优先使用本机Agent.md) · [方案 B 交互原型（已过期）](../previews/personal-team-workbench/README.md) · [最新协作工作台原型](../previews/collaboration-workbench/README.md)
 
 按四个可演示停点全栈推进（`contracts/`、`server/`、`packages/` 与 `desktop/`），沿用当前 `harness_lody` 分支与既有工作区。每到达一个停点走一遍必要构建、边界与真实冒烟后再推进下一停点；界面布局、芯片与发布/停止共享转场严格对照[方案 B 交互原型](../previews/personal-team-workbench/README.md)，并遵循 2026-11-23 确认规则：个人栏位统一展示全部个人会话并按工程目录组织（不设团队/无团队筛选）、团队栏位按 Project 组织、个人会话支持直接发布到任意已加入团队的活跃 Project、会话重命名采用 Codex 风格右键菜单与居中弹窗。
 

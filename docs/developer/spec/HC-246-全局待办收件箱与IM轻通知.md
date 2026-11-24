@@ -2,7 +2,7 @@
 
 > 状态：规格草案（2026-11-24，待审阅）。本文定义 [HC-246 Task](../task/HC-246-全局待办收件箱与IM轻通知.md) 的行为契约、数据库增量、跨端接口、企业自研 IM 可扩展出站口子、桌面端 UI 与深链接唤醒规则，对应 [个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md) 第 13.2 节与第 15 节，并与 [HC-220 轻量通知](HC-220-项目看板与轻量通知.md)、[HC-239 双轨桌面外壳](HC-239-个人优先使用本机Agent.md) 及 [HC-240 团队角色与代管规则](HC-240-Workspace角色管理.md) 对齐。
 
-[需求卡](../task/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [方案 B 交互原型](../previews/personal-team-workbench/README.md)
+[需求卡](../task/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [当前协作工作台交互原型](../previews/collaboration-workbench/README.md) · [方案 B 原型（已过期）](../previews/personal-team-workbench/README.md)
 
 ---
 
@@ -298,7 +298,7 @@ public interface InboxActionabilityChecker {
 
 ### 6.1 左栏顶置「收件箱」入口（跨空间全局可见）
 
-- 对齐 [方案 B 交互原型](../previews/personal-team-workbench/src/app.js#L1189-L1196) 与双轨左栏 [ProjectNavigation](../../../desktop/src/ui/navigation/index.tsx#L700-L727)：
+- 对齐 [当前协作工作台交互原型](../previews/collaboration-workbench/README.md) 与 [方案 B 交互原型（已过期历史对照）](../previews/personal-team-workbench/src/app.js#L1189-L1196) 语义，结合双轨左栏 [ProjectNavigation](../../../desktop/src/ui/navigation/index.tsx#L700-L727)：
   - 在「个人 | 团队」分段切换器正下方（不隶属于个人或某个 Project，在两个空间下都始终置顶可见）增加一行全局「收件箱（Inbox）」导航条目；
   - 右侧展示两类清晰且绝不混算的状态提示：
     1. **云端待拍板红点角标**：仅显示 `counts.actionRequired`（Task `todo + review`）；为 0 时隐藏数字；当角标数值上升时触发一次轻微跳动提示（不抢焦点）；

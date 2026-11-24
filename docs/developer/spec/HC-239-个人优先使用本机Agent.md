@@ -2,7 +2,7 @@
 
 > 状态：规格草案（2026-11-23，待审阅）。本文定义 [HC-239 Task](../task/HC-239-个人优先使用本机Agent.md) 的行为契约、跨端数据模型、存储方案、授权边界与可验证验收标准，对应 [个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md) 第 4 节及第 7 节旅程 0、1、8，并与 [HC-233 Spec](HC-233-项目记忆与团队知识读取.md) 对齐本机执行作用域。
 
-[需求卡](../task/HC-239-个人优先使用本机Agent.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [方案 B 交互原型](../previews/personal-team-workbench/README.md) · [HC-233 统一设计](HC-233-项目记忆与团队知识读取.md)
+[需求卡](../task/HC-239-个人优先使用本机Agent.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [方案 B 交互原型（已过期）](../previews/personal-team-workbench/README.md) · [最新协作工作台原型](../previews/collaboration-workbench/README.md) · [HC-233 统一设计](HC-233-项目记忆与团队知识读取.md)
 
 ---
 

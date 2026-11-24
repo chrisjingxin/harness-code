@@ -1,0 +1,186 @@
+/* ═══ Harness Code 视觉风格令牌（双栏架构 × 克制对比色板） ═══ */
+:root {
+  color-scheme: light;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+  --rail-surface: #f4f4f6;
+  --sidebar-surface: #f4f4f6;
+  --rail-bg: #f7f7f9;
+
+  --fg: #171717;
+  --fg-2: #3f3f46;
+  --muted: #55555d;
+  --meta: #5e5e66;
+
+  --border: rgba(0, 0, 0, 0.09);
+  --border-soft: rgba(0, 0, 0, 0.05);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --selected: rgba(0, 0, 0, 0.06);
+  --hover: rgba(0, 0, 0, 0.038);
+
+  /* 语义状态色（与 personal-team-workbench 保持一致的克制可读对比） */
+  --info: #2b59e8;
+  --info-fg: #1e44b8;
+  --info-tint: rgba(43, 89, 232, 0.08);
+  --info-ring: rgba(43, 89, 232, 0.20);
+
+  --success: #15803d;
+  --success-fg: #166534;
+  --success-tint: rgba(21, 128, 61, 0.10);
+  --success-ring: rgba(21, 128, 61, 0.22);
+
+  --warn: #b45309;
+  --warn-fg: #92400e;
+  --warn-tint: rgba(180, 83, 9, 0.10);
+  --warn-ring: rgba(180, 83, 9, 0.22);
+
+  --danger: #b91c1c;
+  --danger-fg: #b91c1c;
+  --danger-tint: rgba(220, 38, 38, 0.10);
+  --danger-ring: rgba(220, 38, 38, 0.22);
+
+  --toast-bg: #171717;
+  --toast-fg: #ffffff;
+  --scrim: rgba(16, 16, 19, 0.34);
+
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 22px;
+
+  --leading-body: 1.65;
+  --leading-tight: 1.35;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-pill: 9999px;
+
+  --panel-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px var(--border);
+  --popover-shadow: 0 0 0 1px var(--border), 0 12px 32px -12px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.04);
+
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-flow: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --rail-w: 56px;
+  --sidebar-w: 304px;
+  --dock-w: 320px;
+  --topbar-h: 48px;
+  --pad-stage: 24px;
+  --ui-zoom: 1;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101013;
+  --surface: #151519;
+  --surface-2: #1c1c22;
+  --rail-surface: #121216;
+  --sidebar-surface: #141418;
+  --rail-bg: #121216;
+
+  --fg: #ededf0;
+  --fg-2: #b4b4bc;
+  --muted: #9898a2;
+  --meta: #9797a2;
+
+  --border: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --selected: rgba(255, 255, 255, 0.075);
+  --hover: rgba(255, 255, 255, 0.05);
+
+  --info: #8aa8ee;
+  --info-fg: #a6bef5;
+  --info-tint: rgba(138, 168, 238, 0.13);
+  --info-ring: rgba(138, 168, 238, 0.24);
+
+  --success: #34d399;
+  --success-fg: #6ee7b7;
+  --success-tint: rgba(52, 211, 153, 0.12);
+  --success-ring: rgba(52, 211, 153, 0.24);
+
+  --warn: #fbbf24;
+  --warn-fg: #fde68a;
+  --warn-tint: rgba(251, 191, 36, 0.12);
+  --warn-ring: rgba(251, 191, 36, 0.24);
+
+  --danger: #f87171;
+  --danger-fg: #fca5a5;
+  --danger-tint: rgba(248, 113, 113, 0.13);
+  --danger-ring: rgba(248, 113, 113, 0.25);
+
+  --toast-bg: #ededf0;
+  --toast-fg: #101013;
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  --panel-shadow: 0 1px 3px rgba(0, 0, 0, 0.24), 0 0 0 1px var(--border);
+  --popover-shadow: 0 0 0 1px var(--border-strong), 0 16px 38px -12px rgba(0, 0, 0, 0.68);
+}
+
+[data-density="compact"] { --pad-stage: 16px; }
+[data-density="wide"]    { --pad-stage: 32px; }
+
+/* 强调色预设（完全对齐 personal-team-workbench 的克制靛紫与 WCAG AA 文字强调色） */
+[data-accent="violet"] {
+  --accent: #5b63d3; --accent-hover: #4d55c4; --accent-fg: #ffffff;
+  --accent-tint: rgba(91, 99, 211, 0.06); --accent-ring: rgba(91, 99, 211, 0.22); --accent-text: #4348b5;
+}
+[data-accent="indigo"] {
+  --accent: #2b59e8; --accent-hover: #2149c7; --accent-fg: #ffffff;
+  --accent-tint: rgba(43, 89, 232, 0.06); --accent-ring: rgba(43, 89, 232, 0.22); --accent-text: #1e44b8;
+}
+[data-accent="teal"] {
+  --accent: #09695a; --accent-hover: #075448; --accent-fg: #ffffff;
+  --accent-tint: rgba(9, 105, 90, 0.06); --accent-ring: rgba(9, 105, 90, 0.22); --accent-text: #075448;
+}
+[data-accent="ink"] {
+  --accent: #171717; --accent-hover: #333333; --accent-fg: #ffffff;
+  --accent-tint: rgba(23, 23, 23, 0.06); --accent-ring: rgba(23, 23, 23, 0.18); --accent-text: #171717;
+}
+
+[data-theme="dark"][data-accent="violet"] {
+  --accent: #8c93f8; --accent-hover: #a0a6fa; --accent-fg: #11121c;
+  --accent-tint: rgba(140, 147, 248, 0.12); --accent-ring: rgba(140, 147, 248, 0.28); --accent-text: #a8adff;
+}
+[data-theme="dark"][data-accent="indigo"] {
+  --accent: #7ca3ff; --accent-hover: #96b5ff; --accent-fg: #0b1124;
+  --accent-tint: rgba(124, 163, 255, 0.12); --accent-ring: rgba(124, 163, 255, 0.28); --accent-text: #9eb7ff;
+}
+[data-theme="dark"][data-accent="teal"] {
+  --accent: #46c7ae; --accent-hover: #62d4be; --accent-fg: #04201c;
+  --accent-tint: rgba(70, 199, 174, 0.12); --accent-ring: rgba(70, 199, 174, 0.28); --accent-text: #6fe0ca;
+}
+[data-theme="dark"][data-accent="ink"] {
+  --accent: #ededf0; --accent-hover: #ffffff; --accent-fg: #101013;
+  --accent-tint: rgba(255, 255, 255, 0.08); --accent-ring: rgba(255, 255, 255, 0.22); --accent-text: #ededf0;
+}
+
+/* 统一 Status Badge（延续 Harness Code 克制轻底 + 细框） */
+.hui-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px; border-radius: var(--radius-pill);
+  font-size: var(--text-xs); font-weight: 500; line-height: 1; white-space: nowrap;
+  background: var(--surface-2); color: var(--fg-2); box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.hui-badge[data-size="xs"] { height: 20px; padding: 0 7px; font-size: 11px; }
+.hui-badge[data-tone="accent"]  { background: var(--accent-tint); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent-ring); }
+.hui-badge[data-tone="info"]    { background: var(--info-tint); color: var(--info-fg); box-shadow: inset 0 0 0 1px var(--info-ring); }
+.hui-badge[data-tone="success"] { background: var(--success-tint); color: var(--success-fg); box-shadow: inset 0 0 0 1px var(--success-ring); }
+.hui-badge[data-tone="warn"]    { background: var(--warn-tint); color: var(--warn-fg); box-shadow: inset 0 0 0 1px var(--warn-ring); }
+.hui-badge[data-tone="danger"]  { background: var(--danger-tint); color: var(--danger-fg); box-shadow: inset 0 0 0 1px var(--danger-ring); }
+.hui-badge[data-tone="muted"]   { background: var(--surface-2); color: var(--meta); box-shadow: inset 0 0 0 1px var(--border-soft); }
+.hui-badge.mono { font-family: var(--font-mono); font-size: 11px; }
+.hui-lamp { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent); }
