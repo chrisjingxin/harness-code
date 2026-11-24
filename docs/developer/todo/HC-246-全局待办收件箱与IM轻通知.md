@@ -1,6 +1,6 @@
 # HC-246 全局待办收件箱与 IM 轻通知 · 执行清单
 
-[需求卡](../task/HC-246-全局待办收件箱与IM轻通知.md) · [行为规格](../spec/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md)
+[需求卡](../task/archive/HC-246-全局待办收件箱与IM轻通知.md) · [行为规格](../spec/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md)
 
 执行依据：[HC-246 Spec](../spec/HC-246-全局待办收件箱与IM轻通知.md)、[HC-246 Plan](../plan/HC-246-全局待办收件箱与IM轻通知.md)。每完成一个停点须通过对应测试与可观察验证后再请用户确认推进下一停点。
 
@@ -51,4 +51,4 @@
 
 - [x] 更新 `docs/user/独立桌面工作台.md`（全局收件箱、方案 A 本机待确认、通知降噪设置与企业自研 IM 扩展口子说明）并增量同步 `docs/developer/architecture/`。
 - [x] 运行全套构建、类型、边界、契约、项目文档与全工作区测试（`npm run build`、`npm run typecheck`、`npm run check:boundaries -- --self-check`、`npm run contracts:smoke`、`npm run project:check`、各 workspace `test` 与 `mvn -f server/pom.xml test`）。
-- [x] 将实测命令、结果与演示证据回写 [HC-246 Task](../task/HC-246-全局待办收件箱与IM轻通知.md)，更新状态为 `待验收` 并执行 `npm run tasks:sync`。
+- [x] 将实测命令、结果与演示证据回写 [HC-246 Task](../task/archive/HC-246-全局待办收件箱与IM轻通知.md)，更新状态为 `待验收` 并执行 `npm run tasks:sync`。

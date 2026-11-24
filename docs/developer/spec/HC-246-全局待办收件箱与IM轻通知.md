@@ -1,8 +1,8 @@
 # HC-246 全局待办收件箱与 IM 轻通知行为规格
 
-> 状态：规格草案（2026-11-24，待审阅）。本文定义 [HC-246 Task](../task/HC-246-全局待办收件箱与IM轻通知.md) 的行为契约、数据库增量、跨端接口、企业自研 IM 可扩展出站口子、桌面端 UI 与深链接唤醒规则，对应 [个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md) 第 13.2 节与第 15 节，并与 [HC-220 轻量通知](HC-220-项目看板与轻量通知.md)、[HC-239 双轨桌面外壳](HC-239-个人优先使用本机Agent.md) 及 [HC-240 团队角色与代管规则](HC-240-Workspace角色管理.md) 对齐。
+> 状态：规格草案（2026-11-24，待审阅）。本文定义 [HC-246 Task](../task/archive/HC-246-全局待办收件箱与IM轻通知.md) 的行为契约、数据库增量、跨端接口、企业自研 IM 可扩展出站口子、桌面端 UI 与深链接唤醒规则，对应 [个人与团队协同用户旅程](../architecture/个人与团队协同用户旅程.md) 第 13.2 节与第 15 节，并与 [HC-220 轻量通知](HC-220-项目看板与轻量通知.md)、[HC-239 双轨桌面外壳](HC-239-个人优先使用本机Agent.md) 及 [HC-240 团队角色与代管规则](HC-240-Workspace角色管理.md) 对齐。
 
-[需求卡](../task/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [当前协作工作台交互原型](../previews/collaboration-workbench/README.md) · [方案 B 原型（已过期）](../previews/personal-team-workbench/README.md)
+[需求卡](../task/archive/HC-246-全局待办收件箱与IM轻通知.md) · [实施计划](../plan/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [当前协作工作台交互原型](../previews/collaboration-workbench/README.md) · [方案 B 原型（已过期）](../previews/personal-team-workbench/README.md)
 
 ---
 

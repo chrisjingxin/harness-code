@@ -5,23 +5,23 @@ feature_area: 独立桌面协作工作台
 parent_task: HC-192
 decomposed_by: Antigravity
 priority: P0
-status: 待验收
+status: 已完成
 owner: Antigravity
 branch: harness_lody
 scope: 在桌面左栏顶置跨 Workspace / 跨 Project 全局待办收件箱（Inbox），以可扩展的 InboxItemSource SPI 聚合需真人拍板的跨人异步待办（本期落地 Task 待接收 todo 与待验收 review（含 HC-240 离职代管），为 HC-241/243/245/252 预留扩展点；doing 不占待拍板角标），支持“待我处理 / 我发起的 / 已处理（30天）”与团队/类型筛选及一键直达；按方案 A 在 Inbox 顶部动态置顶非当前查看的本机 waiting_approval（工具权限审批 / Plan 确认 / Goal 确认 / 澄清问答）与 error 会话提醒（点击跳回原会话处理，不混入云端角标、不上云、不推 IM）；服务端提供用户级跨团队通知流（/api/v1/me/notifications/stream）与通知降噪偏好（开关/事件/免打扰/合并窗口），并落地面向企业自研 IM 的可插拔外部通知出站引擎与 SPI（ExternalNotificationChannel、ExternalRecipientResolver、DeepLinkBuilder）及 Noop/Logging 默认通道与单元测试保障，不内置具体第三方 IM，仅传脱敏摘要卡片与安全 deep-link，不发正文且不反向触发执行。
 acceptance: 跨多个 Workspace 与 Project 的新指派 Task（todo）与待验收 Task（review，含离职后 Project owner 代管）在桌面左栏全局收件箱统一呈现并实时显示未处理角标（doing 与本机等待均不计入云端角标）；处理或取消后条目即时消退，切换“我发起的 / 已处理”可追踪进度；非当前查看本机会话卡在 waiting_approval 或 error 时在 Inbox 顶部置顶提示并支持一键跳回原会话；用户可在设置中调整跨团队通知与免打扰/合批偏好；服务端外部通知出站引擎经单元与集成测试验证合批、免打扰顺延、发送前现态复核消噪、白名单脱敏、user_no 寻址、重试及自定义 ExternalNotificationChannel 可扩展性；Electron 单实例锁与 workbench:// deep-link 可在冷/热启动下安全聚焦并精准定位 Inbox 或目标 Task，且绝不自动触发 Agent 执行。
 user_docs: 实施阶段更新 docs/user/独立桌面工作台.md
 developer_docs: docs/developer/architecture/个人与团队协同用户旅程.md；docs/developer/spec/HC-246-全局待办收件箱与IM轻通知.md；docs/developer/plan/HC-246-全局待办收件箱与IM轻通知.md；docs/developer/todo/HC-246-全局待办收件箱与IM轻通知.md
-test_evidence: 2026-11-24 全栈构建与检查通过（build / typecheck / check:boundaries --self-check / contracts:smoke / project:check / test:project 20/20）；TS 4-workspace 单测全绿（collaboration-client 10/10、acp-runtime 30/30、harness-acp 4/4、desktop 154/154）；Java 服务端 HC-246 定向 10 类 26/26 通过；隔离 HOME 下实测 Electron 单实例锁与 workbench:// 深链接冷/热启动、非法链接拦截均通过（详见文末实测记录）。
+test_evidence: 2026-11-24 全栈构建与检查通过（build / typecheck / check:boundaries --self-check / contracts:smoke / project:check / test:project 20/20）；TS 4-workspace 单测全绿（collaboration-client 10/10、acp-runtime 30/30、harness-acp 4/4、desktop 154/154）；Java 服务端 HC-246 定向 10 类 26/26 通过；隔离 HOME 下实测 Electron 单实例锁与 workbench:// 深链接冷/热启动、非法链接拦截均通过；人工验收通过。
 references: docs/developer/architecture/个人与团队协同用户旅程.md；docs/developer/task/HC-220-项目看板与轻量通知.md；docs/developer/task/HC-239-个人优先使用本机Agent.md；docs/developer/task/HC-240-Workspace角色管理.md；docs/developer/task/HC-241-知识分级与审核沉淀.md
-completed_at: -
+completed_at: 2026-11-24
 ---
 
 # HC-246 全局待办收件箱与IM轻通知
 
 ## 当前阶段
 
-2026-11-24 已在 `harness_lody` 分支全栈完成停点 1–4 实施与文档同步，并通过全工作区构建、类型/边界/契约/文档校验、TS 四工作区单测、Java 服务端 HC-246 测试集及隔离环境下的 Electron 单实例 `workbench://` 深链接冒烟验证，当前状态标为 `待验收`（完整 TDSQL 与双平台集成回归由 `HC-204` 统一处理）。产出清单：[HC-246 Spec](../spec/HC-246-全局待办收件箱与IM轻通知.md)、[HC-246 Plan](../plan/HC-246-全局待办收件箱与IM轻通知.md) 与 [HC-246 Todo](../todo/HC-246-全局待办收件箱与IM轻通知.md)。
+2026-11-24 已在 `harness_lody` 分支全栈完成停点 1–4 实施与文档同步，并通过全工作区构建、类型/边界/契约/文档校验、TS 四工作区单测、Java 服务端 HC-246 测试集及隔离环境下的 Electron 单实例 `workbench://` 深链接冒烟验证，当前状态标为 `待验收`（完整 TDSQL 与双平台集成回归由 `HC-204` 统一处理）。产出清单：[HC-246 Spec](../../spec/HC-246-全局待办收件箱与IM轻通知.md)、[HC-246 Plan](../../plan/HC-246-全局待办收件箱与IM轻通知.md) 与 [HC-246 Todo](../../todo/HC-246-全局待办收件箱与IM轻通知.md)。
 
 ## 要解决的问题
 
@@ -62,7 +62,7 @@ completed_at: -
 ## 职责与前置
 
 - 本卡全栈实施：服务端（`contracts/` + `server/` + `packages/collaboration-client/`）负责跨团队待办聚合查询与 `InboxItemSource` SPI、用户级跨团队通知分页与 SSE 流、用户通知偏好、面向企业自研 IM 的外部出站引擎与 SPI；桌面端负责左栏全局 Inbox 入口与页面、方案 A 本机待确认置顶区、设置内通知偏好、跨团队/跨项目页面直达、`requestSingleInstanceLock` 与 `workbench://` deep-link 安全路由。
-- 依赖 [HC-220](HC-220-项目看板与轻量通知.md) 的轻量通知与事务发件箱底座、[HC-239](HC-239-个人优先使用本机Agent.md) 的双轨桌面外壳与本机会话状态模型，以及 [HC-240](HC-240-Workspace角色管理.md) 的成员离职移除与 Project owner 代管验收规则。
+- 依赖 [HC-220](../HC-220-项目看板与轻量通知.md) 的轻量通知与事务发件箱底座、[HC-239](../HC-239-个人优先使用本机Agent.md) 的双轨桌面外壳与本机会话状态模型，以及 [HC-240](../HC-240-Workspace角色管理.md) 的成员离职移除与 Project owner 代管验收规则。
 
 ## 已确认决策（2026-11-24）
 

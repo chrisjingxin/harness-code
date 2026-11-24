@@ -1,6 +1,6 @@
 # HC-246 全局待办收件箱与 IM 轻通知 · 实施计划
 
-[需求卡](../task/HC-246-全局待办收件箱与IM轻通知.md) · [行为规格](../spec/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [当前协作工作台交互原型](../previews/collaboration-workbench/README.md)
+[需求卡](../task/archive/HC-246-全局待办收件箱与IM轻通知.md) · [行为规格](../spec/HC-246-全局待办收件箱与IM轻通知.md) · [执行清单](../todo/HC-246-全局待办收件箱与IM轻通知.md) · [用户旅程总纲](../architecture/个人与团队协同用户旅程.md) · [当前协作工作台交互原型](../previews/collaboration-workbench/README.md)
 
 按四个可演示停点全栈推进（`contracts/`、`server/`、`packages/collaboration-client/` 与 `desktop/`），沿用当前 `harness_lody` 工作区与既有未提交保护原则（不切换分支、不自动提交推送）。每到达一个停点完成必要构建、契约/边界与测试验证并停下请用户确认，全部交付后更新 `docs/user/独立桌面工作台.md` 与架构增量说明。
 
