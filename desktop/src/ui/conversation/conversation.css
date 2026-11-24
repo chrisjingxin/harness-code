@@ -96,7 +96,7 @@
 .wb-conversation-agent-group > .wb-conversation-process { margin-top: 2px; }
 
 /* 通用折叠容器：组体始终挂载，用 grid 行高过渡；收起时内容对焦点与读屏隐藏。 */
-.wb-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms ease, opacity 180ms ease; opacity: 0; }
+.wb-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 190ms var(--ease-flow, cubic-bezier(0.16, 1, 0.3, 1)), opacity 150ms var(--ease-standard, ease); opacity: 0; }
 .wb-disclosure[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
 .wb-disclosure-inner { min-height: 0; overflow: hidden; }
 
@@ -179,7 +179,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-conversation-process-time { margin-inline-start: auto; color: var(--muted); font-size: var(--text-2xs); opacity: 0; transition: opacity var(--motion-fast) var(--ease-standard); }
 .wb-conversation-process-header:is(:hover, :focus-visible) .wb-conversation-process-time { opacity: 1; }
 @media (hover: none) { .wb-conversation-process-time { opacity: 1; } }
-.wb-conversation-process-disclosure { transition: grid-template-rows var(--motion-slow, 320ms) var(--ease-out-expo, ease), opacity 220ms ease; }
+.wb-conversation-process-disclosure { transition: grid-template-rows 220ms var(--ease-flow, cubic-bezier(0.16, 1, 0.3, 1)), opacity 180ms var(--ease-standard, ease); }
 .wb-conversation-process-body { margin: 0 0 6px 6.25px; padding: 2px 0 2px 12px; border-left: 1.5px solid var(--border); }
 .wb-conversation-process-body .wb-conversation-message-actions { display: none; }
 
@@ -288,11 +288,15 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-composer-bar { flex: 0 0 auto; min-width: 0; background: transparent; }
 .wb-composer-inner { position: relative; width: 100%; max-width: 740px; margin-inline: auto; padding: 8px 6px 8px; }
 .wb-composer-shell {
-  border: 1px solid var(--border, var(--line));
-  border-radius: 18px;
+  border: none;
+  border-radius: var(--radius-xl, 16px);
   background: var(--field-bg, var(--surface-2));
   padding: 0 4px 4px;
-  box-shadow: 0 2px 10px -4px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border, var(--line)));
+  transition: box-shadow var(--motion-fast, 140ms) var(--ease-standard, ease);
+}
+.wb-composer-shell:focus-within {
+  box-shadow: 0 0 0 1px var(--border-strong, var(--line-strong)), 0 0 0 3px var(--selected);
 }
 .wb-composer-context-bar {
   display: flex;
@@ -500,7 +504,8 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), 0 4px 14px -6px rgba(15, 23, 42, 0.12);
 }
 .wb-composer-shell > .wb-composer-box:focus-within {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--border-strong, var(--line-strong));
+  box-shadow: none;
 }
 .wb-composer-editor {
   position: relative;
@@ -897,8 +902,25 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 /* 沿用旧审批区的紧凑按钮和问题组；外层不抢高度，长表单在圆角描边卡片内部滚动，输入框始终可见。 */
 .wb-interaction-dock { flex: 0 0 auto; width: 100%; max-width: 740px; min-width: 0; margin-inline: auto; padding: 0 6px 8px; }
 /* 待处理请求：审批类用提醒色细边，提问/澄清类用柔和主色调细边；出现时上移淡入，内容过长时仅卡片内部滚动。 */
-.wb-interaction-form { display: grid; align-content: start; gap: 11px; max-height: min(46vh, 380px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 15px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: var(--radius-surface, 12px); background: var(--surface); animation: wb-interaction-form-in 240ms var(--ease-out-expo); }
-.wb-interaction-form[data-kind="question"] { border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); }
+.wb-interaction-form {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 15px;
+  border: none;
+  border-radius: var(--radius-lg, 12px);
+  background: color-mix(in srgb, var(--warn-tint) 38%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--warn-ring, color-mix(in srgb, var(--warn) 45%, var(--border))), var(--panel-shadow);
+  animation: wb-interaction-form-in 200ms var(--ease-flow, var(--ease-out-expo));
+}
+.wb-interaction-form[data-kind="question"] {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent-ring, color-mix(in srgb, var(--accent) 36%, var(--border))), var(--panel-shadow);
+}
 @keyframes wb-interaction-form-in { from { opacity: 0; transform: translateY(8px); } }
 .wb-interaction-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .wb-interaction-heading h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: var(--text-sm); color: var(--fg, var(--text)); }

@@ -6,7 +6,7 @@ import type { ReactElement } from "react"
 import type { KnowledgeSummary, TaskStatus, TaskSummary } from "@workbench/collaboration-client/types"
 import type { NavigationMember, NavigationSessionEntry } from "../../../ui/index.js"
 import { resolveFallbackDemoAvatar, resolveUserPhoto } from "../../demo-avatars.js"
-import { IconBook, IconChevronDown, IconListCheck, IconLock, IconSearch, IconX } from "@tabler/icons-react"
+import { IconBook, IconChevronDown, IconCompass, IconListCheck, IconLock, IconMessageCircle, IconSearch, IconX } from "@tabler/icons-react"
 
 const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "待接收",
@@ -319,34 +319,56 @@ export function CollabMembersPopover({
 }
 
 type PaletteItem =
+  | { kind: "personal-session"; id: string; title: string; sub: string }
   | { kind: "session"; id: string; title: string; sub: string; user?: NavigationMember; self?: boolean }
   | { kind: "task"; id: string; title: string; sub: string; user?: NavigationMember }
   | { kind: "knowledge"; id: string; title: string; sub: string; user?: NavigationMember }
+  | { kind: "action"; id: string; title: string; sub: string; onSelect: () => void }
 
-/** ⌘K 全局搜索命令面板。 */
+export type PalettePersonalSessionItem = {
+  readonly conversationId: string
+  readonly title: string
+  readonly directoryLabel: string
+  readonly timeLabel: string
+}
+
+export type PaletteQuickActionItem = {
+  readonly id: string
+  readonly title: string
+  readonly sub: string
+  readonly onSelect: () => void
+}
+
+/** ⌘K 全局搜索命令面板：覆盖个人本机会话、当前团队协作项与跨页面直达。 */
 export function CommandPaletteModal({
   open,
   projectName,
-  members,
-  mySessions,
-  peerSessions,
-  tasks,
-  knowledge,
+  personalSessions = [],
+  members = [],
+  mySessions = [],
+  peerSessions = [],
+  tasks = [],
+  knowledge = [],
+  quickActions = [],
   metadataMessage,
   onClose,
+  onSelectPersonalSession,
   onSelectSession,
   onSelectTask,
   onSelectKnowledge,
 }: {
   readonly open: boolean
-  readonly projectName: string
-  readonly members: readonly NavigationMember[]
-  readonly mySessions: readonly NavigationSessionEntry[]
-  readonly peerSessions: readonly NavigationSessionEntry[]
-  readonly tasks: readonly TaskSummary[]
-  readonly knowledge: readonly KnowledgeSummary[]
+  readonly projectName?: string
+  readonly personalSessions?: readonly PalettePersonalSessionItem[]
+  readonly members?: readonly NavigationMember[]
+  readonly mySessions?: readonly NavigationSessionEntry[]
+  readonly peerSessions?: readonly NavigationSessionEntry[]
+  readonly tasks?: readonly TaskSummary[]
+  readonly knowledge?: readonly KnowledgeSummary[]
+  readonly quickActions?: readonly PaletteQuickActionItem[]
   readonly metadataMessage?: string
   readonly onClose: () => void
+  readonly onSelectPersonalSession?: (conversationId: string) => void
   readonly onSelectSession: (conversationId: string) => void
   readonly onSelectTask: (taskId: string) => void
   readonly onSelectKnowledge: (knowledgeId: string) => void
@@ -372,15 +394,30 @@ export function CommandPaletteModal({
     const hit = (txt: string) => !q || txt.toLowerCase().includes(q)
     const out: { label: string; items: PaletteItem[] }[] = []
 
+    const personal = personalSessions
+      .filter(s => hit(s.title) || hit(s.directoryLabel))
+      .slice(0, cap)
+    if (personal.length) {
+      out.push({
+        label: "个人本机会话",
+        items: personal.map(s => ({
+          kind: "personal-session",
+          id: s.conversationId,
+          title: s.title,
+          sub: `${s.directoryLabel || "未选目录"} · ${s.timeLabel}`,
+        })),
+      })
+    }
+
     const mine = mySessions.filter(s => hit(s.title)).slice(0, cap)
     if (mine.length) {
       out.push({
-        label: q ? "我的会话" : "当前 Project 会话",
+        label: q ? "我的团队会话" : "当前 Project 会话",
         items: mine.map(s => ({
           kind: "session",
           id: s.conversationId,
           title: s.title,
-          sub: `${projectName} · ${s.timeLabel}`,
+          sub: `${projectName || "Project"} · ${s.timeLabel}`,
           user: memberById.get(s.ownerUserId),
           self: true,
         })),
@@ -400,7 +437,7 @@ export function CommandPaletteModal({
             kind: "session",
             id: s.conversationId,
             title: s.title,
-            sub: `${owner?.userName ?? "成员"} · ${projectName}`,
+            sub: `${owner?.userName ?? "成员"} · ${projectName || "Project"}`,
             user: owner,
           }
         }),
@@ -418,7 +455,7 @@ export function CommandPaletteModal({
           kind: "task",
           id: t.taskId,
           title: t.title,
-          sub: `${projectName} · ${TASK_STATUS_LABEL[t.status]}`,
+          sub: `${projectName || "Project"} · ${TASK_STATUS_LABEL[t.status]}`,
           user: memberById.get(t.assigneeId),
         })),
       })
@@ -437,17 +474,33 @@ export function CommandPaletteModal({
       })
     }
 
+    const actions = quickActions.filter(a => hit(a.title) || hit(a.sub)).slice(0, q ? 10 : 5)
+    if (actions.length) {
+      out.push({
+        label: "工作台直达",
+        items: actions.map(a => ({
+          kind: "action",
+          id: a.id,
+          title: a.title,
+          sub: a.sub,
+          onSelect: a.onSelect,
+        })),
+      })
+    }
+
     return out
-  }, [query, mySessions, peerSessions, tasks, activeKnowledge, projectName, memberById])
+  }, [query, personalSessions, mySessions, peerSessions, tasks, activeKnowledge, quickActions, projectName, memberById])
 
   const flatItems = useMemo(() => groups.flatMap(g => g.items), [groups])
 
   const activateItem = (item: PaletteItem | undefined) => {
     if (!item) return
     onClose()
-    if (item.kind === "session") onSelectSession(item.id)
+    if (item.kind === "personal-session") onSelectPersonalSession?.(item.id)
+    else if (item.kind === "session") onSelectSession(item.id)
     else if (item.kind === "task") onSelectTask(item.id)
-    else onSelectKnowledge(item.id)
+    else if (item.kind === "knowledge") onSelectKnowledge(item.id)
+    else item.onSelect()
   }
 
   useEffect(() => {
@@ -474,7 +527,7 @@ export function CommandPaletteModal({
 
   if (!open) return null
 
-  const totalAll = mySessions.length + peerSessions.length + tasks.length + activeKnowledge.length
+  const totalAll = personalSessions.length + mySessions.length + peerSessions.length + tasks.length + activeKnowledge.length
   let flatIdx = 0
 
   return (
@@ -485,7 +538,7 @@ export function CommandPaletteModal({
           <input
             ref={inputRef}
             type="text"
-            placeholder="搜索会话、任务、知识"
+            placeholder="跨范围搜索个人会话、团队会话、任务、知识或视图…"
             value={query}
             onChange={e => { setQuery(e.currentTarget.value); setActiveIdx(0) }}
           />
@@ -498,12 +551,12 @@ export function CommandPaletteModal({
             <div className="pop-empty">
               没有匹配的内容。
               <br />
-              试试会话标题、成员名或知识关键词。
+              试试会话标题、目录名、成员名或功能入口。
             </div>
           ) : (
             <>
               {!query.trim() && (
-                <div className="p-hint">默认优先显示当前 Project 最近项 · 输入关键词可搜索全部 {totalAll} 条记录</div>
+                <div className="p-hint">默认展示最近条目与工作台直达 · 输入关键词可检索全部 {totalAll} 条记录</div>
               )}
               {groups.map(group => (
                 <div key={group.label}>
@@ -519,10 +572,16 @@ export function CommandPaletteModal({
                         onMouseEnter={() => setActiveIdx(idx)}
                         onClick={() => activateItem(item)}
                       >
-                        {item.user ? (
-                          <UserAvatar user={item.user} size={22} self={item.kind === "session" && item.self} />
+                        {item.kind === "session" && item.user ? (
+                          <UserAvatar user={item.user} size={22} self={item.self} />
+                        ) : item.kind === "task" && item.user ? (
+                          <UserAvatar user={item.user} size={22} />
+                        ) : item.kind === "personal-session" ? (
+                          <IconMessageCircle size={15} aria-hidden="true" />
                         ) : item.kind === "knowledge" ? (
                           <IconBook size={15} aria-hidden="true" />
+                        ) : item.kind === "action" ? (
+                          <IconCompass size={15} aria-hidden="true" />
                         ) : (
                           <IconListCheck size={15} aria-hidden="true" />
                         )}

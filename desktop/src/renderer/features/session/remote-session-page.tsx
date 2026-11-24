@@ -7,6 +7,7 @@
  */
 import { useState } from "react"
 import type { ReactElement } from "react"
+import type { UserSummary } from "@workbench/collaboration-client/types"
 import { ConversationView } from "../../../ui/index.js"
 import type {
   ConversationComposerView,
@@ -16,6 +17,7 @@ import type {
   ConversationTimelineEntry,
   RenderingActions,
 } from "../../../ui/index.js"
+import { UserAvatar } from "../collaboration-views/index.js"
 import type {
   ProjectConversationSummary,
   SessionExternalHooks,
@@ -27,6 +29,7 @@ import {
   IconAlertTriangle,
   IconChecks,
   IconClock,
+  IconDevices,
   IconGitBranch,
   IconLink,
   IconLock,
@@ -54,6 +57,8 @@ export type RemoteSessionPageProps = {
   readonly kind: Exclude<SessionKind, "local">
   readonly conversation: ProjectConversationSummary
   readonly ownerName: string
+  readonly owner?: Pick<UserSummary, "userNo" | "userName" | "photo"> | null
+  readonly projectName?: string
   readonly syncStatus: SessionSyncStatus
   readonly syncState: SessionSyncState
   readonly entries: readonly ConversationTimelineEntry[]
@@ -72,6 +77,8 @@ export function RemoteSessionPage({
   kind,
   conversation,
   ownerName,
+  owner,
+  projectName,
   syncStatus,
   syncState,
   entries,
@@ -162,25 +169,51 @@ export function RemoteSessionPage({
         </>
       ) : (
         <div className="session-remote-body">
-          <div className="session-remote-brief">
+          <div className="session-remote-brief brief-card">
             <div className="session-brief-top">
-              <div className="session-brief-title-group">
-                <h2>
-                  {isSummaryOnly
-                    ? `${kind === "remote_self" ? "本人其他设备" : ownerName} 的状态与成果摘要`
-                    : (kind === "remote_self" ? "本人其他设备的会话简报" : `${ownerName} 的会话简报`)}
-                </h2>
-                <span className="session-brief-meta">
-                  最近上传于 {briefUploadedLabel}
-                  {isStopped ? " · 已停止同步" : ""}
-                </span>
+              <div className="session-brief-head-left">
+                {kind === "remote_other" ? (
+                  <UserAvatar
+                    user={owner ? { ...owner, userName: owner.userName || ownerName } : { userName: ownerName }}
+                    name={ownerName}
+                    size={34}
+                  />
+                ) : (
+                  <span className="session-device-avatar" aria-hidden="true">
+                    <IconDevices size={17} />
+                  </span>
+                )}
+                <div className="session-brief-title-group">
+                  <h2>
+                    {isSummaryOnly
+                      ? `${kind === "remote_self" ? "本人其他设备" : ownerName} 的状态与成果摘要`
+                      : (kind === "remote_self" ? "本人其他设备的会话简报" : `${ownerName} 的会话简报`)}
+                  </h2>
+                  <div className="session-brief-meta">
+                    {projectName ? <span>{projectName}</span> : null}
+                    {projectName ? <span aria-hidden="true">·</span> : null}
+                    <span>最近上传于 {briefUploadedLabel}</span>
+                    {isStopped ? <span>· 已停止同步</span> : null}
+                  </div>
+                </div>
               </div>
-              <span className="wb-status-badge">
-                {isSummaryOnly
-                  ? (isStopped ? "仅共享摘要 · 已停止同步" : "仅共享状态与成果摘要")
-                  : isStopped
-                    ? "已停止同步 · 只读"
-                    : (conversation.briefSource === "agent" ? "Agent 摘要" : "规则摘要")}
+              <span
+                className="hui-badge"
+                data-tone={isStopped ? "warn" : isSummaryOnly ? "muted" : "accent"}
+                data-size="xs"
+              >
+                {!isSummaryOnly && !isStopped ? (
+                  <span className="hui-lamp" aria-hidden="true" />
+                ) : (
+                  <IconLock size={11} aria-hidden="true" />
+                )}
+                <span>
+                  {isSummaryOnly
+                    ? (isStopped ? "仅共享摘要 · 已停止同步" : "仅共享状态与成果摘要")
+                    : isStopped
+                      ? "已停止同步 · 只读"
+                      : (conversation.briefSource === "agent" ? "Agent 摘要" : "规则摘要")}
+                </span>
               </span>
             </div>
 
@@ -204,8 +237,8 @@ export function RemoteSessionPage({
                 </span>
               </span>
               {conversation.repositories.map(repo => (
-                <span key={repo.repositoryId}>
-                  <IconGitBranch size={13} aria-hidden="true" />
+                <span key={repo.repositoryId} className="hui-badge" data-tone="muted" data-size="xs">
+                  <IconGitBranch size={11} aria-hidden="true" />
                   <span>{repo.name}</span>
                 </span>
               ))}
@@ -275,11 +308,11 @@ export function RemoteSessionPage({
 
       {notice ? <p className="session-inline-notice" role="status">{notice}</p> : null}
 
-      <footer className="session-remote-action-bar">
-        <div className="session-peer-foot-inner">
+      <footer className="session-remote-action-bar peer-foot">
+        <div className="session-peer-foot-inner peer-foot-inner">
           <span className="session-ro-hint">
             <IconLock size={13} aria-hidden="true" />
-            <span>跨机器会话仅供阅读 · 无输入框</span>
+            <span>跨机只读模式 · 无对话输入框</span>
           </span>
           <div className="session-remote-actions">
             <button

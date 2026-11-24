@@ -76,5 +76,14 @@ export type {
   NavigationWorkspaceItem, PersonalNavigationDirectoryGroup, ProjectNavigationActions, ProjectNavigationProps,
   ProjectNavigationView,
 } from "./navigation/index.js"
-export { WorkbenchLayout } from "./layout/index.js"
-export type { CollaborationContextView, WorkbenchLayoutProps, WorkbenchPanelMode, WorkbenchRightSlot } from "./layout/index.js"
+export { AppRail, UserPopover, WorkbenchLayout } from "./layout/index.js"
+export type {
+  AppRailProps,
+  CollaborationContextView,
+  UserPopoverProps,
+  UserPopoverThemeMode,
+  WorkbenchLayoutProps,
+  WorkbenchNavId,
+  WorkbenchPanelMode,
+  WorkbenchRightSlot,
+} from "./layout/index.js"

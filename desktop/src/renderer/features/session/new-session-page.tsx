@@ -7,7 +7,7 @@
  */
 import type { ReactElement } from "react"
 import type { AcpAgentInfo } from "@workbench/acp-runtime/types"
-import { ConversationComposer } from "../../../ui/index.js"
+import { BrandMark, ConversationComposer } from "../../../ui/index.js"
 import type { ConversationComposerView, RenderingActions } from "../../../ui/index.js"
 import type { ProjectNavigationScope } from "../project-navigation/contracts.js"
 import { buildDirectoryContextView, handleDirectoryContextAction } from "./session-model.js"
@@ -152,64 +152,75 @@ export function NewSessionPage({
 
   return (
     <section className="session-new-page" aria-label="新会话准备">
-      <h1>今天想推进什么？</h1>
-      <p>在“{projectName}”中创建自己的会话。</p>
-      <div className="session-new-composer">
-        <ConversationComposer
-          scope={{ ...scope, conversationId: NEW_SESSION_DRAFT_ID }}
-          visible={visible}
-          model={composer}
-          draft={newSessionConversationDraft(draft)}
-          actions={{
-            onPersonalChange: (_source, change) => {
-              if (change.kind === "draft-text") onDraftChange(change.text, change.selectionStart, change.selectionEnd)
-            },
-            onSend: async () => ({ status: "accepted" }),
-            onCapabilitySelect: (_source, controlId, itemId) => {
-              if (controlId === "provider") onSelectProvider?.(itemId)
-            },
-            onDirectoryContextAction: (_source, itemId) => {
-              handleDirectoryContextAction({
-                itemId,
-                directoryPath: draft.directoryPath,
-                recentById,
-                onChooseDirectory,
-                onSelectDirectory,
-                onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
-              })
-            },
-            onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
-            onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
-            onReferenceAction: hooks?.onReferenceAction,
-          }}
-          sendBlocked={busy}
-          cancelBlocked
-          submitOnEnter={false}
-          onSend={() => { if (canSubmit) onStartSession() }}
-          onCancel={() => {}}
-        >
-          <span
-            className="session-tag"
-            data-tone={agentAvailable ? "success" : "warning"}
-            title={agentLabel}
-          >
-            {agentAvailable ? "本机可用" : agentLabel}
+      <div className="home-welcome">
+        <div className="home-brand-row">
+          <span className="home-logo" aria-hidden="true">
+            <BrandMark />
           </span>
-          {hooks?.composerExtra}
-        </ConversationComposer>
-      </div>
-      {(errorMessage || (!canCreateConversation && createBlockedReason)) ? (
-        <div className="session-new-send">
-          <span
-            className="session-new-status"
-            data-tone={errorMessage ? "danger" : undefined}
-            role={errorMessage ? "alert" : "status"}
-          >
-            {errorMessage || createBlockedReason}
-          </span>
+          <div className="home-heading">
+            <h1>今天想推进什么？</h1>
+            <p className="home-sub">在“{projectName}”中创建自己的会话。</p>
+          </div>
         </div>
-      ) : null}
-      <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹。</p>
+        <div className="session-new-composer">
+          <ConversationComposer
+            scope={{ ...scope, conversationId: NEW_SESSION_DRAFT_ID }}
+            visible={visible}
+            model={composer}
+            draft={newSessionConversationDraft(draft)}
+            actions={{
+              onPersonalChange: (_source, change) => {
+                if (change.kind === "draft-text") onDraftChange(change.text, change.selectionStart, change.selectionEnd)
+              },
+              onSend: async () => ({ status: "accepted" }),
+              onCapabilitySelect: (_source, controlId, itemId) => {
+                if (controlId === "provider") onSelectProvider?.(itemId)
+              },
+              onDirectoryContextAction: (_source, itemId) => {
+                handleDirectoryContextAction({
+                  itemId,
+                  directoryPath: draft.directoryPath,
+                  recentById,
+                  onChooseDirectory,
+                  onSelectDirectory,
+                  onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
+                })
+              },
+              onRequestCollaborationCandidates: hooks?.onRequestCollaborationCandidates,
+              onSelectCollaborationCandidate: hooks?.onSelectCollaborationCandidate,
+              onReferenceAction: hooks?.onReferenceAction,
+            }}
+            sendBlocked={busy}
+            cancelBlocked
+            submitOnEnter={false}
+            onSend={() => { if (canSubmit) onStartSession() }}
+            onCancel={() => {}}
+          >
+            <span
+              className="hui-badge"
+              data-tone={agentAvailable ? "success" : "warn"}
+              data-size="xs"
+              title={agentLabel}
+            >
+              <span className="hui-lamp" aria-hidden="true" />
+              <span>{agentAvailable ? "本机可用" : agentLabel}</span>
+            </span>
+            {hooks?.composerExtra}
+          </ConversationComposer>
+        </div>
+        {(errorMessage || (!canCreateConversation && createBlockedReason)) ? (
+          <div className="session-new-send">
+            <span
+              className="session-new-status"
+              data-tone={errorMessage ? "danger" : undefined}
+              role={errorMessage ? "alert" : "status"}
+            >
+              {errorMessage || createBlockedReason}
+            </span>
+          </div>
+        ) : null}
+        <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹。</p>
+      </div>
     </section>
   )
 }

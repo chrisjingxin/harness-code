@@ -5,7 +5,7 @@
  */
 import type { ReactElement } from "react"
 import type { AcpAgentInfo } from "@workbench/acp-runtime/types"
-import { ConversationComposer } from "../../../ui/index.js"
+import { BrandMark, ConversationComposer } from "../../../ui/index.js"
 import type { ConversationComposerView, RenderingActions } from "../../../ui/index.js"
 import { buildDirectoryContextView, handleDirectoryContextAction } from "../session/session-model.js"
 import { NEW_SESSION_DRAFT_ID } from "../session/contracts.js"
@@ -151,79 +151,90 @@ export function PersonalNewSessionPage({
 
   return (
     <section className="session-new-page" aria-label="新建个人会话">
-      <h1>今天想推进什么？</h1>
-      <p>个人会话优先在本机独立执行与保存；需要协作时随时可发布到 Project。</p>
-
-      <AgentPreflightCard
-        providers={providers}
-        checking={checkingProviders}
-        onRefresh={onRefreshProviders}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <div className="session-new-composer">
-        <ConversationComposer
-          scope={{
-            namespace: "desktop-personal",
-            accountId,
-            workspaceId: "__solo__",
-            conversationId: NEW_SESSION_DRAFT_ID,
-          }}
-          visible={visible}
-          model={composer}
-          draft={{
-            text: draft.draftText,
-            selectionStart: draft.selectionStart,
-            selectionEnd: draft.selectionEnd,
-            revision: draft.revision,
-            referenceIds: [],
-            attachmentIds: [],
-          }}
-          actions={{
-            onPersonalChange: (_source, change) => {
-              if (change.kind === "draft-text") {
-                onDraftChange(change.text, change.selectionStart, change.selectionEnd)
-              }
-            },
-            onSend: async () => ({ status: "accepted" }),
-            onCapabilitySelect: (_source, controlId, itemId) => {
-              if (controlId === "provider") onSelectProvider(itemId)
-            },
-            onDirectoryContextAction: (_source, itemId) => {
-              handleDirectoryContextAction({
-                itemId,
-                directoryPath: draft.directoryPath,
-                recentById,
-                onChooseDirectory,
-                onSelectDirectory,
-                onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
-              })
-            },
-          }}
-          sendBlocked={busy}
-          cancelBlocked
-          submitOnEnter={false}
-          onSend={() => { if (canSubmit) onStartSession() }}
-          onCancel={() => {}}
-        >
-          <span
-            className="session-tag"
-            data-tone={agentAvailable ? "success" : "warning"}
-            title={agentLabel}
-          >
-            {agentAvailable ? "本机可用" : agentLabel}
+      <div className="home-welcome">
+        <div className="home-brand-row">
+          <span className="home-logo" aria-hidden="true">
+            <BrandMark />
           </span>
-        </ConversationComposer>
-      </div>
-
-      {errorMessage && (
-        <div className="session-new-send">
-          <span className="session-new-status" data-tone="danger" role="alert">
-            {errorMessage}
-          </span>
+          <div className="home-heading">
+            <h1>今天想推进什么？</h1>
+            <p className="home-sub">个人会话优先在本机独立执行与保存；需要协作时随时可发布到 Project。</p>
+          </div>
         </div>
-      )}
-      <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹；不加入团队或断网时也可直接使用。</p>
+
+        <AgentPreflightCard
+          providers={providers}
+          checking={checkingProviders}
+          onRefresh={onRefreshProviders}
+          onOpenSettings={onOpenSettings}
+        />
+
+        <div className="session-new-composer">
+          <ConversationComposer
+            scope={{
+              namespace: "desktop-personal",
+              accountId,
+              workspaceId: "__solo__",
+              conversationId: NEW_SESSION_DRAFT_ID,
+            }}
+            visible={visible}
+            model={composer}
+            draft={{
+              text: draft.draftText,
+              selectionStart: draft.selectionStart,
+              selectionEnd: draft.selectionEnd,
+              revision: draft.revision,
+              referenceIds: [],
+              attachmentIds: [],
+            }}
+            actions={{
+              onPersonalChange: (_source, change) => {
+                if (change.kind === "draft-text") {
+                  onDraftChange(change.text, change.selectionStart, change.selectionEnd)
+                }
+              },
+              onSend: async () => ({ status: "accepted" }),
+              onCapabilitySelect: (_source, controlId, itemId) => {
+                if (controlId === "provider") onSelectProvider(itemId)
+              },
+              onDirectoryContextAction: (_source, itemId) => {
+                handleDirectoryContextAction({
+                  itemId,
+                  directoryPath: draft.directoryPath,
+                  recentById,
+                  onChooseDirectory,
+                  onSelectDirectory,
+                  onCopyPath: path => { void rendering?.copyText?.(path).catch(() => {}) },
+                })
+              },
+            }}
+            sendBlocked={busy}
+            cancelBlocked
+            submitOnEnter={false}
+            onSend={() => { if (canSubmit) onStartSession() }}
+            onCancel={() => {}}
+          >
+            <span
+              className="hui-badge"
+              data-tone={agentAvailable ? "success" : "warn"}
+              data-size="xs"
+              title={agentLabel}
+            >
+              <span className="hui-lamp" aria-hidden="true" />
+              <span>{agentAvailable ? "本机可用" : agentLabel}</span>
+            </span>
+          </ConversationComposer>
+        </div>
+
+        {errorMessage && (
+          <div className="session-new-send">
+            <span className="session-new-status" data-tone="danger" role="alert">
+              {errorMessage}
+            </span>
+          </div>
+        )}
+        <p className="session-new-note">目录由你选择，支持普通非 Git 文件夹；不加入团队或断网时也可直接使用。</p>
+      </div>
     </section>
   )
 }

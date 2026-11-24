@@ -12,46 +12,79 @@ type Loaded<T> = { value: T; availability: NavigationAvailability }
 const failed = (message: string): NavigationAvailability => ({ state: "failed", message })
 
 /** 读取当前账号参与的项目；创建或改名后由调用方重新读取，以服务端返回的角色与成员数为准。 */
-export function useProjects(host: OrganizationHost, workspaceId: string, enabled = true) {
-  const [state, setState] = useState<Loaded<readonly ProjectSummary[]>>({ value: [], availability: { state: "loading" } })
+export function useProjects(host: OrganizationHost, workspaceId: string | null, enabled = true) {
+  const [state, setState] = useState<Loaded<readonly ProjectSummary[]> & { workspaceId: string | null }>({
+    workspaceId,
+    value: [],
+    availability: workspaceId && enabled ? { state: "loading" } : { state: "unavailable" },
+  })
   const request = useRef(0)
   const load = useCallback(async () => {
-    if (!enabled) return
+    if (!enabled || !workspaceId) return
+    const targetWorkspaceId = workspaceId
     const current = ++request.current
-    setState(previous => ({ ...previous, availability: { state: "loading" } }))
-    const result = await host.listProjects(workspaceId).catch(() => null)
+    setState(previous => previous.workspaceId === targetWorkspaceId
+      ? { ...previous, availability: { state: "loading" } }
+      : { workspaceId: targetWorkspaceId, value: [], availability: { state: "loading" } })
+    const result = await host.listProjects(targetWorkspaceId).catch(() => null)
     if (current !== request.current) return
-    if (!result) setState(previous => ({ ...previous, availability: failed("无法读取项目，请重试。") }))
-    else if (!result.ok) setState(previous => ({ ...previous, availability: failed(result.error.message) }))
-    else if (result.value.workspaceId !== workspaceId) setState(previous => ({ ...previous, availability: failed("项目列表与当前团队不一致。") }))
-    else setState({ value: result.value.projects, availability: { state: "ready" } })
+    if (!result) setState({ workspaceId: targetWorkspaceId, value: [], availability: failed("无法读取项目，请重试。") })
+    else if (!result.ok) setState({ workspaceId: targetWorkspaceId, value: [], availability: failed(result.error.message) })
+    else if (result.value.workspaceId !== targetWorkspaceId) setState({ workspaceId: targetWorkspaceId, value: [], availability: failed("项目列表与当前团队不一致。") })
+    else setState({ workspaceId: targetWorkspaceId, value: result.value.projects, availability: { state: "ready" } })
   }, [host, workspaceId, enabled])
   useEffect(() => {
+    if (!workspaceId) {
+      request.current++
+      setState({ workspaceId: null, value: [], availability: { state: "unavailable" } })
+      return
+    }
     if (!enabled) return
     void load()
     return () => { request.current++ }
-  }, [load, enabled])
-  return { projects: state.value, availability: state.availability, reload: load }
+  }, [load, enabled, workspaceId])
+  if (!workspaceId) return { projects: [] as readonly ProjectSummary[], availability: { state: "unavailable" } as NavigationAvailability, reload: load }
+  const scoped = state.workspaceId === workspaceId
+    ? state
+    : { value: [] as readonly ProjectSummary[], availability: { state: "loading" } as NavigationAvailability }
+  return { projects: scoped.value, availability: scoped.availability, reload: load }
 }
 
 /** 团队成员只在团队范围内读取一次，供项目成员显示名与添加候选使用。 */
-export function useTeamMembers(host: CollaborationHost, workspaceId: string, enabled = true) {
-  const [state, setState] = useState<Loaded<readonly MemberSummary[]>>({ value: [], availability: { state: "loading" } })
+export function useTeamMembers(host: CollaborationHost, workspaceId: string | null, enabled = true) {
+  const [state, setState] = useState<Loaded<readonly MemberSummary[]> & { workspaceId: string | null }>({
+    workspaceId,
+    value: [],
+    availability: workspaceId && enabled ? { state: "loading" } : { state: "unavailable" },
+  })
   const request = useRef(0)
   const load = useCallback(async () => {
-    if (!enabled) return
+    if (!enabled || !workspaceId) return
+    const targetWorkspaceId = workspaceId
     const current = ++request.current
-    const result = await host.listMembers(workspaceId).catch(() => null)
+    setState(previous => previous.workspaceId === targetWorkspaceId
+      ? { ...previous, availability: { state: "loading" } }
+      : { workspaceId: targetWorkspaceId, value: [], availability: { state: "loading" } })
+    const result = await host.listMembers(targetWorkspaceId).catch(() => null)
     if (current !== request.current) return
-    if (!result?.ok) setState(previous => ({ ...previous, availability: failed(result?.error.message ?? "无法读取团队成员，请重试。") }))
-    else setState({ value: result.value.members, availability: { state: "ready" } })
+    if (!result?.ok) setState({ workspaceId: targetWorkspaceId, value: [], availability: failed(result?.error.message ?? "无法读取团队成员，请重试。") })
+    else setState({ workspaceId: targetWorkspaceId, value: result.value.members, availability: { state: "ready" } })
   }, [host, workspaceId, enabled])
   useEffect(() => {
+    if (!workspaceId) {
+      request.current++
+      setState({ workspaceId: null, value: [], availability: { state: "unavailable" } })
+      return
+    }
     if (!enabled) return
     void load()
     return () => { request.current++ }
-  }, [load, enabled])
-  return { members: state.value, availability: state.availability, reload: load }
+  }, [load, enabled, workspaceId])
+  if (!workspaceId) return { members: [] as readonly MemberSummary[], availability: { state: "unavailable" } as NavigationAvailability, reload: load }
+  const scoped = state.workspaceId === workspaceId
+    ? state
+    : { value: [] as readonly MemberSummary[], availability: { state: "loading" } as NavigationAvailability }
+  return { members: scoped.value, availability: scoped.availability, reload: load }
 }
 
 export type ProjectDetailState = {
@@ -62,28 +95,43 @@ export type ProjectDetailState = {
 }
 
 /** 读取项目详情；切换项目时立即清空旧详情，绝不把上一个项目的成员显示在新项目下。 */
-export function useProjectDetail(host: OrganizationHost, workspaceId: string, projectId: string | null) {
-  const [state, setState] = useState<ProjectDetailState & { projectId: string | null }>({ projectId, detail: null, availability: { state: "loading" }, lost: false })
+export function useProjectDetail(host: OrganizationHost, workspaceId: string | null, projectId: string | null) {
+  const [state, setState] = useState<ProjectDetailState & { workspaceId: string | null; projectId: string | null }>({
+    workspaceId,
+    projectId,
+    detail: null,
+    availability: { state: "loading" },
+    lost: false,
+  })
   const request = useRef(0)
   const load = useCallback(async () => {
     const current = ++request.current
-    if (!projectId) { setState({ projectId, detail: null, availability: { state: "unavailable" }, lost: false }); return }
-    setState(previous => previous.projectId === projectId
+    if (!workspaceId || !projectId) {
+      setState({ workspaceId, projectId, detail: null, availability: { state: "unavailable" }, lost: false })
+      return
+    }
+    const targetWorkspaceId = workspaceId
+    const targetProjectId = projectId
+    setState(previous => previous.workspaceId === targetWorkspaceId && previous.projectId === targetProjectId
       ? { ...previous, availability: { state: "loading" } }
-      : { projectId, detail: null, availability: { state: "loading" }, lost: false })
-    const result = await host.getProject(workspaceId, projectId).catch(() => null)
+      : { workspaceId: targetWorkspaceId, projectId: targetProjectId, detail: null, availability: { state: "loading" }, lost: false })
+    const result = await host.getProject(targetWorkspaceId, targetProjectId).catch(() => null)
     if (current !== request.current) return
-    if (!result) setState(previous => ({ ...previous, availability: failed("无法读取项目资料，请重试。") }))
-    else if (!result.ok) setState(previous => ({ ...previous, availability: failed(result.error.message), lost: result.error.code === "RESOURCE_NOT_FOUND" }))
-    else if (result.value.project.projectId !== projectId || result.value.project.workspaceId !== workspaceId) {
-      setState(previous => ({ ...previous, availability: failed("项目资料与当前选择不一致。") }))
-    } else setState({ projectId, detail: result.value, availability: { state: "ready" }, lost: false })
+    if (!result) setState({ workspaceId: targetWorkspaceId, projectId: targetProjectId, detail: null, availability: failed("无法读取项目资料，请重试。"), lost: false })
+    else if (!result.ok) setState({ workspaceId: targetWorkspaceId, projectId: targetProjectId, detail: null, availability: failed(result.error.message), lost: result.error.code === "RESOURCE_NOT_FOUND" })
+    else if (result.value.project.projectId !== targetProjectId || result.value.project.workspaceId !== targetWorkspaceId) {
+      setState({ workspaceId: targetWorkspaceId, projectId: targetProjectId, detail: null, availability: failed("项目资料与当前选择不一致。"), lost: false })
+    } else setState({ workspaceId: targetWorkspaceId, projectId: targetProjectId, detail: result.value, availability: { state: "ready" }, lost: false })
   }, [host, workspaceId, projectId])
   useEffect(() => {
     void load()
     return () => { request.current++ }
   }, [load])
-  const current = state.projectId === projectId ? state : { detail: null, availability: { state: "loading" } as const, lost: false }
+  const current = !workspaceId || !projectId
+    ? { detail: null, availability: { state: "unavailable" } as const, lost: false }
+    : state.workspaceId === workspaceId && state.projectId === projectId
+      ? state
+      : { detail: null, availability: { state: "loading" } as const, lost: false }
   return { ...current, reload: load }
 }
 

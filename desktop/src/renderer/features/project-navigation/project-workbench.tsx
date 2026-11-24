@@ -27,6 +27,9 @@ import type {
   NavigationWorkspaceItem,
   PersonalNavigationDirectoryGroup,
   ProjectNavigationActions,
+  ProjectNavigationView,
+  WorkbenchNavId,
+  WorkbenchRightSlot,
 } from "../../../ui/index.js"
 import type { PersonalPersistence } from "../../personal-persistence.js"
 import {
@@ -51,7 +54,7 @@ import { projectMembers, useProjectDetail, useProjects, useTeamMembers } from ".
 import "./project-navigation.css"
 
 const DESKTOP_NAMESPACE = "desktop-window"
-const workspaceDefaults: WorkspacePersonal = { projectId: null, panels: { left: { open: true, width: 280 }, right: { open: true, width: 340 } } }
+const workspaceDefaults: WorkspacePersonal = { projectId: null, panels: { left: { open: true, width: 304 }, right: { open: true, width: 340 } } }
 const navigationDefaults: ProjectNavigationPersonal = { page: { kind: "new" }, expandedMembers: [], selfCollapsed: false }
 const pageNames: Record<ProjectPage["kind"], string> = {
   new: "新对话", conversation: "会话", board: "Project 看板", tasks: "任务", task: "任务详情", info: "Project 资料与成员", knowledge: "团队知识库",
@@ -65,18 +68,22 @@ const defaultSessions: NavigationSessionSource = {
 type NavigationEntry = { status: "loading" | "ready" | "failed"; value: ProjectNavigationPersonal }
 type NavigationChange = (value: ProjectNavigationPersonal) => ProjectNavigationPersonal
 
+function projectNavKey(workspaceId: string | null, projectId: string): string {
+  return `${workspaceId ?? ""}::${projectId}`
+}
+
 export type UseProjectShellOptions = {
   organization: OrganizationHost
   collaboration: CollaborationHost
   persistence: PersonalPersistence
-  workspaceId: string
+  workspaceId: string | null
   user: UserSummary
   namespace?: string
 }
 
 /**
  * 维护当前团队下的项目选择、详情、成员与个人导航状态，并向外部页面提供统一的 scope 与导航动作。
- * 范围或项目切换后，旧范围迟到的异步回包一律丢弃。
+ * 范围或项目切换后，旧范围迟到的异步回包一律丢弃；workspaceId 为 null（如离线或未入团）时保持空态不发请求。
  */
 export function useProjectShell({
   organization,
@@ -86,26 +93,16 @@ export function useProjectShell({
   user,
   namespace = DESKTOP_NAMESPACE,
 }: UseProjectShellOptions) {
-  const [workspace, setWorkspace] = useState<{ status: "loading" | "ready" | "failed"; value: WorkspacePersonal }>({
-    status: "loading",
+  const [workspaceState, setWorkspaceState] = useState<{
+    workspaceId: string | null
+    status: "loading" | "ready" | "failed"
+    value: WorkspacePersonal
+  }>({
+    workspaceId,
+    status: workspaceId ? "loading" : "ready",
     value: workspaceDefaults,
   })
   const [workspaceAttempt, setWorkspaceAttempt] = useState(0)
-  useEffect(() => {
-    let current = true
-    setWorkspace(previous => ({ ...previous, status: "loading" }))
-    void persistence.load({ kind: "workspace", workspaceId }).then(result => {
-      if (!current) return
-      if (!result.ok) { setWorkspace(previous => ({ ...previous, status: "failed" })); return }
-      const saved = result.value.data as WorkspacePersonal | null
-      setWorkspace({ status: "ready", value: saved ?? workspaceDefaults })
-    })
-    return () => { current = false }
-  }, [persistence, workspaceId, workspaceAttempt])
-
-  const workspaceReady = workspace.status === "ready"
-  const projects = useProjects(organization, workspaceId, workspaceReady)
-  const team = useTeamMembers(collaboration, workspaceId, workspaceReady)
   const [notice, setNotice] = useState("")
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<string | null>(null)
@@ -114,14 +111,49 @@ export function useProjectShell({
   const navigationRef = useRef(navigation)
   const pendingNavigation = useRef(new Map<string, NavigationChange[]>())
 
-  function setNavigationEntry(id: string, entry: NavigationEntry) {
-    const next = { ...navigationRef.current, [id]: entry }
+  useEffect(() => {
+    setNotice("")
+    setCreating(false)
+    setCreated(null)
+    setSearch("")
+    if (!workspaceId) {
+      setWorkspaceState({ workspaceId: null, status: "ready", value: workspaceDefaults })
+      return
+    }
+    let current = true
+    const targetWorkspaceId = workspaceId
+    setWorkspaceState(previous => previous.workspaceId === targetWorkspaceId
+      ? { ...previous, status: "loading" }
+      : { workspaceId: targetWorkspaceId, status: "loading", value: workspaceDefaults })
+    void persistence.load({ kind: "workspace", workspaceId: targetWorkspaceId }).then(result => {
+      if (!current) return
+      if (!result.ok) {
+        setWorkspaceState(previous => ({ workspaceId: targetWorkspaceId, status: "failed", value: previous.value }))
+        return
+      }
+      const saved = result.value.data as WorkspacePersonal | null
+      setWorkspaceState({ workspaceId: targetWorkspaceId, status: "ready", value: saved ?? workspaceDefaults })
+    })
+    return () => { current = false }
+  }, [persistence, workspaceId, workspaceAttempt])
+
+  const workspace = workspaceId && workspaceState.workspaceId !== workspaceId
+    ? { status: "loading" as const, value: workspaceDefaults }
+    : { status: workspaceState.status, value: workspaceState.value }
+
+  const workspaceReady = Boolean(workspaceId) && workspace.status === "ready"
+  const projects = useProjects(organization, workspaceId, workspaceReady)
+  const team = useTeamMembers(collaboration, workspaceId, workspaceReady)
+
+  function setNavigationEntry(key: string, entry: NavigationEntry) {
+    const next = { ...navigationRef.current, [key]: entry }
     navigationRef.current = next
     setNavigation(next)
   }
 
   const saveWorkspace = (value: WorkspacePersonal) => {
-    setWorkspace({ status: "ready", value })
+    if (!workspaceId) return
+    setWorkspaceState({ workspaceId, status: "ready", value })
     persistence.save({ kind: "workspace", workspaceId }, value)
   }
 
@@ -138,54 +170,59 @@ export function useProjectShell({
         : null
 
   useEffect(() => {
-    if (!ready || projectId === saved) return
+    if (!workspaceId || !ready || projectId === saved) return
     if (saved !== null) setNotice("上次的项目已不可访问，已切换到其他项目。")
     saveWorkspace({ ...workspace.value, projectId })
-  }, [ready, projectId, saved])
+  }, [workspaceId, ready, projectId, saved])
 
   const detail = useProjectDetail(organization, workspaceId, projectId)
   // 项目已不可访问：重新读取列表，由上面的规则移出失效选择。
   useEffect(() => { if (detail.lost) void projects.reload() }, [detail.lost])
 
   useEffect(() => {
-    if (!projectId || navigationRef.current[projectId]?.status === "ready") return
+    if (!workspaceId || !projectId) return
+    const compositeKey = projectNavKey(workspaceId, projectId)
+    if (navigationRef.current[compositeKey]?.status === "ready") return
     let current = true
-    const target = projectId
-    const key = { kind: "projectNavigation", workspaceId, projectId: target } as const
-    setNavigationEntry(target, { status: "loading", value: navigationRef.current[target]?.value ?? navigationDefaults })
+    const targetWorkspaceId = workspaceId
+    const targetProjectId = projectId
+    const key = { kind: "projectNavigation", workspaceId: targetWorkspaceId, projectId: targetProjectId } as const
+    setNavigationEntry(compositeKey, { status: "loading", value: navigationRef.current[compositeKey]?.value ?? navigationDefaults })
     void persistence.load(key).then(result => {
       if (!current) return
       const stored = result.ok ? result.value.data as ProjectNavigationPersonal | null : null
       let value = stored ?? navigationDefaults
-      if (created === target) value = { ...value, page: { kind: "info" } }
+      if (created === targetProjectId) value = { ...value, page: { kind: "info" } }
       // 恢复期间也能切页。把这段时间的点击按顺序应用到旧记录，保留用户已保存的其余偏好。
-      const pending = pendingNavigation.current.get(target)
-      pendingNavigation.current.delete(target)
+      const pending = pendingNavigation.current.get(compositeKey)
+      pendingNavigation.current.delete(compositeKey)
       if (pending) value = pending.reduce((state, change) => change(state), value)
-      setNavigationEntry(target, { status: result.ok ? "ready" : "failed", value })
+      setNavigationEntry(compositeKey, { status: result.ok ? "ready" : "failed", value })
       if (result.ok && pending) persistence.save(key, value)
     })
     return () => { current = false }
   }, [projectId, persistence, workspaceId])
 
-  const personal = (projectId ? navigation[projectId]?.value : undefined) ?? navigationDefaults
+  const activeNavKey = workspaceId && projectId ? projectNavKey(workspaceId, projectId) : ""
+  const personal = (activeNavKey ? navigation[activeNavKey]?.value : undefined) ?? navigationDefaults
   function updateNavigation(change: NavigationChange) {
-    if (!projectId) return
-    const existing = navigationRef.current[projectId]
+    if (!workspaceId || !projectId) return
+    const compositeKey = projectNavKey(workspaceId, projectId)
+    const existing = navigationRef.current[compositeKey]
     const value = change(existing?.value ?? navigationDefaults)
     const status = existing?.status ?? "loading"
     if (status === "loading") {
-      const pending = pendingNavigation.current.get(projectId) ?? []
+      const pending = pendingNavigation.current.get(compositeKey) ?? []
       pending.push(change)
-      pendingNavigation.current.set(projectId, pending)
+      pendingNavigation.current.set(compositeKey, pending)
     }
-    setNavigationEntry(projectId, { status, value })
+    setNavigationEntry(compositeKey, { status, value })
     // 只有读取成功的记录才写回，避免用默认值覆盖尚未读到的旧记录。
     if (status === "ready") persistence.save({ kind: "projectNavigation", workspaceId, projectId }, value)
   }
 
   const scope: ProjectNavigationScope | null = useMemo(
-    () => (workspaceReady && projectId ? { namespace, accountId: user.id, workspaceId, projectId } : null),
+    () => (workspaceReady && workspaceId && projectId ? { namespace, accountId: user.id, workspaceId, projectId } : null),
     [workspaceReady, namespace, user.id, workspaceId, projectId],
   )
 
@@ -255,12 +292,14 @@ export type ProjectShellState = ReturnType<typeof useProjectShell>
 
 export type DualTrackNavigationProps = {
   readonly activeSpace: NavigationSpaceKind
+  readonly workspaceRoleLabel?: string | null
   readonly hasTeamUpdates?: boolean
   readonly offline?: boolean
   readonly canPublishPersonal?: boolean
   readonly personalGroups?: readonly PersonalNavigationDirectoryGroup[]
   readonly personalSearch?: string
   readonly selectedPersonalConversationId?: string | null
+  readonly landingConversationId?: string | null
   readonly publishedSessionCount?: number
   selectSpace(space: NavigationSpaceKind): void
   createPersonalSession(): void
@@ -284,7 +323,7 @@ export type ProjectWorkbenchProps = {
   shell: ProjectShellState
   organization: OrganizationHost
   persistence: PersonalPersistence
-  workspaceId: string
+  workspaceId: string | null
   workspaceName: string
   workspaces?: readonly NavigationWorkspaceItem[]
   onSelectWorkspace?(workspaceId: string): void
@@ -313,6 +352,12 @@ export type ProjectWorkbenchProps = {
   onCloseInbox?(): void
   onReturnToInbox?(): void
   onSelectKnowledge?(knowledgeId: string): void
+  /** 单壳层集成控制：切页同步到外层 56px Rail、共享命令面板与左栏收展开关。 */
+  onSelectNav?(nav: WorkbenchNavId): void
+  onOpenCommandPalette?(): void
+  onToggleLeftSidebar?(): void
+  disableGlobalShortcuts?: boolean
+  isTeamChatActive?: boolean
 }
 
 function resolveProvider(page: ProjectPage, providers: ProjectPageProviders): ProjectPageProvider | undefined {
@@ -332,7 +377,7 @@ function resolveProvider(page: ProjectPage, providers: ProjectPageProviders): Pr
   }
 }
 
-export function ProjectWorkbench(props: ProjectWorkbenchProps) {
+export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
   const { shell, organization, persistence, workspaceId, user } = props
   const members = useMemo(
     () => projectMembers(shell.detail.detail, shell.team.members),
@@ -341,19 +386,34 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const [collabPopoverOpen, setCollabPopoverOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const pendingSettingsProjectIdRef = useRef<string | null>(null)
+  const lastChatPageRef = useRef<ProjectPage>({ kind: "new" })
 
   // 项目切换后关闭旧结果浮层，避免用户在新项目点击旧任务或知识。
   useEffect(() => { setPaletteOpen(false); setCollabPopoverOpen(false) }, [shell.scope])
+
+  // 记录最近停留的团队会话或新对话准备页，从看板/知识切回工作台时无缝恢复。
+  useEffect(() => {
+    const p = shell.personal.page
+    if (p.kind === "new" || p.kind === "conversation") {
+      lastChatPageRef.current = p
+    }
+  }, [shell.personal.page])
+
+  useEffect(() => {
+    lastChatPageRef.current = { kind: "new" }
+  }, [workspaceId, shell.projectId])
 
   // 当在团队空间点击未激活 Project 的齿轮时，切到该项目后自动打开其资料与成员设置页。
   useEffect(() => {
     const targetProjectId = pendingSettingsProjectIdRef.current
     if (!targetProjectId || shell.projectId !== targetProjectId) return
     pendingSettingsProjectIdRef.current = null
+    props.onSelectNav?.("chat")
     shell.openPage({ kind: "info" })
   }, [shell.projectId, shell.openPage])
 
   useEffect(() => {
+    if (props.disableGlobalShortcuts) return
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
@@ -370,15 +430,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [shell.workspace.status, shell.workspace.value, shell.saveWorkspace])
-
-  if (shell.workspace.status !== "ready") {
-    const failed = shell.workspace.status === "failed"
-    return <section className="desktop-empty desktop-conversation">
-      <p role={failed ? "alert" : "status"}>{failed ? props.personalError || "无法恢复个人视图。" : "正在恢复个人视图…"}</p>
-      {failed && <button className="wb-button wb-button-secondary" onClick={shell.retryWorkspace}>重试</button>}
-    </section>
-  }
+  }, [props.disableGlobalShortcuts, shell.workspace.status, shell.workspace.value, shell.saveWorkspace])
 
   const sessions = props.sessions ?? defaultSessions
   const providers = props.providers ?? {}
@@ -394,8 +446,16 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     : storedPage
 
   const navigator: ProjectNavigator = {
-    openPage: shell.openPage,
-    locateConversation: conversationId => shell.locateConversation(conversationId, sessions.entries),
+    openPage: target => {
+      if (target.kind === "board" || target.kind === "tasks" || target.kind === "task") props.onSelectNav?.("board")
+      else if (target.kind === "knowledge") props.onSelectNav?.("knowledge")
+      else props.onSelectNav?.("chat")
+      shell.openPage(target)
+    },
+    locateConversation: conversationId => {
+      props.onSelectNav?.("chat")
+      return shell.locateConversation(conversationId, sessions.entries)
+    },
   }
 
   const groups = buildMemberGroups({
@@ -409,6 +469,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const myEntries = sessions.entries.filter(item => item.ownerUserId === user.id)
   const peerEntries = sessions.entries.filter(item => item.ownerUserId !== user.id)
   const myLocalEntries = sessions.entries.filter(item => item.ownerUserId === user.id && item.badge?.text === "本机")
+  const hasPeerUpdates = peerEntries.some(item => item.badge?.tone === "warning" || item.badge?.text.includes("有更新") || item.badge?.text.includes("未同步"))
 
   const activePage: NavigationPageKind | null = !projectId ? null : page.kind === "task" ? "tasks" : page.kind
   const inboxActive = Boolean(props.inboxView?.active && props.inboxPage)
@@ -454,12 +515,14 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     createProject: shell.openCreateDialog,
     openProjectSettings: () => {
       props.onCloseInbox?.()
+      props.onSelectNav?.("chat")
       shell.openPage({ kind: "info" })
     },
     openProjectSettingsFor: targetProjectId => {
       props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       if (targetProjectId === shell.projectId) {
+        props.onSelectNav?.("chat")
         shell.openPage({ kind: "info" })
         return
       }
@@ -469,16 +532,21 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     openPage: kind => {
       props.onCloseInbox?.()
       setCollabPopoverOpen(false)
+      if (kind === "board" || kind === "tasks") props.onSelectNav?.("board")
+      else if (kind === "knowledge") props.onSelectNav?.("knowledge")
+      else props.onSelectNav?.("chat")
       shell.openPage({ kind })
     },
     createSession: () => {
       props.onCloseInbox?.()
       setCollabPopoverOpen(false)
+      props.onSelectNav?.("chat")
       shell.openPage({ kind: "new" })
     },
     selectConversation: conversationId => {
       props.onCloseInbox?.()
       setCollabPopoverOpen(false)
+      props.onSelectNav?.("chat")
       shell.openPage({ kind: "conversation", conversationId })
     },
     renameConversation: sessions.renameConversation,
@@ -486,27 +554,36 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     setSearch: shell.setSearch,
     openCommandPalette: () => {
       setCollabPopoverOpen(false)
-      setPaletteOpen(true)
+      if (props.onOpenCommandPalette) props.onOpenCommandPalette()
+      else setPaletteOpen(true)
     },
-    toggleLeftSidebar: () => shell.saveWorkspace({
-      ...workspace,
-      panels: { ...workspace.panels, left: { ...workspace.panels.left, open: !workspace.panels.left.open } },
-    }),
+    toggleLeftSidebar: () => {
+      if (props.onToggleLeftSidebar) props.onToggleLeftSidebar()
+      else shell.saveWorkspace({
+        ...workspace,
+        panels: { ...workspace.panels, left: { ...workspace.panels.left, open: !workspace.panels.left.open } },
+      })
+    },
     retry: area => {
       if (area === "projects") void shell.projects.reload()
       else if (area === "members") { void shell.detail.reload(); void shell.team.reload() }
       else if (area === "sessions") sessions.retry()
     },
-    openSettings: () => props.setSettingsOpen(true),
+    openSettings: () => {
+      if (props.onSelectNav) props.onSelectNav("admin")
+      else props.setSettingsOpen(true)
+    },
   }
 
   const isSessionPage = page.kind === "new" || page.kind === "conversation"
+  const teamChatActive = props.isTeamChatActive ?? true
+  const isTeamSessionVisible = Boolean(teamChatActive && isSessionPage && !inboxActive)
   const activeProvider = resolveProvider(page, providers)
 
-  // 会话提供者在整个项目范围内保持挂载，切到看板/任务/资料/知识/收件箱时只隐藏，保证草稿与阅读位置不丢。
+  // 会话提供者在整个项目范围内保持挂载，切到看板/任务/资料/知识/收件箱/个人空间时只隐藏，保证草稿与阅读位置不丢。
   const sessionSlot = projectId && scope && providers.session
-    ? <div key={projectId} className="pnav-page-slot" hidden={!isSessionPage || inboxActive}>
-        {providers.session.render({ scope, page, navigator, visible: isSessionPage && !inboxActive })}
+    ? <div key={`${workspaceId ?? ""}:${projectId}`} className="pnav-page-slot" hidden={!isTeamSessionVisible}>
+        {providers.session.render({ scope, page, navigator, visible: isTeamSessionVisible })}
       </div>
     : null
 
@@ -525,8 +602,8 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       </> : <p className="pnav-page-status" role="status">正在读取项目…</p>}
     </section>
   } else if (page.kind === "info") {
-    pageView = <ProjectInfoPage
-      key={projectId}
+    pageView = workspaceId ? <ProjectInfoPage
+      key={`${workspaceId}:${projectId}`}
       host={organization}
       workspaceId={workspaceId}
       workspaceName={props.workspaceName}
@@ -540,7 +617,7 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
       knowledgeCount={props.knowledge?.length ?? props.knowledgeCount ?? undefined}
       onChanged={shell.reloadProject}
       onRetry={() => { void shell.detail.reload() }}
-    />
+    /> : null
   } else if (isSessionPage && providers.session) {
     pageView = null
   } else if (activeProvider && scope) {
@@ -629,11 +706,12 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           onOpenConversation={conversationId => {
             props.onCloseInbox?.()
             setCollabPopoverOpen(false)
+            props.onSelectNav?.("chat")
             shell.openPage({ kind: "conversation", conversationId })
           }}
         />
       )}
-      {current && (
+      {!props.onOpenCommandPalette && current && (
         <CommandPaletteModal
           open={paletteOpen}
           projectName={current.name}
@@ -659,6 +737,17 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
           }}
         />
       )}
+      {workspaceId && shell.creating && (
+        <CreateProjectDialog
+          host={organization}
+          workspaceId={workspaceId}
+          workspaceName={props.workspaceName}
+          teamMembers={shell.team.members}
+          selfUserId={user.id}
+          onClose={shell.closeCreateDialog}
+          onCreated={shell.finishCreateProject}
+        />
+      )}
     </>
   )
 
@@ -667,154 +756,196 @@ export function ProjectWorkbench(props: ProjectWorkbenchProps) {
     initial: (m.user.userName || "?").slice(0, 1),
     photo: resolveUserPhoto(m.user),
   }))
-  const enrichedWorkspaces = (props.workspaces ?? [{ workspaceId, name: props.workspaceName }]).map(ws =>
-    ws.workspaceId === workspaceId
-      ? {
-          ...ws,
-          ...(shell.team.members.length ? { memberCount: shell.team.members.length } : {}),
-          ...(teamPhotos.length ? { memberPhotos: teamPhotos } : {}),
-        }
-      : ws,
-  )
+  const enrichedWorkspaces = workspaceId
+    ? (props.workspaces ?? [{ workspaceId, name: props.workspaceName }]).map(ws =>
+        ws.workspaceId === workspaceId
+          ? {
+              ...ws,
+              ...(shell.team.members.length ? { memberCount: shell.team.members.length } : {}),
+              ...(teamPhotos.length ? { memberPhotos: teamPhotos } : {}),
+            }
+          : ws,
+      )
+    : (props.workspaces ?? [])
 
-  return <>
+  const renderHeaderTitle = ({ leftCollapsed }: { leftCollapsed: boolean }): ReactNode => {
+    if (inboxActive) {
+      const cloudCount = props.inboxView?.cloudActionCount ?? 0
+      return (
+        <>
+          <span className="tb-name">Inbox · 待办与审批</span>
+          <span className="tb-count">{cloudCount} 项待你拍板</span>
+        </>
+      )
+    }
+    if (scope && activeProvider?.headerTitle) {
+      const custom = activeProvider.headerTitle({ scope, page, leftCollapsed })
+      if (custom !== null && custom !== undefined) return custom
+    }
+    if (!current) return <span className="tb-name">协作工作台</span>
+    const viewTitle = pageNames[page.kind]
+    const effectiveTaskCount = props.taskCount !== null && props.taskCount !== undefined
+      ? props.taskCount
+      : props.tasks?.length ?? null
+    const countLabel = page.kind === "info"
+      ? `${members.length} 位成员`
+      : page.kind === "board"
+        ? effectiveTaskCount !== null
+          ? `${effectiveTaskCount} 项待办 · ${members.length} 人`
+          : `${members.length} 位成员`
+        : page.kind === "tasks" || page.kind === "task"
+          ? effectiveTaskCount !== null
+            ? `${effectiveTaskCount} 项待办`
+            : ""
+          : page.kind === "knowledge"
+            ? leftCollapsed
+              ? ""
+              : props.workspaceName
+            : ""
+    const crumbLabel = page.kind === "knowledge" ? props.workspaceName : current.name
+    return (
+      <>
+        {leftCollapsed && crumbLabel ? (
+          <span className="tb-crumb">
+            <span className="tb-crumb-name">{crumbLabel}</span>
+            <span className="tb-crumb-sep" aria-hidden="true">/</span>
+          </span>
+        ) : null}
+        <span className="tb-name">{viewTitle}</span>
+        {countLabel ? <span className="tb-count">{countLabel}</span> : null}
+      </>
+    )
+  }
+
+  const navigationView: ProjectNavigationView = {
+    accountName: user.userName,
+    accountPhoto: resolveUserPhoto(user),
+    accountRole: memberRoleLabel(selfMember),
+    workspaceName: workspaceId ? props.workspaceName : null,
+    workspaces: enrichedWorkspaces,
+    currentWorkspaceId: workspaceId,
+    projects: shell.projects.projects.map(item => ({
+      projectId: item.projectId,
+      name: item.name,
+      archived: item.status === "archived",
+      memberCount: item.memberCount,
+      ...(item.projectId === projectId && currentRepoLabel ? { repo: currentRepoLabel } : {}),
+    })),
+    projectsAvailability: shell.projects.availability,
+    currentProjectId: projectId,
+    currentProjectRepo: currentRepoLabel,
+    currentProjectMemberCount: members.length,
+    localDeviceName: props.localDeviceName ?? undefined,
+    groups,
+    membersAvailability: shell.detail.availability.state === "ready" && shell.team.availability.state === "failed"
+      ? shell.team.availability
+      : shell.detail.availability,
+    sessionsAvailability: sessions.availability,
+    search: shell.search,
+    activePage,
+    selectedConversationId: page.kind === "conversation" ? page.conversationId : null,
+    taskCount: !projectId
+      ? null
+      : props.taskCount !== undefined
+        ? props.taskCount
+        : props.tasks
+          ? props.tasks.filter(t => t.assigneeId === user.id && t.status !== "done" && t.status !== "cancelled").length
+          : null,
+    knowledgeCount: !projectId
+      ? null
+      : props.knowledgeCount !== undefined
+        ? props.knowledgeCount
+        : props.knowledge
+          ? props.knowledge.filter(k => !k.archived).length
+          : null,
+    ...(props.dualTrack
+      ? {
+          activeSpace: props.dualTrack.activeSpace,
+          workspaceRoleLabel: props.dualTrack.workspaceRoleLabel,
+          hasTeamUpdates: props.dualTrack.hasTeamUpdates,
+          offline: props.dualTrack.offline,
+          canPublishPersonal: props.dualTrack.canPublishPersonal,
+          personalGroups: props.dualTrack.personalGroups,
+          personalSearch: props.dualTrack.personalSearch,
+          selectedPersonalConversationId: props.dualTrack.selectedPersonalConversationId,
+          landingConversationId: props.dualTrack.landingConversationId,
+          publishedSessionCount: props.dualTrack.publishedSessionCount,
+        }
+      : {}),
+    ...(props.inboxView ? { inbox: props.inboxView } : {}),
+  }
+
+  const renderRight = (slot: WorkbenchRightSlot): ReactNode =>
+    !inboxActive && scope && activeProvider?.right ? activeProvider.right({ scope, page, slot }) : null
+
+  return {
+    workspaceReady: shell.workspace.status === "ready",
+    workspaceFailed: shell.workspace.status === "failed",
+    retryWorkspace: shell.retryWorkspace,
+    workspace,
+    scope,
+    projectId,
+    current,
+    page,
+    lastChatPageRef,
+    members,
+    myEntries,
+    peerEntries,
+    hasPeerUpdates,
+    navigationView,
+    navigationActions: actions,
+    sessionSlot,
+    pageView,
+    renderRight,
+    hasRight: Boolean(!inboxActive && scope && activeProvider?.right),
+    headerContext,
+    renderHeaderTitle,
+    backButton,
+    headerExtra,
+    overlays,
+    notice: shell.notice,
+  }
+}
+
+export function ProjectWorkbench(props: ProjectWorkbenchProps) {
+  const { shell, persistence, personalError } = props
+  const model = useProjectWorkbenchSlots(props)
+
+  if (!model.workspaceReady) {
+    return <section className="desktop-empty desktop-conversation">
+      <p role={model.workspaceFailed ? "alert" : "status"}>{model.workspaceFailed ? personalError || "无法恢复个人视图。" : "正在恢复个人视图…"}</p>
+      {model.workspaceFailed && <button className="wb-button wb-button-secondary" onClick={model.retryWorkspace}>重试</button>}
+    </section>
+  }
+
+  return (
     <WorkbenchLayout
       titleBarClassName={props.titleBarClassName}
-      context={headerContext}
-      renderHeaderTitle={({ leftCollapsed }) => {
-        if (inboxActive) {
-          const cloudCount = props.inboxView?.cloudActionCount ?? 0
-          return (
-            <>
-              <span className="tb-name">Inbox · 待办与审批</span>
-              <span className="tb-count">{cloudCount} 项待你拍板</span>
-            </>
-          )
-        }
-        if (scope && activeProvider?.headerTitle) {
-          const custom = activeProvider.headerTitle({ scope, page, leftCollapsed })
-          if (custom !== null && custom !== undefined) return custom
-        }
-        if (!current) return <span className="tb-name">协作工作台</span>
-        const viewTitle = pageNames[page.kind]
-        const effectiveTaskCount = props.taskCount !== null && props.taskCount !== undefined
-          ? props.taskCount
-          : props.tasks?.length ?? null
-        const countLabel = page.kind === "info"
-          ? `${members.length} 位成员`
-          : page.kind === "board"
-            ? effectiveTaskCount !== null
-              ? `${effectiveTaskCount} 项待办 · ${members.length} 人`
-              : `${members.length} 位成员`
-            : page.kind === "tasks" || page.kind === "task"
-              ? effectiveTaskCount !== null
-                ? `${effectiveTaskCount} 项待办`
-                : ""
-              : page.kind === "knowledge"
-                ? leftCollapsed
-                  ? ""
-                  : props.workspaceName
-                : ""
-        const crumbLabel = page.kind === "knowledge" ? props.workspaceName : current.name
-        return (
-          <>
-            {leftCollapsed && crumbLabel ? (
-              <span className="tb-crumb">
-                <span className="tb-crumb-name">{crumbLabel}</span>
-                <span className="tb-crumb-sep" aria-hidden="true">/</span>
-              </span>
-            ) : null}
-            <span className="tb-name">{viewTitle}</span>
-            {countLabel ? <span className="tb-count">{countLabel}</span> : null}
-          </>
-        )
-      }}
-      backButton={backButton}
-      headerExtra={headerExtra}
+      context={model.headerContext}
+      renderHeaderTitle={model.renderHeaderTitle}
+      backButton={model.backButton}
+      headerExtra={model.headerExtra}
       colorScheme={props.colorScheme}
       onToggleTheme={props.onToggleTheme}
-      overlays={overlays}
+      overlays={model.overlays}
       navigation={<div className="desktop-navigation">
-        <ProjectNavigation view={{
-          accountName: user.userName,
-          accountPhoto: resolveUserPhoto(user),
-          accountRole: memberRoleLabel(selfMember),
-          workspaceName: props.workspaceName,
-          workspaces: enrichedWorkspaces,
-          currentWorkspaceId: workspaceId,
-          projects: shell.projects.projects.map(item => ({
-            projectId: item.projectId,
-            name: item.name,
-            archived: item.status === "archived",
-            memberCount: item.memberCount,
-            ...(item.projectId === projectId && currentRepoLabel ? { repo: currentRepoLabel } : {}),
-          })),
-          projectsAvailability: shell.projects.availability,
-          currentProjectId: projectId,
-          currentProjectRepo: currentRepoLabel,
-          currentProjectMemberCount: members.length,
-          localDeviceName: props.localDeviceName ?? undefined,
-          groups,
-          membersAvailability: shell.detail.availability.state === "ready" && shell.team.availability.state === "failed"
-            ? shell.team.availability
-            : shell.detail.availability,
-          sessionsAvailability: sessions.availability,
-          search: shell.search,
-          activePage,
-          selectedConversationId: page.kind === "conversation" ? page.conversationId : null,
-          taskCount: !projectId
-            ? null
-            : props.taskCount !== undefined
-              ? props.taskCount
-              : props.tasks
-                ? props.tasks.filter(t => t.assigneeId === user.id && t.status !== "done" && t.status !== "cancelled").length
-                : null,
-          knowledgeCount: !projectId
-            ? null
-            : props.knowledgeCount !== undefined
-              ? props.knowledgeCount
-              : props.knowledge
-                ? props.knowledge.filter(k => !k.archived).length
-                : null,
-          ...(props.dualTrack
-            ? {
-                activeSpace: props.dualTrack.activeSpace,
-                hasTeamUpdates: props.dualTrack.hasTeamUpdates,
-                offline: props.dualTrack.offline,
-                canPublishPersonal: props.dualTrack.canPublishPersonal,
-                personalGroups: props.dualTrack.personalGroups,
-                personalSearch: props.dualTrack.personalSearch,
-                selectedPersonalConversationId: props.dualTrack.selectedPersonalConversationId,
-                publishedSessionCount: props.dualTrack.publishedSessionCount,
-              }
-            : {}),
-          ...(props.inboxView ? { inbox: props.inboxView } : {}),
-        }} actions={actions} />
-        {shell.notice && <p className="desktop-navigation-note" role="status">{shell.notice}</p>}
-        {props.personalError && <p className="desktop-navigation-note" role="alert">{props.personalError}{" "}
+        <ProjectNavigation view={model.navigationView} actions={model.navigationActions} />
+        {model.notice && <p className="desktop-navigation-note" role="status">{model.notice}</p>}
+        {personalError && <p className="desktop-navigation-note" role="alert">{personalError}{" "}
           <button className="wb-button wb-button-small wb-button-quiet" onClick={() => { void persistence.flush() }}>重试保存</button>
         </p>}
       </div>}
-      center={<>{sessionSlot}{pageView}</>}
-      right={slot => (!inboxActive && scope && activeProvider?.right ? activeProvider.right({ scope, page, slot }) : null)}
-      leftOpen={workspace.panels.left.open}
-      leftWidthPx={workspace.panels.left.width}
-      rightOpen={Boolean(!inboxActive && scope && activeProvider?.right) && workspace.panels.right.open}
-      rightWidthPx={workspace.panels.right.width}
-      setPanelOpen={(side, open) => shell.saveWorkspace({ ...workspace, panels: { ...workspace.panels, [side]: { ...workspace.panels[side], open } } })}
-      setPanelWidth={(side, width) => shell.saveWorkspace({ ...workspace, panels: { ...workspace.panels, [side]: { ...workspace.panels[side], width } } })}
+      center={<>{model.sessionSlot}{model.pageView}</>}
+      right={model.renderRight}
+      leftOpen={model.workspace.panels.left.open}
+      leftWidthPx={model.workspace.panels.left.width}
+      rightOpen={model.hasRight && model.workspace.panels.right.open}
+      rightWidthPx={model.workspace.panels.right.width}
+      setPanelOpen={(side, open) => shell.saveWorkspace({ ...model.workspace, panels: { ...model.workspace.panels, [side]: { ...model.workspace.panels[side], open } } })}
+      setPanelWidth={(side, width) => shell.saveWorkspace({ ...model.workspace, panels: { ...model.workspace.panels, [side]: { ...model.workspace.panels[side], width } } })}
       settingsOpen={props.settingsOpen}
       closeSettings={() => props.setSettingsOpen(false)}
       settings={props.settings}
     />
-    {shell.creating && <CreateProjectDialog
-      host={organization}
-      workspaceId={workspaceId}
-      workspaceName={props.workspaceName}
-      teamMembers={shell.team.members}
-      selfUserId={user.id}
-      onClose={shell.closeCreateDialog}
-      onCreated={shell.finishCreateProject}
-    />}
-  </>
+  )
 }

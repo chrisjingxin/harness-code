@@ -1,4 +1,4 @@
-/* 工作台外壳：通顶左栏 .sidebar + 右侧 .main（48px 单行顶栏 + 居中舞台 + 右栏 ProjectDock）。 */
+/* 工作台外壳：第一层 56px 全局图标栏（可选）+ 第二层 304px 次级侧栏 + 右侧 .main（48px 单行顶栏 + 居中舞台 + 右栏 ProjectDock）。 */
 .collaboration-layout {
   height: 100%;
   min-height: 0;
@@ -10,6 +10,207 @@
   overflow: hidden;
 }
 
+/* ─── 第一层：56px 固定全局图标栏 ─── */
+.lf-rail {
+  position: relative;
+  flex: none;
+  width: var(--rail-w, 56px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  background: var(--rail-surface, var(--sidebar-bg));
+  box-shadow: inset -1px 0 0 var(--border);
+  user-select: none;
+}
+.lf-rail-macos-spacer { display: none; }
+.collaboration-layout.is-macos .lf-rail { padding-top: 0; }
+.collaboration-layout.is-macos .lf-rail-macos-spacer {
+  display: block;
+  width: 100%;
+  height: 38px;
+  flex: none;
+  -webkit-app-region: drag;
+}
+.lf-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 8px;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--accent-text, var(--accent));
+  box-shadow: inset 0 0 0 1px var(--border);
+  -webkit-app-region: drag;
+}
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.rail-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  -webkit-app-region: no-drag;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform 110ms var(--ease-standard);
+}
+.rail-btn:hover { background: var(--hover); color: var(--fg); }
+.rail-btn:active { transform: scale(0.96); }
+.rail-btn.is-active {
+  background: var(--selected);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.rail-btn.is-active::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.rail-btn.is-active svg { color: var(--accent-text, var(--accent)); }
+.rail-badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--rail-surface, var(--sidebar-bg));
+  font-variant-numeric: tabular-nums;
+}
+.rail-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--rail-surface, var(--sidebar-bg));
+}
+.rail-dot.is-warn { background: var(--warn); }
+.rail-sep { width: 22px; height: 1px; background: var(--border); margin: 4px 0; flex: none; }
+.rail-spacer { flex: 1 1 auto; }
+.rail-avatar-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  -webkit-app-region: no-drag;
+  transition: box-shadow var(--motion-fast) var(--ease-standard), transform 110ms var(--ease-standard);
+}
+.rail-avatar-btn:hover { box-shadow: 0 0 0 3px var(--hover); }
+.rail-avatar-btn:active { transform: scale(0.96); }
+.rail-avatar-btn .av-role-dot {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--rail-surface, var(--sidebar-bg));
+}
+.rail-avatar-btn .av-role-dot.solo { background: var(--warn); }
+
+/* 左下角账号与外观 Popover */
+.user-popover {
+  position: fixed;
+  z-index: 70;
+  width: 288px;
+  padding: 12px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--popover-shadow, var(--elev-pop));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.user-pop-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.user-pop-identity { display: grid; gap: 1px; min-width: 0; flex: 1 1 0; }
+.user-pop-identity strong {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-pop-identity .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-pop-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  box-shadow: inset 0 1px 0 var(--border-soft);
+}
+.user-pop-theme-seg {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.user-pop-theme-seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: var(--text-xs);
+}
+.user-pop-actions { gap: 2px; }
+.user-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.user-pop-item:hover { background: var(--hover); }
+.user-pop-item.is-danger { color: var(--danger-fg); }
+.user-pop-item.is-danger:hover { background: var(--danger-tint); }
+.user-pop-arrow { margin-left: auto; }
+
 .collaboration-left {
   position: relative;
   flex: none;
@@ -17,12 +218,13 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: var(--sidebar-bg);
+  background: var(--sidebar-surface, var(--sidebar-bg));
   box-shadow: inset -1px 0 0 var(--line);
-  transition: width var(--motion-base) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+  transition: width 200ms var(--ease-flow, var(--ease-standard)), opacity var(--motion-fast) var(--ease-standard);
 }
 .collaboration-left[data-mode="hidden"] {
   box-shadow: none;
+  opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
@@ -33,6 +235,18 @@
   bottom: 0;
   left: 0;
   box-shadow: var(--elev-pop);
+}
+.collaboration-layout.has-rail .collaboration-left[data-mode="overlay"] {
+  left: var(--rail-w, 56px);
+}
+.collaboration-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: var(--scrim);
+}
+.collaboration-layout.has-rail .collaboration-scrim {
+  left: var(--rail-w, 56px);
 }
 .collaboration-traffic-drag {
   flex: none;
@@ -93,14 +307,20 @@
   user-select: none;
   min-width: 0;
 }
-/* 覆盖全局 .desktop-titlebar-macos 左侧大边距：仅当左栏收起时为红绿灯和固定折叠按钮留出空间 */
+/* 覆盖全局 .desktop-titlebar-macos 左侧大边距：仅当左栏收起或无侧栏时为红绿灯和固定折叠按钮留出空间 */
 .collaboration-layout.is-macos .collaboration-header.desktop-titlebar-macos {
   padding-left: 16px;
 }
-.collaboration-layout.is-macos[data-left-mode="hidden"] .collaboration-header.desktop-titlebar-macos {
+.collaboration-layout.is-macos:not(.has-rail)[data-left-mode="hidden"] .collaboration-header.desktop-titlebar-macos {
   padding-left: 122px;
 }
-.collaboration-layout:not(.is-macos)[data-left-mode="hidden"] .collaboration-header {
+.collaboration-layout.is-macos.has-rail[data-left-mode="hidden"]:not(.no-sidebar) .collaboration-header.desktop-titlebar-macos {
+  padding-left: 68px;
+}
+.collaboration-layout.is-macos.has-rail.no-sidebar .collaboration-header.desktop-titlebar-macos {
+  padding-left: 36px;
+}
+.collaboration-layout:not(.is-macos)[data-left-mode="hidden"]:not(.no-sidebar) .collaboration-header {
   padding-left: 50px;
 }
 .collaboration-layout.is-windows .collaboration-header.desktop-titlebar-windows {
@@ -114,6 +334,9 @@
   z-index: 45;
   width: 28px;
   height: 28px;
+}
+.collaboration-layout:not(.is-macos).has-rail .collaboration-header-toggle {
+  left: calc(var(--rail-w, 56px) + 12px);
 }
 .collaboration-layout.is-macos .collaboration-header-toggle {
   top: 4px;
@@ -255,16 +478,18 @@
   align-items: center;
   gap: 5px;
   flex: none;
-  height: 24px;
-  padding: 0 9px;
+  height: 22px;
+  padding: 0 8px;
   border-radius: var(--radius-pill);
   font-size: var(--text-2xs);
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
 }
 .tb-state .d {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
   flex: none;
@@ -272,6 +497,11 @@
 .tb-state.running {
   color: var(--success-fg);
   background: var(--success-tint);
+  box-shadow: inset 0 0 0 1px var(--success-ring, color-mix(in srgb, var(--success) 32%, transparent));
+}
+.tb-state.running .d {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+  animation: tb-lamp-pulse 1.8s ease-in-out infinite;
 }
 .tb-state.ro {
   color: var(--muted);
@@ -279,12 +509,18 @@
   box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
 }
 .tb-state.sync {
-  color: var(--accent);
+  color: var(--accent-text, var(--accent));
   background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent-ring, transparent);
 }
 .tb-state.failed {
   color: var(--danger-fg);
   background: var(--danger-tint);
+  box-shadow: inset 0 0 0 1px var(--danger-ring, transparent);
+}
+@keyframes tb-lamp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.86); }
 }
 
 /* 跨机只读会话所有权标识 */
@@ -409,4 +645,17 @@
 .collaboration-layout :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+@keyframes lfPopIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .user-popover { animation: lfPopIn 160ms var(--ease-flow, var(--ease-standard)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-btn:active,
+  .rail-avatar-btn:active { transform: none; }
+  .tb-state.running .d { animation: none; }
 }

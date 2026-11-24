@@ -230,6 +230,8 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
           kind={kind}
           conversation={conversation}
           ownerName={ownerName}
+          owner={controller.resolveOwner?.(conversation.ownerUserId)}
+          projectName={controller.projectName}
           syncStatus={syncStatus}
           syncState={syncState}
           entries={controller.hooks?.renderHistoryReferences?.(entries) ?? entries}

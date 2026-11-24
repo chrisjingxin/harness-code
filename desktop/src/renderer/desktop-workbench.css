@@ -37,49 +37,65 @@ html, body, #root { height: 100%; overflow: hidden; }
 .desktop-project-dock { position: relative; height: 100%; min-height: 0; }
 .desktop-project-retry { position: absolute; z-index: 2; right: 48px; top: 12px; }
 
-/* 设置弹窗（对齐原型稿 #dlgSettings：固定标题 + 内部独立滚动 + 完整四角圆角） */
-.desktop-settings {
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  font-size: var(--text-sm);
-  color: var(--text);
-}
-.desktop-settings-head {
-  flex: none;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding-right: 36px;
-  padding-bottom: 12px;
-  box-shadow: inset 0 -1px 0 var(--line-soft);
-}
-.desktop-settings-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.4; }
-.desktop-settings-sub { margin: 2px 0 0; font-size: var(--text-sm); color: var(--muted); }
-.desktop-settings-body {
-  flex: 1 1 auto;
-  min-width: 0;
+/* 未登录或连接异常时的简洁居中登录引导卡片（已确认用户使用 features/admin 1200px 管理台） */
+.desktop-login-stage {
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: 6px 4px 10px 0;
-  margin-right: -4px;
+  display: grid;
+  place-items: center;
+  padding: var(--pad-stage, 24px);
+  background: var(--bg);
+}
+.desktop-login-card {
+  width: min(100%, 560px);
+  padding: 24px 26px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border, var(--line)));
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong, var(--line-strong)) transparent;
+  gap: 14px;
 }
-
-.desktop-set-section {
-  margin-top: 8px; padding-top: 6px;
-  font-family: var(--font-mono); font-size: var(--text-2xs);
-  letter-spacing: .08em; text-transform: uppercase; color: var(--subtle);
+.desktop-login-card h1 {
+  margin: 0;
+  font-size: var(--text-xl, 18px);
+  font-weight: 600;
+  color: var(--fg, var(--text));
 }
+.desktop-login-card > p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.6;
+}
+.desktop-login-card .identity-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}
+.desktop-login-card .identity-heading { gap: 4px 10px; margin-bottom: 8px; }
+.desktop-login-card .identity-heading h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg, var(--text)); }
+.desktop-login-card .identity-panel p { margin: 6px 0; font-size: var(--text-sm); line-height: 1.6; color: var(--fg-2, var(--text-soft)); }
+.desktop-login-card .identity-actions,
+.desktop-login-card .identity-actions label { gap: 8px; }
+.desktop-login-card .identity-actions select {
+  min-height: var(--control-compact);
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-size: var(--text-sm);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}
+.desktop-login-card .hint { color: var(--muted); font-size: var(--text-xs); }
+.desktop-login-card .error, .desktop-empty .error { color: var(--danger-fg); }
 .desktop-preferences { display: flex; flex-direction: column; }
 .desktop-set-row {
   display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px;
@@ -155,40 +171,10 @@ html, body, #root { height: 100%; overflow: hidden; }
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
-.desktop-settings .identity-panel {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  margin-top: 2px;
-  padding: 14px;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
 @media (max-width: 520px) {
   .kbd-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.desktop-settings .identity-heading { gap: 4px 10px; margin-bottom: 8px; }
-.desktop-settings .identity-heading h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg, var(--text)); }
-.desktop-settings .identity-panel p { margin: 6px 0; font-size: var(--text-sm); line-height: 1.6; color: var(--fg-2, var(--text-soft)); }
-.desktop-settings .identity-panel h3 { margin: 10px 0 6px; font-size: var(--text-sm); font-weight: 600; }
-.desktop-settings .identity-panel ul { margin: 6px 0 0; font-size: var(--text-sm); line-height: 1.65; }
-.desktop-settings .identity-actions,
-.desktop-settings .identity-actions label { gap: 8px; }
-.desktop-settings .identity-actions select {
-  min-height: var(--control-compact);
-  padding: 5px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--fg, var(--text));
-  font-size: var(--text-sm);
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-.desktop-settings .wb-button { min-height: var(--control-compact); padding: 0 10px; font-size: var(--text-sm); }
-.desktop-settings .hint { color: var(--muted); font-size: var(--text-xs); }
-.desktop-settings .error, .desktop-empty .error { color: var(--danger-fg); }
+.desktop-empty .error { color: var(--danger-fg); }
 
 @media (max-height: 560px) {
   .desktop-history { padding: 8px 16px 10px; }
@@ -202,6 +188,9 @@ html, body, #root { height: 100%; overflow: hidden; }
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.desktop-personal-stage[hidden] {
+  display: none;
 }
 .desktop-offline-pill {
   display: inline-flex;

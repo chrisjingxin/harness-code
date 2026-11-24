@@ -45,10 +45,17 @@
   background: var(--action); color: var(--action-text); font-weight: 600;
 }
 .wb-button-secondary {
-  background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line);
+  background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong, var(--line));
+}
+.wb-button-soft {
+  background: var(--accent-tint); color: var(--accent-text, var(--accent)); font-weight: 600;
+}
+.wb-button-danger {
+  background: var(--surface); color: var(--danger-fg); box-shadow: inset 0 0 0 1px var(--danger-ring, var(--danger-tint));
 }
 .wb-button-quiet { color: var(--text-soft); }
 .wb-button-small { min-height: var(--control-compact); padding: 0 10px; font-size: var(--text-sm); }
+.wb-button-xs { min-height: 24px; padding: 0 8px; font-size: var(--text-2xs); }
 
 .wb-icon-button {
   width: 30px; height: 30px; padding: 0;
@@ -58,7 +65,13 @@
 .wb-icon-button svg { width: var(--icon-sm); height: var(--icon-sm); }
 
 .wb-button-secondary:hover:not(:disabled) {
-  background: var(--hover); color: var(--text); box-shadow: 0 0 0 1px var(--line-strong);
+  background: var(--hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.wb-button-soft:hover:not(:disabled) {
+  filter: brightness(.96);
+}
+.wb-button-danger:hover:not(:disabled) {
+  background: var(--danger-tint); color: var(--danger-fg);
 }
 .wb-button-quiet:hover:not(:disabled),
 .wb-icon-button:hover:not(:disabled) {
@@ -70,8 +83,25 @@
 .wb-button-primary:hover:not(:disabled) {
   background: var(--action-hover); color: var(--action-text);
 }
-.wb-button:active:not(:disabled), .wb-icon-button:active:not(:disabled) { transform: scale(.98); }
+.wb-button:active:not(:disabled), .wb-icon-button:active:not(:disabled) { transform: scale(.97); }
 .wb-button:disabled, .wb-icon-button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 统一 Status Badge（延续 Harness Code 克制轻底 + 细框） */
+.hui-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px; border-radius: var(--radius-pill);
+  font-size: var(--text-xs); font-weight: 500; line-height: 1; white-space: nowrap;
+  background: var(--surface-2); color: var(--fg-2); box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.hui-badge[data-size="xs"] { height: 20px; padding: 0 7px; font-size: 11px; }
+.hui-badge[data-tone="accent"]  { background: var(--accent-tint); color: var(--accent-text, var(--accent)); box-shadow: inset 0 0 0 1px var(--accent-ring, var(--accent-border)); }
+.hui-badge[data-tone="info"]    { background: var(--info-tint); color: var(--info-fg); box-shadow: inset 0 0 0 1px var(--info-ring); }
+.hui-badge[data-tone="success"] { background: var(--success-tint); color: var(--success-fg); box-shadow: inset 0 0 0 1px var(--success-ring); }
+.hui-badge[data-tone="warn"]    { background: var(--warn-tint); color: var(--warn-fg); box-shadow: inset 0 0 0 1px var(--warn-ring); }
+.hui-badge[data-tone="danger"]  { background: var(--danger-tint); color: var(--danger-fg); box-shadow: inset 0 0 0 1px var(--danger-ring); }
+.hui-badge[data-tone="muted"]   { background: var(--surface-2); color: var(--meta); box-shadow: inset 0 0 0 1px var(--border-soft); }
+.hui-badge.mono { font-family: var(--font-mono); font-size: 11px; }
+.hui-lamp { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent); }
 
 /* 公共分段切换器 */
 .wb-seg {

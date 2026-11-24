@@ -1,8 +1,9 @@
 /**
- * 会话顶部元信息芯片栏（对齐方案 B 原型 `.c4-chat-head` / `sessionMeta`）：
+ * 会话顶部元信息芯片栏（对齐方案 B 原型 `.c4-chat-head` / `.hui-badge`）：
  * 左侧展示当前共享状态（仅本机 / 已停止同步 / Project 可见与档位）；
  * 右侧提供「发布到 Project…」与「停止共享」动作入口（个人会话不展示团队切换器）。
  */
+import { IconLock } from "@tabler/icons-react"
 import type { ReactElement } from "react"
 import type { ConversationShareMode } from "@workbench/collaboration-client/types"
 import type { LocalConversationShareStatus } from "../../../shared/index.js"
@@ -32,6 +33,7 @@ export function SessionMetaHeader({
       ? "已停止同步 · 仅本机保留"
       : "仅本机"
 
+  const badgeTone = shareStatus === "active" ? "accent" : shareStatus === "stopped" ? "warn" : "muted"
   const publishDisabled = offline || !hasPublishableTeams
   const publishDisabledTitle = offline
     ? "离线状态暂不可发布到团队 Project"
@@ -43,10 +45,15 @@ export function SessionMetaHeader({
     <div className="psess-chat-head" role="region" aria-label="会话上下文与共享状态">
       <div className="psess-meta-chips">
         <span
-          className={`psess-chip${shareStatus === "active" ? " is-shared" : shareStatus === "stopped" ? " is-stopped" : ""}`}
+          className="hui-badge"
+          data-tone={badgeTone}
+          data-size="xs"
           title={visibilityLabel}
         >
-          {visibilityLabel}
+          {shareStatus === "active"
+            ? <span className="hui-lamp" aria-hidden="true" />
+            : <IconLock size={11} aria-hidden="true" />}
+          <span>{visibilityLabel}</span>
         </span>
       </div>
 
@@ -54,7 +61,7 @@ export function SessionMetaHeader({
         {shareStatus === "active" && onOpenStopSharing && (
           <button
             type="button"
-            className="wb-button wb-button-secondary wb-button-small"
+            className="wb-button wb-button-secondary wb-button-xs"
             disabled={offline}
             title={offline ? "离线状态暂不可操作云端停止共享" : "停止同步此会话的新内容"}
             onClick={onOpenStopSharing}
@@ -65,7 +72,7 @@ export function SessionMetaHeader({
         {shareStatus === "local_only" && onOpenPublish && (
           <button
             type="button"
-            className="wb-button wb-button-secondary wb-button-small"
+            className="wb-button wb-button-soft wb-button-xs"
             disabled={publishDisabled}
             title={publishDisabledTitle}
             onClick={onOpenPublish}

@@ -1,4 +1,4 @@
-/* 个人优先双轨模式样式（对齐方案 B `.c4-chat-head`、`.c4-chip`、预检卡与发布/停止共享弹窗）。 */
+/* 个人优先双轨模式样式（对齐原型 `.c4-chat-head`、`.hui-badge`、预检卡与发布/停止共享弹窗）。 */
 
 .psess-chat-head {
   flex: 0 0 auto;
@@ -7,9 +7,9 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
-  padding: 6px 24px;
-  background: var(--bg);
-  box-shadow: inset 0 -1px 0 var(--line-soft);
+  padding: 8px 20px;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
 }
 .psess-meta-chips {
   display: flex;
@@ -17,28 +17,6 @@
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-}
-.psess-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  min-height: 24px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--fg-2, var(--text-soft));
-  font-size: var(--text-xs);
-  line-height: 1.4;
-}
-.psess-chip.is-shared {
-  background: var(--accent-tint);
-  color: var(--accent-text, var(--accent));
-  font-weight: 500;
-}
-.psess-chip.is-stopped {
-  background: var(--warn-tint, rgba(217, 119, 6, 0.12));
-  color: var(--warn-fg, #92400e);
 }
 .psess-head-actions {
   display: flex;
@@ -51,19 +29,19 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   padding: 10px 12px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg, 10px);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border, var(--line)));
   font-size: var(--text-sm);
 }
 .psess-preflight.is-loading,
 .psess-preflight.is-ready {
   flex-direction: row;
   align-items: center;
-  padding: 7px 12px;
-  color: var(--text-soft);
+  padding: 8px 12px;
+  color: var(--fg-2, var(--text-soft));
 }
 .psess-preflight.is-ready > svg {
   color: var(--success-fg, #15803d);
@@ -88,8 +66,8 @@
   color: var(--text);
 }
 .psess-preflight.is-blocked {
-  background: color-mix(in srgb, var(--warn-tint, rgba(217, 119, 6, 0.12)) 55%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #d97706) 35%, var(--line));
+  background: color-mix(in srgb, var(--warn-tint, rgba(217, 119, 6, 0.12)) 48%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--warn-ring, color-mix(in srgb, var(--warn, #d97706) 35%, var(--line)));
 }
 .psess-preflight-head {
   display: flex;

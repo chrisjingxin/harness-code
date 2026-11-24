@@ -17,7 +17,7 @@ export interface ProjectUpdateTargets {
 export function useProjectUpdates(
   host: ProjectUpdatesHost | undefined,
   accountId: string,
-  workspaceId: string,
+  workspaceId: string | null,
   targets: ProjectUpdateTargets,
 ): ProjectUpdatesStatus {
   const [status, setStatus] = useState<ProjectUpdatesStatus>("connecting")
@@ -25,7 +25,7 @@ export function useProjectUpdates(
   useLayoutEffect(() => { currentTargets.current = targets }, [targets])
 
   useLayoutEffect(() => {
-    if (!host) { setStatus("unavailable"); return }
+    if (!host || !workspaceId) { setStatus("unavailable"); return }
     const subscriptionId = crypto.randomUUID()
     let current = true
     let batch: NotificationEvent[] = []

@@ -19,8 +19,10 @@
   --text-soft: #3f3f46;
   --muted: #55555d;
   --subtle: #5e5e66;
-  --accent-text: var(--accent-fg);
+  --rail-surface: #f4f4f6;
+  --sidebar-surface: #f4f4f6;
   --accent-tint: color-mix(in srgb, var(--accent) 6%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 22%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 6%, var(--surface));
   --accent-soft-2: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --accent-border: color-mix(in srgb, var(--accent) 26%, var(--surface));
@@ -28,15 +30,23 @@
   --action: var(--accent);
   --action-hover: var(--accent-hover);
   --action-text: var(--accent-fg);
+  --info: #2b59e8;
+  --info-fg: #1e44b8;
+  --info-tint: rgba(43, 89, 232, .08);
+  --info-ring: rgba(43, 89, 232, .20);
   --success: #15803d;
   --success-fg: #166534;
   --success-tint: rgba(21, 128, 61, .10);
+  --success-ring: rgba(21, 128, 61, .22);
   --warning: #b45309;
   --warning-fg: #92400e;
   --warning-tint: rgba(180, 83, 9, .10);
+  --warning-ring: rgba(180, 83, 9, .22);
+  --warn-ring: rgba(180, 83, 9, .22);
   --danger: #b91c1c;
   --danger-fg: #b91c1c;
   --danger-tint: rgba(220, 38, 38, .10);
+  --danger-ring: rgba(220, 38, 38, .22);
   /* 鲜亮 danger：只给停止按钮等图形化中断动作（文字仍用 --danger 保证对比度）。 */
   --danger-vivid: #dc2626;
   --danger-soft: rgba(220, 38, 38, .08);
@@ -81,6 +91,8 @@
   --elev-ring: 0 0 0 1px var(--line);
   --elev-raised: 0 0 0 1px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04), 0 6px 12px -8px rgba(0, 0, 0, .06);
   --elev-pop: 0 0 0 1px rgba(0, 0, 0, .08), 0 12px 32px -12px rgba(0, 0, 0, .28), 0 2px 6px rgba(0, 0, 0, .06);
+  --panel-shadow: 0 1px 2px rgba(0, 0, 0, .03), 0 0 0 1px var(--border);
+  --popover-shadow: 0 0 0 1px var(--border), 0 12px 32px -12px rgba(0, 0, 0, .16), 0 2px 6px rgba(0, 0, 0, .04);
   --shadow: var(--elev-pop);
   --shadow-float: var(--elev-raised);
 
@@ -134,8 +146,10 @@
   --text-soft: #b4b4bc;
   --muted: #9898a2;
   --subtle: #9797a2;
-  --accent-text: var(--accent-fg);
+  --rail-surface: #121216;
+  --sidebar-surface: #141418;
   --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 28%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 8%, var(--surface));
   --accent-soft-2: color-mix(in srgb, var(--accent) 18%, var(--surface));
   --accent-border: color-mix(in srgb, var(--accent) 28%, var(--surface));
@@ -143,15 +157,23 @@
   --action: var(--accent);
   --action-hover: var(--accent-hover);
   --action-text: var(--accent-fg);
+  --info: #8aa8ee;
+  --info-fg: #a6bef5;
+  --info-tint: rgba(138, 168, 238, .13);
+  --info-ring: rgba(138, 168, 238, .24);
   --success: #4ade80;
   --success-fg: #86efac;
   --success-tint: rgba(74, 222, 128, .14);
+  --success-ring: rgba(52, 211, 153, .24);
   --warning: #f59e0b;
   --warning-fg: #fcd34d;
   --warning-tint: rgba(245, 158, 11, .14);
+  --warning-ring: rgba(251, 191, 36, .24);
+  --warn-ring: rgba(251, 191, 36, .24);
   --danger: #f87171;
   --danger-fg: #fca5a5;
   --danger-tint: rgba(248, 113, 113, .14);
+  --danger-ring: rgba(248, 113, 113, .25);
   --danger-vivid: #f87171;
   --danger-soft: rgba(248, 113, 113, .12);
   --chrome: var(--surface);
@@ -195,6 +217,8 @@
   --elev-ring: 0 0 0 1px var(--line);
   --elev-raised: 0 0 0 1px rgba(255, 255, 255, .09), 0 2px 4px rgba(0, 0, 0, .32);
   --elev-pop: 0 0 0 1px rgba(255, 255, 255, .12), 0 16px 40px -12px rgba(0, 0, 0, .72);
+  --panel-shadow: 0 1px 3px rgba(0, 0, 0, .24), 0 0 0 1px var(--border);
+  --popover-shadow: 0 0 0 1px var(--border-strong), 0 16px 38px -12px rgba(0, 0, 0, .68);
   --shadow: var(--elev-pop);
   --shadow-float: var(--elev-raised);
 

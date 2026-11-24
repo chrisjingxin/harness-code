@@ -46,38 +46,156 @@ export function TeamSettings({ host, organization, workspace, accountId }: Props
   }
   const candidates = members.filter(m => m.status === "active" && m.enabled)
   const displayName = (id: string) => members.find(m => m.user.id === id)?.user.userName ?? "成员"
-  return <section className="team-settings" aria-labelledby="team-settings-title">
-    <div className="identity-actions"><h2 id="team-settings-title">团队设置 · {workspace.name}</h2>
-      <button className="wb-button wb-button-secondary" disabled={busy} onClick={() => setRevision(v => v + 1)}>刷新团队</button></div>
-    <p>{admin ? "管理员可管理成员、角色与仓库负责人。" : "开发者可查看团队成员与知识。团队知识由管理员发布，可联系管理员维护。"}</p>
-    {notice && <p className="error" role="alert">{notice}</p>}
-    {!ready ? <p role="status">{notice ? "团队设置未能读取。" : "正在读取团队设置…"}</p> : <>
-      {admin && <form className="identity-actions" onSubmit={event => { event.preventDefault(); void change(() => host.addWorkspaceMember(workspace.id, { userNo: userNo.trim(), requestId: crypto.randomUUID() })) }}>
-        <label>成员工号<input aria-label="成员工号" value={userNo} onChange={e => setUserNo(e.target.value)} disabled={busy} /></label>
-        <button className="wb-button wb-button-secondary" disabled={busy || !userNo.trim()}>添加开发者</button>
-      </form>}
-      <table className="team-settings-table"><thead><tr><th>成员</th><th>角色</th><th>状态</th>{admin && <th>操作</th>}</tr></thead><tbody>
-        {members.map(m => {
-          const last = m.role === "admin" && m.status === "active" && m.enabled && admins === 1
-          return <tr key={m.user.id}><td>{m.user.userName}{m.user.id === accountId ? "（本人）" : ""}<small>{m.user.userNo}</small></td>
-            <td>{admin && m.status === "active" && m.enabled ? <select aria-label={`${m.user.userName}的团队角色`} value={m.role} disabled={busy || last} title={last ? "团队至少需要一名有效管理员" : undefined}
-              onChange={e => { const role = e.target.value; if (role !== "admin" && role !== "developer") return; void change(() => host.changeWorkspaceRole(workspace.id, m.user.id, { role, expectedVersion: m.version, requestId: crypto.randomUUID() })) }}>
-              <option value="admin">管理员</option><option value="developer">开发者</option></select> : m.role === "admin" ? "管理员" : "开发者"}</td>
-            <td>{m.status === "removed" ? "原成员已离开" : !m.enabled ? "账号已停用" : "在册"}{last && <small>最后一名有效管理员</small>}</td>
-            {admin && <td>{m.status === "active" && <button className="wb-button wb-button-quiet" disabled={busy || last} title={last ? "请先设置另一名管理员" : undefined} onClick={() => setTarget(m)}>移除与交接</button>}</td>}</tr>
-        })}</tbody></table>
-      <h3>团队仓库</h3>
-      <p>负责人是团队内的协作职责，不改变 Git 仓库访问权限。</p>
-      {admin && <form className="identity-actions" onSubmit={event => { event.preventDefault(); void change(() => organization.createRepository(workspace.id, { name: name.trim(), remoteUrl: remoteUrl.trim(), requestId: crypto.randomUUID() })) }}>
-        <label>仓库名称<input aria-label="仓库名称" value={name} onChange={e => setName(e.target.value)} /></label>
-        <label>远端地址<input aria-label="仓库远端地址" value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} /></label>
-        <button className="wb-button wb-button-secondary" disabled={busy || !name.trim() || !remoteUrl.trim()}>登记仓库</button></form>}
-      {repositories.length ? <ul className="team-repositories">{repositories.map(r => <li key={r.repositoryId}><span>{r.name}{r.status === "archived" ? "（已归档）" : ""}</span>
-        {admin && r.status === "active" ? <select aria-label={`${r.name}的负责人`} value={r.ownerUserId ?? ""} disabled={busy} onChange={e => { const ownerUserId = e.target.value || null; void change(() => organization.updateRepository(workspace.id, r.repositoryId, { ownerUserId, expectedVersion: r.version })) }}>
-          <option value="">待认领</option>{candidates.map(m => <option key={m.user.id} value={m.user.id}>{m.user.userName}</option>)}</select> : <span>{r.ownerUserId ? displayName(r.ownerUserId) : "待认领"}</span>}</li>)}</ul> : <p>尚未登记仓库。</p>}
-    </>}
+  return <div className="team-settings" aria-labelledby="team-settings-title">
+    <section className="panel team-panel">
+      <div className="panel-head">
+        <div>
+          <h2 id="team-settings-title">成员与权限 · {workspace.name}</h2>
+          <p className="team-panel-sub">
+            {admin ? "管理员可添加成员、调整角色与发起离职交接（受最后一名有效管理员保护）。" : "开发者可查看团队成员与知识；成员与角色由管理员维护。"}
+          </p>
+        </div>
+        <div className="team-head-meta">
+          <span className="hui-badge" data-tone={admin ? "accent" : "neutral"} data-size="xs">
+            {admin ? "管理员" : "开发者"}
+          </span>
+          <button type="button" className="wb-button wb-button-secondary wb-button-xs" disabled={busy} onClick={() => setRevision(v => v + 1)}>
+            刷新团队
+          </button>
+        </div>
+      </div>
+
+      {notice && <p className="error team-notice" role="alert">{notice}</p>}
+
+      {!ready ? (
+        <p className="team-panel-sub" role="status">{notice ? "团队设置未能读取。" : "正在读取团队设置…"}</p>
+      ) : (
+        <>
+          {admin && (
+            <form className="team-inline-form" onSubmit={event => { event.preventDefault(); void change(() => host.addWorkspaceMember(workspace.id, { userNo: userNo.trim(), requestId: crypto.randomUUID() })) }}>
+              <label>成员工号<input aria-label="成员工号" placeholder="输入工号" value={userNo} onChange={e => setUserNo(e.target.value)} disabled={busy} /></label>
+              <button type="submit" className="wb-button wb-button-secondary wb-button-small" disabled={busy || !userNo.trim()}>添加开发者</button>
+            </form>
+          )}
+          <div className="team-table-wrap">
+            <table className="team-settings-table">
+              <thead><tr><th>成员</th><th>角色</th><th>状态</th>{admin && <th>操作</th>}</tr></thead>
+              <tbody>
+                {members.map(m => {
+                  const last = m.role === "admin" && m.status === "active" && m.enabled && admins === 1
+                  const statusTone = m.status === "removed" ? "muted" : !m.enabled ? "warn" : "success"
+                  const statusLabel = m.status === "removed" ? "原成员已离开" : !m.enabled ? "账号已停用" : "在册"
+                  return (
+                    <tr key={m.user.id}>
+                      <td>
+                        <div className="team-member-cell">
+                          <span>{m.user.userName}</span>
+                          {m.user.id === accountId && <span className="hui-badge" data-tone="accent" data-size="xs">本人</span>}
+                        </div>
+                        <small>{m.user.userNo}</small>
+                      </td>
+                      <td>
+                        {admin && m.status === "active" && m.enabled ? (
+                          <select
+                            aria-label={`${m.user.userName}的团队角色`}
+                            value={m.role}
+                            disabled={busy || last}
+                            title={last ? "团队至少需要一名有效管理员" : undefined}
+                            onChange={e => { const role = e.target.value; if (role !== "admin" && role !== "developer") return; void change(() => host.changeWorkspaceRole(workspace.id, m.user.id, { role, expectedVersion: m.version, requestId: crypto.randomUUID() })) }}
+                          >
+                            <option value="admin">管理员</option>
+                            <option value="developer">开发者</option>
+                          </select>
+                        ) : (
+                          <span className="hui-badge" data-tone={m.role === "admin" ? "accent" : "neutral"} data-size="xs">
+                            {m.role === "admin" ? "管理员" : "开发者"}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="team-status-cell">
+                          <span className="hui-badge" data-tone={statusTone} data-size="xs">{statusLabel}</span>
+                          {last && <small>最后一名有效管理员</small>}
+                        </div>
+                      </td>
+                      {admin && (
+                        <td>
+                          {m.status === "active" && (
+                            <button
+                              type="button"
+                              className="wb-button wb-button-danger wb-button-xs"
+                              disabled={busy || last}
+                              title={last ? "请先设置另一名管理员" : undefined}
+                              onClick={() => setTarget(m)}
+                            >
+                              移除与交接
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+
+    <section className="panel team-panel">
+      <div className="panel-head">
+        <div>
+          <h3>团队仓库</h3>
+          <p className="team-panel-sub">负责人是团队内的协作职责，不改变 Git 仓库访问权限。</p>
+        </div>
+        {ready && <span className="hui-badge" data-tone="muted" data-size="xs">{repositories.length} 个仓库</span>}
+      </div>
+
+      {ready && (
+        <>
+          {admin && (
+            <form className="team-inline-form" onSubmit={event => { event.preventDefault(); void change(() => organization.createRepository(workspace.id, { name: name.trim(), remoteUrl: remoteUrl.trim(), requestId: crypto.randomUUID() })) }}>
+              <label>仓库名称<input aria-label="仓库名称" placeholder="例如 harness-code" value={name} onChange={e => setName(e.target.value)} /></label>
+              <label>远端地址<input aria-label="仓库远端地址" placeholder="https://git..." value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} /></label>
+              <button type="submit" className="wb-button wb-button-secondary wb-button-small" disabled={busy || !name.trim() || !remoteUrl.trim()}>登记仓库</button>
+            </form>
+          )}
+          {repositories.length ? (
+            <ul className="team-repositories">
+              {repositories.map(r => (
+                <li key={r.repositoryId}>
+                  <div className="team-repo-info">
+                    <span className="team-repo-name">{r.name}</span>
+                    {r.status === "archived" && <span className="hui-badge" data-tone="muted" data-size="xs">已归档</span>}
+                  </div>
+                  {admin && r.status === "active" ? (
+                    <select
+                      aria-label={`${r.name}的负责人`}
+                      value={r.ownerUserId ?? ""}
+                      disabled={busy}
+                      onChange={e => { const ownerUserId = e.target.value || null; void change(() => organization.updateRepository(workspace.id, r.repositoryId, { ownerUserId, expectedVersion: r.version })) }}
+                    >
+                      <option value="">待认领</option>
+                      {candidates.map(m => <option key={m.user.id} value={m.user.id}>{m.user.userName}</option>)}
+                    </select>
+                  ) : (
+                    <span className="hui-badge" data-tone={r.ownerUserId ? "neutral" : "warn"} data-size="xs">
+                      {r.ownerUserId ? displayName(r.ownerUserId) : "待认领"}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="team-panel-sub">尚未登记仓库。</p>
+          )}
+        </>
+      )}
+    </section>
+
     {target && admin && <RemovalDialog key={`${target.user.id}:${workspace.accessVersion}`} {...{ host, workspace, members, target }} onClose={() => setTarget(null)} onRemoved={() => { setTarget(null); setRevision(v => v + 1) }} />}
-  </section>
+  </div>
 }
 
 function itemName(item: WorkspaceRemovalItem) { return item.kind === "task" ? item.title : item.name }

@@ -1,0 +1,146 @@
+/* 1200px 居中管理台与 .panel 卡片排版（HC-255 停点 2） */
+.admin-stage {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--pad-stage, 24px);
+  background: var(--bg);
+}
+
+.page-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  margin: 0;
+  font-size: var(--text-xl, 18px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--fg, var(--text));
+  line-height: 1.3;
+}
+.page-head p {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.panel {
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--panel-shadow, inset 0 0 0 1px var(--border, var(--line)));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: var(--text-md, 15px);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+}
+
+.admin-panel-desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.admin-empty-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 账号面板复用在独立设置卡片内的紧凑层次 */
+.admin-panel .identity-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}
+.admin-panel .identity-heading { gap: 4px 10px; margin-bottom: 8px; }
+.admin-panel .identity-heading h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg, var(--text)); }
+.admin-panel .identity-panel p { margin: 6px 0; font-size: var(--text-sm); line-height: 1.6; color: var(--fg-2, var(--text-soft)); }
+.admin-panel .identity-panel h3 { margin: 10px 0 6px; font-size: var(--text-sm); font-weight: 600; }
+.admin-panel .identity-actions,
+.admin-panel .identity-actions label { gap: 8px; }
+.admin-panel .identity-actions select {
+  min-height: var(--control-compact);
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-size: var(--text-sm);
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}
+
+/* DirectoryMemory 在管理台独立承载时的表单整齐排列 */
+.admin-memory-host .conversation-reference-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+.admin-memory-host .conversation-reference-targets legend {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  padding: 0 4px;
+}
+.admin-memory-host .conversation-reference-targets p {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.admin-memory-host .conversation-reference-targets label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--fg-2, var(--text-soft));
+}
+.admin-memory-host .conversation-reference-targets select,
+.admin-memory-host .conversation-reference-targets input {
+  min-height: var(--control-compact);
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+}

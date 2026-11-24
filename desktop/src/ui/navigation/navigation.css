@@ -8,12 +8,16 @@
   flex-direction: column;
   padding: 4px 10px 8px;
   gap: 6px;
-  background: var(--sidebar-bg);
+  background: var(--sidebar-surface, var(--sidebar-bg));
   color: var(--text);
   font-size: var(--text-base);
   line-height: 1.4;
 }
-.project-navigation > :not(.my-sessions) { flex-shrink: 0; }
+.project-navigation[data-dual="true"] {
+  padding: 0;
+  gap: 0;
+}
+.project-navigation > :not(.my-sessions):not(.sb-scroll) { flex-shrink: 0; }
 :where(.project-navigation) button,
 :where(.project-navigation) input { font: inherit; color: inherit; }
 .project-navigation button { cursor: pointer; }
@@ -474,3 +478,271 @@
   padding: 4px 8px; font-size: var(--text-xs); font-weight: 600; color: var(--muted);
 }
 .pnav-peer-head .n { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-2xs); }
+
+/* ─── HC-255 停点 2：304px 双模次级侧栏（工作台 + 管理模式）与跨轨 row-land 动效 ─── */
+.sb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--topbar-h, 48px);
+  padding: 0 12px 0 14px;
+  flex: none;
+  box-shadow: inset 0 -1px 0 var(--border-soft, var(--line-soft));
+}
+.sb-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-seg-wrap {
+  padding: 10px 10px 2px;
+  flex: none;
+}
+.sb-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+.sb-seg button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.sb-seg button:hover { color: var(--fg, var(--text)); }
+.sb-seg button.is-active {
+  background: var(--surface);
+  color: var(--fg, var(--text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--border-soft, var(--line-soft));
+}
+.sb-seg button.is-active .od-icon { color: var(--accent-text); }
+.sb-seg .seg-count { font-family: var(--font-mono); font-size: 11px; color: var(--meta); font-variant-numeric: tabular-nums; }
+.sb-seg .sp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+
+.sb-actions-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  flex: none;
+}
+.sb-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sb-actions .pnav-new { flex: 1 1 auto; }
+.sb-actions .sb-search-btn {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border, var(--line));
+}
+.sb-filter-wrap { flex: none; }
+
+.project-navigation[data-dual="true"] .my-sessions {
+  padding-top: 0;
+  margin-top: 0;
+  box-shadow: none;
+}
+.project-navigation[data-dual="true"] .pnav-team-empty {
+  padding: 12px 10px;
+}
+
+.sb-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 14px;
+  scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+}
+
+.sb-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 4px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--meta);
+}
+.sb-block-head .sb-block-act { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.ws-pill-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  margin: 4px 0 6px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  text-align: left;
+  box-shadow: inset 0 0 0 1px var(--border, var(--line));
+  transition: background var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+}
+.ws-pill-btn:hover:not(:disabled) {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong, var(--line-strong));
+}
+.ws-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--accent);
+}
+.ws-pill-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg, var(--text));
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-pill-role {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--meta);
+}
+.ws-pill-btn .chev { color: var(--meta); flex: none; }
+
+.grp-head .chev {
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.grp-head.is-closed .chev {
+  transform: rotate(-90deg);
+}
+
+/* CSS Grid 0fr → 1fr 局部折叠：避免测量 DOM 高度造成抖动 */
+.grp-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 190ms var(--ease-flow), opacity 150ms var(--ease-standard);
+}
+.grp-collapse[data-open="0"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+.grp-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sr-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 12px;
+}
+.sr-top .sess-title {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-right: 0;
+}
+.sess-me-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.6;
+  font-weight: 600;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+/* 跨轨落位（个人会话发布 / 停止共享回流）唯一焦点 750ms 脉冲高亮 */
+.sess-item.is-landing {
+  animation: row-land 750ms var(--ease-flow);
+}
+@keyframes row-land {
+  0% {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent-ring);
+  }
+  100% {
+    background: var(--selected);
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+/* 管理模式次级侧栏分组菜单（复用给 AdminSidebar） */
+.nav-group-label {
+  padding: 12px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--meta);
+}
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2, var(--text-soft));
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.nav-item:hover:not(:disabled) { background: var(--hover); color: var(--fg, var(--text)); }
+.nav-item.is-active { background: var(--selected); color: var(--fg, var(--text)); font-weight: 600; }
+.nav-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.nav-item .nav-label {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grp-collapse { transition: opacity 120ms linear; }
+  .grp-head .chev { transition: none; }
+  /* 减弱动态效果时取消脉冲闪烁，仍保留清晰的边框/底色状态确认 */
+  .sess-item.is-landing {
+    animation: none;
+    background: var(--accent-tint);
+    box-shadow: inset 0 0 0 1px var(--accent-ring);
+  }
+}

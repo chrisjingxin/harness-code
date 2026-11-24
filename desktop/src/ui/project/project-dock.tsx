@@ -82,7 +82,14 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
         <button type="button" role="tab" id={`${uid}-changes-tab`} aria-controls={`${uid}-changes-panel`} aria-selected={panel === "changes"}
           tabIndex={panel === "changes" ? 0 : -1} data-panel="changes" className={panel === "changes" ? "project-dock-tab is-selected" : "project-dock-tab"}
           onClick={() => actions.selectPanel(scope, "changes")}><IconGitBranch size={14} aria-hidden="true" />变更
-          {showChanges && changes.repository ? <span className="project-git-count">{changes.repository.files.length}</span> : null}
+          {showChanges && changes.repository ? (
+            <span
+              className="project-git-count"
+              data-has-changes={changes.repository.files.length > 0 ? "true" : undefined}
+            >
+              {changes.repository.files.length}
+            </span>
+          ) : null}
         </button>
       </div>
       <button type="button" className="wb-icon-button project-dock-close" aria-label="关闭右侧面板" title="关闭右栏"

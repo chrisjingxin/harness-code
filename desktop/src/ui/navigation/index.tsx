@@ -12,21 +12,23 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconDots,
+  IconFolder,
   IconInbox,
   IconLayoutGrid,
   IconListCheck,
   IconLock,
-  IconMessageCircle,
   IconPencil,
   IconPlus,
   IconRefresh,
   IconSearch,
   IconSettings,
   IconUpload,
+  IconUser,
   IconUsers,
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { safeAvatarUrl } from "../common/avatar.js";
 import type { NavigationMemberGroup, NavigationSessionEntry } from "./members.js";
 import {
   RenameSessionDialog,
@@ -117,12 +119,14 @@ export type ProjectNavigationView = {
   knowledgeCount?: number | null;
   /** 双轨工作台当前空间；未传入时退回原有单栏项目导航以兼容组件预览。 */
   activeSpace?: NavigationSpaceKind;
+  workspaceRoleLabel?: string | null;
   hasTeamUpdates?: boolean;
   offline?: boolean;
   canPublishPersonal?: boolean;
   personalGroups?: readonly PersonalNavigationDirectoryGroup[];
   personalSearch?: string;
   selectedPersonalConversationId?: string | null;
+  landingConversationId?: string | null;
   publishedSessionCount?: number;
   /** 跨空间全局收件箱状态。 */
   inbox?: NavigationInboxView;
@@ -183,32 +187,6 @@ function Status({ value, area, actions }: { value: NavigationAvailability; area:
   );
 }
 
-const SAFE_DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
-
-function safeAvatarUrl(photo?: string | null): string | null {
-  if (!photo) return null;
-  if (SAFE_DATA_IMAGE_RE.test(photo)) return photo;
-  if (
-    (photo.startsWith("/") && !photo.startsWith("//"))
-    || photo.startsWith("./")
-    || photo.startsWith("../")
-    || photo.startsWith("assets/")
-  ) {
-    return photo;
-  }
-  try {
-    const url = new URL(photo);
-    return url.protocol === "https:"
-      || url.protocol === "http:"
-      || url.protocol === "file:"
-      || url.protocol === "blob:"
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 /** 成员圆形头像：支持安全远程链接、站内静态路径及打包内联位图，加载失败自动回退到姓名首字。 */
 export function MemberAvatar({
   initial,
@@ -236,8 +214,8 @@ export function MemberAvatar({
   );
 }
 
-/** Workspace 切换器（头像堆叠 + Workspace 名称 + 成员数 + 下拉切换）。 */
-function WorkspaceSwitch({ view, actions }: ProjectNavigationProps) {
+/** Workspace 切换器：双轨模式渲染原型 .ws-pill-btn 胶囊，传统单栏预览保持成员头像堆叠风格。 */
+function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & { dualTrack: boolean }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -277,34 +255,51 @@ function WorkspaceSwitch({ view, actions }: ProjectNavigationProps) {
 
   return (
     <div className="pnav-switcher" ref={root}>
-      <button
-        ref={trigger}
-        type="button"
-        className="switch-btn pnav-ws-switch"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        disabled={!view.workspaceName}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {memberAvatars.length > 0 ? (
-          <span className="av-stack">
-            {memberAvatars.map((m, idx) => (
-              <MemberAvatar key={idx} initial={m.initial} photo={m.photo} self={m.self} size={22} />
-            ))}
-          </span>
-        ) : (
-          <MemberAvatar initial={(view.workspaceName ?? "W").slice(0, 1)} self size={22} />
-        )}
-        <span className="switch-txt">
-          <span className="switch-name od-truncate">{view.workspaceName ?? "未选择团队"}</span>
-          <span className="switch-sub">
-            <span className="od-truncate">
-              Workspace{memberCount ? ` · ${memberCount} 人` : ""}
+      {dualTrack ? (
+        <button
+          ref={trigger}
+          type="button"
+          className="ws-pill-btn"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={!view.workspaceName}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="ws-dot" aria-hidden="true" />
+          <span className="ws-pill-name">{view.workspaceName ?? "未选择团队"}</span>
+          {view.workspaceRoleLabel && <span className="ws-pill-role">{view.workspaceRoleLabel}</span>}
+          <IconChevronDown size={12} className="chev" aria-hidden="true" />
+        </button>
+      ) : (
+        <button
+          ref={trigger}
+          type="button"
+          className="switch-btn pnav-ws-switch"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={!view.workspaceName}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {memberAvatars.length > 0 ? (
+            <span className="av-stack">
+              {memberAvatars.map((m, idx) => (
+                <MemberAvatar key={idx} initial={m.initial} photo={m.photo} self={m.self} size={22} />
+              ))}
+            </span>
+          ) : (
+            <MemberAvatar initial={(view.workspaceName ?? "W").slice(0, 1)} self size={22} />
+          )}
+          <span className="switch-txt">
+            <span className="switch-name od-truncate">{view.workspaceName ?? "未选择团队"}</span>
+            <span className="switch-sub">
+              <span className="od-truncate">
+                Workspace{memberCount ? ` · ${memberCount} 人` : ""}
+              </span>
             </span>
           </span>
-        </span>
-        <IconChevronDown size={14} className="chev" aria-hidden="true" />
-      </button>
+          <IconChevronDown size={14} className="chev" aria-hidden="true" />
+        </button>
+      )}
 
       {open && workspaces.length > 0 && (
         <div className="pnav-menu" role="menu" aria-label="切换 Workspace">
@@ -462,14 +457,30 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
   );
 }
 
-function SessionRow({ entry, active, localDeviceName, select, canOpenMenu, onOpenMenu }: {
+function toBadgeTone(tone: "neutral" | "accent" | "warning" | "danger"): "neutral" | "accent" | "warn" | "danger" {
+  return tone === "warning" ? "warn" : tone;
+}
+
+function useScrollIntoViewOnLanding(ref: { current: HTMLButtonElement | null }, landing?: boolean) {
+  useEffect(() => {
+    if (!landing) return;
+    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    ref.current?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+  }, [landing, ref]);
+}
+
+function SessionRow({ entry, active, landing, showMeTag, localDeviceName, select, canOpenMenu, onOpenMenu }: {
   entry: NavigationSessionEntry;
   active: boolean;
+  landing?: boolean;
+  showMeTag?: boolean;
   localDeviceName?: string | null;
   select: ProjectNavigationActions["selectConversation"];
   canOpenMenu: boolean;
   onOpenMenu: (x: number, y: number) => void;
 }) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+  useScrollIntoViewOnLanding(rowRef, landing);
   const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
   const hasUnread = entry.badge?.tone === "accent" || entry.badge?.tone === "warning";
   const deviceLabel = isOtherDevice ? "其他设备 · 只读" : localDeviceName ? `本机 · ${localDeviceName}` : "本机";
@@ -484,19 +495,23 @@ function SessionRow({ entry, active, localDeviceName, select, canOpenMenu, onOpe
       } : undefined}
     >
       <button
+        ref={rowRef}
         type="button"
-        className={`sess-item pnav-session${active ? " is-active" : ""}`}
+        className={`sess-item pnav-session${active ? " is-active" : ""}${landing ? " is-landing" : ""}`}
         title={entry.title}
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => select(entry.conversationId)}
       >
-        <span className="sess-title pnav-ellipsis">{entry.title}</span>
+        <span className="sr-top">
+          {showMeTag && !isOtherDevice && <span className="sess-me-tag">我</span>}
+          <span className="sess-title pnav-ellipsis">{entry.title}</span>
+        </span>
         <span className="sess-meta">
           {isOtherDevice && <IconLock size={10} aria-hidden="true" />}
           <span className="line">{deviceLabel} · {entry.timeLabel}</span>
           {entry.badge && entry.badge.text !== "本机" && (
-            <span className={`pnav-row-badge is-${entry.badge.tone}`}>{entry.badge.text}</span>
+            <span className="hui-badge" data-tone={toBadgeTone(entry.badge.tone)} data-size="xs">{entry.badge.text}</span>
           )}
         </span>
         {hasUnread && <span className="unsync-dot" aria-label="有更新" />}
@@ -520,20 +535,25 @@ function SessionRow({ entry, active, localDeviceName, select, canOpenMenu, onOpe
   );
 }
 
-/** 个人空间左栏单条会话行（支持左键切换、右键 Codex 菜单与悬停更多按钮）。 */
+/** 个人空间左栏单条会话行（支持左键切换、右键 Codex 菜单、悬停更多按钮及跨轨落位脉冲）。 */
 function PersonalSessionRow({
   entry,
   active,
+  landing,
   select,
   canOpenMenu,
   onOpenMenu,
 }: {
   entry: NavigationPersonalEntry;
   active: boolean;
+  landing?: boolean;
   select?: (conversationId: string) => void;
   canOpenMenu: boolean;
   onOpenMenu: (x: number, y: number) => void;
 }) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+  useScrollIntoViewOnLanding(rowRef, landing);
+
   return (
     <div
       className="pnav-session-row"
@@ -544,18 +564,21 @@ function PersonalSessionRow({
       } : undefined}
     >
       <button
+        ref={rowRef}
         type="button"
-        className={`sess-item pnav-session${active ? " is-active" : ""}`}
+        className={`sess-item pnav-session${active ? " is-active" : ""}${landing ? " is-landing" : ""}`}
         title={entry.title}
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => select?.(entry.conversationId)}
       >
-        <span className="sess-title pnav-ellipsis">{entry.title}</span>
+        <span className="sr-top">
+          <span className="sess-title pnav-ellipsis">{entry.title}</span>
+        </span>
         <span className="sess-meta">
           {entry.status === "running" && <span className="sess-run" title="运行中" aria-label="运行中" />}
           {entry.shareStatus === "stopped" ? (
-            <span className="pnav-row-badge is-warning">已停止同步</span>
+            <span className="hui-badge" data-tone="warn" data-size="xs">已停止同步</span>
           ) : (
             <IconLock size={10} aria-hidden="true" />
           )}
@@ -602,7 +625,8 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   const selfGroup = view.groups.find((g) => g.self);
   const mySessions = selfGroup?.sessions ?? [];
   const peerGroups = view.groups.filter((g) => !g.self && g.sessions.length > 0);
-  const activeTeamSessionCount = mySessions.length + peerGroups.reduce((sum, g) => sum + g.sessions.length, 0);
+  const peerSessionCount = peerGroups.reduce((sum, g) => sum + g.sessions.length, 0);
+  const activeTeamSessionCount = mySessions.length + peerSessionCount;
   const inboxActive = Boolean(view.inbox?.active);
   const cloudActionCount = view.inbox?.cloudActionCount ?? 0;
   const localAttentionCount = view.inbox?.localAttentionCount ?? 0;
@@ -627,6 +651,26 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   useEffect(() => {
     setContextMenu(null);
   }, [activeSpace, view.currentWorkspaceId, view.currentProjectId]);
+
+  // 发布到 Project 或停止共享移回个人空间时，自动展开包含目标会话的目录/项目分组，让 row-land 脉冲可见。
+  useEffect(() => {
+    const landingId = view.landingConversationId;
+    if (!landingId) return;
+    const matchedDir = (view.personalGroups ?? []).find((group) =>
+      group.records.some((rec) => rec.conversationId === landingId),
+    );
+    if (matchedDir) {
+      setCollapsedDirs((prev) => (prev[matchedDir.directoryKey] ? { ...prev, [matchedDir.directoryKey]: false } : prev));
+    }
+    if (view.currentProjectId) {
+      const inCurrentProject = mySessions.some((entry) => entry.conversationId === landingId)
+        || peerGroups.some((group) => group.sessions.some((entry) => entry.conversationId === landingId));
+      if (inCurrentProject) {
+        const pid = view.currentProjectId;
+        setCollapsedProjects((prev) => (prev[pid] ? { ...prev, [pid]: false } : prev));
+      }
+    }
+  }, [view.landingConversationId, view.personalGroups, view.currentProjectId, mySessions, peerGroups]);
 
   useEffect(() => {
     if (actions.openCommandPalette || isPersonalSpace) return;
@@ -724,38 +768,48 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   }
 
   return (
-    <nav className="project-navigation" aria-label={isPersonalSpace ? "个人空间导航" : "项目导航"}>
-      {/* 0. 方案 B 双轨切换器（个人 | 团队） */}
+    <nav
+      className="project-navigation"
+      data-dual={dualTrack ? "true" : undefined}
+      aria-label={isPersonalSpace ? "个人空间导航" : "工作台导航"}
+    >
+      {/* 0. 双轨工作台页头与「个人 | 团队」分段切换（全局业务入口已上收至 56px AppRail） */}
       {dualTrack && (
-        <div className="sb-top">
-          <div className="space-sw-h" role="tablist" aria-label="切换工作区空间">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeSpace === "personal"}
-              className={activeSpace === "personal" ? "is-on" : ""}
-              onClick={() => actions.selectSpace?.("personal")}
-            >
-              <IconMessageCircle size={14} aria-hidden="true" />
-              <span>个人</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeSpace === "team"}
-              className={activeSpace === "team" ? "is-on" : ""}
-              onClick={() => actions.selectSpace?.("team")}
-            >
-              <IconUsers size={14} aria-hidden="true" />
-              <span>团队</span>
-              {view.hasTeamUpdates && <span className="sp-dot" title="队友会话有更新" />}
-            </button>
+        <>
+          <div className="sb-head">
+            <span className="sb-head-title">工作台</span>
           </div>
-        </div>
+          <div className="sb-seg-wrap">
+            <div className="sb-seg" role="tablist" aria-label="切换工作区空间">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSpace === "personal"}
+                className={activeSpace === "personal" ? "is-active" : ""}
+                onClick={() => actions.selectSpace?.("personal")}
+              >
+                <IconUser size={13} className="od-icon" aria-hidden="true" />
+                <span>个人</span>
+                {totalPersonalCount > 0 && <span className="seg-count">{totalPersonalCount}</span>}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSpace === "team"}
+                className={activeSpace === "team" ? "is-active" : ""}
+                onClick={() => actions.selectSpace?.("team")}
+              >
+                <IconUsers size={13} className="od-icon" aria-hidden="true" />
+                <span>团队</span>
+                {view.hasTeamUpdates && <span className="sp-dot" title="队友会话有更新" />}
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* 0.5 跨空间顶置全局收件箱入口（个人 | 团队双轨下始终可见，云端红点与本机提示绝不混算） */}
-      {view.inbox && actions.openInbox && (
+      {/* 传统单栏预览保留 Inbox 与全局业务入口（双轨模式由 56px AppRail 承担） */}
+      {!dualTrack && view.inbox && actions.openInbox && (
         <div className="sb-inbox-wrap">
           <button
             type="button"
@@ -794,8 +848,8 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
 
       {isPersonalSpace ? (
         <>
-          <div className="pnav-actions">
-            <div className="sb-cta-row">
+          <div className="sb-actions-wrap">
+            <div className="sb-actions">
               <button
                 type="button"
                 className="pnav-new"
@@ -805,7 +859,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 <IconPencil size={14} aria-hidden="true" />
                 <span>新建个人会话</span>
               </button>
-              {actions.openCommandPalette && view.workspaceName && !view.offline && (
+              {actions.openCommandPalette && (
                 <button
                   type="button"
                   className="pnav-icon-button sb-search-btn"
@@ -818,25 +872,27 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               )}
             </div>
             {actions.setPersonalSearch && (
-              <label className="pnav-search">
-                <IconSearch size={14} aria-hidden="true" />
-                <input
-                  aria-label="搜索个人会话"
-                  placeholder="搜索个人会话"
-                  value={view.personalSearch ?? ""}
-                  onChange={(event) => actions.setPersonalSearch?.(event.target.value)}
-                />
-              </label>
+              <div className="sb-filter-wrap">
+                <label className="pnav-search">
+                  <IconSearch size={14} aria-hidden="true" />
+                  <input
+                    aria-label="搜索个人会话"
+                    placeholder="过滤本机会话或目录"
+                    value={view.personalSearch ?? ""}
+                    onChange={(event) => actions.setPersonalSearch?.(event.target.value)}
+                  />
+                </label>
+              </div>
             )}
           </div>
 
           <div className="my-sessions" aria-label="个人会话">
-            <div className="sb-sec-head">
-              <span className="label">个人会话</span>
-              {totalPersonalCount > 0 && <span className="count">{totalPersonalCount} 条</span>}
-            </div>
+            <div className="sb-scroll">
+              <div className="sb-block-head">
+                <span>我的个人会话（按工程目录）</span>
+                {totalPersonalCount > 0 && <span className="sb-block-act count">{totalPersonalCount}</span>}
+              </div>
 
-            <div className="sess-list">
               {visiblePersonalGroups.length === 0 ? (
                 <p className="side-empty">
                   {personalQuery ? (
@@ -845,13 +901,13 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                     <>
                       还没有个人会话。
                       <br />
-                      点击上方「新建个人会话」开始。
+                      在右侧选择目录或直接发送消息即可开始。
                     </>
                   )}
                 </p>
               ) : (
                 visiblePersonalGroups.map((group) => {
-                  const open = collapsedDirs[group.directoryKey] !== true;
+                  const open = Boolean(personalQuery) || collapsedDirs[group.directoryKey] !== true;
                   return (
                     <div key={group.directoryKey} className="sb-grp">
                       <button
@@ -865,28 +921,32 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                         }))}
                       >
                         <span className="chev">
-                          {open ? <IconChevronDown size={12} aria-hidden="true" /> : <IconChevronRight size={12} aria-hidden="true" />}
+                          <IconChevronDown size={11} aria-hidden="true" />
                         </span>
+                        <IconFolder size={13} aria-hidden="true" />
                         <span className="d pnav-ellipsis">{group.label}</span>
                         <span className="n">{group.records.length}</span>
                       </button>
-                      {open && (
-                        <div className="grp-body">
-                          {group.records.map((entry) => (
-                            <PersonalSessionRow
-                              key={entry.conversationId}
-                              entry={entry}
-                              active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
-                              select={actions.selectPersonalConversation}
-                              canOpenMenu={Boolean(
-                                actions.renamePersonalConversation
-                                || (entry.shareStatus === "local_only" && actions.publishPersonalConversation),
-                              )}
-                              onOpenMenu={(x, y) => openPersonalMenu(entry, x, y)}
-                            />
-                          ))}
+                      <div className="grp-collapse" data-open={open ? "1" : "0"} inert={!open || undefined}>
+                        <div className="grp-collapse-inner">
+                          <div className="grp-body">
+                            {group.records.map((entry) => (
+                              <PersonalSessionRow
+                                key={entry.conversationId}
+                                entry={entry}
+                                active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
+                                landing={view.landingConversationId === entry.conversationId}
+                                select={actions.selectPersonalConversation}
+                                canOpenMenu={Boolean(
+                                  actions.renamePersonalConversation
+                                  || (entry.shareStatus === "local_only" && actions.publishPersonalConversation),
+                                )}
+                                onOpenMenu={(x, y) => openPersonalMenu(entry, x, y)}
+                              />
+                            ))}
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })
@@ -897,7 +957,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                   className="pane-foot"
                   onClick={() => actions.selectSpace?.("team")}
                 >
-                  另有 {view.publishedSessionCount} 个会话已发布，在「团队」空间里。
+                  另有 {view.publishedSessionCount} 个会话已发布到 Project，在「团队」空间里。
                 </button>
               )}
             </div>
@@ -941,12 +1001,206 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             </div>
           </div>
         </div>
+      ) : dualTrack ? (
+        <>
+          <div className="sb-actions-wrap">
+            <div className="sb-actions">
+              <button
+                type="button"
+                className="pnav-new"
+                data-active={effectiveActivePage === "new"}
+                aria-current={effectiveActivePage === "new" ? "page" : undefined}
+                disabled={!hasProject}
+                onClick={() => (actions.createSession ? actions.createSession() : actions.openPage("new"))}
+              >
+                <IconPlus size={15} aria-hidden="true" />
+                <span>新建协作会话</span>
+              </button>
+              {actions.openCommandPalette && (
+                <button
+                  type="button"
+                  className="pnav-icon-button sb-search-btn"
+                  aria-label="全局搜索"
+                  title="全局搜索 (⌘K)"
+                  onClick={actions.openCommandPalette}
+                >
+                  <IconSearch size={15} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="my-sessions" aria-label="Project 协作会话">
+            <div className="sb-scroll">
+              <WorkspaceSwitch view={view} actions={actions} dualTrack />
+
+              <div className="sb-block-head">
+                <span>Project 协作会话</span>
+                {hasProject && view.sessionsAvailability.state === "ready" && (
+                  <span className="sb-block-act count">
+                    {mySessions.length} 我 / {peerSessionCount} 队友
+                  </span>
+                )}
+              </div>
+
+              {view.projectsAvailability.state === "failed" && !view.projects.length && (
+                <Status value={view.projectsAvailability} area="projects" actions={actions} />
+              )}
+
+              {!view.projects.length ? (
+                view.projectsAvailability.state === "ready" && (
+                  <div className="pnav-empty">
+                    <p>还没有项目。</p>
+                    <button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={actions.createProject}>
+                      <IconPlus size={13} aria-hidden="true" />
+                      <span>创建项目</span>
+                    </button>
+                  </div>
+                )
+              ) : (
+                <>
+                  {view.projects.map((project) => {
+                    // 仅当前激活 Project 默认展开并拉取会话，保持单 Project 请求契约以防请求风暴（HC-225）。
+                    const isCurrent = project.projectId === view.currentProjectId;
+                    const open = isCurrent && collapsedProjects[project.projectId] !== true;
+                    return (
+                      <div key={project.projectId} className="cp-proj">
+                        <div className="cp-proj-row">
+                          <button
+                            type="button"
+                            className={`grp-head cp-head${open ? "" : " is-closed"}${isCurrent ? " is-current" : ""}`}
+                            aria-expanded={open}
+                            title={project.name}
+                            onClick={() => {
+                              if (isCurrent) {
+                                setCollapsedProjects((prev) => ({ ...prev, [project.projectId]: open }));
+                              } else {
+                                setCollapsedProjects((prev) => ({ ...prev, [project.projectId]: false }));
+                                actions.selectProject(project.projectId);
+                              }
+                            }}
+                          >
+                            <span className="chev">
+                              <IconChevronDown size={11} aria-hidden="true" />
+                            </span>
+                            <span className="d pnav-ellipsis">{project.name}</span>
+                            {project.archived && <span className="hui-badge" data-tone="muted" data-size="xs">已归档</span>}
+                            {isCurrent && view.sessionsAvailability.state === "ready" && (
+                              <span className="n">{activeTeamSessionCount}</span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className="pnav-icon-button cp-gear"
+                            aria-label={`${project.name} 资料与成员`}
+                            title="Project 资料与成员"
+                            data-active={isCurrent && view.activePage === "info"}
+                            onClick={() => {
+                              if (actions.openProjectSettingsFor) {
+                                actions.openProjectSettingsFor(project.projectId);
+                              } else if (isCurrent) {
+                                actions.openProjectSettings();
+                              } else {
+                                actions.selectProject(project.projectId);
+                              }
+                            }}
+                          >
+                            <IconAdjustmentsHorizontal size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                        <div className="grp-collapse" data-open={open ? "1" : "0"} inert={!open || undefined}>
+                          <div className="grp-collapse-inner">
+                            {isCurrent ? (
+                              <div className="cp-body">
+                                <Status value={view.membersAvailability} area="members" actions={actions} />
+                                {view.membersAvailability.state !== "denied" && (
+                                  <Status value={view.sessionsAvailability} area="sessions" actions={actions} />
+                                )}
+                                {view.sessionsAvailability.state === "ready" && mySessions.length === 0 && peerGroups.length === 0 && (
+                                  <p className="cp-empty">暂无已发布会话</p>
+                                )}
+                                {mySessions.map((entry) => {
+                                  const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
+                                  const isStopped = entry.badge?.text === "已停止同步";
+                                  const canOpenMenu = !isOtherDevice && Boolean(
+                                    actions.renameConversation || (actions.stopSharingConversation && !isStopped),
+                                  );
+                                  return (
+                                    <SessionRow
+                                      key={`${project.projectId}:${entry.conversationId}`}
+                                      entry={entry}
+                                      active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
+                                      landing={view.landingConversationId === entry.conversationId}
+                                      showMeTag
+                                      localDeviceName={view.localDeviceName}
+                                      select={actions.selectConversation}
+                                      canOpenMenu={canOpenMenu}
+                                      onOpenMenu={(x, y) => openTeamSessionMenu(entry, x, y)}
+                                    />
+                                  );
+                                })}
+                                {peerGroups.map((group) => (
+                                  <div key={group.userId} className="sb-grp pnav-peer-grp">
+                                    <div className="pnav-peer-head">
+                                      <MemberAvatar initial={group.initial} photo={group.photo} size={18} />
+                                      <span className="pnav-ellipsis">{group.label}</span>
+                                      <span className="n">{group.sessions.length}</span>
+                                    </div>
+                                    {group.sessions.map((entry) => {
+                                      const active = effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId;
+                                      const landing = view.landingConversationId === entry.conversationId;
+                                      const hasPeerUpdate = entry.badge?.tone === "warning"
+                                        || entry.badge?.tone === "accent"
+                                        || entry.badge?.text.includes("有更新")
+                                        || entry.badge?.text.includes("未同步");
+                                      return (
+                                        <button
+                                          key={`${project.projectId}:${entry.conversationId}`}
+                                          type="button"
+                                          className={`sess-item pnav-session${active ? " is-active" : ""}${landing ? " is-landing" : ""}`}
+                                          title={entry.title}
+                                          data-active={active}
+                                          aria-current={active ? "page" : undefined}
+                                          onClick={() => actions.selectConversation(entry.conversationId)}
+                                        >
+                                          <span className="sr-top">
+                                            <span className="sess-title pnav-ellipsis">{entry.title}</span>
+                                          </span>
+                                          <span className="sess-meta">
+                                            <IconLock size={10} aria-hidden="true" />
+                                            <span className="line">只读 · {entry.timeLabel}</span>
+                                            {entry.badge && (
+                                              <span className="hui-badge" data-tone={toBadgeTone(entry.badge.tone)} data-size="xs">{entry.badge.text}</span>
+                                            )}
+                                          </span>
+                                          {hasPeerUpdate && <span className="unsync-dot" aria-label="有未同步更新" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button type="button" className="nav-item cp-create-proj" onClick={actions.createProject}>
+                    <IconPlus size={14} aria-hidden="true" />
+                    <span className="nav-label">新建 Project</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </>
       ) : (
         <>
-          {/* 1. Workspace 团队组 + 团队知识库入口 */}
+          {/* 1. Workspace 团队组 + 团队知识库入口（单栏独立预览兼容分支） */}
           <div className="side-group">
-            {!dualTrack && <p className="pnav-eyebrow">Workspace</p>}
-            <WorkspaceSwitch view={view} actions={actions} />
+            <p className="pnav-eyebrow">Workspace</p>
+            <WorkspaceSwitch view={view} actions={actions} dualTrack={false} />
             <button
               type="button"
               className="pnav-nav-item"
@@ -968,7 +1222,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
 
           {/* 2. Project 切换 + Project 看板 / 任务入口 */}
           <div className="side-group">
-            {!dualTrack && <p className="pnav-eyebrow">Project</p>}
+            <p className="pnav-eyebrow">Project</p>
             <ProjectSwitch view={view} actions={actions} />
             {view.projectsAvailability.state === "failed" && !view.projects.length && (
               <Status value={view.projectsAvailability} area="projects" actions={actions} />
@@ -1013,7 +1267,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               onClick={() => (actions.createSession ? actions.createSession() : actions.openPage("new"))}
             >
               <IconPlus size={15} aria-hidden="true" />
-              <span>新建协作会话</span>
+              <span>新建会话</span>
             </button>
 
             {actions.openCommandPalette ? (
@@ -1044,146 +1298,17 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             )}
           </div>
 
-          {/* 4. 协作会话（双轨团队空间按 Project 分组折叠；兼容旧单栏预览） */}
-          <div className="my-sessions" aria-label={dualTrack ? "协作会话" : "我的会话"}>
+          {/* 4. 我的会话（仅单栏独立预览渲染） */}
+          <div className="my-sessions" aria-label="我的会话">
             <div className="sec-head">
-              <span className="label">{dualTrack ? "协作会话" : "我的会话"}</span>
-              {view.sessionsAvailability.state === "ready" && activeTeamSessionCount > 0 && (
-                <span className="count">{activeTeamSessionCount} 条</span>
+              <span className="label">我的会话</span>
+              {view.sessionsAvailability.state === "ready" && mySessions.length > 0 && (
+                <span className="count">{mySessions.length} 条</span>
               )}
             </div>
 
             <div className="sess-list">
-              {dualTrack ? (
-                !view.projects.length ? (
-                  view.projectsAvailability.state === "ready" && (
-                    <div className="pnav-empty">
-                      <p>还没有项目。</p>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={actions.createProject}>
-                        <IconPlus size={13} aria-hidden="true" />
-                        <span>创建项目</span>
-                      </button>
-                    </div>
-                  )
-                ) : (
-                  <>
-                    {view.projects.map((project) => {
-                      const isCurrent = project.projectId === view.currentProjectId;
-                      const open = isCurrent && collapsedProjects[project.projectId] !== true;
-                      return (
-                        <div key={project.projectId} className="cp-proj">
-                          <div className="cp-proj-row">
-                            <button
-                              type="button"
-                              className={`grp-head cp-head${open ? "" : " is-closed"}${isCurrent ? " is-current" : ""}`}
-                              aria-expanded={open}
-                              title={project.name}
-                              onClick={() => {
-                                if (isCurrent) {
-                                  setCollapsedProjects((prev) => ({ ...prev, [project.projectId]: open }));
-                                } else {
-                                  setCollapsedProjects((prev) => ({ ...prev, [project.projectId]: false }));
-                                  actions.selectProject(project.projectId);
-                                }
-                              }}
-                            >
-                              <span className="chev">
-                                {open ? <IconChevronDown size={12} aria-hidden="true" /> : <IconChevronRight size={12} aria-hidden="true" />}
-                              </span>
-                              <span className="d pnav-ellipsis">{project.name}</span>
-                              {project.archived && <span className="cp-archived-tag">已归档</span>}
-                              {isCurrent && view.sessionsAvailability.state === "ready" && (
-                                <span className="n">{activeTeamSessionCount}</span>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              className="pnav-icon-button cp-gear"
-                              aria-label={`${project.name} 资料与成员`}
-                              title="Project 资料与成员"
-                              data-active={isCurrent && view.activePage === "info"}
-                              onClick={() => {
-                                if (actions.openProjectSettingsFor) {
-                                  actions.openProjectSettingsFor(project.projectId);
-                                } else if (isCurrent) {
-                                  actions.openProjectSettings();
-                                } else {
-                                  actions.selectProject(project.projectId);
-                                }
-                              }}
-                            >
-                              <IconAdjustmentsHorizontal size={13} aria-hidden="true" />
-                            </button>
-                          </div>
-                          {open && (
-                            <div className="cp-body">
-                              <Status value={view.membersAvailability} area="members" actions={actions} />
-                              {view.membersAvailability.state !== "denied" && (
-                                <Status value={view.sessionsAvailability} area="sessions" actions={actions} />
-                              )}
-                              {view.sessionsAvailability.state === "ready" && mySessions.length === 0 && peerGroups.length === 0 && (
-                                <p className="cp-empty">
-                                  {isSearchingLocalOnly ? "没有匹配的协作会话。" : "暂无已发布会话"}
-                                </p>
-                              )}
-                              {mySessions.map((entry) => {
-                                const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
-                                const isStopped = entry.badge?.text === "已停止同步";
-                                const canOpenMenu = !isOtherDevice && Boolean(
-                                  actions.renameConversation || (actions.stopSharingConversation && !isStopped),
-                                );
-                                return (
-                                  <SessionRow
-                                    key={`${project.projectId}:${entry.conversationId}`}
-                                    entry={entry}
-                                    active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
-                                    localDeviceName={view.localDeviceName}
-                                    select={actions.selectConversation}
-                                    canOpenMenu={canOpenMenu}
-                                    onOpenMenu={(x, y) => openTeamSessionMenu(entry, x, y)}
-                                  />
-                                );
-                              })}
-                              {peerGroups.map((group) => (
-                                <div key={group.userId} className="sb-grp pnav-peer-grp">
-                                  <div className="pnav-peer-head">
-                                    <MemberAvatar initial={group.initial} photo={group.photo} size={18} />
-                                    <span className="pnav-ellipsis">{group.label}</span>
-                                    <span className="n">{group.sessions.length}</span>
-                                  </div>
-                                  {group.sessions.map((entry) => (
-                                    <button
-                                      key={`${project.projectId}:${entry.conversationId}`}
-                                      type="button"
-                                      className={`sess-item pnav-session${effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId ? " is-active" : ""}`}
-                                      title={entry.title}
-                                      data-active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
-                                      onClick={() => actions.selectConversation(entry.conversationId)}
-                                    >
-                                      <span className="sess-title pnav-ellipsis">{entry.title}</span>
-                                      <span className="sess-meta">
-                                        <IconLock size={10} aria-hidden="true" />
-                                        <span className="line">只读 · {entry.timeLabel}</span>
-                                        {entry.badge && (
-                                          <span className={`pnav-row-badge is-${entry.badge.tone}`}>{entry.badge.text}</span>
-                                        )}
-                                      </span>
-                                    </button>
-                                  ))}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <button type="button" className="pnav-nav-item cp-create-proj" onClick={actions.createProject}>
-                      <IconPlus size={14} aria-hidden="true" />
-                      <span className="pnav-nav-label">新建 Project</span>
-                    </button>
-                  </>
-                )
-              ) : !hasProject ? (
+              {!hasProject ? (
                 view.projectsAvailability.state === "ready" && (
                   <div className="pnav-empty">
                     <p>{view.projects.length ? "选择一个项目开始协作。" : "还没有项目。"}</p>
@@ -1224,30 +1349,30 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               )}
             </div>
           </div>
+
+          {/* 5. 底部当前账号与系统设置（单栏预览保留） */}
+          <div className="side-foot">
+            <MemberAvatar initial={(view.accountName ?? "?").slice(0, 1)} photo={view.accountPhoto} self size={28} />
+            <span className="who">
+              <span className="who-name pnav-ellipsis">{view.accountName ?? "未登录"}</span>
+              <span className="who-role pnav-ellipsis">
+                {view.offline
+                  ? "离线续用"
+                  : view.accountRole || view.workspaceName || "未加入团队"}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="pnav-icon-button"
+              aria-label="设置"
+              title="系统设置"
+              onClick={actions.openSettings}
+            >
+              <IconSettings size={16} aria-hidden="true" />
+            </button>
+          </div>
         </>
       )}
-
-      {/* 5. 底部当前账号与系统设置 */}
-      <div className="side-foot">
-        <MemberAvatar initial={(view.accountName ?? "?").slice(0, 1)} photo={view.accountPhoto} self size={28} />
-        <span className="who">
-          <span className="who-name pnav-ellipsis">{view.accountName ?? "未登录"}</span>
-          <span className="who-role pnav-ellipsis">
-            {view.offline
-              ? "离线续用"
-              : view.accountRole || view.workspaceName || "未加入团队"}
-          </span>
-        </span>
-        <button
-          type="button"
-          className="pnav-icon-button"
-          aria-label="设置"
-          title="系统设置"
-          onClick={actions.openSettings}
-        >
-          <IconSettings size={16} aria-hidden="true" />
-        </button>
-      </div>
 
       {contextMenu && (
         <SessionContextMenu

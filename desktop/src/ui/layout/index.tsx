@@ -1,4 +1,4 @@
-/** 工作台外壳：通顶左侧栏 + 右侧(顶栏 + 舞台/右栏)，仅管理空间、响应折叠与浮层。 */
+/** 工作台外壳：56px 全局图标栏（可选）+ 304px 次级侧栏 + 右侧(顶栏 + 舞台/右栏)，支持 noSidebar 宽屏模式与浮层。 */
 import { IconLayoutSidebar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarRight, IconMoon, IconSun, IconX } from "@tabler/icons-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
@@ -7,6 +7,11 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
+
+export { AppRail } from "./app-rail.js";
+export type { AppRailProps, WorkbenchNavId } from "./app-rail.js";
+export { UserPopover } from "./user-popover.js";
+export type { UserPopoverProps, UserPopoverThemeMode } from "./user-popover.js";
 
 export type CollaborationContextView = {
   title: string;
@@ -29,6 +34,10 @@ export type WorkbenchRightSlot = {
 export type WorkbenchLayoutProps = {
   /** 正式窗口按平台给原生按钮和拖动区留空间。 */
   titleBarClassName?: string;
+  /** 第一层 56px 固定全局图标栏（可选，兼容未升级的独立预览入口）。 */
+  rail?: ReactNode;
+  /** 宽屏业务页模式：自动隐藏次级侧栏并隐藏侧栏收展开关，释放 1200px 主区宽度。 */
+  noSidebar?: boolean;
   context: CollaborationContextView | null;
   /** 自定义单行顶栏标题区渲染器；传入左栏当前是否收起（含窄屏自动收起），返回 null/undefined 或未提供时回退到 context 单行展示。 */
   renderHeaderTitle?: (state: { leftCollapsed: boolean }) => ReactNode;
@@ -55,15 +64,16 @@ export type WorkbenchLayoutProps = {
   overlays?: ReactNode;
 };
 
-const LEFT_MIN = 220,
+const LEFT_MIN = 240,
   LEFT_MAX = 380,
   RIGHT_MIN = 260,
   RIGHT_MAX = 560,
+  RAIL_W = 56,
   CENTER_MIN = 380;
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
-/** 通顶左栏工作台布局；面板保持挂载，自动收合不修改宿主开合偏好。 */
+/** 双层左栏工作台布局；面板保持挂载，宽屏隐藏或窄屏自动收合不修改宿主开合偏好。 */
 export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLElement>(null),
@@ -79,13 +89,17 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     null,
   );
   const [leftDragging, setLeftDragging] = useState(false);
-  const leftWidth = clamp(props.leftWidthPx || 256, LEFT_MIN, LEFT_MAX);
-  const rightWidth = clamp(props.rightWidthPx || 300, RIGHT_MIN, RIGHT_MAX);
-  const leftFits = width >= leftWidth + CENTER_MIN;
+  const hasRail = Boolean(props.rail);
+  const noSidebar = Boolean(props.noSidebar);
+  const railReserve = hasRail ? RAIL_W : 0;
+  const leftWidth = clamp(props.leftWidthPx || 304, LEFT_MIN, LEFT_MAX);
+  const rightWidth = clamp(props.rightWidthPx || 340, RIGHT_MIN, RIGHT_MAX);
+  const leftFits = !noSidebar && width >= railReserve + leftWidth + CENTER_MIN;
   const rightFits =
-    width >= (props.leftOpen ? leftWidth : 0) + CENTER_MIN + rightWidth;
-  const leftMode: WorkbenchPanelMode =
-    leftFits && props.leftOpen
+    width >= railReserve + (!noSidebar && props.leftOpen ? leftWidth : 0) + CENTER_MIN + rightWidth;
+  const leftMode: WorkbenchPanelMode = noSidebar
+    ? "hidden"
+    : leftFits && props.leftOpen
       ? "docked"
       : !leftFits && overlay === "left"
         ? "overlay"
@@ -98,7 +112,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         : "hidden";
   const effectiveRight =
     rightMode === "overlay"
-      ? Math.min(overlayRightWidth ?? rightWidth, Math.max(0, width - 32))
+      ? Math.min(overlayRightWidth ?? rightWidth, Math.max(0, width - railReserve - 32))
       : rightWidth;
 
   const closeRight = (open: boolean) => {
@@ -158,11 +172,11 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
 
   useEffect(() => {
     if (
-      (overlay === "left" && leftFits) ||
+      (overlay === "left" && (leftFits || noSidebar)) ||
       (overlay === "right" && (rightFits || !hasRight))
     )
       setOverlay(null);
-  }, [overlay, leftFits, rightFits, hasRight]);
+  }, [overlay, leftFits, noSidebar, rightFits, hasRight]);
 
   useEffect(() => {
     if (!props.settingsOpen) return;
@@ -279,6 +293,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
     <div
       className={[
         "collaboration-layout",
+        hasRail ? "has-rail" : "",
+        noSidebar ? "no-sidebar" : "",
         isMac ? "is-macos" : "",
         isWin ? "is-windows" : "",
       ].filter(Boolean).join(" ")}
@@ -287,7 +303,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
       ref={root}
       onKeyDown={keyDown}
     >
-      {/* 左侧边栏：通顶布局，直接触达顶部与底部 */}
+      {props.rail}
+
+      {/* 第二层次级侧栏：宽屏业务页下平缓隐藏，保持挂载不丢失滚动与草稿 */}
       <aside
         ref={left}
         className="collaboration-left"
@@ -296,9 +314,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
           width:
             leftMode === "hidden"
               ? 0
-              : Math.min(leftWidth, Math.max(0, width - 32)),
+              : Math.min(leftWidth, Math.max(0, width - railReserve - 32)),
         }}
-        aria-label="工作台导航"
+        aria-label="工作台次级导航"
         aria-hidden={leftMode === "hidden" || undefined}
         inert={leftMode === "hidden"}
       >
@@ -404,19 +422,34 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps): ReactElement {
         </div>
       </div>
 
+      {(leftMode === "overlay" || visibleRightMode === "overlay") && (
+        <div
+          className="collaboration-scrim"
+          aria-hidden="true"
+          onClick={() => {
+            const side = overlay;
+            setOverlay(null);
+            if (side === "left") leftButton.current?.focus();
+            else if (side === "right") rightButton.current?.focus();
+          }}
+        />
+      )}
+
       {/* 左栏折叠/展开按钮固定于左上角红绿灯旁；DOM 必须位于含 -webkit-app-region: drag 的左侧栏与顶栏之后，否则 Electron 会按 DOM 顺序将按钮区域覆盖为拖动区导致点击失效 */}
-      <button
-        ref={leftButton}
-        type="button"
-        className="collaboration-header-toggle"
-        data-active={leftMode === "overlay" ? "true" : "false"}
-        onClick={() => toggle("left")}
-        aria-label="切换导航"
-        aria-expanded={leftMode !== "hidden"}
-        title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
-      >
-        {leftMode !== "hidden" ? <IconLayoutSidebarLeftCollapse size={16} aria-hidden="true" /> : <IconLayoutSidebar size={16} aria-hidden="true" />}
-      </button>
+      {!noSidebar && (
+        <button
+          ref={leftButton}
+          type="button"
+          className="collaboration-header-toggle"
+          data-active={leftMode === "overlay" ? "true" : "false"}
+          onClick={() => toggle("left")}
+          aria-label="切换导航"
+          aria-expanded={leftMode !== "hidden"}
+          title={leftMode !== "hidden" ? "收起左栏 (⌘\\)" : "展开左栏 (⌘\\)"}
+        >
+          {leftMode !== "hidden" ? <IconLayoutSidebarLeftCollapse size={16} aria-hidden="true" /> : <IconLayoutSidebar size={16} aria-hidden="true" />}
+        </button>
+      )}
 
       {props.overlays}
 

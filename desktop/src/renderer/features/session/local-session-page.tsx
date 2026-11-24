@@ -714,80 +714,86 @@ export function LocalSessionPage({
               })()}
             </span>
           </button>
-          {!planCollapsed ? (
-            <div ref={planBodyRef} className="session-plan-body">
-              {activePlans.map((plan, planIdx) => {
-                if (plan.kind === "entries") {
+          <div
+            className="session-plan-collapse"
+            data-open={!planCollapsed ? "1" : "0"}
+            inert={planCollapsed || undefined}
+          >
+            <div className="session-plan-collapse-inner">
+              <div ref={planBodyRef} className="session-plan-body">
+                {activePlans.map((plan, planIdx) => {
+                  if (plan.kind === "entries") {
+                    return (
+                      <ul key={plan.id ?? `entries-${planIdx}`} className="session-plan-entries">
+                        {plan.entries.map((entry, entryIdx) => (
+                          <li key={`${planIdx}-${entryIdx}`} className={`session-plan-entry is-${entry.status}`}>
+                            <span className="session-plan-entry-icon" aria-hidden="true">
+                              {entry.status === "completed" ? (
+                                <IconCheck size={13} stroke={2} />
+                              ) : entry.status === "in_progress" ? (
+                                <IconLoader2 size={13} stroke={2} className="session-plan-spin" />
+                              ) : (
+                                <span className="session-plan-dot" />
+                              )}
+                            </span>
+                            <span className="session-plan-entry-content">{entry.content}</span>
+                            <span className={`session-plan-priority is-${entry.priority}`}>
+                              {PLAN_PRIORITY_LABEL[entry.priority]}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                  }
+                  if (plan.kind === "markdown") {
+                    return (
+                      <div key={plan.id} className="session-plan-markdown">
+                        <div className="session-plan-markdown-tools">
+                          <button
+                            type="button"
+                            className="session-plan-zoom-btn"
+                            onClick={() => setExpandedPlan({
+                              title: "执行计划详情",
+                              markdown: plan.content,
+                            })}
+                          >
+                            <IconArrowsMaximize size={12} stroke={1.8} aria-hidden="true" />
+                            <span>放大查看</span>
+                          </button>
+                        </div>
+                        <Markdown text={plan.content} actions={messageRendering} />
+                      </div>
+                    )
+                  }
                   return (
-                    <ul key={plan.id ?? `entries-${planIdx}`} className="session-plan-entries">
-                      {plan.entries.map((entry, entryIdx) => (
-                        <li key={`${planIdx}-${entryIdx}`} className={`session-plan-entry is-${entry.status}`}>
-                          <span className="session-plan-entry-icon" aria-hidden="true">
-                            {entry.status === "completed" ? (
-                              <IconCheck size={13} stroke={2} />
-                            ) : entry.status === "in_progress" ? (
-                              <IconLoader2 size={13} stroke={2} className="session-plan-spin" />
-                            ) : (
-                              <span className="session-plan-dot" />
-                            )}
-                          </span>
-                          <span className="session-plan-entry-content">{entry.content}</span>
-                          <span className={`session-plan-priority is-${entry.priority}`}>
-                            {PLAN_PRIORITY_LABEL[entry.priority]}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )
-                }
-                if (plan.kind === "markdown") {
-                  return (
-                    <div key={plan.id} className="session-plan-markdown">
-                      <div className="session-plan-markdown-tools">
+                    <div key={plan.id} className="session-plan-file">
+                      <IconFileText size={14} stroke={1.8} />
+                      {messageRendering.openFile ? (
                         <button
                           type="button"
-                          className="session-plan-zoom-btn"
-                          onClick={() => setExpandedPlan({
-                            title: "执行计划详情",
-                            markdown: plan.content,
-                          })}
+                          className="session-plan-file-link"
+                          onClick={() => {
+                            void messageRendering.openFile?.(plan.uri).catch(err => {
+                              setCapabilityError(err instanceof Error ? err.message : "无法打开计划文件。")
+                            })
+                          }}
                         >
-                          <IconArrowsMaximize size={12} stroke={1.8} aria-hidden="true" />
-                          <span>放大查看</span>
+                          {plan.uri}
                         </button>
-                      </div>
-                      <Markdown text={plan.content} actions={messageRendering} />
+                      ) : (
+                        <span className="session-plan-file-text">{plan.uri}</span>
+                      )}
                     </div>
                   )
-                }
-                return (
-                  <div key={plan.id} className="session-plan-file">
-                    <IconFileText size={14} stroke={1.8} />
-                    {messageRendering.openFile ? (
-                      <button
-                        type="button"
-                        className="session-plan-file-link"
-                        onClick={() => {
-                          void messageRendering.openFile?.(plan.uri).catch(err => {
-                            setCapabilityError(err instanceof Error ? err.message : "无法打开计划文件。")
-                          })
-                        }}
-                      >
-                        {plan.uri}
-                      </button>
-                    ) : (
-                      <span className="session-plan-file-text">{plan.uri}</span>
-                    )}
-                  </div>
-                )
-              })}
-              <SelectionToolbar
-                containerRef={planBodyRef}
-                enabled={visible && !(viewingFile && pvMax)}
-                onAddToChat={handleAddSelectionToChat}
-              />
+                })}
+                <SelectionToolbar
+                  containerRef={planBodyRef}
+                  enabled={visible && !planCollapsed && !(viewingFile && pvMax)}
+                  onAddToChat={handleAddSelectionToChat}
+                />
+              </div>
             </div>
-          ) : null}
+          </div>
         </div>
       ) : null}
     </div>
