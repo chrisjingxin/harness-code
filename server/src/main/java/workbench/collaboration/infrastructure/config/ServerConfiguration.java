@@ -106,7 +106,8 @@ public class ServerConfiguration {
                 foundation.validateRoles();
             }
             case "init-workspace-roles" -> { foundation.validate(); foundation.initializeRoles(env.getRequiredProperty("workbench.roles-mapping")); }
-            case "start" -> { foundation.validate(); foundation.validateRoles(); }
+            case "init-knowledge" -> { foundation.validate(); foundation.validateRoles(); foundation.initializeKnowledge(); }
+            case "start" -> { foundation.validate(); foundation.validateRoles(); foundation.validateKnowledgeMetadata(); }
             default -> throw new IllegalArgumentException("未知服务端命令");
         }
         return foundation;

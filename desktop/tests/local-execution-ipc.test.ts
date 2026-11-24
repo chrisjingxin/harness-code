@@ -154,6 +154,7 @@ function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState
       sent.push(text)
       return { status: "accepted", turnId: `turn-${++turnCounter}` }
     },
+    sendPrompt: blocks => session.send(blocks.filter(block => block.type === "text").map(block => block.text).join("\n")),
     cancel: () => true,
     answerPermission: () => true,
     subscribe: listener => {
@@ -748,18 +749,6 @@ test("多代理切换、会话级能力透传（session-state/elicitation/mode/c
     assert.equal(registered.size, 0)
     await ipc.dispose()
 
-    // 验证缺少 sendPrompt 的极简 Mock 会话也能优雅降级到 session.send(prompt)
-    const { runtime: minimalRuntime } = createMockRuntime()
-    const minimalIpc = createLocalExecutionCoordinator(window, identity, null, minimalRuntime)
-    await minimalIpc.captureDirectorySelection()(workdir)
-    const minPrep = await minimalIpc.prepare(scope, workdir)
-    assert.equal(minPrep.ok, true)
-    if (minPrep.ok) {
-      const fallbackSend = await minimalIpc.send(scope, minPrep.value.bindingId, REQ_ID, "带附件回退", [], ["src/app file.ts"])
-      assert.equal(fallbackSend.ok, true)
-      if (fallbackSend.ok) assert.equal(fallbackSend.value.status, "accepted")
-    }
-    await minimalIpc.dispose()
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1545,6 +1534,7 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
             title: "团队规范",
             authorId: USER_A,
             createdAtMs: 1_700_000_000_000,
+            level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",contributors:[USER_A],reviewerId:null,reviewedAtMs:null,proposalId:null,
           },
           text: "务必保留单测",
         })

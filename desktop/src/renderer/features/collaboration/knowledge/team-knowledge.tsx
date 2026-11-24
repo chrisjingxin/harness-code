@@ -21,6 +21,7 @@ export interface KnowledgeItem {
   readonly title: string
   readonly category?: string
   readonly versionLabel?: string
+  readonly detailLabel?: string
 }
 
 /** 版本标识及其显示信息均来自装配方。 */
@@ -70,6 +71,7 @@ export interface TeamKnowledgeProps {
   readonly controls?: ReactNode
   readonly initialItemId?: string
   readonly selectedRequest?: { readonly itemId: string; readonly token: number }
+  versionExtras?(version: KnowledgeVersionContent): ReactNode
   onEditItem?(itemId: string): void
 }
 
@@ -93,7 +95,7 @@ export function TeamKnowledge(props: TeamKnowledgeProps) {
   return <KnowledgePage key={JSON.stringify([namespace, accountId, teamId])} {...props} />
 }
 
-function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, selectedRequest, onEditItem }: TeamKnowledgeProps) {
+function KnowledgePage({ scope, items, actions, rendering, controls, initialItemId, selectedRequest, onEditItem, versionExtras }: TeamKnowledgeProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [content, setContent] = useState<Resource<KnowledgeVersionContent> | null>(null)
   const [history, setHistory] = useState<HistoryState>({ status: "closed" })
@@ -180,7 +182,7 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
                 <li key={item.id}>
                   <button type="button" aria-current={selectedId === item.id ? "true" : undefined} onClick={() => selectItem(item.id)}>
                     {item.title}{item.category && <small> · {item.category}</small>}
-                    {item.versionLabel && <small> · {item.versionLabel}</small>}
+                    {item.versionLabel && <small> · {item.versionLabel}</small>}{item.detailLabel&&<small> · {item.detailLabel}</small>}
                   </button>
                 </li>
               ))}
@@ -204,7 +206,7 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
                     引用到会话
                   </button>
                 ) : null}
-                {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>编辑条目</button>}
+                {onEditItem && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={() => onEditItem(selected.id)}>提出修订 / 管理</button>}
                 <button type="button" className="wb-button wb-button-secondary wb-button-small"
                   disabled={!historyAvailable || history.status === "loading"}
                   title={historyAvailable ? undefined : "版本历史暂不可用"}
@@ -244,6 +246,7 @@ function KnowledgePage({ scope, items, actions, rendering, controls, initialItem
             </>}
             {version && <>
               <VersionMetadata version={version} />
+              {versionExtras?.(version)}
               {readable ? <>
                 <div className="team-knowledge-markdown" aria-label="知识正文">
                   <Markdown text={version.reference.snapshotText} actions={rendering} />

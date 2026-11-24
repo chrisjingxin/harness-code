@@ -9,13 +9,15 @@ import { realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, resolve } from "node:path"
 import type { LocalAcpSessionSetup } from "@workbench/acp-runtime"
+import { isKnowledgeProposalContent } from "@workbench/collaboration-client"
+import type { KnowledgeProposalContent, KnowledgeSource } from "@workbench/collaboration-client/types"
 import type { CollaborationState } from "@workbench/collaboration-client"
-import type { ProjectMemoryDirectory } from "../../shared/workbench-context-host.js"
+import type { FixedKnowledgeMaterial, ProjectMemoryDirectory } from "../../shared/workbench-context-host.js"
 import type { LocalExecutionScope } from "../../shared/local-execution-host.js"
 import type { LocalExecutionContextAssembler } from "../local-execution-coordinator.js"
 import { directoryGitFacts } from "./directory-facts.js"
 import { TeamKnowledge } from "./knowledge.js"
-import { ContextMcpServer, sameToken } from "./mcp-server.js"
+import { ContextMcpServer, sameToken, contextTools, draftTools } from "./mcp-server.js"
 import { ProjectMemoryStore, renderMemory } from "./memory-store.js"
 import { memoryFile, type MemoryEntry, type MemoryFields, type MemoryPair, type MemoryProposal, type MemoryScope, type MemorySource, type MemoryUpdateResult } from "./types.js"
 
@@ -28,8 +30,8 @@ const byteLength = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value))
 
 type Pending = { proposal: MemoryProposal; toolId: string; result: MemoryUpdateResult }
-type Turn = { id: string; sources: Map<string, MemorySource>; pending: Pending[]; readVersions: Map<string, unknown>; accepting: boolean }
-type Session = { scope: LocalExecutionScope; generation: number; bindingId: string; token: string; revoked: boolean; turn?: Turn; settling?: Promise<void> }
+type Turn = { id: string; sources: Map<string, MemorySource>; pending: Pending[]; readVersions: Map<string, unknown>; accepting: boolean; repositoryIds?:string[]; readIds?:Map<string,string> }
+type Session = { scope: LocalExecutionScope; generation: number; bindingId: string; token: string; revoked: boolean; turn?: Turn; settling?: Promise<void>; draft?:{candidates:KnowledgeProposalContent[];searches:Array<{query:string;nextAfterId:string|null}>;sourceRefs:KnowledgeSource[]} }
 /** 接线方沿既有工具卡更新同一 toolId，保存结果不会伪装成 Agent 的执行终态。 */
 export type MemoryFeedback = { scope: LocalExecutionScope; bindingId: string; turnId: string; toolId: string; result: MemoryUpdateResult | { status: "saving"; message: string } }
 export type WorkbenchContextOptions = {
@@ -46,15 +48,16 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
   readonly store: ProjectMemoryStore
   readonly knowledge: TeamKnowledge
   #sessions = new Map<string, Session>()
+  #draftSessions=new Map<string,Session>()
   #server: ContextMcpServer
   #disposed = false
   #unsubscribe: () => void
   constructor(private readonly options: WorkbenchContextOptions) {
     this.store = options.store ?? new ProjectMemoryStore()
     this.knowledge = new TeamKnowledge(options.identity)
-    this.#server = new ContextMcpServer(token => Boolean(this.#findToken(token)), (token, name, args, callId) => this.#call(token, name, args, callId))
+    this.#server = new ContextMcpServer(token => Boolean(this.#findToken(token)), (token, name, args, callId) => this.#call(token, name, args, callId), token=>this.#findToken(token)?.draft?draftTools:contextTools, (token,name,args,result)=>this.#delivered(token,name,args,result))
     this.#unsubscribe = options.identity.onStateChanged(() => {
-      for (const session of this.#sessions.values()) if (!this.#current(session)) this.#revoke(session)
+      for (const session of [...this.#sessions.values(),...this.#draftSessions.values()]) if (!this.#current(session)) this.#revoke(session)
       this.knowledge.invalidate()
     })
     if (Buffer.byteLength(MEMORY_UPDATE_REMINDER, "utf8") > 256) throw new Error("逐轮更新提醒超过256字节。")
@@ -75,11 +78,12 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
   }
   #revoke(session: Session) {
     if (session.turn) for (const pending of session.turn.pending) this.#feedback(session, session.turn, pending, { status: "cancelled", message: "会话已关闭或切换，提案未保存。" })
+    this.#draftSessions.delete(session.token)
     session.revoked = true
     session.turn = undefined
     if (this.#sessions.get(scopeKey(session.scope)) === session) this.#sessions.delete(scopeKey(session.scope))
   }
-  #findToken(token: string) { return [...this.#sessions.values()].find(s => this.#current(s) && sameToken(token, s.token)) }
+  #findToken(token: string) { return [...this.#sessions.values(),...this.#draftSessions.values()].find(s => this.#current(s) && sameToken(token, s.token)) }
   #session(scope: LocalExecutionScope) {
     const session = this.#sessions.get(scopeKey(scope))
     if (!session || !this.#current(session)) throw new Error("当前会话的项目记忆工具尚未连接。")
@@ -103,6 +107,27 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
       await this.#authorize(session)
       return { ...existing, mcpServers: [...(existing.mcpServers ?? []).filter(s => s.name !== "workbench-context"), { name: "workbench-context", type: "http", url, headers: [{ name: "Authorization", value: `Bearer ${session.token}` }] }] }
     } catch (error) { this.#revoke(session); throw error }
+  }
+  /** 临时起草凭据与正式会话并存；不调用会撤销原 token 的 prepareSession。 */
+  async prepareKnowledgeDraft(scope:LocalExecutionScope,executionId:string,directoryPath:string,sourceRefs:KnowledgeSource[]) {
+    const login=this.options.identity.personalIdentity()
+    if(!login||scope.workspaceId===null)throw new Error("请在有效团队的本人会话中起草。")
+    const session:Session={scope:structuredClone(scope),generation:login.generation,bindingId:executionId,token:randomBytes(32).toString("base64url"),revoked:false,draft:{candidates:[],searches:[],sourceRefs},turn:{id:executionId,sources:new Map(),pending:[],readVersions:new Map(),accepting:true}}
+    this.#draftSessions.set(session.token,session)
+    try{await this.#authorize(session);session.turn!.repositoryIds=await this.knowledge.repositories({...this.#memoryScope(session),generation:session.generation},directoryPath);const url=await this.#server.start();await this.#authorize(session)
+      return {setup:{mcpServers:[{name:"workbench-context",type:"http" as const,url,headers:[{name:"Authorization",value:`Bearer ${session.token}`}]}]},setTurn:(id:string)=>{session.turn!.id=id},result:()=>({candidates:structuredClone(session.draft!.candidates),searches:structuredClone(session.draft!.searches),readReferences:[...session.turn!.readVersions.keys()]}),close:()=>this.#revoke(session)}
+    }catch(e){this.#revoke(session);throw e}
+  }
+  /** 仅 MCP 正文响应成功交付后登记；同轮同版只回报一个随机 ID，失败重试仍复用。 */
+  #delivered(token:string,name:string,args:unknown,result:unknown){
+    const session=this.#findToken(token),turn=session?.turn
+    if(!session||!turn||!turn.accepting||name!=="read_team_knowledge"||!record(args)||!record(result)||typeof result.text!=="string"||typeof result.referenceId!=="string"||result.alreadyRead)return
+    const referenceId=result.referenceId
+    turn.readVersions.set(referenceId,structuredClone(result));turn.sources.set(referenceId,{sourceId:referenceId,kind:"knowledge"})
+    turn.readIds??=new Map();if(turn.readIds.has(referenceId))return
+    const readId=randomUUID();turn.readIds.set(referenceId,readId)
+    const report=()=>this.knowledge.reportRead({...this.#memoryScope(session),generation:session.generation},referenceId,readId)
+    void report().catch(async()=>{if(this.#current(session)&&session.turn===turn)await report()}).catch(()=>{ /* 统计失败不改写已成功交付正文的事实；不从历史重放补数。 */ })
   }
   revokeSession(scope: LocalExecutionScope, bindingId?: string): void {
     const session = this.#sessions.get(scopeKey(scope))
@@ -128,7 +153,7 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     for (const source of sources) turn.sources.set(source.sourceId, structuredClone(source))
   }
   /** 主进程已解析的手动固定知识可登记为本轮已读，后续工具读取同版不重复附带正文。 */
-  registerFixedKnowledge(scope: LocalExecutionScope, turnId: string, materials: readonly { referenceId: string; title: string; version: number; text: string }[]): void {
+  registerFixedKnowledge(scope: LocalExecutionScope, turnId: string, materials: readonly FixedKnowledgeMaterial[]): void {
     const session = this.#session(scope)
     const turn = session.turn
     if (!turn || turn.id !== turnId || !turn.accepting) throw new Error("轮次已结束。")
@@ -190,8 +215,9 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
       await add("personal_directory", { ...git, ...(repositoryId ? { repositoryId } : {}), name: basename(path), summary: "本人会话已确认的本机工程目录。", rootPath: path, relativePath: ".", ...(session.scope.projectId ? { projectIds: [session.scope.projectId] } : {}) }, { sourceId: `conversation:${session.scope.conversationId}`, kind: "conversation", ...git, ...(repositoryId ? { repositoryId } : {}), ...(session.scope.projectId ? { projectId: session.scope.projectId } : {}), confirmedDirectory: path })
     }
   }
-  async assembleTurnContext(input: { scope: LocalExecutionScope; userText: string; directoryPath: string; turnId: string }) {
+  async assembleTurnContext(input: { scope: LocalExecutionScope; userText: string; directoryPath: string; turnId: string; fixedKnowledge?: readonly FixedKnowledgeMaterial[] }) {
     if (input.scope.workspaceId === null) return { contextBlocks: [] }
+    try {
     const session = this.#session(input.scope)
     await this.#authorize(session)
     await session.settling
@@ -199,6 +225,8 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     if (session.turn) throw new Error("上一轮项目记忆尚未收口。")
     const turn: Turn = { id: input.turnId, sources: new Map(), pending: [], readVersions: new Map(), accepting: true }
     session.turn = turn
+    // 这里只登记已在手动 prompt 中的材料；自动准备的规约尚无送达证明，不能登记为已读。
+    this.registerFixedKnowledge(input.scope, input.turnId, input.fixedKnowledge ?? [])
     const userSourceId = `conversation:${input.scope.conversationId}:${input.turnId}`
     turn.sources.set(userSourceId, { sourceId: userSourceId, kind: "conversation", ...(input.scope.projectId ? { projectId: input.scope.projectId } : {}) })
     const statuses: string[] = []
@@ -209,12 +237,24 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
       for (const doc of Object.values(pair)) for (const entry of doc.entries) for (const source of entry.sources) if (source.kind === "user_confirmation" || source.confirmedDirectory) turn.sources.set(source.sourceId, source)
       body = `\n<本机记忆 team.md>\n${renderMemory("team.md", pair["team.md"].entries)}\n</本机记忆>\n<本机记忆 personal.md>\n${renderMemory("personal.md", pair["personal.md"].entries)}\n</本机记忆>`
     } catch (error) { statuses.push(`本轮记忆未能完整附带：${error instanceof Error ? error.message : "文件暂不可读"}`) }
+    const knowledgeScope={...this.#memoryScope(session),generation:session.generation,repositoryIds:[] as string[]}
+    let repositoriesReady=true
+    try{knowledgeScope.repositoryIds=await this.knowledge.repositories(knowledgeScope,input.directoryPath)}catch(e){repositoriesReady=false;statuses.push(`团队仓库匹配暂不可用：${e instanceof Error?e.message:"读取失败"}`)}
+    turn.repositoryIds=knowledgeScope.repositoryIds
+    const rules=repositoriesReady?await this.knowledge.rules(knowledgeScope,turn.readVersions):{materials:[],text:"",status:{code:"unavailable",message:"团队规约未附带：无法确认实际仓库范围，可重试。"}}
+    if(rules.status.code!=="ready")statuses.push(rules.status.message)
     let directory: unknown = { items: [], hasMore: false }
-    try { directory = await this.knowledge.directory({ ...this.#memoryScope(session), generation: session.generation }) } catch (error) { statuses.push(`团队知识目录暂不可用：${error instanceof Error ? error.message : "请重试"}`) }
+    try { directory = await this.knowledge.directory(knowledgeScope,[...turn.readVersions.keys()]) } catch (error) { statuses.push(`团队知识目录暂不可用：${error instanceof Error ? error.message : "请重试"}`) }
     await this.#authorize(session)
     if (session.turn !== turn || !turn.accepting) throw new Error("本轮已取消。")
-    return { contextBlocks: [{ type: "text" as const, text: `${usage}\n${MEMORY_UPDATE_REMINDER}
-本轮用户原文来源：${userSourceId}${body}\n团队知识标题（按需读取固定版本）：${JSON.stringify(directory)}\n${statuses.join("\n")}` }] }
+    return { knowledgeStatus:rules.status,preparedKnowledge:rules.materials,contextBlocks: [{ type: "text" as const, text: `${usage}\n${MEMORY_UPDATE_REMINDER}
+本轮用户原文来源：${userSourceId}${body}\n${rules.text}\n团队知识标题（按需读取固定版本）：${JSON.stringify(directory)}\n${statuses.join("\n")}` }] }
+    } catch(error) {
+      const session=this.#sessions.get(scopeKey(input.scope))
+      if(session?.turn?.id===input.turnId){session.turn.accepting=false;session.turn=undefined}
+      // 团队资料不完整时整组不带；返回真实状态供正式输入区消费，普通本机消息不受此模块阻断。
+      return {contextBlocks:[],preparedKnowledge:[],knowledgeStatus:{code:"unavailable",message:`团队资料未附带，可重试：${error instanceof Error?error.message:"暂不可用"}`}}
+    }
   }
   async #validateSources(session: Session, turn: Turn, proposal: MemoryProposal): Promise<MemorySource[]> {
     const sources = proposal.sourceIds.map(id => turn.sources.get(id))
@@ -257,23 +297,35 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     const turn = session.turn
     if (!turn || !turn.accepting) throw new Error("当前没有可读写的活动轮次。")
     if (!record(raw)) throw new Error("工具参数必须是对象。")
-    const allowedKeys: Record<string, string[]> = { query_project_memory: ["query", "repositoryId", "entryId", "kind"], propose_project_memory_update: ["operation", "kind", "entryId", "baseEntryRevision", "fields", "sourceIds"], list_team_knowledge: ["query", "afterId"], read_team_knowledge: ["referenceId"] }
+    const allowedKeys: Record<string, string[]> = { query_project_memory: ["query", "repositoryId", "entryId", "kind"], propose_project_memory_update: ["operation", "kind", "entryId", "baseEntryRevision", "fields", "sourceIds"], list_team_knowledge: ["query", "afterId", "scope"], propose_team_knowledge_draft:["content"], read_team_knowledge: ["referenceId"] }
     if (!allowedKeys[name] || Object.keys(raw).some(key => !allowedKeys[name].includes(key))) throw new Error("工具名称或参数无效，身份范围不能由模型指定。")
+    if(session.draft&&!["list_team_knowledge","read_team_knowledge","propose_team_knowledge_draft"].includes(name)||!session.draft&&name==="propose_team_knowledge_draft")throw new Error("此工具不属于当前凭据用途。")
     let result: unknown
-    if (name === "query_project_memory") {
+    if(name==="propose_team_knowledge_draft"){
+      if(!session.draft||!isKnowledgeProposalContent(raw.content))throw new Error("候选不符合结构化知识格式。")
+      if(!session.draft.searches.length)throw new Error("请先实际检索团队已有知识。")
+      const proposal=raw.content
+      const refs=[...proposal.relatedReferences,...(proposal.targetKnowledgeId&&proposal.baseVersionId?[{knowledgeId:proposal.targetKnowledgeId,versionId:proposal.baseVersionId}]:[])]
+      if(refs.some(r=>!turn.readVersions.has(`knowledge:${r.knowledgeId}:${r.versionId}`)))throw new Error("修订或相关来源必须使用本次实际读过的固定版本。")
+      if(session.draft.candidates.length>=20)throw new Error("本次最多20个候选，请分批整理。")
+      const candidate={...structuredClone(proposal),sourceRefs:session.draft.sourceRefs,generationKind:"agent" as const}
+      const duplicate=session.draft.candidates.findIndex(c=>JSON.stringify(c)===JSON.stringify(candidate));if(duplicate>=0)return{status:"draft",message:"该本机候选已存在。",candidateIndex:duplicate}
+      session.draft.candidates.push(candidate);result={status:"draft",message:"已形成本机候选，仍需本人确认提交。",candidateIndex:session.draft.candidates.length-1}
+    } else if (name === "query_project_memory") {
       if (Object.values(raw).some(v => typeof v !== "string")) throw new Error("查询参数必须是字符串。")
       result = await this.#query(session, turn, raw)
     } else if (name === "list_team_knowledge") {
       if (Object.values(raw).some(v => typeof v !== "string")) throw new Error("知识查询参数无效。")
-      result = await this.knowledge.list({ ...this.#memoryScope(session), generation: session.generation }, raw.query as string | undefined, raw.afterId as string | undefined)
+      if(raw.scope!==undefined&&!["all","applicable"].includes(String(raw.scope)))throw new Error("知识检索范围无效。")
+      result = await this.knowledge.list({ ...this.#memoryScope(session), generation: session.generation,repositoryIds:turn.repositoryIds }, raw.query as string | undefined, raw.afterId as string | undefined,raw.scope as "all"|"applicable"|undefined)
+      session.draft?.searches.push({query:String(raw.query??""),nextAfterId:(result as {nextAfterId:string|null}).nextAfterId})
     } else if (name === "read_team_knowledge") {
       if (typeof raw.referenceId !== "string") throw new Error("缺少固定版本引用。")
       const alreadyRead = turn.readVersions.get(raw.referenceId) as { title: string; referenceId: string; version: number } | undefined
       if (alreadyRead) result = { title: alreadyRead.title, referenceId: alreadyRead.referenceId, version: alreadyRead.version, alreadyRead: true, message: "本轮已提供此固定版本正文，请使用先前材料。" }
       else {
         result = await this.knowledge.read({ ...this.#memoryScope(session), generation: session.generation }, raw.referenceId)
-        turn.readVersions.set(raw.referenceId, result)
-        turn.sources.set(raw.referenceId, { sourceId: raw.referenceId, kind: "knowledge" })
+        // 在 HTTP 成功交付回调中登记已读；预取失败或断开不算阅读。
       }
     } else {
       const proposal = raw as unknown as MemoryProposal
@@ -312,9 +364,8 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     if (!session || !turn) return
     if (!turn.accepting) return
     if (turn.id !== input.turnId) {
-      session.turn = undefined
-      for (const pending of turn.pending) this.#feedback(session, turn, pending, { status: "error", message: "准备和终态的轮次标识不一致，提案未提交。" })
-      throw new Error("准备和终态的轮次标识不一致，提案未提交。")
+      // 旧轮迟到终态不拥有当前轮，不能清空新轮资料或丢弃新提案。
+      return
     }
     turn.accepting = false
     try {
@@ -367,7 +418,7 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
   async dispose(): Promise<void> {
     this.#disposed = true
     this.#unsubscribe()
-    for (const session of this.#sessions.values()) this.#revoke(session)
+    for (const session of [...this.#sessions.values(),...this.#draftSessions.values()]) this.#revoke(session)
     this.knowledge.invalidate()
     await this.#server.close()
   }

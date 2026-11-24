@@ -215,6 +215,8 @@ public final class Contracts {
                 Map.entry("TaskCreateRequest", TaskDtos.TaskCreateRequest.class),
                 Map.entry("TaskTransitionRequest", TaskDtos.TaskTransitionRequest.class),
                 Map.entry("KnowledgeCreateRequest", KnowledgeDtos.KnowledgeCreateRequest.class),
+                Map.entry("KnowledgeProposalCreateRequest", KnowledgeDtos.KnowledgeProposalCreateRequest.class),
+                Map.entry("KnowledgeReadRequest", KnowledgeDtos.KnowledgeReadRequest.class),
                 Map.entry("BoardResponse", BoardDtos.BoardResponse.class),
                 Map.entry("NotificationEvent", NotificationDtos.NotificationEvent.class),
                 Map.entry("InboxResponse", InboxDtos.InboxResponse.class),

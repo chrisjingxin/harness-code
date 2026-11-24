@@ -90,3 +90,5 @@ export function createCollaborationSdk(options: CollaborationSdkOptions) {
     },
   }
 }
+
+export { isKnowledgeProposalContent, knowledgeProposalToolSchema } from "./knowledge-validation.js"

@@ -1,3 +1,7 @@
+import { KnowledgeDraftButton } from "../../knowledge-drafts/knowledge-draft-button.js"
+import type { KnowledgeLevel, KnowledgeScope, KnowledgeProposalContent } from "@workbench/collaboration-client/types"
+import { KnowledgeGovernance, KnowledgeProposalEditor, KnowledgeScopeFields, levelNames, blankProposal, publishedCandidate } from "./knowledge-governance.js"
+import { KnowledgeFeedback } from "./knowledge-feedback.js"
 /** Workspace 知识的正式装配。列表和历史只读元数据，正文按用户选择的版本读取。 */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import type { CollaborationResult, KnowledgeDetail, KnowledgeSummary, KnowledgeVersion } from "@workbench/collaboration-client/types"
@@ -58,6 +62,9 @@ export function LiveTeamKnowledge({
   host, scope, teamName, revision, rendering, ownerName, canReference, canManage, requestedItem, previewFixed, refreshMetadata,
 }: LiveTeamKnowledgeProps) {
   const { workspaceId, accountId, namespace } = scope
+  const [view,setView]=useState<"published"|"mine"|"review"|"recheck">("published")
+  const [proposalInitial,setProposalInitial]=useState<KnowledgeProposalContent|null>(null)
+  useEffect(()=>{if(!canManage&&(view==="review"||view==="recheck"))setView("published")},[canManage,view])
   const [queryInput, setQueryInput] = useState("")
   const [query, setQuery] = useState("")
   const [items, setItems] = useState<KnowledgeList>({ status: "loading" })
@@ -86,7 +93,7 @@ export function LiveTeamKnowledge({
       .then(result => {
         if (current) setItems({
           status: "ready", value: result.filter(item => !item.archived).map(item => ({
-            id: item.knowledgeId, title: item.title, category: item.category, versionLabel: `v${item.version}`,
+            id: item.knowledgeId, title: item.title, category: item.category, versionLabel: `v${item.version}`, detailLabel: `${levelNames[item.level]} · ${item.scope.kind==="workspace"?"全团队":`${item.scope.repositoryIds.length}个仓库`} · Agent工具读取${item.health.readCount}次${item.health.needsReview?" · 待复核":""}`,
           })),
         })
       }).catch(error => {
@@ -99,7 +106,7 @@ export function LiveTeamKnowledge({
     const material = knowledgeMaterial(value, ownerName)
     return {
       itemId: value.knowledgeId, versionId: value.version.versionId,
-      versionLabel: material.version, author: material.owner, updatedAt: material.uploadedAt,
+      versionLabel: material.version, author: `${material.owner}（贡献：${value.version.contributors.map(ownerName).join("、")}；审核：${value.version.reviewerId?ownerName(value.version.reviewerId):"历史未知"}）`, updatedAt: material.uploadedAt,
       reference: snapshotReferenceView(material),
       referenceAvailability: value.archived
         ? { enabled: false, reason: "该条目已归档。" }
@@ -113,7 +120,11 @@ export function LiveTeamKnowledge({
     }
   }
 
+  const tabs=<nav className="knowledge-tabs" aria-label="知识管理"><button className="wb-button wb-button-secondary" aria-pressed={view==="published"} onClick={()=>setView("published")}>已发布</button><button className="wb-button wb-button-secondary" aria-pressed={view==="mine"} onClick={()=>setView("mine")}>我的提议</button>{canManage&&<><button className="wb-button wb-button-secondary" aria-pressed={view==="review"} onClick={()=>setView("review")}>待审核</button><button className="wb-button wb-button-secondary" aria-pressed={view==="recheck"} onClick={()=>setView("recheck")}>待复核</button></>}</nav>
+  if(view!=="published")return <>{tabs}<KnowledgeGovernance key={JSON.stringify([namespace,accountId,workspaceId,view,canManage])} host={host} workspaceId={workspaceId} accountId={accountId} admin={canManage} view={view} onChanged={()=>refreshMetadata(scope)}/></>
   return <>
+    {tabs}
+    {canManage&&<KnowledgeDraftButton key={JSON.stringify([namespace,accountId,workspaceId])} workspaceId={workspaceId} accountId={accountId} maintenance/>}
     <TeamKnowledge
       key={updated?.revision ?? 0}
       scope={{ namespace, accountId, teamId: workspaceId }}
@@ -122,7 +133,8 @@ export function LiveTeamKnowledge({
       initialItemId={updated?.itemId}
       selectedRequest={targetRequest}
       rendering={rendering}
-      onEditItem={canManage ? itemId => setEditing({ itemId }) : undefined}
+      onEditItem={itemId=>{if(canManage)setEditing({itemId});else void host.readKnowledge(workspaceId,itemId).then(r=>{if(r.ok)setProposalInitial({...blankProposal(),intent:"supplement",targetKnowledgeId:r.value.item.knowledgeId,baseVersionId:r.value.item.currentVersionId,baseItemVersion:r.value.item.version,candidate:publishedCandidate(r.value)})})}}
+      versionExtras={v=><KnowledgeFeedback key={JSON.stringify([accountId,workspaceId,v.itemId,v.versionId])} host={host} workspaceId={workspaceId} knowledgeId={v.itemId} versionId={v.versionId}/>}
       controls={<form className="team-knowledge-toolbar" onSubmit={event => {
         event.preventDefault()
         if (query !== queryInput.trim()) { setItems({ status: "loading" }); setQuery(queryInput.trim()) }
@@ -136,7 +148,7 @@ export function LiveTeamKnowledge({
           onChange={event => setQueryInput(event.target.value)}
         />
         <button className="wb-button wb-button-secondary" type="submit">搜索</button>
-        {canManage ? <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button> : <span>团队知识由管理员发布，可联系管理员维护。</span>}
+        {canManage ? <button className="wb-button wb-button-primary" type="button" onClick={() => setEditing({})}>新建条目</button> : <button className="wb-button wb-button-primary" type="button" onClick={()=>setProposalInitial(blankProposal())}>提出新知识</button>}
       </form>}
       actions={{
         async readCurrent(_source, itemId) {
@@ -158,6 +170,7 @@ export function LiveTeamKnowledge({
         retryList: () => refreshMetadata(scope),
       }}
     />
+    {proposalInitial&&<KnowledgeProposalEditor key={JSON.stringify([namespace,accountId,workspaceId])} host={host} workspaceId={workspaceId} accountId={accountId} admin={canManage} initial={proposalInitial} onClose={()=>setProposalInitial(null)} onSaved={()=>refreshMetadata(scope)}/>}
     {editing && canManage && <KnowledgeEditor host={host} workspaceId={workspaceId} itemId={editing.itemId}
       onClose={() => setEditing(null)} onSaved={detail => {
         setEditing(null)
@@ -190,6 +203,9 @@ function KnowledgeEditor({ host, workspaceId, itemId, onClose, onSaved }: {
   const [title, setTitle] = useState("")
   const [text, setText] = useState("")
   const [archiving, setArchiving] = useState(false)
+  const [level,setLevel]=useState<KnowledgeLevel>("experience")
+  const [knowledgeScope,setKnowledgeScope]=useState<KnowledgeScope>({kind:"workspace",repositoryIds:[]})
+  const request=useRef({key:"",id:""})
 
   useLayoutEffect(() => {
     mounted.current = true
@@ -214,6 +230,8 @@ function KnowledgeEditor({ host, workspaceId, itemId, onClose, onSaved }: {
       setCategory(detail.item.category)
       setTitle(detail.item.title)
       setText(detail.current.text)
+      setLevel(detail.item.level)
+      setKnowledgeScope(detail.item.scope)
     } catch {
       if (mounted.current) setError("无法读取知识条目，请重试。")
     } finally {
@@ -245,10 +263,11 @@ function KnowledgeEditor({ host, workspaceId, itemId, onClose, onSaved }: {
     setBusy(true)
     setError("")
     try {
-      const fields = { category: category.trim(), title: title.trim(), text }
+      const key=JSON.stringify([itemId,category,title,text,level,knowledgeScope,loaded?.item.version]);if(request.current.key!==key)request.current={key,id:crypto.randomUUID()}
+      const fields = { category: category.trim(), title: title.trim(), text, level, scope:knowledgeScope,contentType:"article" as const,requestId:request.current.id }
       const result = loaded
         ? archiving
-          ? await host.archiveKnowledge(workspaceId, loaded.item.knowledgeId, loaded.item.version)
+          ? await host.archiveKnowledge(workspaceId, loaded.item.knowledgeId, loaded.item.version, request.current.id)
           : await host.editKnowledge(workspaceId, loaded.item.knowledgeId, { ...fields, expectedVersion: loaded.item.version })
         : await host.createKnowledge(workspaceId, { ...fields, termKey: resolvedKey.termKey })
       if (!mounted.current) return
@@ -279,6 +298,8 @@ function KnowledgeEditor({ host, workspaceId, itemId, onClose, onSaved }: {
             onChange={event => setTitle(event.target.value)}
           />
         </label>
+        <label>级别<select value={level} onChange={e=>setLevel(e.target.value as KnowledgeLevel)}>{Object.entries(levelNames).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+        <KnowledgeScopeFields workspaceId={workspaceId} scope={knowledgeScope} onChange={setKnowledgeScope} disabled={busy}/>
         <div className="team-knowledge-category-field">
           <label>
             分类

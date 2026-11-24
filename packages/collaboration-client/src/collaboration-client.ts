@@ -24,6 +24,7 @@ import type {
   InboxQuery, InboxResponse, UserNotificationEvent, UserNotificationPage,
   NotificationPreferences, NotificationPreferencesUpdateRequest,
 } from "./types/index.js"
+import type * as K from "./types/collaboration.js"
 import { InvalidProjectNotification, readProjectNotifications } from "./project-notification-stream.js"
 import { isNotificationCursor } from "./project-notification-cursor.js"
 
@@ -67,8 +68,17 @@ const messages: Record<CollaborationError["code"], string> = {
   TASK_STATE_CONFLICT: "任务状态已变化，请刷新后重试",
   TASK_ROLE_REQUIRED: "当前账号无权执行该任务操作",
   TASK_CONVERSATION_CONFLICT: "任务或会话已关联，请刷新后确认",
-  KNOWLEDGE_TERM_CONFLICT: "团队内已存在该术语键",
   KNOWLEDGE_ARCHIVED: "知识条目已归档",
+  PROPOSAL_STATE_CONFLICT: "提议状态已变化，请刷新",
+  KNOWLEDGE_BASE_CHANGED: "知识已发布新版本，请重新比较后提交",
+  KNOWLEDGE_KEY_EXISTS: "团队已有同一知识键，请改为修订提议",
+  IDEMPOTENCY_CONFLICT: "请求编号已用于其他操作",
+  RULE_BODY_TOO_LARGE: "规约正文超过4 KiB，请精简后提交",
+  KNOWLEDGE_METADATA_REQUIRED: "知识结构需要由管理员显式初始化",
+  REVIEW_REASON_REQUIRED: "请填写审核或复核理由",
+  PROPOSER_MEMBERSHIP_CHANGED: "提议人的团队资格已变化，请重新提议",
+  REPOSITORY_UNAVAILABLE: "适用仓库已不可用，请重新选择",
+
 }
 class ClientProblem extends Error {
   constructor(readonly code: CollaborationError["code"]) { super(code) }
@@ -461,11 +471,12 @@ export class CollaborationClient {
     return this.#write(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}/conversation`, "collaboration#TaskDetail", { body: request }, "PUT")
   }
 
-  async listKnowledge(workspaceId: string, query: string, afterId: string | null): Promise<CollaborationResult<KnowledgeListResponse>> {
+  async listKnowledge(workspaceId: string, query: string, afterId: string | null, options: K.KnowledgeQuery = {}): Promise<CollaborationResult<KnowledgeListResponse>> {
     if (!this.#validator("Id")(workspaceId) || (afterId !== null && !this.#validator("Id")(afterId)) || typeof query !== "string") {
       return this.#error("INVALID_REQUEST")
     }
-    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge`, "collaboration#KnowledgeListResponse", "GET", { query: { ...(afterId ? { afterId } : {}), ...(query.trim() ? { q: query.trim() } : {}) } })
+    if (!this.#validator("collaboration#KnowledgeQuery")(options)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge`, "collaboration#KnowledgeListResponse", "GET", { query: { ...(afterId ? { afterId } : {}), ...(query.trim() ? { q: query.trim() } : {}), ...(options.level ? {level: options.level}:{}), ...(options.scopeMode ? {scopeMode: options.scopeMode}:{}), ...(options.repositoryIds?.length ? {repositoryIds:options.repositoryIds.join(",")}:{}), ...(options.limit ? {limit:String(options.limit)}:{}) } })
   }
 
   async readKnowledge(workspaceId: string, knowledgeId: string): Promise<CollaborationResult<KnowledgeDetail>> {
@@ -489,11 +500,11 @@ export class CollaborationClient {
     return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail", { body: request }, "PUT")
   }
 
-  async archiveKnowledge(workspaceId: string, knowledgeId: string, expectedVersion: number): Promise<CollaborationResult<KnowledgeDetail>> {
-    if (!this.#validIds(workspaceId, knowledgeId) || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+  async archiveKnowledge(workspaceId: string, knowledgeId: string, expectedVersion: number, requestId: string): Promise<CollaborationResult<KnowledgeDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId, requestId) || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
       return this.#error("INVALID_REQUEST")
     }
-    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail", { query: { expectedVersion: String(expectedVersion) } }, "DELETE")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}`, "collaboration#KnowledgeDetail", { query: { expectedVersion: String(expectedVersion), requestId } }, "DELETE")
   }
 
   async listKnowledgeVersions(workspaceId: string, knowledgeId: string, afterId: string | null): Promise<CollaborationResult<KnowledgeVersionListResponse>> {
@@ -510,6 +521,85 @@ export class CollaborationClient {
     const result = await this.#call<KnowledgeVersion>(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions/${versionId}`, "collaboration#KnowledgeVersion")
     return result.ok && (result.value.knowledgeId !== knowledgeId || result.value.version.versionId !== versionId)
       ? this.#error("INVALID_SERVER_RESPONSE") : result
+  }
+
+
+  /** 团队知识createKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async createKnowledgeProposal(workspaceId: string, request: K.KnowledgeProposalCreateRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId) || !this.#validator("collaboration#KnowledgeProposalCreateRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge-proposals`, "collaboration#KnowledgeProposalDetail", {body:request}, "POST")
+  }
+
+  /** 团队知识listKnowledgeProposals：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async listKnowledgeProposals(workspaceId: string, view: "mine" | "review", status: string | null, afterId: string | null): Promise<CollaborationResult<K.KnowledgeProposalListResponse>> {
+    if (!this.#validIds(workspaceId) || afterId !== null && !this.#validator("Id")(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge-proposals`, "collaboration#KnowledgeProposalListResponse", "GET", {query:{view, ...(status ? {status} : {}), ...(afterId ? {afterId} : {})}})
+  }
+
+  /** 团队知识readKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async readKnowledgeProposal(workspaceId: string, proposalId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId, proposalId) || afterId !== null && !/^[0-9]{1,19}$/.test(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge-proposals/${proposalId}`, "collaboration#KnowledgeProposalDetail", "GET", {query:{...(afterId ? {afterId} : {})}})
+  }
+
+  /** 团队知识editKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async editKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalUpdateRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId, proposalId) || !this.#validator("collaboration#KnowledgeProposalUpdateRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge-proposals/${proposalId}`, "collaboration#KnowledgeProposalDetail", {body:request}, "PUT")
+  }
+
+  /** 团队知识submitKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async submitKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalActionRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId, proposalId) || !this.#validator("collaboration#KnowledgeProposalActionRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge-proposals/${proposalId}/submit`, "collaboration#KnowledgeProposalDetail", {body:request}, "POST")
+  }
+
+  /** 团队知识withdrawKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async withdrawKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalActionRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId, proposalId) || !this.#validator("collaboration#KnowledgeProposalActionRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge-proposals/${proposalId}/withdraw`, "collaboration#KnowledgeProposalDetail", {body:request}, "POST")
+  }
+
+  /** 团队知识reviewKnowledgeProposal：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async reviewKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalReviewRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>> {
+    if (!this.#validIds(workspaceId, proposalId) || !this.#validator("collaboration#KnowledgeProposalReviewRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge-proposals/${proposalId}/review`, "collaboration#KnowledgeProposalDetail", {body:request}, "POST")
+  }
+
+  /** 团队知识reportKnowledgeRead：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async reportKnowledgeRead(workspaceId: string, knowledgeId: string, versionId: string, request: K.KnowledgeReadRequest): Promise<CollaborationResult<K.KnowledgeUsageResponse>> {
+    if (!this.#validIds(workspaceId, knowledgeId, versionId) || !this.#validator("collaboration#KnowledgeReadRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions/${versionId}/reads`, "collaboration#KnowledgeUsageResponse", {body:request}, "POST")
+  }
+
+  /** 团队知识readKnowledgeFeedback：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async readKnowledgeFeedback(workspaceId: string, knowledgeId: string, versionId: string): Promise<CollaborationResult<K.KnowledgeFeedbackResponse>> {
+    if (!this.#validIds(workspaceId, knowledgeId, versionId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions/${versionId}/feedback`, "collaboration#KnowledgeFeedbackResponse")
+  }
+
+  /** 团队知识setKnowledgeFeedback：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async setKnowledgeFeedback(workspaceId: string, knowledgeId: string, versionId: string, request: K.KnowledgeFeedbackRequest): Promise<CollaborationResult<K.KnowledgeFeedbackResponse>> {
+    if (!this.#validIds(workspaceId, knowledgeId, versionId) || !this.#validator("collaboration#KnowledgeFeedbackRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/versions/${versionId}/feedback`, "collaboration#KnowledgeFeedbackResponse", {body:request}, "PUT")
+  }
+
+  /** 团队知识listKnowledgeReviews：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async listKnowledgeReviews(workspaceId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeListResponse>> {
+    if (!this.#validIds(workspaceId) || afterId !== null && !this.#validator("Id")(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge-reviews`, "collaboration#KnowledgeListResponse", "GET", {query:{...(afterId ? {afterId} : {})}})
+  }
+
+  /** 团队知识readKnowledgeReview：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async readKnowledgeReview(workspaceId: string, knowledgeId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeReviewDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId) || afterId !== null && !/^[0-9]{1,19}$/.test(afterId)) return this.#error("INVALID_REQUEST")
+    return this.#call(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/review`, "collaboration#KnowledgeReviewDetail", "GET", {query:{...(afterId ? {afterId} : {})}})
+  }
+
+  /** 团队知识confirmKnowledgeReview：输入先过封闭契约，服务端重新校验当前成员/管理员。 */
+  async confirmKnowledgeReview(workspaceId: string, knowledgeId: string, request: K.KnowledgeReviewRequest): Promise<CollaborationResult<K.KnowledgeReviewDetail>> {
+    if (!this.#validIds(workspaceId, knowledgeId) || !this.#validator("collaboration#KnowledgeReviewRequest")(request)) return this.#error("INVALID_REQUEST")
+    return this.#write(`/api/v1/workspaces/${workspaceId}/knowledge/${knowledgeId}/review`, "collaboration#KnowledgeReviewDetail", {body:request}, "POST")
   }
 
   /** 会话创建者上传定稿消息与简报；走当前登录会话 Cookie + CSRF。 */

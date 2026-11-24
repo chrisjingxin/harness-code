@@ -64,7 +64,7 @@ try{
  await until(()=>ui.evaluate(`!!document.querySelector('select[aria-label="沈北辰的团队角色"]')`),'已打开开发者窗口获得管理入口')
  await realRole('developer')
  await until(()=>ui.evaluate(`!document.querySelector('select[aria-label="沈北辰的团队角色"]') && document.body.innerText.includes('团队知识由管理员发布')`),'旧页面权限实时收回')
- const rejected=await ui.evaluate(`window.collaborationApps.createKnowledge(${JSON.stringify(w)},{termKey:'forbidden-ui',category:'经验',title:'不可发布',text:'不可发布'})`)
+ const rejected=await ui.evaluate(`window.collaborationApps.createKnowledge(${JSON.stringify(w)},{level:'experience',scope:{kind:'workspace',repositoryIds:[]},contentType:'article',requestId:crypto.randomUUID(),termKey:'forbidden-ui',category:'经验',title:'不可发布',text:'不可发布'})`)
  assert.equal(rejected.ok,false);assert.equal(rejected.error.code,'WORKSPACE_ADMIN_REQUIRED')
  administrator.dispose()
  const api=JSON.parse(await readFile(join(evidenceDirectory,'api-evidence.json'),'utf8'))

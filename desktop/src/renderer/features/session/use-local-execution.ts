@@ -25,6 +25,7 @@ import {
   type LocalExecutionNotice,
   type LocalExecutionScope,
   type LocalExecutionSessionState,
+  type KnowledgeContextStatus,
   type PersonalDraftImage,
   type PromptQueueView,
 } from "../../../shared/index.js"
@@ -73,6 +74,7 @@ type BufferedBindingNotices = {
 }
 
 type Screen = {
+  knowledgeStatus?: KnowledgeContextStatus
   contextTurns?: Map<string, string>
   timeline: LocalExecutionView
   queue?: PromptQueueView
@@ -212,9 +214,12 @@ export function useLocalExecution(
     canSteer?: boolean,
     images?: readonly PersonalDraftImage[],
     attachments?: readonly LocalExecutionAttachment[],
+    knowledgeStatus?: KnowledgeContextStatus,
   ): void {
     if (flight.turnId !== undefined) return
     flight.turnId = turnId
+    // 只接受当前 scope/binding/request 的受理结果；成功的下一轮清除旧降级提示。
+    screen.knowledgeStatus = knowledgeStatus?.code !== "ready" ? knowledgeStatus : undefined
     screen.contextTurns ??= new Map()
     screen.contextTurns.set(flight.requestId, turnId)
     if (screen.contextTurns.size > 200) screen.contextTurns.delete(screen.contextTurns.keys().next().value!)
@@ -337,7 +342,7 @@ export function useLocalExecution(
           lastSequence: 0, unknown: false,
         }
         screen.flight = flight
-        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments)
+        accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments, notice.knowledgeStatus)
         return
       }
       const flight = screen.flight
@@ -356,7 +361,7 @@ export function useLocalExecution(
       }
       if (flight.bindingId !== notice.bindingId) return
       if (notice.kind === "accepted") {
-        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments)
+        if (flight.requestId === notice.requestId) accept(screen, flight, notice.scope.conversationId, notice.turnId, notice.text, notice.canSteer, notice.images, notice.attachments, notice.knowledgeStatus)
         return
       }
       if (flight.turnId !== notice.turnId || notice.sequence !== flight.lastSequence + 1) return
@@ -433,6 +438,7 @@ export function useLocalExecution(
     screen.preparedFor = target
     screen.preparedForProvider = desiredProvider
     screen.binding = undefined
+    screen.knowledgeStatus = undefined
     screen.availability = preparing
     screen.directoryStatus = "checking"
     current.current.onSessionTitleChange?.(target.scope, undefined)
@@ -507,6 +513,7 @@ export function useLocalExecution(
       return {
         ...readAvailability(target, id),
         ...(target?.scope.conversationId === id ? {
+          ...(preparedForTarget && screen?.knowledgeStatus ? { knowledgeStatus: screen.knowledgeStatus } : {}),
           directoryStatus: !target.directory
             ? "confirmation-required"
             : preparedForTarget ? screen?.directoryStatus ?? "checking" : "checking",
@@ -600,6 +607,7 @@ export function useLocalExecution(
       screen.directoryStatus = "checking"
       screen.timeline = { ...screen.timeline, sessionState: undefined, supportsImagePrompt: undefined, elicitation: null }
       current.current.onSessionTitleChange?.(source.scope, undefined)
+      screen.knowledgeStatus = undefined
       refresh()
 
       try {
@@ -856,7 +864,7 @@ export function useLocalExecution(
         const receipt = result.ok ? result.value : { status: "rejected" as const, reason: result.error.message }
         if (receipt.status === "accepted") {
           if (mounted.current && screens.current.get(source.key) === screen && screen.flight === flight) {
-            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer, images, receipt.attachments)
+            accept(screen, flight, scope.conversationId, receipt.turnId, input.text, receipt.canSteer, images, receipt.attachments, receipt.knowledgeStatus)
           }
           return { status: "accepted" }
         }

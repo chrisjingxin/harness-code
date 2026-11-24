@@ -1,3 +1,4 @@
+import type * as K from "@workbench/collaboration-client/types"
 /**
  * 【功能定义】桌面工作台主进程、预加载与渲染层共用的组织/协作/看板宿主窄端口契约。
  * 【协作边界】仅消费 `@workbench/collaboration-client/types` 纯数据 DTO，零 Node/Electron 依赖。
@@ -61,13 +62,25 @@ export interface CollaborationAppsHost {
   editTask(workspaceId: string, projectId: string, taskId: string, request: TaskPatchRequest): Promise<CollaborationResult<TaskDetail>>
   transitionTask(workspaceId: string, projectId: string, taskId: string, request: TaskTransitionRequest): Promise<CollaborationResult<TaskDetail>>
   linkTaskConversation(workspaceId: string, projectId: string, taskId: string, request: TaskConversationRequest): Promise<CollaborationResult<TaskDetail>>
-  listKnowledge(workspaceId: string, query: string, afterId: string | null): Promise<CollaborationResult<KnowledgeListResponse>>
+  listKnowledge(workspaceId: string, query: string, afterId: string | null, options?: K.KnowledgeQuery): Promise<CollaborationResult<KnowledgeListResponse>>
   readKnowledge(workspaceId: string, knowledgeId: string): Promise<CollaborationResult<KnowledgeDetail>>
   createKnowledge(workspaceId: string, request: KnowledgeCreateRequest): Promise<CollaborationResult<KnowledgeDetail>>
   editKnowledge(workspaceId: string, knowledgeId: string, request: KnowledgeUpdateRequest): Promise<CollaborationResult<KnowledgeDetail>>
-  archiveKnowledge(workspaceId: string, knowledgeId: string, expectedVersion: number): Promise<CollaborationResult<KnowledgeDetail>>
+  archiveKnowledge(workspaceId: string, knowledgeId: string, expectedVersion: number, requestId: string): Promise<CollaborationResult<KnowledgeDetail>>
   listKnowledgeVersions(workspaceId: string, knowledgeId: string, afterId: string | null): Promise<CollaborationResult<KnowledgeVersionListResponse>>
   readKnowledgeVersion(workspaceId: string, knowledgeId: string, versionId: string): Promise<CollaborationResult<KnowledgeVersion>>
+  createKnowledgeProposal(workspaceId: string, request: K.KnowledgeProposalCreateRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  listKnowledgeProposals(workspaceId: string, view: "mine" | "review", status: string | null, afterId: string | null): Promise<CollaborationResult<K.KnowledgeProposalListResponse>>
+  readKnowledgeProposal(workspaceId: string, proposalId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  editKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalUpdateRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  submitKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalActionRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  withdrawKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalActionRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  reviewKnowledgeProposal(workspaceId: string, proposalId: string, request: K.KnowledgeProposalReviewRequest): Promise<CollaborationResult<K.KnowledgeProposalDetail>>
+  readKnowledgeFeedback(workspaceId: string, knowledgeId: string, versionId: string): Promise<CollaborationResult<K.KnowledgeFeedbackResponse>>
+  setKnowledgeFeedback(workspaceId: string, knowledgeId: string, versionId: string, request: K.KnowledgeFeedbackRequest): Promise<CollaborationResult<K.KnowledgeFeedbackResponse>>
+  listKnowledgeReviews(workspaceId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeListResponse>>
+  readKnowledgeReview(workspaceId: string, knowledgeId: string, afterId: string | null): Promise<CollaborationResult<K.KnowledgeReviewDetail>>
+  confirmKnowledgeReview(workspaceId: string, knowledgeId: string, request: K.KnowledgeReviewRequest): Promise<CollaborationResult<K.KnowledgeReviewDetail>>
 }
 
 export type ProjectUpdatesStatus = "connecting" | "connected" | "retrying" | "unavailable"

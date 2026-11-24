@@ -39,7 +39,14 @@
       "termKey": "billing",
       "category": "术语",
       "title": "账单",
-      "text": "结算流水汇总。"
+      "text": "结算流水汇总。",
+      "level": "experience",
+      "scope": {
+        "kind": "workspace",
+        "repositoryIds": []
+      },
+      "contentType": "article",
+      "requestId": "00000000-0000-4000-8000-0000000000a1"
     }
   },
   {
@@ -50,7 +57,14 @@
       "termKey": "Billing",
       "category": "术语",
       "title": "账单",
-      "text": "结算流水汇总。"
+      "text": "结算流水汇总。",
+      "level": "experience",
+      "scope": {
+        "kind": "workspace",
+        "repositoryIds": []
+      },
+      "contentType": "article",
+      "requestId": "00000000-0000-4000-8000-0000000000a1"
     }
   },
   {
@@ -234,6 +248,63 @@
       "dndTimezone": "Asia/Shanghai",
       "mergeWindowSec": 60,
       "expectedVersion": 0
+    }
+  },
+  {
+    "name": "knowledge-proposal",
+    "schema": "KnowledgeProposalCreateRequest",
+    "valid": true,
+    "data": {
+      "content": {
+        "intent": "new",
+        "targetKnowledgeId": null,
+        "baseVersionId": null,
+        "baseItemVersion": null,
+        "candidate": {
+          "termKey": "callback",
+          "category": "经验",
+          "title": "回调幂等",
+          "text": "按业务幂等键处理。",
+          "level": "experience",
+          "scope": {
+            "kind": "workspace",
+            "repositoryIds": []
+          },
+          "contentType": "article"
+        },
+        "relatedReferences": [],
+        "sourceSummary": "本人确认的会话总结",
+        "sourceRefs": [],
+        "generationKind": "agent"
+      },
+      "submit": true,
+      "requestId": "00000000-0000-4000-8000-0000000000a1"
+    }
+  },
+  {
+    "name": "knowledge-scope-reject-empty",
+    "schema": "KnowledgeScope",
+    "valid": false,
+    "data": {
+      "kind": "repositories",
+      "repositoryIds": []
+    }
+  },
+  {
+    "name": "knowledge-read-id",
+    "schema": "KnowledgeReadRequest",
+    "valid": true,
+    "data": {
+      "readId": "00000000-0000-4000-8000-0000000000a1"
+    }
+  },
+  {
+    "name": "knowledge-reject-actor-injection",
+    "schema": "KnowledgeReadRequest",
+    "valid": false,
+    "data": {
+      "readId": "00000000-0000-4000-8000-0000000000a1",
+      "actorId": "fake"
     }
   }
 ]

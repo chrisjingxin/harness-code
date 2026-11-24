@@ -1,3 +1,5 @@
+import { KnowledgeDraftService } from "./knowledge-drafts/service.js"
+import { bindKnowledgeDraftIpc } from "./knowledge-drafts/ipc.js"
 import { bindWorkspaceIpc } from "./workspace-ipc.js"
 /**
  * 【功能定义】桌面身份、项目会话、协作应用与个人视图 IPC 装配入口：
@@ -298,6 +300,10 @@ export function bindCollaborationIpc(
       return result.response === 0
     },
   })
+  const knowledgeDrafts=new KnowledgeDraftService(identity,localConversations,runtime,context,(scope,path,provider)=>execution.prepare(scope,path,provider),state=>{
+    if(!window.isDestroyed()&&!window.webContents.isDestroyed())window.webContents.send("workbench:knowledge-drafts:state",state)
+  },personal)
+  const unbindKnowledgeDrafts=bindKnowledgeDraftIpc(window,trustedUrl,knowledgeDrafts)
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
   const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads)
   const unbindWorkspace = bindWorkspaceIpc(window, trustedUrl, identity)
@@ -339,7 +345,7 @@ export function bindCollaborationIpc(
         workspaceId,
         async (networkClient): Promise<CollaborationResult<unknown>> => {
           const result = await invoke(networkClient, workspaceId, args)
-          if (result.ok && ["createKnowledge", "editKnowledge", "archiveKnowledge"].includes(name)) context.knowledge.invalidate(workspaceId)
+          if (result.ok && ["createKnowledge", "editKnowledge", "archiveKnowledge", "reviewKnowledgeProposal"].includes(name)) context.knowledge.invalidate(workspaceId)
           return result
         },
         { publishConnectionError: false },
@@ -363,16 +369,29 @@ export function bindCollaborationIpc(
     isUuid(projectId) && isUuid(taskId) && isTaskTransitionRequest(request) ? c.transitionTask(ws, projectId, taskId, request) : invalidAppRequest())
   handleApp("linkTaskConversation", 4, (c, ws, [projectId, taskId, request]) =>
     isUuid(projectId) && isUuid(taskId) && isTaskConversationRequest(request) ? c.linkTaskConversation(ws, projectId, taskId, request) : invalidAppRequest())
-  handleApp("listKnowledge", 3, (c, ws, [query, afterId]) =>
-    typeof query === "string" && isNullableUuid(afterId) ? c.listKnowledge(ws, query, afterId) : invalidAppRequest())
+  handleApp("listKnowledge", 4, (c, ws, [query, afterId, options]) =>
+    typeof query === "string" && isNullableUuid(afterId) ? c.listKnowledge(ws, query, afterId, options as import("@workbench/collaboration-client/types").KnowledgeQuery | undefined) : invalidAppRequest())
   handleApp("readKnowledge", 2, (c, ws, [knowledgeId]) =>
     isUuid(knowledgeId) ? c.readKnowledge(ws, knowledgeId) : invalidAppRequest())
   handleApp("createKnowledge", 2, (c, ws, [request]) =>
     isKnowledgeCreateRequest(request) ? c.createKnowledge(ws, request) : invalidAppRequest())
   handleApp("editKnowledge", 3, (c, ws, [knowledgeId, request]) =>
     isUuid(knowledgeId) && isKnowledgeUpdateRequest(request) ? c.editKnowledge(ws, knowledgeId, request) : invalidAppRequest())
-  handleApp("archiveKnowledge", 3, (c, ws, [knowledgeId, expectedVersion]) =>
-    isUuid(knowledgeId) && isPositiveSafeInteger(expectedVersion) ? c.archiveKnowledge(ws, knowledgeId, expectedVersion) : invalidAppRequest())
+  handleApp("archiveKnowledge", 4, (c, ws, [knowledgeId, expectedVersion, requestId]) =>
+    isUuid(knowledgeId) && isPositiveSafeInteger(expectedVersion) && isUuid(requestId) ? c.archiveKnowledge(ws, knowledgeId, expectedVersion, requestId) : invalidAppRequest())
+  handleApp("createKnowledgeProposal", 2, (c, ws, [request]) => c.createKnowledgeProposal(ws, request as import("@workbench/collaboration-client/types").KnowledgeProposalCreateRequest))
+  handleApp("listKnowledgeProposals", 4, (c, ws, [view, status, afterId]) => c.listKnowledgeProposals(ws, view as "mine" | "review", status as string | null, afterId as string | null))
+  handleApp("readKnowledgeProposal", 3, (c, ws, [proposalId, afterId]) => c.readKnowledgeProposal(ws, proposalId as string, afterId as string | null))
+  handleApp("editKnowledgeProposal", 3, (c, ws, [proposalId, request]) => c.editKnowledgeProposal(ws, proposalId as string, request as import("@workbench/collaboration-client/types").KnowledgeProposalUpdateRequest))
+  handleApp("submitKnowledgeProposal", 3, (c, ws, [proposalId, request]) => c.submitKnowledgeProposal(ws, proposalId as string, request as import("@workbench/collaboration-client/types").KnowledgeProposalActionRequest))
+  handleApp("withdrawKnowledgeProposal", 3, (c, ws, [proposalId, request]) => c.withdrawKnowledgeProposal(ws, proposalId as string, request as import("@workbench/collaboration-client/types").KnowledgeProposalActionRequest))
+  handleApp("reviewKnowledgeProposal", 3, (c, ws, [proposalId, request]) => c.reviewKnowledgeProposal(ws, proposalId as string, request as import("@workbench/collaboration-client/types").KnowledgeProposalReviewRequest))
+  handleApp("readKnowledgeFeedback", 3, (c, ws, [knowledgeId, versionId]) => c.readKnowledgeFeedback(ws, knowledgeId as string, versionId as string))
+  handleApp("setKnowledgeFeedback", 4, (c, ws, [knowledgeId, versionId, request]) => c.setKnowledgeFeedback(ws, knowledgeId as string, versionId as string, request as import("@workbench/collaboration-client/types").KnowledgeFeedbackRequest))
+  handleApp("listKnowledgeReviews", 2, (c, ws, [afterId]) => c.listKnowledgeReviews(ws, afterId as string | null))
+  handleApp("readKnowledgeReview", 3, (c, ws, [knowledgeId, afterId]) => c.readKnowledgeReview(ws, knowledgeId as string, afterId as string | null))
+  handleApp("confirmKnowledgeReview", 3, (c, ws, [knowledgeId, request]) => c.confirmKnowledgeReview(ws, knowledgeId as string, request as import("@workbench/collaboration-client/types").KnowledgeReviewRequest))
+
   handleApp("listKnowledgeVersions", 3, (c, ws, [knowledgeId, afterId]) =>
     isUuid(knowledgeId) && isNullableUuid(afterId) ? c.listKnowledgeVersions(ws, knowledgeId, afterId) : invalidAppRequest())
   handleApp("readKnowledgeVersion", 3, (c, ws, [knowledgeId, versionId]) =>
@@ -445,7 +464,7 @@ export function bindCollaborationIpc(
     // 超时后的旧结果不能取消用户发起的下一次关窗。
     if (request !== closeRequest) return
     if (!flushed) { closeFailed(); return }
-    try { await execution.dispose() }
+    try { await knowledgeDrafts.dispose(); await execution.dispose() }
     catch { closeFailed(true); return }
     if (request !== closeRequest) return
     if (closeTimer) clearTimeout(closeTimer)
@@ -455,6 +474,8 @@ export function bindCollaborationIpc(
 
   window.once("closed", () => {
     if (closeTimer) clearTimeout(closeTimer)
+    unbindKnowledgeDrafts()
+    void knowledgeDrafts.dispose().catch(()=>{})
     unbindContext()
     void context.dispose().catch(() => {})
     void execution.dispose().catch(() => {})

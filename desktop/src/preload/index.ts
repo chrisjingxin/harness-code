@@ -1,3 +1,4 @@
+import type { KnowledgeDraftsHost } from "../shared/index.js"
 /** 隔离桥只转发固定桌面/身份方法；不向页面暴露 Electron 事件、IPC 对象或 Node。 */
 import { contextBridge, ipcRenderer } from "electron"
 import type { CollaborationHost, IdentityState } from "@workbench/collaboration-client/types"
@@ -85,6 +86,18 @@ const workbenchContext: WorkbenchContextHost = {
   removeDirectory: (scope, entryId, revision) => ipcRenderer.invoke("workbench:context:remove-directory", scope, entryId, revision),
 }
 contextBridge.exposeInMainWorld("workbenchContext", workbenchContext)
+const knowledgeDrafts:KnowledgeDraftsHost={
+  source:scope=>ipcRenderer.invoke("workbench:knowledge-drafts:source",scope),
+  start:(scope,input)=>ipcRenderer.invoke("workbench:knowledge-drafts:start",scope,input),
+  read:id=>ipcRenderer.invoke("workbench:knowledge-drafts:read",id),
+  cancel:id=>ipcRenderer.invoke("workbench:knowledge-drafts:cancel",id),
+  release:id=>ipcRenderer.invoke("workbench:knowledge-drafts:release",id),
+  answerPermission:(id,requestId,optionId)=>ipcRenderer.invoke("workbench:knowledge-drafts:permission",id,requestId,optionId),
+  answerElicitation:(id,requestId,answer)=>ipcRenderer.invoke("workbench:knowledge-drafts:elicitation",id,requestId,answer),
+  onState:listener=>{const handler=(_event:unknown,state:Parameters<typeof listener>[0])=>listener(state);ipcRenderer.on("workbench:knowledge-drafts:state",handler);return()=>ipcRenderer.removeListener("workbench:knowledge-drafts:state",handler)},
+}
+contextBridge.exposeInMainWorld("knowledgeDrafts",knowledgeDrafts)
+
 
 const collaborationApps: CollaborationAppsHost = {
   createSnapshot: (workspaceId, projectId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createSnapshot", workspaceId, projectId, request),
@@ -95,13 +108,25 @@ const collaborationApps: CollaborationAppsHost = {
   editTask: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:editTask", workspaceId, projectId, taskId, request),
   transitionTask: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:transitionTask", workspaceId, projectId, taskId, request),
   linkTaskConversation: (workspaceId, projectId, taskId, request) => ipcRenderer.invoke("workbench:collaboration-apps:linkTaskConversation", workspaceId, projectId, taskId, request),
-  listKnowledge: (workspaceId, query, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledge", workspaceId, query, afterId),
+  listKnowledge: (workspaceId, query, afterId, options) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledge", workspaceId, query, afterId, options),
   readKnowledge: (workspaceId, knowledgeId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledge", workspaceId, knowledgeId),
   createKnowledge: (workspaceId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createKnowledge", workspaceId, request),
   editKnowledge: (workspaceId, knowledgeId, request) => ipcRenderer.invoke("workbench:collaboration-apps:editKnowledge", workspaceId, knowledgeId, request),
-  archiveKnowledge: (workspaceId, knowledgeId, expectedVersion) => ipcRenderer.invoke("workbench:collaboration-apps:archiveKnowledge", workspaceId, knowledgeId, expectedVersion),
+  archiveKnowledge: (workspaceId, knowledgeId, expectedVersion, requestId) => ipcRenderer.invoke("workbench:collaboration-apps:archiveKnowledge", workspaceId, knowledgeId, expectedVersion, requestId),
   listKnowledgeVersions: (workspaceId, knowledgeId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledgeVersions", workspaceId, knowledgeId, afterId),
   readKnowledgeVersion: (workspaceId, knowledgeId, versionId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledgeVersion", workspaceId, knowledgeId, versionId),
+  createKnowledgeProposal: (workspaceId, request) => ipcRenderer.invoke("workbench:collaboration-apps:createKnowledgeProposal", workspaceId, request),
+  listKnowledgeProposals: (workspaceId, view, status, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledgeProposals", workspaceId, view, status, afterId),
+  readKnowledgeProposal: (workspaceId, proposalId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledgeProposal", workspaceId, proposalId, afterId),
+  editKnowledgeProposal: (workspaceId, proposalId, request) => ipcRenderer.invoke("workbench:collaboration-apps:editKnowledgeProposal", workspaceId, proposalId, request),
+  submitKnowledgeProposal: (workspaceId, proposalId, request) => ipcRenderer.invoke("workbench:collaboration-apps:submitKnowledgeProposal", workspaceId, proposalId, request),
+  withdrawKnowledgeProposal: (workspaceId, proposalId, request) => ipcRenderer.invoke("workbench:collaboration-apps:withdrawKnowledgeProposal", workspaceId, proposalId, request),
+  reviewKnowledgeProposal: (workspaceId, proposalId, request) => ipcRenderer.invoke("workbench:collaboration-apps:reviewKnowledgeProposal", workspaceId, proposalId, request),
+  readKnowledgeFeedback: (workspaceId, knowledgeId, versionId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledgeFeedback", workspaceId, knowledgeId, versionId),
+  setKnowledgeFeedback: (workspaceId, knowledgeId, versionId, request) => ipcRenderer.invoke("workbench:collaboration-apps:setKnowledgeFeedback", workspaceId, knowledgeId, versionId, request),
+  listKnowledgeReviews: (workspaceId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:listKnowledgeReviews", workspaceId, afterId),
+  readKnowledgeReview: (workspaceId, knowledgeId, afterId) => ipcRenderer.invoke("workbench:collaboration-apps:readKnowledgeReview", workspaceId, knowledgeId, afterId),
+  confirmKnowledgeReview: (workspaceId, knowledgeId, request) => ipcRenderer.invoke("workbench:collaboration-apps:confirmKnowledgeReview", workspaceId, knowledgeId, request),
 }
 contextBridge.exposeInMainWorld("collaborationApps", collaborationApps)
 contextBridge.exposeInMainWorld("projectUpdates", createProjectUpdatesHost(ipcRenderer))

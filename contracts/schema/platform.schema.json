@@ -378,7 +378,6 @@
             "TASK_STATE_CONFLICT",
             "TASK_ROLE_REQUIRED",
             "TASK_CONVERSATION_CONFLICT",
-            "KNOWLEDGE_TERM_CONFLICT",
             "KNOWLEDGE_ARCHIVED",
             "CONVERSATION_CONFLICT",
             "CONVERSATION_SHARING_STOPPED",
@@ -388,7 +387,16 @@
             "HANDOFF_PREVIEW_STALE",
             "HANDOFF_INCOMPLETE",
             "PROJECT_SUCCESSOR_CONFIRMATION_REQUIRED",
-            "WORKSPACE_MEMBER_LIMIT"
+            "WORKSPACE_MEMBER_LIMIT",
+            "PROPOSAL_STATE_CONFLICT",
+            "KNOWLEDGE_BASE_CHANGED",
+            "KNOWLEDGE_KEY_EXISTS",
+            "IDEMPOTENCY_CONFLICT",
+            "RULE_BODY_TOO_LARGE",
+            "KNOWLEDGE_METADATA_REQUIRED",
+            "REVIEW_REASON_REQUIRED",
+            "PROPOSER_MEMBERSHIP_CHANGED",
+            "REPOSITORY_UNAVAILABLE"
           ]
         },
         "requestId": {

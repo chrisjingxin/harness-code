@@ -32,8 +32,8 @@ const transport = async input => {
   if (url.pathname.endsWith("/projects")) return json({ workspaceId, projects: [project(projectId), project(otherProject)] })
   if (url.pathname.includes("/projects/")) return json({ project: project(url.pathname.split("/").at(-1)), members: [], repositories: [] })
   if (url.pathname.endsWith("/repositories")) return json({ workspaceId, repositories: [] })
-  if (url.pathname.endsWith("/knowledge")) { titleReads++; return json({ items: [{ knowledgeId, termKey: "errors", category: "规范", title, currentVersionId: versionId, version: 1, archived: false, updatedAtMs: 1 }], nextAfterId: null }) }
-  if (url.pathname.endsWith(`/versions/${versionId}`)) return json({ knowledgeId, termKey: "errors", archived: false, version: { versionId, version: 1, category: "规范", title, authorId: user, createdAtMs: 1 }, text: "已发布规范正文：团队工程用途依据。" })
+  if (url.pathname.endsWith("/knowledge")) { titleReads++; return json({ items: [{ knowledgeId, termKey: "errors", category: "规范", title, currentVersionId: versionId, version: 1, archived: false, updatedAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",health:{readCount:0,usefulCount:0,expiredCount:0,needsReview:false,lastReviewedAtMs:1,feedbackWatermark:0} }], nextAfterId: null }) }
+  if (url.pathname.endsWith(`/versions/${versionId}`)) return json({ knowledgeId, termKey: "errors", archived: false, version: { versionId, version: 1, category: "规范", title, authorId: user, createdAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",contributors:[user],reviewerId:null,reviewedAtMs:null,proposalId:null }, text: "已发布规范正文：团队工程用途依据。" })
   throw new Error(`未预期请求:${url.pathname}`)
 }
 const root = await mkdtemp(join(tmpdir(), "hc233-"))

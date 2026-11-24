@@ -498,6 +498,38 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "rule",
+                "experience",
+                "term"
+              ]
+            }
+          },
+          {
+            "name": "scopeMode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "applicable"
+              ]
+            }
+          },
+          {
+            "name": "repositoryIds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "最多20个团队仓库UUID，以逗号分隔；仅用于适用范围筛选。"
+            }
           }
         ],
         "responses": {
@@ -739,6 +771,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
             }
           }
         ],
@@ -1352,6 +1392,738 @@
                 "schema": {
                   "$ref": "../schema/platform.schema.json#/$defs/ErrorEnvelope"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals": {
+      "post": {
+        "operationId": "createKnowledgeProposal",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalCreateRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listKnowledgeProposals",
+        "parameters": [
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "mine",
+                "review"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "draft",
+                "submitted",
+                "returned",
+                "published",
+                "withdrawn"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}": {
+      "get": {
+        "operationId": "readKnowledgeProposal",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "editKnowledgeProposal",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalUpdateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/events": {
+      "get": {
+        "operationId": "readKnowledgeProposalEvents",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/submit": {
+      "post": {
+        "operationId": "submitKnowledgeProposal",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalActionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/withdraw": {
+      "post": {
+        "operationId": "withdrawKnowledgeProposal",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalActionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/review": {
+      "post": {
+        "operationId": "reviewKnowledgeProposal",
+        "parameters": [
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeProposalReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}/reads": {
+      "post": {
+        "operationId": "reportKnowledgeRead",
+        "parameters": [
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeUsageResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeReadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}/feedback": {
+      "get": {
+        "operationId": "readKnowledgeFeedback",
+        "parameters": [
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeFeedbackResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setKnowledgeFeedback",
+        "parameters": [
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeFeedbackResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeFeedbackRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge-reviews": {
+      "get": {
+        "operationId": "listKnowledgeReviews",
+        "parameters": [
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeListResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/review": {
+      "get": {
+        "operationId": "readKnowledgeReview",
+        "parameters": [
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "afterId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeReviewDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "confirmKnowledgeReview",
+        "parameters": [
+          {
+            "name": "knowledgeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "../schema/platform.schema.json#/$defs/BeeResponseEntity"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeReviewDetail"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schema/collaboration.schema.json#/$defs/KnowledgeReviewRequest"
               }
             }
           }

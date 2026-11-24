@@ -80,7 +80,15 @@ public final class ApiResponses {
             Map.entry("TASK_ROLE_REQUIRED", "CLB2007"),
             Map.entry("TASK_STATE_CONFLICT", "CLB3011"),
             Map.entry("TASK_CONVERSATION_CONFLICT", "CLB3012"),
-            Map.entry("KNOWLEDGE_TERM_CONFLICT", "CLB3013"),
+            Map.entry("KNOWLEDGE_KEY_EXISTS", "CLB3013"),
+            Map.entry("PROPOSAL_STATE_CONFLICT", "CLB3023"),
+            Map.entry("KNOWLEDGE_BASE_CHANGED", "CLB3024"),
+            Map.entry("IDEMPOTENCY_CONFLICT", "CLB3025"),
+            Map.entry("RULE_BODY_TOO_LARGE", "CLB3026"),
+            Map.entry("KNOWLEDGE_METADATA_REQUIRED", "CLB5003"),
+            Map.entry("REVIEW_REASON_REQUIRED", "CLB3027"),
+            Map.entry("PROPOSER_MEMBERSHIP_CHANGED", "CLB3028"),
+            Map.entry("REPOSITORY_UNAVAILABLE", "CLB3029"),
             Map.entry("KNOWLEDGE_ARCHIVED", "CLB3014"),
             Map.entry("CONVERSATION_CONFLICT", "CLB3015"),
             Map.entry("CONVERSATION_SHARING_STOPPED", "CLB3016"),
@@ -207,7 +215,15 @@ public final class ApiResponses {
             case "TASK_ROLE_REQUIRED" -> "当前账号无权执行该任务操作";
             case "TASK_STATE_CONFLICT" -> "任务当前状态不支持此操作";
             case "TASK_CONVERSATION_CONFLICT" -> "任务或会话已建立关联";
-            case "KNOWLEDGE_TERM_CONFLICT" -> "该术语键已存在";
+            case "KNOWLEDGE_KEY_EXISTS" -> "该术语键已存在";
+            case "PROPOSAL_STATE_CONFLICT" -> "提议状态已变化，请刷新";
+            case "KNOWLEDGE_BASE_CHANGED" -> "知识基准已变化，请重新比较";
+            case "IDEMPOTENCY_CONFLICT" -> "请求编号已用于其他载荷";
+            case "RULE_BODY_TOO_LARGE" -> "规约正文超过4 KiB，请精简后提交";
+            case "KNOWLEDGE_METADATA_REQUIRED" -> "知识元数据需要运维显式初始化";
+            case "REVIEW_REASON_REQUIRED" -> "请填写审核或复核理由";
+            case "PROPOSER_MEMBERSHIP_CHANGED" -> "提议人的团队资格已变化，请重新提议";
+            case "REPOSITORY_UNAVAILABLE" -> "适用仓库已不可用，请调整范围";
             case "KNOWLEDGE_ARCHIVED" -> "知识条目已归档";
             case "CONVERSATION_CONFLICT" -> "会话标识或请求参数冲突";
             case "CONVERSATION_SHARING_STOPPED" -> "该会话已停止团队共享";

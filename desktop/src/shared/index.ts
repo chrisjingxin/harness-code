@@ -12,3 +12,5 @@ export * from "./local-execution-host.js"
 export * from "./local-conversations-host.js"
 
 export type * from "./workbench-context-host.js"
+
+export type * from "./knowledge-drafts-host.js"

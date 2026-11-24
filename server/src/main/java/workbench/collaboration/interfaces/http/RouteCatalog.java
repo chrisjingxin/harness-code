@@ -51,7 +51,11 @@ public final class RouteCatalog {
             "assignee", Pattern.compile("me"), "creator", Pattern.compile("me"),
             "status", Pattern.compile("todo|doing|review|done|cancelled"));
     private static final Map<String, Pattern> KNOWLEDGE_PAGE = Map.of("afterId", ID, "limit", LIMIT,
-            "category", Pattern.compile(".{1,80}"), "q", Pattern.compile(".{1,200}"));
+            "category", Pattern.compile(".{1,80}"), "q", Pattern.compile(".{1,200}"),
+            "level", Pattern.compile("rule|experience|term"), "scopeMode", Pattern.compile("all|applicable"),
+            "repositoryIds", Pattern.compile(ID.pattern()+"(,"+ID.pattern()+"){0,19}"));
+    private static final Map<String, Pattern> PROPOSAL_PAGE=Map.of("view",Pattern.compile("mine|review"),"status",Pattern.compile("draft|submitted|returned|published|withdrawn"),"afterId",ID,"limit",LIMIT);
+    private static final Map<String, Pattern> EVENT_PAGE=Map.of("afterId",SEQUENCE,"limit",LIMIT);
     private static final Map<String, Pattern> NOTIFICATION_PAGE = Map.of("afterId", SEQUENCE, "limit", LIMIT);
     private static final Map<String, Pattern> INBOX_PAGE = Map.of(
             "bucket", Pattern.compile("action_required|sent|resolved"),
@@ -94,9 +98,19 @@ public final class RouteCatalog {
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/tasks/{taskId}/conversation", Set.of("PUT"), Auth.USER, 4096, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/knowledge", Set.of("GET", "POST"), Auth.USER, 131072, KNOWLEDGE_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}", Set.of("GET", "PUT", "DELETE"), Auth.USER, 131072,
-                    Map.of("expectedVersion", SEQUENCE)),
+                    Map.of("expectedVersion", SEQUENCE, "requestId", ID)),
             new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions", Set.of("GET"), Auth.USER, 0, ID_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}", Set.of("GET"), Auth.USER, 0, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals", Set.of("GET","POST"), Auth.USER, 131072, PROPOSAL_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}", Set.of("GET","PUT"), Auth.USER, 131072, EVENT_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/events", Set.of("GET"), Auth.USER, 0, EVENT_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/submit", Set.of("POST"), Auth.USER, 4096, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/withdraw", Set.of("POST"), Auth.USER, 4096, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-proposals/{proposalId}/review", Set.of("POST"), Auth.USER, 131072, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}/reads", Set.of("POST"), Auth.USER, 4096, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/versions/{versionId}/feedback", Set.of("GET","PUT"), Auth.USER, 4096, NONE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge-reviews", Set.of("GET"), Auth.USER, 0, ID_PAGE),
+            new Route("/api/v1/workspaces/{workspaceId}/knowledge/{knowledgeId}/review", Set.of("GET","POST"), Auth.USER, 8192, EVENT_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/projects/{projectId}/board", Set.of("GET"), Auth.USER, 0, NONE),
             new Route("/api/v1/workspaces/{workspaceId}/notifications", Set.of("GET"), Auth.USER, 0, NOTIFICATION_PAGE),
             new Route("/api/v1/workspaces/{workspaceId}/notifications/stream", Set.of("GET"), Auth.USER, 0, Map.of("afterId", SEQUENCE)),

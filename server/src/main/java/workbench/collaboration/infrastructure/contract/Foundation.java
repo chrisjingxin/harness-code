@@ -14,6 +14,7 @@ import workbench.collaboration.domain.identity.WorkspaceMember;
 import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
 
@@ -25,14 +26,14 @@ import java.util.UUID;
  * 本服务从不执行任何 DDL——库表结构唯一来源是 classpath:db/schema.sql，由运维手工建库。
  *
  * <p>【核心架构底线与校验规则 (Invariants)】
- * 1. 核对当前 22 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量、HC-246 通知偏好与外部出站）：
+ * 1. 核对当前 30 张控制面表（身份、HC-211 组织与会话、HC-212 协作增量、HC-246 通知偏好与外部出站、HC-241 知识治理）：
  *    - 完整集合见 REQUIRED_TABLES，与唯一 schema.sql 对齐；
  *    - 引擎必须为 InnoDB，字符集必须为 utf8mb4；
  *    - 每张业务表必须拥有物理自增主键 bigint unsigned id (PRI auto_increment)；
  *      业务标识列带实体前缀（wb_user.user_id 为 CHAR(32) 唯一索引，wb_project.project_id 等为 CHAR(36) 唯一索引）；
  *    - 抽查新语义关键列：wb_repository.remote_url_sha256、
  *      wb_conversation 的 owner/status/brief/synced_sequence/brief_updated_at 等；
- *    - 团队规范落库形态：时间列 DATETIME(3)（*_at，应用当前时区），状态列 TINYINT，全列 NOT NULL。
+ *    - 团队规范落库形态：时间列 DATETIME(3)（*_at，应用当前时区），状态列 TINYINT；未知审核时间按 canonical DDL 保留 NULL。
  * 2. 彻底移除旧模型残留：
  *    - 绝不允许出现历史流水表（wb_message、wb_execution 系列、wb_request_receipt、
  *      wb_device_request、wb_outbox_event）；
@@ -48,14 +49,16 @@ import java.util.UUID;
  */
 public final class Foundation {
 
-    /** 必须存在的 22 张控制面表 */
+    /** 必须存在的 30 张控制面表 */
     private static final List<String> REQUIRED_TABLES = List.of(
             "wb_user", "wb_user_org", "wb_org", "wb_workspace", "wb_workspace_member", "wb_workspace_request",
             "wb_repository", "wb_project", "wb_project_member", "wb_project_repository",
             "wb_conversation", "wb_conversation_repository", "wb_snapshot",
             "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
             "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox",
-            "wb_user_notification_pref", "wb_external_notification_delivery"
+            "wb_user_notification_pref", "wb_external_notification_delivery",
+            "wb_knowledge_version_repository", "wb_knowledge_proposal", "wb_knowledge_proposal_event", "wb_knowledge_request",
+            "wb_knowledge_read_receipt", "wb_knowledge_usage", "wb_knowledge_feedback", "wb_knowledge_review_event"
     );
 
     /** 新语义关键列抽查清单：表 -> 必须存在的列 */
@@ -79,8 +82,16 @@ public final class Foundation {
             Map.entry("wb_task_link", List.of("task_id", "link_type", "version_id", "knowledge_id")),
             Map.entry("wb_task_request", List.of("project_id", "actor_id", "request_id", "fingerprint", "response")),
             Map.entry("wb_knowledge_item", List.of("workspace_id", "knowledge_id", "term_key", "current_version_id",
-                    "version", "indexed_version", "archived")),
-            Map.entry("wb_knowledge_version", List.of("knowledge_id", "version_id", "version", "text")),
+                    "version", "indexed_version", "archived", "last_reviewed_at", "reviewed_feedback_id")),
+            Map.entry("wb_knowledge_version", List.of("knowledge_id", "version_id", "version", "text", "level", "scope_kind", "content_type", "contributors", "proposal_id", "reviewer_id", "reviewed_at")),
+            Map.entry("wb_knowledge_version_repository",List.of("version_id","repository_id")),
+            Map.entry("wb_knowledge_proposal",List.of("proposal_id","workspace_id","proposer_id","proposer_member_version","content","revision","status","submitted_at")),
+            Map.entry("wb_knowledge_proposal_event",List.of("proposal_id","content","actor_id","kind")),
+            Map.entry("wb_knowledge_request",List.of("workspace_id","actor_id","request_id","fingerprint","response")),
+            Map.entry("wb_knowledge_read_receipt",List.of("read_id","knowledge_id","version_id")),
+            Map.entry("wb_knowledge_usage",List.of("knowledge_id","version_id","read_count")),
+            Map.entry("wb_knowledge_feedback",List.of("knowledge_id","version_id","user_id","value","event_id")),
+            Map.entry("wb_knowledge_review_event",List.of("knowledge_id","version_id","actor_id","kind","note")),
             Map.entry("wb_notification_outbox", List.of("workspace_id", "user_id", "project_id", "event_id", "event_type", "object_id")),
             Map.entry("wb_user_notification_pref", List.of("user_id", "external_enabled", "subscribed_events",
                     "dnd_enabled", "dnd_start_minute", "dnd_end_minute", "dnd_timezone",
@@ -197,7 +208,31 @@ public final class Foundation {
         }
     }
 
-    /** 运维显式映射初始化历史团队；仅处理 role=0，已生效的角色与移除记录不覆盖。 */
+    /** 只读校验当前元数据和版本指针；应用启动不补字段、不猜测旧分类。 */
+    public void validateKnowledgeMetadata() {
+        Long invalid=jdbc.queryForObject("SELECT COUNT(*) FROM wb_knowledge_version WHERE level NOT IN ('rule','experience','term') OR scope_kind NOT IN ('workspace','repositories') OR content_type<>'article' OR JSON_VALID(contributors)=0",Long.class);
+        Long pointers=jdbc.queryForObject("SELECT COUNT(*) FROM wb_knowledge_item i LEFT JOIN wb_knowledge_version v ON v.knowledge_id=i.knowledge_id AND v.version_id=i.current_version_id WHERE v.version_id IS NULL",Long.class);
+        if(invalid!=0||pointers!=0)throw new IllegalStateException("知识元数据尚未初始化或版本指针无效；先由运维核验结构并显式运行 init-knowledge。");
+    }
+
+    /** 运维先显式补齐 canonical DDL 后运行；仅处理全空的已核验元数据，绝不执行 DDL 或覆盖已有发布信息。 */
+    public void initializeKnowledge() {
+        transaction.executeWithoutResult(status->{
+            for(String ws:jdbc.query("SELECT workspace_id FROM wb_workspace ORDER BY workspace_id",(r,i)->r.getString(1)))identity.lockWorkspace(ws);
+            var rows=jdbc.queryForList("SELECT knowledge_id,version_id,author_id,level,scope_kind,content_type,contributors,proposal_id,reviewer_id,reviewed_at FROM wb_knowledge_version");
+            for(var row:rows){
+                boolean blank="".equals(row.get("level"))&&"".equals(row.get("scope_kind"))&&"".equals(row.get("content_type"));
+                if(!blank)continue;
+                if(!"".equals(row.get("proposal_id"))||!"".equals(row.get("reviewer_id"))||row.get("reviewed_at")!=null||!Set.of("","[]").contains(row.get("contributors"))||!String.valueOf(row.get("author_id")).matches("[0-9a-f]{32}"))throw new IllegalStateException("历史知识存在混合元数据，请人工核对："+row.get("version_id"));
+                String version=String.valueOf(row.get("version_id"));
+                if(jdbc.queryForObject("SELECT COUNT(*) FROM wb_knowledge_version_repository WHERE version_id=?",Long.class,version)!=0)throw new IllegalStateException("未初始化版本已有指定范围，拒绝覆盖。");
+                jdbc.update("UPDATE wb_knowledge_version SET level='experience',scope_kind='workspace',content_type='article',contributors=JSON_ARRAY(author_id) WHERE version_id=? AND level='' AND scope_kind='' AND content_type=''",version);
+            }
+            validateKnowledgeMetadata();
+        });
+    }
+
+    /** 运维显式映射初始化历史团队；不覆盖已生效角色。 */
     public void initializeRoles(String mappingFile) {
         var mapper=tools.jackson.databind.json.JsonMapper.builder().build();
         tools.jackson.databind.JsonNode mappings;

@@ -59,7 +59,7 @@ SQL
 "${sql[@]}" hc211_smoke < "$service/src/main/resources/db/demo-data.sql"
 "${sql[@]}" --batch hc211_smoke -e 'SHOW TABLES' >"$root/tables.tsv"
 table_count=$("${sql[@]}" --skip-column-names hc211_smoke -e 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()')
-test "$table_count" = 19
+test "$table_count" = 30
 origin=http://127.0.0.1:$java_port
 echo "$origin" >"$root/origin"
 cat >"$root/jdbc.properties" <<PROPERTIES

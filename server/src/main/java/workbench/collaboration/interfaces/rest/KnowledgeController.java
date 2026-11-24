@@ -25,9 +25,12 @@ public class KnowledgeController {
     public ResponseEntity<String> list(@PathVariable String workspaceId,
                                        @RequestParam(required = false) String category,
                                        @RequestParam(required = false) String q,
+                                       @RequestParam(required = false) String level,
+                                       @RequestParam(defaultValue = "all") String scopeMode,
+                                       @RequestParam(defaultValue = "") String repositoryIds,
                                        @RequestParam(defaultValue = "") String afterId,
                                        @RequestParam(required = false) String limit) {
-        return ApiResponses.json(200, knowledge.list(CurrentSession.userId(), workspaceId, category, q, afterId,
+        return ApiResponses.json(200, knowledge.list(CurrentSession.userId(), workspaceId, category, q, level, scopeMode, repositoryIds.isEmpty() ? java.util.List.of() : java.util.List.of(repositoryIds.split(",")), afterId,
                 PageInput.limit(limit)));
     }
 
@@ -44,9 +47,9 @@ public class KnowledgeController {
 
     @DeleteMapping("/{knowledgeId}")
     public ResponseEntity<String> archive(@PathVariable String workspaceId, @PathVariable String knowledgeId,
-                                          @RequestParam(required = false) String expectedVersion) {
+                                          @RequestParam(required = false) String expectedVersion, @RequestParam String requestId) {
         return ApiResponses.json(200, knowledge.archive(CurrentSession.userId(), workspaceId, knowledgeId,
-                PageInput.number(expectedVersion, 1)));
+                PageInput.number(expectedVersion, 1), requestId));
     }
 
     @GetMapping("/{knowledgeId}/versions")

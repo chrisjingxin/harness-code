@@ -68,7 +68,7 @@ public class Application {
         }
 
         // 命令合法性防篡改防御
-        if (!Set.of("init-demo", "init-workspace-roles", "start").contains(command)) {
+        if (!Set.of("init-demo", "init-workspace-roles", "init-knowledge", "start").contains(command)) {
             throw new IllegalArgumentException("未知运行命令");
         }
 

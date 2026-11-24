@@ -1,3 +1,5 @@
+import { withKnowledgeToolFeedback } from "../collaboration/knowledge/knowledge-tool-feedback.js"
+import { KnowledgeDraftButton } from "../knowledge-drafts/knowledge-draft-button.js"
 /**
  * 本人本机会话页：只服务归属当前账号且在当前设备运行的会话。
  *
@@ -543,7 +545,7 @@ export function LocalSessionPage({
         ? imageUnsupportedReason
         : imageNotice
           ? imageNotice
-          : canEnqueue || availability.available ? undefined : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
+          : canEnqueue || availability.available ? availability.knowledgeStatus?.message : availability.reason ?? "本机 Agent 与运行链路尚未接入，暂不能发送或取消。",
     commands: capabilities.commands,
     agentModel: capabilities.agentModel,
     controls: capabilities.controls,
@@ -640,7 +642,10 @@ export function LocalSessionPage({
     ? { ...projected, composer: { ...projected.composer, statusText: availability.reason } }
     : projected
 
-  const renderedEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
+  const referencedEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
+  // 个人视图的 __solo__ 只是阅读状态命名空间，知识权限始终取真实执行绑定。
+  const knowledgeWorkspaceId = executionScope ? executionScope.workspaceId : scope.workspaceId
+  const renderedEntries = knowledgeWorkspaceId ? withKnowledgeToolFeedback(referencedEntries,window.collaborationApps,knowledgeWorkspaceId,scope.accountId) : referencedEntries
 
   const restoreKey = sessionState?.restoreStatus.kind === "reset"
     ? `${conversation.conversationId}:${sessionState.restoreStatus.sessionId}`
@@ -818,6 +823,7 @@ export function LocalSessionPage({
         <div className="session-conversation-column">
           {headerBar}
           <div className="session-conversation-wrap">
+            {knowledgeWorkspaceId&&<div className="knowledge-draft-entry"><KnowledgeDraftButton key={JSON.stringify([scope.accountId,knowledgeWorkspaceId,scope.conversationId])} scope={{accountId:scope.accountId,workspaceId:knowledgeWorkspaceId,projectId:executionScope ? executionScope.projectId : conversation.projectId,conversationId:conversation.conversationId}} workspaceId={knowledgeWorkspaceId} accountId={scope.accountId} disabled={!visible||!execution.getAvailability(conversation.conversationId).available}/></div>}
             <ConversationView
               {...view}
               entries={renderedEntries}

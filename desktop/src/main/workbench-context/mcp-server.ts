@@ -4,6 +4,7 @@
  * 使用无服务端会话的 Streamable HTTP JSON 响应；不启动额外模型或远程执行通道。
  */
 import { createServer, type Server, type IncomingMessage } from "node:http"
+import { knowledgeProposalToolSchema } from "@workbench/collaboration-client"
 import { timingSafeEqual } from "node:crypto"
 
 const string = { type: "string" }
@@ -16,9 +17,12 @@ const kinds = { type: "string", enum: ["team_project", "team_repository", "perso
 export const contextTools = [
   { name: "query_project_memory", description: "查询当前账号和会话所属团队的本机记忆、来源及最新条目修订号。最多10条/8KiB，hasMore只约束查询。", inputSchema: { type: "object", properties: { query: string, repositoryId: string, entryId: string, kind: kinds }, additionalProperties: false } },
   { name: "propose_project_memory_update", description: "结束回答前提交有已读sourceIds依据的条目变更。已有条目使用查询得到的baseEntryRevision，新条目使用0。pending尚未保存，只有本轮正常终态才能提交。个人路径须本人确认；冲突时先核实。", inputSchema: { type: "object", properties: { operation: { type: "string", enum: ["upsert", "remove"] }, kind: kinds, entryId: string, baseEntryRevision: { type: "integer", minimum: 0 }, fields: { type: "object", properties: fields, additionalProperties: false }, sourceIds: { type: "array", items: string, minItems: 1 } }, required: ["operation", "kind", "baseEntryRevision", "sourceIds"], additionalProperties: false } },
-  { name: "list_team_knowledge", description: "按标题查找当前团队知识，仅返回标题与固定版本引用，沿真实nextAfterId翻页。", inputSchema: { type: "object", properties: { query: string, afterId: string }, additionalProperties: false } },
+  { name: "list_team_knowledge", description: "按标题查找当前团队知识，仅返回标题与固定版本引用，沿真实nextAfterId翻页。", inputSchema: { type: "object", properties: { query: string, afterId: string, scope: { type: "string", enum:["all","applicable"] } }, additionalProperties: false } },
   { name: "read_team_knowledge", description: "读取 knowledge:<知识ID>:<版本ID> 对应的固定版本正文与来源。不会创建或改写团队知识。", inputSchema: { type: "object", properties: { referenceId: string }, required: ["referenceId"], additionalProperties: false } },
 ] as const
+
+/** 起草凭据只看到读知识与本机候选工具，不具备云端写入或记忆修改能力。 */
+export const draftTools=[...contextTools.filter(t=>["list_team_knowledge","read_team_knowledge"].includes(t.name)),{name:"propose_team_knowledge_draft",description:"先实际检索已有知识并读取相关固定版本，再返回新增/补充/冲突/归档建议。只保存本机候选，不提交云端。sourceRefs填空，由主进程补入真实来源。",inputSchema:knowledgeProposalToolSchema()}]
 
 /** 凭据比较不随首个不匹配字节提前返回；不存在或过期的凭据统一拒绝。 */
 export function sameToken(actual: string, expected: string): boolean {
@@ -40,7 +44,7 @@ export class ContextMcpServer {
   #server?: Server
   #starting?: Promise<string>
   #url?: string
-  constructor(private readonly authorized: (token: string) => boolean, private readonly invoke: (token: string, name: string, args: unknown, callId: string) => Promise<unknown>) {}
+  constructor(private readonly authorized: (token: string) => boolean, private readonly invoke: (token: string, name: string, args: unknown, callId: string) => Promise<unknown>, private readonly toolsFor: (token:string)=>readonly unknown[] = ()=>contextTools, private readonly delivered?: (token:string,name:string,args:unknown,result:unknown)=>void) {}
   /** 同一桌面服务只监听一个系统分配端口；每个Agent会话在请求头携带自己的临时凭据。 */
   start(): Promise<string> {
     if (this.#starting) return this.#starting
@@ -64,12 +68,14 @@ export class ContextMcpServer {
         const reply = (result: unknown) => send(200, { jsonrpc: "2.0", id: rpc.id, result })
         if (rpc.method === "initialize") return reply({ protocolVersion: ["2024-11-05", "2025-03-26", "2025-06-18"].includes(String(rpc.params?.protocolVersion)) ? rpc.params!.protocolVersion : "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "workbench-context", version: "1.0.0" } })
         if (rpc.method === "ping") return reply({})
-        if (rpc.method === "tools/list") return reply({ tools: contextTools })
+        if (rpc.method === "tools/list") return reply({ tools: this.toolsFor(token) })
         if (rpc.method !== "tools/call" || typeof rpc.params?.name !== "string") return send(200, { jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "不支持的 MCP 方法。" } })
         try {
           const result = await this.invoke(token, rpc.params.name, rpc.params.arguments ?? {}, String(rpc.id))
           if (!this.authorized(token)) return send(401)
           const status = (result as { status?: string })?.status
+          // finish 只证明正文响应已成功交给本机连接，不把业务预取或工具卡渲染算阅读。
+          response.once("finish",()=>{if(this.authorized(token))this.delivered?.(token,String(rpc.params?.name),rpc.params?.arguments??{},result)})
           reply({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result, ...(["error", "conflict"].includes(status ?? "") ? { isError: true } : {}) })
         } catch (error) {
           reply({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : "工具调用失败。" }] })

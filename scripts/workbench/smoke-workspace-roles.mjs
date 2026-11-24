@@ -22,8 +22,8 @@ const after=(await ok(a.listMembers(ws))).members
 assert.equal(after.filter(m=>m.role==='admin'&&m.status==='active').length,1)
 if(after.find(m=>m.user.id===au).role!=='admin')await ok(change(b,au,'admin',(await member(au)).version))
 if((await member(bu)).role==='admin')await ok(change(a,bu,'developer',(await member(bu)).version))
-await fails(b.createKnowledge(ws,{termKey:'forbidden',category:'经验',title:'不能直接发布',text:'无权限'}),'WORKSPACE_ADMIN_REQUIRED')
-const knowledge=await ok(a.createKnowledge(ws,{termKey:'role-smoke',category:'经验',title:'历史贡献',text:'固定版本不得因角色变化而改写'}))
+await fails(b.createKnowledge(ws,{level:'experience',scope:{kind:'workspace',repositoryIds:[]},contentType:'article',requestId:randomUUID(),termKey:'forbidden',category:'经验',title:'不能直接发布',text:'无权限'}),'WORKSPACE_ADMIN_REQUIRED')
+const knowledge=await ok(a.createKnowledge(ws,{level:'experience',scope:{kind:'workspace',repositoryIds:[]},contentType:'article',requestId:randomUUID(),termKey:'role-smoke',category:'经验',title:'历史贡献',text:'固定版本不得因角色变化而改写'}))
 const repo=await ok(a.createRepository(ws,{name:'交接仓库',remoteUrl:'https://example.invalid/hc240.git',ownerUserId:bu,requestId:randomUUID()}))
 await fails(b.createRepository(ws,{name:'禁止登记',remoteUrl:'https://example.invalid/no.git',requestId:randomUUID()}),'WORKSPACE_ADMIN_REQUIRED')
 const project='00000000-0000-4000-8000-0000000000a2'

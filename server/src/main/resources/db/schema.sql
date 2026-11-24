@@ -302,6 +302,8 @@ CREATE TABLE wb_knowledge_item (
   current_version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   version BIGINT NOT NULL COMMENT '条目修改或归档递增',
   indexed_version BIGINT NOT NULL DEFAULT 0 COMMENT '已成功写检索索引的条目版本',
+  last_reviewed_at DATETIME(3) NULL COMMENT '未知复核保持空，不伪造审查',
+  reviewed_feedback_id BIGINT NOT NULL DEFAULT 0,
   archived TINYINT UNSIGNED NOT NULL,
   updated_at DATETIME(3) NOT NULL,
   PRIMARY KEY (id),
@@ -319,6 +321,13 @@ CREATE TABLE wb_knowledge_version (
   title VARCHAR(200) NOT NULL,
   author_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   text MEDIUMTEXT NOT NULL,
+  level VARCHAR(16) CHARACTER SET ascii NOT NULL,
+  scope_kind VARCHAR(16) CHARACTER SET ascii NOT NULL,
+  content_type VARCHAR(24) CHARACTER SET ascii NOT NULL,
+  contributors MEDIUMTEXT NOT NULL,
+  proposal_id CHAR(36) CHARACTER SET ascii NOT NULL,
+  reviewer_id CHAR(32) CHARACTER SET ascii NOT NULL,
+  reviewed_at DATETIME(3) NULL,
   created_at DATETIME(3) NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_version_id (version_id),
@@ -405,3 +414,94 @@ CREATE TABLE wb_external_notification_delivery (
   KEY idx_user_merge_status (user_id, merge_key, status, available_at),
   KEY idx_object_user_status (object_id, user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部IM轻通知出站队列与投递元数据表';
+-- 知识适用范围只属于不可变发布版本；草稿不进入这些关系。
+CREATE TABLE wb_knowledge_version_repository (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  repository_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (version_id, repository_id),
+  KEY idx_repository_version (repository_id, version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE wb_knowledge_proposal (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  proposal_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  proposer_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  proposer_member_version BIGINT NOT NULL,
+  content MEDIUMTEXT NOT NULL,
+  revision BIGINT NOT NULL,
+  status VARCHAR(16) CHARACTER SET ascii NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  submitted_at DATETIME(3) NULL,
+  last_reason VARCHAR(1000) NOT NULL,
+  published_knowledge_id CHAR(36) CHARACTER SET ascii NOT NULL,
+  published_version_id CHAR(36) CHARACTER SET ascii NOT NULL,
+  reviewer_id CHAR(32) CHARACTER SET ascii NOT NULL,
+  outcome VARCHAR(16) CHARACTER SET ascii NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (proposal_id),
+  KEY idx_workspace_proposer (workspace_id, proposer_id, proposal_id),
+  KEY idx_workspace_status (workspace_id, status, proposal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE wb_knowledge_proposal_event (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  proposal_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii NOT NULL,
+  kind VARCHAR(30) NOT NULL,
+  note VARCHAR(1000) NOT NULL,
+  content MEDIUMTEXT NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id), KEY idx_proposal_event (proposal_id,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE wb_knowledge_request (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workspace_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  action VARCHAR(128) NOT NULL,
+  fingerprint CHAR(64) CHARACTER SET ascii NOT NULL,
+  response MEDIUMTEXT NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (workspace_id,actor_id,request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 读取回执不保存账号、会话、路径和模型输入；统计在同事务按首次回执递增。
+CREATE TABLE wb_knowledge_read_receipt (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  read_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (read_id), KEY idx_version_receipt (version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE wb_knowledge_usage (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  read_count BIGINT NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (version_id), KEY idx_knowledge_usage (knowledge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE wb_knowledge_feedback (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  value VARCHAR(16) NOT NULL,
+  note VARCHAR(280) NOT NULL,
+  event_id BIGINT NOT NULL,
+  PRIMARY KEY (id), UNIQUE KEY uk_business (version_id,user_id), KEY idx_feedback_knowledge (knowledge_id,event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE wb_knowledge_review_event (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  knowledge_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  version_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  actor_id CHAR(32) CHARACTER SET ascii NOT NULL,
+  kind VARCHAR(30) NOT NULL,
+  value VARCHAR(16) NOT NULL,
+  note VARCHAR(1000) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (id), KEY idx_knowledge_review (knowledge_id,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

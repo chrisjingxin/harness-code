@@ -80,62 +80,38 @@ export interface TaskListResponse {
 }
 
 /** 团队知识编辑创建固定版本，条目版本号用于并发核对。 */
-export interface KnowledgeCreateRequest {
-  termKey: string
-  category: string
-  title: string
-  text: string
-}
-
-export interface KnowledgeUpdateRequest {
-  category: string
-  title: string
-  text: string
-  expectedVersion: number
-}
-
-export interface KnowledgeSummary {
-  knowledgeId: string
-  termKey: string
-  category: string
-  title: string
-  currentVersionId: string
-  version: number
-  archived: boolean
-  updatedAtMs: number
-}
-
-export interface KnowledgeVersionSummary {
-  versionId: string
-  version: number
-  category: string
-  title: string
-  authorId: string
-  createdAtMs: number
-}
-
-export interface KnowledgeVersion {
-  knowledgeId: string
-  termKey: string
-  archived: boolean
-  version: KnowledgeVersionSummary
-  text: string
-}
-
-export interface KnowledgeDetail {
-  item: KnowledgeSummary
-  current: KnowledgeVersion
-}
-
-export interface KnowledgeListResponse {
-  items: KnowledgeSummary[]
-  nextAfterId: string | null
-}
-
-export interface KnowledgeVersionListResponse {
-  versions: KnowledgeVersionSummary[]
-  nextAfterId: string | null
-}
+/** 团队知识的结构化内容、固定发布版本、提议审核及保鲜契约；与同名 JSON Schema 对齐。 */
+/** 团队知识的结构化内容、固定发布版本、提议审核及保鲜契约；与同名 JSON Schema 对齐。 */
+export type KnowledgeCreateRequest = { termKey: string; category: string; title: string; text: string; level: KnowledgeLevel; scope: KnowledgeScope; contentType: "article"; requestId: string }
+export type KnowledgeUpdateRequest = { category: string; title: string; text: string; expectedVersion: number; level: KnowledgeLevel; scope: KnowledgeScope; contentType: "article"; requestId: string }
+export type KnowledgeSummary = { knowledgeId: string; termKey: string; category: string; title: string; currentVersionId: string; version: number; archived: boolean; updatedAtMs: number; level: KnowledgeLevel; scope: KnowledgeScope; contentType: "article"; health: KnowledgeHealth }
+export type KnowledgeVersionSummary = { versionId: string; version: number; category: string; title: string; authorId: string; createdAtMs: number; level: KnowledgeLevel; scope: KnowledgeScope; contentType: "article"; contributors: Array<string>; proposalId: string | null; reviewerId: string | null; reviewedAtMs: number | null }
+export type KnowledgeVersion = { knowledgeId: string; termKey: string; archived: boolean; version: KnowledgeVersionSummary; text: string }
+export type KnowledgeDetail = { item: KnowledgeSummary; current: KnowledgeVersion }
+export type KnowledgeListResponse = { items: Array<KnowledgeSummary>; nextAfterId: string | null }
+export type KnowledgeVersionListResponse = { versions: Array<KnowledgeVersionSummary>; nextAfterId: string | null }
+export type KnowledgeLevel = "rule" | "experience" | "term"
+export type KnowledgeScope = { kind: "workspace" | "repositories"; repositoryIds: Array<string> }
+export type KnowledgeHealth = { readCount: number; usefulCount: number; expiredCount: number; needsReview: boolean; lastReviewedAtMs: number | null; feedbackWatermark: number }
+export type KnowledgeCandidate = { termKey: string; category: string; title: string; text: string; level: KnowledgeLevel; scope: KnowledgeScope; contentType: "article" }
+export type KnowledgeSource = { revision?:number|null; kind: "local_conversation" | "conversation" | "snapshot" | "knowledge" | "proposal"; referenceId: string; projectId: string | null }
+export type KnowledgeProposalContent = { intent: "new" | "supplement" | "conflict" | "archive"; targetKnowledgeId: string | null; baseVersionId: string | null; baseItemVersion: number | null; candidate: KnowledgeCandidate; relatedReferences: Array<KnowledgeRef>; sourceSummary: string; sourceRefs: Array<KnowledgeSource>; generationKind: "agent" | "manual" }
+export type KnowledgeProposalCreateRequest = { content: KnowledgeProposalContent; submit: boolean; requestId: string }
+export type KnowledgeProposalUpdateRequest = { content: KnowledgeProposalContent; expectedRevision: number; requestId: string }
+export type KnowledgeProposalActionRequest = { expectedRevision: number; requestId: string; confirmShare: boolean }
+export type KnowledgeProposalReviewRequest = { decision: "approve" | "return"; expectedRevision: number; requestId: string; baseVersionId: string | null; expectedItemVersion: number | null; finalCandidate: KnowledgeCandidate | null; note: string }
+export type KnowledgeProposal = { proposalId: string; workspaceId: string; proposerId: string; content: KnowledgeProposalContent; revision: number; status: "draft" | "submitted" | "returned" | "published" | "withdrawn"; createdAtMs: number; updatedAtMs: number; submittedAtMs: number | null; lastReason: string; publishedKnowledgeId: string | null; publishedVersionId: string | null; reviewerId: string | null; outcome: "" | "published" | "archived"; proposerActive: boolean }
+export type KnowledgeProposalSummary = { proposalId: string; proposerId: string; title: string; level: KnowledgeLevel; status: "draft" | "submitted" | "returned" | "published" | "withdrawn"; revision: number; updatedAtMs: number; proposerActive: boolean }
+export type KnowledgeProposalListResponse = { items: Array<KnowledgeProposalSummary>; nextAfterId: string | null }
+export type KnowledgeProposalEvent = { eventId: string; kind: string; actorId: string; note: string; content: KnowledgeProposalContent; occurredAtMs: number }
+export type KnowledgeProposalDetail = { proposal: KnowledgeProposal; events: Array<KnowledgeProposalEvent>; nextAfterId: string | null }
+export type KnowledgeReadRequest = { readId: string }
+export type KnowledgeUsageResponse = { versionReadCount: number; totalReadCount: number }
+export type KnowledgeFeedbackRequest = { value: "useful" | "expired" | null; note: string; requestId: string }
+export type KnowledgeFeedbackResponse = { value: "useful" | "expired" | null; note: string; usefulCount: number; expiredCount: number; versionReadCount: number }
+export type KnowledgeReviewRequest = { expectedItemVersion: number; currentVersionId: string; feedbackWatermark: number; action: "confirmed_valid"; note: string; requestId: string }
+export type KnowledgeReviewEvent = { eventId: string; actorId: string; kind: "feedback" | "confirmed_valid"; versionId: string; note: string; value: "useful" | "expired" | null; occurredAtMs: number }
+export type KnowledgeReviewDetail = { item: KnowledgeSummary; events: Array<KnowledgeReviewEvent>; nextAfterId: string | null }
 
 /** 看板中的成员行按 ID 指向返回内的会话与任务列表。 */
 export interface BoardMember {
@@ -280,3 +256,6 @@ export type UserUpdatesNotice = { readonly subscriptionId: string } & (
   | { readonly kind: "status"; readonly status: ProjectUpdatesStatus }
   | { readonly kind: "event"; readonly event: UserNotificationEvent }
 )
+
+/** 已发布知识查询条件，范围筛选在服务端分页之前执行。 */
+export type KnowledgeQuery = {level?:KnowledgeLevel; scopeMode?:"all"|"applicable"; repositoryIds?:string[]; limit?:number}

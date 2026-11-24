@@ -388,13 +388,29 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 16384
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "contentType": {
+          "const": "article"
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
         }
       },
       "required": [
         "termKey",
         "category",
         "title",
-        "text"
+        "text",
+        "level",
+        "scope",
+        "contentType",
+        "requestId"
       ],
       "additionalProperties": false
     },
@@ -420,13 +436,29 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "contentType": {
+          "const": "article"
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
         }
       },
       "required": [
         "category",
         "title",
         "text",
-        "expectedVersion"
+        "expectedVersion",
+        "level",
+        "scope",
+        "contentType",
+        "requestId"
       ],
       "additionalProperties": false
     },
@@ -464,6 +496,18 @@
         "updatedAtMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "contentType": {
+          "const": "article"
+        },
+        "health": {
+          "$ref": "#/$defs/KnowledgeHealth"
         }
       },
       "required": [
@@ -474,7 +518,11 @@
         "currentVersionId",
         "version",
         "archived",
-        "updatedAtMs"
+        "updatedAtMs",
+        "level",
+        "scope",
+        "contentType",
+        "health"
       ],
       "additionalProperties": false
     },
@@ -505,6 +553,55 @@
         "createdAtMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "contentType": {
+          "const": "article"
+        },
+        "contributors": {
+          "type": "array",
+          "items": {
+            "$ref": "platform.schema.json#/$defs/UserId"
+          },
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "proposalId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewerId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/UserId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedAtMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -513,7 +610,14 @@
         "category",
         "title",
         "authorId",
-        "createdAtMs"
+        "createdAtMs",
+        "level",
+        "scope",
+        "contentType",
+        "contributors",
+        "proposalId",
+        "reviewerId",
+        "reviewedAtMs"
       ],
       "additionalProperties": false
     },
@@ -1274,6 +1378,954 @@
         "mergeWindowSec",
         "expectedVersion"
       ],
+      "additionalProperties": false
+    },
+    "KnowledgeLevel": {
+      "enum": [
+        "rule",
+        "experience",
+        "term"
+      ]
+    },
+    "KnowledgeScope": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "workspace",
+            "repositories"
+          ]
+        },
+        "repositoryIds": {
+          "type": "array",
+          "items": {
+            "$ref": "platform.schema.json#/$defs/Id"
+          },
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "kind",
+        "repositoryIds"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "workspace"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "repositoryIds": {
+                "maxItems": 0,
+                "type": "array"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "repositoryIds": {
+                "minItems": 1,
+                "type": "array"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "KnowledgeHealth": {
+      "type": "object",
+      "properties": {
+        "readCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "usefulCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiredCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "needsReview": {
+          "type": "boolean"
+        },
+        "lastReviewedAtMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedbackWatermark": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "readCount",
+        "usefulCount",
+        "expiredCount",
+        "needsReview",
+        "lastReviewedAtMs",
+        "feedbackWatermark"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeCandidate": {
+      "type": "object",
+      "properties": {
+        "termKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "contentType": {
+          "const": "article"
+        }
+      },
+      "required": [
+        "termKey",
+        "category",
+        "title",
+        "text",
+        "level",
+        "scope",
+        "contentType"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "local_conversation",
+            "conversation",
+            "snapshot",
+            "knowledge",
+            "proposal"
+          ]
+        },
+        "referenceId": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "kind",
+        "referenceId",
+        "projectId"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "proposal"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "revision"
+            ],
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "KnowledgeProposalContent": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "enum": [
+            "new",
+            "supplement",
+            "conflict",
+            "archive"
+          ]
+        },
+        "targetKnowledgeId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseVersionId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseItemVersion": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate": {
+          "$ref": "#/$defs/KnowledgeCandidate"
+        },
+        "relatedReferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeRef"
+          },
+          "maxItems": 20
+        },
+        "sourceSummary": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeSource"
+          },
+          "maxItems": 20
+        },
+        "generationKind": {
+          "enum": [
+            "agent",
+            "manual"
+          ]
+        }
+      },
+      "required": [
+        "intent",
+        "targetKnowledgeId",
+        "baseVersionId",
+        "baseItemVersion",
+        "candidate",
+        "relatedReferences",
+        "sourceSummary",
+        "sourceRefs",
+        "generationKind"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalCreateRequest": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/KnowledgeProposalContent"
+        },
+        "submit": {
+          "type": "boolean"
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "content",
+        "submit",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalUpdateRequest": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/KnowledgeProposalContent"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "content",
+        "expectedRevision",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalActionRequest": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "confirmShare": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "requestId",
+        "confirmShare"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalReviewRequest": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "enum": [
+            "approve",
+            "return"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "baseVersionId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedItemVersion": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finalCandidate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KnowledgeCandidate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "decision",
+        "expectedRevision",
+        "requestId",
+        "baseVersionId",
+        "expectedItemVersion",
+        "finalCandidate",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposal": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "workspaceId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "proposerId": {
+          "$ref": "platform.schema.json#/$defs/UserId"
+        },
+        "content": {
+          "$ref": "#/$defs/KnowledgeProposalContent"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "submitted",
+            "returned",
+            "published",
+            "withdrawn"
+          ]
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "submittedAtMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastReason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "publishedKnowledgeId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishedVersionId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewerId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/UserId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "",
+            "published",
+            "archived"
+          ]
+        },
+        "proposerActive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "proposalId",
+        "workspaceId",
+        "proposerId",
+        "content",
+        "revision",
+        "status",
+        "createdAtMs",
+        "updatedAtMs",
+        "submittedAtMs",
+        "lastReason",
+        "publishedKnowledgeId",
+        "publishedVersionId",
+        "reviewerId",
+        "outcome",
+        "proposerActive"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalSummary": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "proposerId": {
+          "$ref": "platform.schema.json#/$defs/UserId"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "submitted",
+            "returned",
+            "published",
+            "withdrawn"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "proposerActive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "proposalId",
+        "proposerId",
+        "title",
+        "level",
+        "status",
+        "revision",
+        "updatedAtMs",
+        "proposerActive"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalListResponse": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeProposalSummary"
+          },
+          "maxItems": 100
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "$ref": "platform.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalEvent": {
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "kind": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "actorId": {
+          "$ref": "platform.schema.json#/$defs/UserId"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "content": {
+          "$ref": "#/$defs/KnowledgeProposalContent"
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "eventId",
+        "kind",
+        "actorId",
+        "note",
+        "content",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeProposalDetail": {
+      "type": "object",
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/KnowledgeProposal"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeProposalEvent"
+          },
+          "maxItems": 100
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "proposal",
+        "events",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeReadRequest": {
+      "type": "object",
+      "properties": {
+        "readId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "readId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeUsageResponse": {
+      "type": "object",
+      "properties": {
+        "versionReadCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "totalReadCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "versionReadCount",
+        "totalReadCount"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeFeedbackRequest": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "useful",
+                "expired"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "value",
+        "note",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeFeedbackResponse": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "useful",
+                "expired"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "usefulCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiredCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "versionReadCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "value",
+        "note",
+        "usefulCount",
+        "expiredCount",
+        "versionReadCount"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeReviewRequest": {
+      "type": "object",
+      "properties": {
+        "expectedItemVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "currentVersionId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "feedbackWatermark": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "const": "confirmed_valid"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "requestId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        }
+      },
+      "required": [
+        "expectedItemVersion",
+        "currentVersionId",
+        "feedbackWatermark",
+        "action",
+        "note",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeReviewEvent": {
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "actorId": {
+          "$ref": "platform.schema.json#/$defs/UserId"
+        },
+        "kind": {
+          "enum": [
+            "feedback",
+            "confirmed_valid"
+          ]
+        },
+        "versionId": {
+          "$ref": "platform.schema.json#/$defs/Id"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "useful",
+                "expired"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "eventId",
+        "actorId",
+        "kind",
+        "versionId",
+        "note",
+        "value",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeReviewDetail": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/KnowledgeSummary"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeReviewEvent"
+          },
+          "maxItems": 100
+        },
+        "nextAfterId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "item",
+        "events",
+        "nextAfterId"
+      ],
+      "additionalProperties": false
+    },
+    "KnowledgeQuery": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/KnowledgeLevel"
+        },
+        "scopeMode": {
+          "enum": [
+            "all",
+            "applicable"
+          ]
+        },
+        "repositoryIds": {
+          "type": "array",
+          "items": {
+            "$ref": "platform.schema.json#/$defs/Id"
+          },
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
       "additionalProperties": false
     }
   }
