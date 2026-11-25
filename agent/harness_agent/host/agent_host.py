@@ -6301,8 +6301,8 @@ class AgentHost:
             # `spec.tools` 是已经过父/Plugin Policy 交集的 immutable MCP 工具视图。
             # 空视图不需要 MCP manager：Plugin Agent 未声明 MCP 时没有对应的
             # manager resource，不能拿空子 snapshot 去 acquire 一个不存在的 key。
-            # 非空视图借用当前完整 Host resource，但只投影已授权的工具；任何
-            # snapshot 或工具缺失都 fail closed，不能把完整 manager 工具泄漏给 child。
+            # 非空视图借用已登记的资源，但只投影已授权的工具；快照或工具
+            # 缺失时拒绝构图，不能把完整 manager 工具泄漏给 child。
             resolved_mcp_names = tuple(
                 str(getattr(tool, "name", ""))
                 if not isinstance(tool, dict)

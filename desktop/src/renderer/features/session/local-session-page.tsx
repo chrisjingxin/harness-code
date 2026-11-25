@@ -412,11 +412,18 @@ export function LocalSessionPage({
       : directoryStatus === "confirmation-required" || directoryStatus === "checking" || directoryStatus === "unavailable"
         ? "warning"
         : undefined
-  const canConfirmDirectory = Boolean(directoryStatus === "confirmation-required" && execution.confirmDirectory)
+  const canConfirmDirectory = Boolean(directoryPath && directoryStatus === "confirmation-required" && execution.confirmDirectory)
   const triggerConfirmDirectory = () => {
-    if (!execution.confirmDirectory || confirmingDirectory || isRunning) return
+    if (!canConfirmDirectory || !execution.confirmDirectory || confirmingDirectory || isRunning) return
+    const sourceKey = referenceKey
+    setCapabilityError(null)
     setConfirmingDirectory(true)
-    void execution.confirmDirectory(conversation.conversationId).finally(() => setConfirmingDirectory(false))
+    void execution.confirmDirectory(conversation.conversationId).catch(error => {
+      // 迟到的异常不能显示到用户后来切换的会话或目录。
+      if (activeReference.current.key === sourceKey && activeReference.current.visible) {
+        setCapabilityError(error instanceof Error ? error.message : "无法确认目录，请重试或重新选择。")
+      }
+    }).finally(() => setConfirmingDirectory(false))
   }
   const switchingAvailability = isRunning
     ? { enabled: false, reason: "等待当前回复完成" }

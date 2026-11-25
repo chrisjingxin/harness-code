@@ -17,8 +17,8 @@ import type {
   ConversationPersonalState,
   ConversationTimelineEntry,
 } from "../../../ui/index.js"
-import type { ProjectConversationSummary } from "../session/contracts.js"
-import { directoryBasename } from "../session/session-model.js"
+import type { ProjectConversationSummary, ProjectHistoryMessage } from "../session/contracts.js"
+import { decodeHistoryToTimelineEntries, directoryBasename } from "../session/session-model.js"
 
 /** 与服务端及待传账本一致的单条共享消息 UTF-8 字节上限（32 KiB）。 */
 export const SYNC_MESSAGE_LIMIT_BYTES = 32 * 1024
@@ -149,8 +149,9 @@ export function localTurnsToTimelineEntries(
           : {}),
       })
     }
-    const assistantText = turn.reply
-      || (turn.status === "cancelled" ? "本轮已停止。" : turn.failure || "本轮未能生成回复。")
+    const terminalNotice = turn.status === "cancelled" ? "本轮已停止。"
+      : turn.status === "failed" ? turn.failure || "本轮未能生成回复。" : undefined
+    const assistantText = [turn.reply, terminalNotice].filter(Boolean).join("\n\n") || "本轮未能生成回复。"
     entries.push({
       kind: "message",
       id: `${baseId}:assistant`,
@@ -160,6 +161,65 @@ export function localTurnsToTimelineEntries(
     })
   }
   return entries
+}
+
+/** 只省略已由实时视图完整呈现的连续尾段，重开后仍从本机历史恢复。 */
+export function localTurnsBeforeLiveTail(
+  turns: readonly LocalConversationTurn[],
+  liveEntries: readonly ConversationTimelineEntry[] = [],
+): readonly LocalConversationTurn[] {
+  const liveTurnIds = new Set<string>()
+  for (const entry of liveEntries) {
+    const match = /^local-execution:([^:]+):/.exec(entry.id)
+    if (match?.[1]) liveTurnIds.add(match[1])
+  }
+  let cutoff = turns.length
+  while (cutoff > 0 && liveTurnIds.has(turns[cutoff - 1]!.turnId)) cutoff--
+  return turns.slice(0, cutoff)
+}
+
+/** 本人 Project 合并本机终态与已同步正文；云端消息一条不删，其他成员不走此入口。 */
+export function projectLocalConversationHistory(
+  messages: readonly ProjectHistoryMessage[],
+  turns: readonly LocalConversationTurn[],
+  owner: { readonly userId: string; readonly displayName: string },
+  liveEntries: readonly ConversationTimelineEntry[] = [],
+  sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>,
+): readonly ConversationTimelineEntry[] {
+  const cloudEntries = decodeHistoryToTimelineEntries(messages, owner, sentImages)
+  const textOf = (message: ProjectHistoryMessage) => {
+    try { return (JSON.parse(message.payload) as { text?: unknown }).text }
+    catch { return undefined }
+  }
+  const usedStarts = new Set<number>()
+  const cloudStarts = turns.map(turn => {
+    if (turn.status !== "completed") return -1
+    const sharedUserText = turn.images?.length
+      ? (turn.userText.trim() ? `${turn.userText}\n\n[附 ${turn.images.length} 张本机图片]` : `[附 ${turn.images.length} 张本机图片]`)
+      : turn.userText
+    // 上传器原样保留这两条正文及各自时间戳。四项同时匹配才建立具体
+    // 云端序号与本机轮次的对应关系；钟差或缺失本机轮次均不删除云端消息。
+    return messages.findIndex((message, start) => {
+      if (usedStarts.has(start) || message.type !== "user" || message.occurredAtMs !== turn.acceptedAtMs || textOf(message) !== sharedUserText) return false
+      const end = messages.findIndex((candidate, index) => index > start && candidate.type === "assistant")
+      const assistant = messages[end]
+      if (!assistant || assistant.occurredAtMs !== turn.completedAtMs || textOf(assistant) !== turn.reply) return false
+      usedStarts.add(start)
+      return true
+    })
+  })
+  const visibleCount = localTurnsBeforeLiveTail(turns, liveEntries).length
+  const additions = new Map<number, LocalConversationTurn[]>()
+  let before = messages.length
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const start = cloudStarts[index]!
+    if (start >= 0) { before = start; continue }
+    if (index >= visibleCount) continue
+    additions.set(before, [turns[index]!, ...(additions.get(before) ?? [])])
+  }
+  return cloudEntries.flatMap((entry, index) => [
+    ...localTurnsToTimelineEntries(additions.get(index) ?? [], owner), entry,
+  ]).concat(localTurnsToTimelineEntries(additions.get(messages.length) ?? [], owner))
 }
 
 /** 将本机个人会话记录映射为 `LocalSessionPage` 所需的只读摘要外壳。 */

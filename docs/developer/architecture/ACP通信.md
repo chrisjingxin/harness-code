@@ -120,6 +120,10 @@ Agent 发给客户端：
 - **审批 ⇄ request_permission**：v3 approval/directory_trust 统一翻成一个 `request_permission`；决定（allow/reject/kind）⇄ `selected.optionId`；`cancelled` 在取消与断连两个方向都成立。标准 diff 在工具卡的 `content` 里。声明了 `approval` 时，选项 `scope` 和原始 `requests` 挂 `_meta.harnessCode.approval`。
 - **审批模式 ⇄ 会话模式**：`session/new`/`session/load`/`session/resume` 的 `modes` 承载 `default`/`auto-edit`/`auto`/`yolo`，声明了表单能力时再加 `plan`。Host 广播的模式变化转成 `current_mode_update`。批准计划后回到进入计划前的模式。
 
+### 会话 MCP 的连接归属（2026-11-25）
+
+`session/new` 等入口传入的 MCP 在 Host 中合并为会话快照，连接保存在侧路资源中，不替换其他会话使用的全局快照。构图统一复用远端 `acquire_covering`，优先借用精确快照，受限子视图只借用完整配置覆盖它的已登记 READY 资源；最终只提供当前角色获准的工具。最后一名会话解除绑定时停止新借用，已有 Engine 继续持有连接，等 Engine 释放后回收，不能强制关闭仍有借用者的资源。回归与真实本机工具调用见 `agent/tests/host/test_session_mcp_runtime.py`。
+
 ### UNSTABLE 依赖
 
 `elicitation/create`、`session/resume`、`session/close` 属于 ACP 里尚未标成稳定的方法。官方 Python SDK `agent-client-protocol` 锁定 **0.12.1**（`test_elicitation.py` 的 `test_sdk_version_is_locked`，`test_sdk_client_e2e.py` 的 `test_sdk_version_is_pinned_release`）。客户端默认不路由这些方法，必须打开 `use_unstable_protocol`。表单的形状只写在 `elicitation.py` 和测试客户端 `packages/cli/src/acp-web/client/elicitation.ts`，SDK 升级时先看这两个文件和版本锁定测试。

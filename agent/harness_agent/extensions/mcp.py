@@ -1153,24 +1153,15 @@ class McpConnectionManager:
         return ()
 
     async def release_side_runtime(self, digest: str) -> None:
-        """关闭这个 digest 上不是当前快照的 runtime。当前快照不动。"""
+        """停止侧路快照的新借用，等已有 Engine 释放后回收；全局快照不动。"""
         current = self._current_resource
-        kept: list[SharedResourceHandle[_McpRuntime]] = []
         for resource in self._resources.get(digest, ()):
             if resource is current:
-                kept.append(resource)
                 continue
-            try:
-                await resource.close()
-            except Exception:
-                try:
-                    await resource.close(force=True)
-                except Exception:
-                    logger.warning("MCP side runtime close failed", exc_info=True)
-        if kept:
-            self._resources[digest] = kept
-        else:
-            self._resources.pop(digest, None)
+            # 会话引用和 Engine 租约是两层生命周期：会话解绑只能阻止新图
+            # 借用，不能强关旧图仍在调用的工具，也不能提前抹掉租约计数。
+            await resource.begin_draining(reason="session_mcp_released")
+        await self._reap_closed_resources()
 
     def _build_single_connection(self, config: McpServerConfig) -> dict[str, Any] | None:
         """构建单个服务器的连接参数；环境变量缺失时返回 None。"""

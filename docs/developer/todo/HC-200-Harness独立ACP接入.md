@@ -152,3 +152,12 @@
 - [x] 7.5 写入覆盖矩阵；未覆盖项登记为缺口表新行；需要新任务的只列建议。已验收。
 - [x] 7.6 写出结论：TUI 能否在功能上被 ACP 链路替代、还差哪几项；Task 对应验收项更新。已验收。
 - [x] 7.7 G4；`openwiki code --update --print`；Task 状态改「待验收」；**停下等待用户确认**。已验收。G4 通过。OpenWiki 命令不存在（127），未安装、未手改生成页。
+
+## 维护停点 M1：会话 MCP 运行时失败（2026-11-25）
+
+查看方式：运行 `cd agent && .venv/bin/python -m pytest tests/host/test_session_mcp_runtime.py -q`，查看 Task 的维护证据。
+
+- [x] M1.1 隔离 Host 与真实本机 MCP 复现 `MCP_RESOURCE_SNAPSHOT_UNAVAILABLE`，确认异常位于模型构造前的全局快照检查。
+- [x] M1.2 复用已登记会话快照的资源借用；保留过滤子视图、配置一致性与工具白名单。
+- [x] M1.3 会话解除绑定时停止新借用，保留已有 Engine 的连接直至释放，再回收。
+- [x] M1.4 完成必要回归与真实本机工具调用，记录验证边界，回调统筹并停下待验收。

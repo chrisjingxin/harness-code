@@ -379,19 +379,20 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   }, [currentScopeKey, persistence, refreshMetadata])
 
   const loadLocalDetail = useCallback(async (conversationId: string): Promise<LocalConversationDetail | null> => {
-    if (!localConversations) return null
+    if (!localConversations || !scope) return null
+    const targetScope = scope
+    const targetKey = makeScopeKey(targetScope)
     const res = await localConversations.get(conversationId).catch(() => null)
-    if (!mountedRef.current || !res?.ok) return null
+    if (!stillActive(targetKey) || !res?.ok) return null
     const detail = res.value
+    if (detail.record.workspaceId !== targetScope.workspaceId || detail.record.projectId !== targetScope.projectId) return null
     setLocalDetailsById(prev => {
       const next = { ...prev, [conversationId]: detail }
       localDetailsRef.current = next
       return next
     })
-    const activeScope = scope
-    const activeKey = activeScopeKeyRef.current
-    if (activeScope && activeKey) {
-      const recKey = makeRecordKey(activeKey, conversationId)
+    if (targetKey) {
+      const recKey = makeRecordKey(targetKey, conversationId)
       const currentRec = recordsRef.current[recKey]
       if (currentRec?.loaded && ((!currentRec.directoryPath && detail.record.directoryPath) || (!currentRec.providerId && detail.record.providerId))) {
         const nextRec: ConversationRecordState = {
@@ -430,7 +431,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
           : Promise.resolve(null),
       ])
       if (!stillActive(targetKey)) return null
-      const localDetail = localRes?.ok ? localRes.value : null
+      const localDetail = localRes?.ok && localRes.value.record.workspaceId === targetScope.workspaceId
+        && localRes.value.record.projectId === targetScope.projectId ? localRes.value : null
       if (localDetail) {
         setLocalDetailsById(prev => {
           const next = { ...prev, [conversationId]: localDetail }
@@ -955,10 +957,13 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     const map: Record<string, readonly LocalConversationTurn[]> = {}
     for (const conv of activeConversations) {
       const detail = localDetailsById[conv.conversationId]
-      if (detail?.turns.length) map[conv.conversationId] = detail.turns
+      if (conv.ownerUserId === userId && detail?.turns.length
+        && detail.record.workspaceId === scope?.workspaceId && detail.record.projectId === scope?.projectId) {
+        map[conv.conversationId] = detail.turns
+      }
     }
     return map
-  }, [activeConversations, localDetailsById])
+  }, [activeConversations, localDetailsById, userId, scope])
 
   const currentPersonalStates = useMemo(() => {
     const map: Record<string, ConversationPersonalState> = {}

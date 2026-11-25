@@ -176,6 +176,105 @@ function createMockRuntime(agentCapabilities?: ReturnType<BoundSession["getState
   return { runtime, session, emit, sent }
 }
 
+test("已受理失败和停止轮次保留本机历史，只有成功定稿共享并用于恢复", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc218-terminal-history-"))
+  try {
+    for (const mode of ["personal", "project", "legacy-project"]) {
+      const published = mode !== "personal"
+      const legacy = mode === "legacy-project"
+      const dataDir = join(root, mode)
+      const workdir = join(dataDir, "workdir")
+      await mkdir(workdir, { recursive: true })
+      const store = new LocalConversationStore(dataDir, ORIGIN)
+      const identity = await createSignedInState(USER_A)
+      const personal = legacy ? new PersonalStore(identity, ORIGIN, dataDir) : undefined
+      if (personal) {
+        const key = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+        assert.ok((await personal.load(key)).ok)
+        assert.ok((await personal.save(key, 1, {
+          scroll: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: null },
+          expandedTools: [], expandedOutputs: [],
+          draft: { text: "尚未受理的草稿", selectionStart: 0, selectionEnd: 0, revision: 1, referenceIds: [], attachmentIds: [] },
+          localDirectoryPath: workdir, syncCache: null,
+        })).ok)
+      }
+      if (!legacy) {
+        const created = await store.create(USER_A, { conversationId: CONV_ID, workspaceId: published ? WORKSPACE_ID : null, directoryPath: workdir })
+        assert.ok(created.ok)
+        if (published) assert.ok((await store.markPublished(USER_A, CONV_ID, { workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, shareMode: "full" })).ok)
+      }
+      const { window } = createFakeWindow()
+      const { runtime, session, emit } = createMockRuntime()
+      const uploaded: string[] = []
+      const uploads = {
+        useAccount() {},
+        async flush() {},
+        enqueue: async (_scope: unknown, turn: { turnId: string }) => { uploaded.push(turn.turnId) },
+      } as unknown as ConversationUploadsType
+      const histories: string[] = []
+      const sendPrompt = session.sendPrompt
+      session.sendPrompt = (blocks, history) => {
+        histories.push(JSON.stringify(history))
+        return sendPrompt(blocks, history)
+      }
+      let changed = 0
+      const coordinator = createLocalExecutionCoordinator(window, identity, uploads, runtime, {
+        origin: ORIGIN, localConversations: store, onLocalConversationChanged: () => { changed++ },
+        ...(personal ? { personal, confirmDirectoryPrompt: async () => true } : {}),
+      })
+      const scope = { accountId: USER_A, workspaceId: published ? WORKSPACE_ID : null, projectId: published ? PROJECT_ID : null, conversationId: CONV_ID }
+      try {
+        if (legacy) assert.deepEqual(await coordinator.confirmDirectory(scope), { ok: true, value: true })
+        else await coordinator.captureDirectorySelection()(workdir)
+        const prepared = await coordinator.prepare(scope, workdir)
+        assert.ok(prepared.ok)
+        if (legacy) {
+          assert.equal(await store.getRecord(USER_A, CONV_ID), null)
+          const originalSend = session.send
+          session.send = () => ({ status: "rejected", reason: "agent-not-configured" })
+          const rejected = await coordinator.send(scope, prepared.value.bindingId, "20000000-0000-4000-8000-000000000001", "未受理草稿", [])
+          assert.ok(rejected.ok && rejected.value.status === "rejected")
+          assert.equal(await store.getRecord(USER_A, CONV_ID), null)
+          session.send = originalSend
+        }
+        const outcomes = [
+          { type: "failed", reason: "prompt-failed", status: "failed" },
+          { type: "cancelled", status: "cancelled" },
+          { type: "completed", shareable: false, status: "cancelled" },
+          { type: "completed", shareable: true, status: "completed" },
+        ] as const
+        for (const [index, outcome] of outcomes.entries()) {
+          const userText = `原始问题 ${index}`
+          const sent = await coordinator.send(scope, prepared.value.bindingId, `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, userText, [])
+          assert.ok(sent.ok && sent.value.status === "accepted")
+          emit({ turnId: sent.value.turnId, sequence: 1, type: "text-delta", text: `部分回复 ${index}` })
+          const { status: _status, ...event } = outcome
+          emit({ ...event, turnId: sent.value.turnId, sequence: 2 })
+          await waitFor(() => changed === index + 1, 1000)
+        }
+        // 新存储对象模拟重启读取；不依赖 renderer 或原 store 的内存。
+        const reopened = await new LocalConversationStore(dataDir, ORIGIN).get(USER_A, CONV_ID)
+        assert.ok(reopened.ok)
+        assert.equal(reopened.value.record.projectId, published ? PROJECT_ID : null)
+        assert.deepEqual(reopened.value.turns.map(turn => turn.status), outcomes.map(item => item.status))
+        assert.deepEqual(reopened.value.turns.map(turn => turn.userText), outcomes.map((_item, index) => `原始问题 ${index}`))
+        assert.deepEqual(reopened.value.turns.map(turn => turn.reply), outcomes.map((_item, index) => `部分回复 ${index}`))
+        assert.ok(reopened.value.turns[0]!.failure)
+        assert.equal(reopened.value.turns[1]!.failure, "本轮已停止。")
+        assert.deepEqual(uploaded, published ? ["turn-4"] : [])
+
+        session.send = () => ({ status: "rejected", reason: "agent-not-configured" })
+        const rejected = await coordinator.send(scope, prepared.value.bindingId, "10000000-0000-4000-8000-000000000001", "未受理草稿", [])
+        assert.ok(rejected.ok && rejected.value.status === "rejected")
+        assert.match(histories.at(-1)!, /原始问题 3/)
+        assert.doesNotMatch(histories.at(-1)!, /原始问题 [012]/)
+        const afterRejected = await store.get(USER_A, CONV_ID)
+        assert.equal(afterRejected.ok && afterRejected.value.turns.length, 4)
+      } finally { await coordinator.dispose() }
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 // ConversationUploads 成功上传一批后会进入 2,000ms 冷却定时器，需预留充足等待窗口。
 async function waitFor(predicate: () => boolean, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs

@@ -24,7 +24,7 @@ import type {
   LocalAcpTool,
   UnavailableReason,
 } from "@workbench/acp-runtime"
-import type { CollaborationResult } from "@workbench/collaboration-client/types"
+import type { CollaborationResult, ConversationSummary } from "@workbench/collaboration-client/types"
 import {
   identityError,
   syncPayloadLimit,
@@ -151,6 +151,8 @@ export type LocalExecutionRuntime =
 
 type Login = NonNullable<ReturnType<CollaborationState["personalIdentity"]>>
 type ActiveTurn = Omit<FinalizedTurn, "completedAtMs" | "tools"> & {
+  /** 没有本机记录的旧 Project 会话，在本次受理前取得的本人归属与共享状态。 */
+  projectConversation?: ConversationSummary
   /** 上下文键由桌面请求确定，ACP turnId 由通用运行时生成；此记录显式关联两者。 */
   context?: { readonly scope: LocalExecutionScope; readonly key: string }
   sequence: number
@@ -541,7 +543,7 @@ export function createLocalExecutionCoordinator(
   })
 
   /** 本机执行鉴权：纯本机核对账号与归属，不发任何云端网络请求；仅无本地记录的云端会话回退远端核验。 */
-  async function authorize(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<null>> {
+  async function authorize(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<ConversationSummary | null>> {
     if (!isCurrent(login) || login.accountId !== scope.accountId) return forbidden()
     if (scope.projectId !== null && scope.workspaceId === null) return forbidden()
     if (scope.projectId === null) {
@@ -573,7 +575,7 @@ export function createLocalExecutionCoordinator(
     const session = detail.value.conversation
     return isCurrent(login) && session.ownerUserId === login.accountId
       && session.projectId === scope.projectId && session.conversationId === scope.conversationId
-      ? ok(null) : forbidden()
+      ? ok(session) : forbidden()
   }
 
   async function savedDirectory(scope: LocalExecutionScope, login: Login): Promise<CollaborationResult<string | null>> {
@@ -663,7 +665,8 @@ export function createLocalExecutionCoordinator(
   // 调用方已获得主进程串行执行权。手动发送与队列发送共用授权、快照和 ACP 受理流程。
   async function sendBound(
     scope: LocalExecutionScope, binding: Binding, item: QueuedPrompt,
-    resolved: { readonly text: string; readonly fixedKnowledge: readonly FixedKnowledgeMaterial[] }, queued = false,
+    resolved: { readonly text: string; readonly fixedKnowledge: readonly FixedKnowledgeMaterial[] },
+    projectConversation: ConversationSummary | null, queued = false,
   ): Promise<CollaborationResult<LocalExecutionReceipt>> {
     binding.currentScope = scope
     const { login } = binding
@@ -808,6 +811,7 @@ export function createLocalExecutionCoordinator(
     const displayAttachments = summarizeDisplayAttachments(text, attachmentBlocks)
     binding.activeTurn = {
       turnId: result.turnId,
+      ...(projectConversation ? { projectConversation } : {}),
       ...(context ? { context } : {}),
       userText: text,
       referenceIds: ids,
@@ -893,7 +897,7 @@ export function createLocalExecutionCoordinator(
       if (!reserved.ok) { pause(reserved.message); return record }
       starting = reserved.value
       if (!isCurrent(login)) return starting
-      const result = await sendBound(scope, binding, item, prompt.value, true)
+      const result = await sendBound(scope, binding, item, prompt.value, authorized.value, true)
       const accepted = result.ok && result.value.status === "accepted"
       if (!result.ok) pause(result.error.message)
       else if (result.value.status === "rejected") pause(result.value.reason)
@@ -1454,6 +1458,10 @@ export function createLocalExecutionCoordinator(
               const completedAtMs = Date.now()
               const agentInfo = event.type === "completed" ? session.getState?.()?.agentInfo : undefined
               const agentName = binding.providerId === "harness" ? "Harness Code" : agentInfo?.title?.trim() || agentInfo?.name
+              const turnStatus = event.type === "completed" ? (event.shareable ? "completed" : "cancelled") : event.type
+              const failure = event.type === "failed"
+                ? (event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason])
+                : turnStatus === "cancelled" ? "本轮已停止。" : undefined
               binding.activeTurn = undefined
               if (checkpoints && turn.checkpoint) {
                 const stopped = event.type !== "failed" || event.reason === "agent-stopped"
@@ -1477,14 +1485,13 @@ export function createLocalExecutionCoordinator(
                 availability: event.type === "failed" && event.reason === "directory-unavailable"
                   ? { available: false, reason: failureMessages[event.reason], directoryStatus: "invalid" }
                   : availability(session, binding.providerReason),
-                ...(event.type === "failed" ? {
-                  failure: event.reason === "agent-stopped" ? stoppedMessages[event.stopReason] : failureMessages[event.reason],
-                } : event.type === "cancelled" ? { failure: "本轮已停止。" } : {}),
+                ...(failure ? { failure } : {}),
               })
               // 一些 Agent 在收到取消后仍以 end_turn 回包；runtime 的 shareable=false 表示该轮未正常完成。
               void settleContext(binding, turn.context, turn.ephemeral || event.type === "completed" && !event.shareable ? "cancelled" : event.type)
-              // 终态先交还输入区：成功轮优先写入本机独立存储；仅处于 active 共享态且仍属团队的会话才进入云端上传账本
-              if (event.type === "completed" && event.shareable && !turn.ephemeral && isCurrent(login)) {
+              // 本机历史记录所有已受理终态，失败/停止也要能重开阅读。
+              // 云端账本仍只接收正常成功定稿，不能把本机留存误当成可共享材料。
+              if (!turn.ephemeral && isCurrent(login)) {
                 const tools = turn.finalizedTools.size > 0 ? [...turn.finalizedTools.values()] : undefined
                 const steering = turn.steering
                 const sameSessionIdentity = () => {
@@ -1494,9 +1501,22 @@ export function createLocalExecutionCoordinator(
                 binding.shareTail = (binding.shareTail ?? Promise.resolve()).then(async () => {
                   await steering
                   if (!sameSessionIdentity()) return
-                  const localRecord = options?.localConversations
+                  let localRecord = options?.localConversations
                     ? await options.localConversations.getRecord(login.accountId, activeScope.conversationId).catch(() => null)
                     : null
+                  // 旧 Project 入口只有云端头和个人目录记录。使用受理前已核验的
+                  // 本人资料补建本机记录，失败终态无需再次联网，也不能创建同事记录。
+                  if (!localRecord && options?.localConversations && turn.projectConversation && activeScope.workspaceId && sameSessionIdentity()) {
+                    const remembered = await options.localConversations.rememberProjectConversation(
+                      login.accountId, activeScope.workspaceId, turn.projectConversation, binding.selectedPath, binding.providerId,
+                    )
+                    if (!remembered.ok) {
+                      publish(login, { scope: activeScope, turnId: turn.turnId, kind: "upload", failure: remembered.error.message })
+                      return
+                    }
+                    localRecord = remembered.value
+                  }
+                  if (!sameSessionIdentity()) return
                   if (localRecord && options?.localConversations) {
                     const persisted = await options.localConversations.appendTurn(login.accountId, activeScope.conversationId, {
                       turnId: turn.turnId,
@@ -1507,7 +1527,8 @@ export function createLocalExecutionCoordinator(
                       ...(turn.followUps?.length ? { followUps: turn.followUps } : {}),
                       ...(tools ? { tools } : {}),
                       reply: turn.localReply,
-                      status: "completed",
+                      status: turnStatus,
+                      ...(failure ? { failure } : {}),
                       acceptedAtMs: turn.acceptedAtMs,
                       completedAtMs,
                     })
@@ -1517,7 +1538,7 @@ export function createLocalExecutionCoordinator(
                       options.onLocalConversationChanged?.(activeScope.conversationId)
                     }
                   }
-                  if (!uploads) return
+                  if (event.type !== "completed" || !event.shareable || !uploads) return
                   const uploadTarget = localRecord
                     ? (localRecord.shareStatus === "active"
                         && localRecord.workspaceId !== null
@@ -1733,7 +1754,7 @@ export function createLocalExecutionCoordinator(
         if (!authorized.ok) return authorized
 
         if (binding.queueArmed) return ok({ status: "rejected", reason: "待发队列正在发送，请加入队列。" })
-        return sendBound(scope, binding, { requestId, text, referenceIds: ids, attachments, ...(images.length ? { images } : {}) }, prompt)
+        return sendBound(scope, binding, { requestId, text, referenceIds: ids, attachments, ...(images.length ? { images } : {}) }, prompt, authorized.value)
       })
     },
 

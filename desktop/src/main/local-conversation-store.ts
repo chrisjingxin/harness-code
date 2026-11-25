@@ -1,7 +1,7 @@
 /**
  * 【功能定义】本机个人会话独立存储（`LocalConversationStore`）：
  * 按 `<userData>/workbench/local-conversations/<originSha256>/<accountId>/` 物理隔离保存
- * 当前账号的个人会话元数据索引（`index.json`）与单会话定稿轮次详情（`conversations/<conversationId>.json`），
+ * 当前账号的个人会话元数据索引（`index.json`）与单会话终态轮次详情（`conversations/<conversationId>.json`），
  * 彻底解耦于云端协作权限与 1 MB 上限的轻量 UI 偏好存储（`PersonalStore`）。
  *
  * 【协作边界】
@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { identityError } from "@workbench/collaboration-client"
-import type { CollaborationResult } from "@workbench/collaboration-client/types"
+import type { CollaborationResult, ConversationSummary } from "@workbench/collaboration-client/types"
 import type {
   CreateLocalConversationInput,
   LocalConversationDetail,
@@ -413,6 +413,52 @@ export class LocalConversationStore {
       } catch (error) {
         return this.#wrapError(error, "无法读取本机会话正文。")
       }
+    })
+  }
+
+  /** 保存已由协调器核对本人归属的旧 Project 会话；不发布、不上传，也不授予目录权限。 */
+  async rememberProjectConversation(
+    accountId: string,
+    workspaceId: string,
+    conversation: ConversationSummary,
+    directoryPath: string,
+    providerId: string,
+  ): Promise<CollaborationResult<LocalConversationRecord>> {
+    if (!validAccountId(accountId) || conversation.ownerUserId !== accountId
+      || !validUuid(workspaceId) || !validUuid(conversation.projectId) || !validUuid(conversation.conversationId)
+      || !SHARE_MODES.has(conversation.shareMode) || !SHARE_STATUSES.has(conversation.shareStatus)) {
+      return identityError("INVALID_REQUEST", "本人 Project 会话归属或共享状态无效。")
+    }
+    return this.#enqueue(accountId, async () => {
+      try {
+        const index = await this.#readIndex(accountId)
+        const existing = index.records.find(item => item.conversationId === conversation.conversationId)
+        if (existing) return existing.workspaceId === workspaceId && existing.projectId === conversation.projectId
+          ? ok(structuredClone(existing)) : identityError("CONVERSATION_CONFLICT", "本机会话已绑定其他范围。")
+        if (index.records.length >= MAX_LOCAL_CONVERSATIONS_PER_ACCOUNT) {
+          return identityError("PAYLOAD_TOO_LARGE", `本机会话数量已达 ${MAX_LOCAL_CONVERSATIONS_PER_ACCOUNT} 条上限。`)
+        }
+        const now = Date.now()
+        const record: LocalConversationRecord = {
+          conversationId: conversation.conversationId,
+          workspaceId,
+          projectId: conversation.projectId,
+          title: sanitizeTitle(conversation.title, "新会话"),
+          directoryPath,
+          providerId,
+          status: conversation.status,
+          shareMode: conversation.shareMode,
+          shareStatus: conversation.shareStatus,
+          syncedSequence: conversation.syncedSequence,
+          createdAtMs: now,
+          updatedAtMs: now,
+          publishedAtMs: now,
+          stoppedAtMs: conversation.stoppedAt ? Date.parse(conversation.stoppedAt) : null,
+        }
+        index.records.push(record)
+        await this.#writeIndex(accountId, index)
+        return ok(structuredClone(record))
+      } catch (error) { return this.#wrapError(error, "无法保存本人 Project 会话记录。") }
     })
   }
 

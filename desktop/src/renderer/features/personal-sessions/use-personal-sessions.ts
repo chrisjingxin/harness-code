@@ -50,6 +50,7 @@ import {
   localTurnsToTimelineEntries,
   makePersonalScopeKey,
   mergeLoadedPersonalRuntime,
+  localTurnsBeforeLiveTail,
   partitionPersonalRecords,
   type PersonalRuntimeState,
 } from "./personal-sessions-model.js"
@@ -900,19 +901,8 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const selectedEntries = useMemo(() => {
     if (!selectedDetail) return []
     const activeEntries = selectedConversationId ? localExecutionPort?.getView?.(selectedConversationId)?.entries : undefined
-    const liveTurnIds = new Set<string>()
-    for (const entry of activeEntries ?? []) {
-      const match = /^local-execution:([^:]+):/.exec(entry.id)
-      if (match?.[1]) liveTurnIds.add(match[1])
-    }
-    // 仅跳过结尾已在实时 execution.entries 中完整呈现的连续尾段轮次，避免跨空间往返后历史顺序倒错或重复。
-    const persisted = selectedDetail.turns
-    let cutoff = persisted.length
-    while (cutoff > 0 && liveTurnIds.has(persisted[cutoff - 1]!.turnId)) {
-      cutoff -= 1
-    }
     return localTurnsToTimelineEntries(
-      persisted.slice(0, cutoff),
+      localTurnsBeforeLiveTail(selectedDetail.turns, activeEntries),
       { userId: user.id, displayName: user.userName || "我" },
     )
   }, [selectedDetail, selectedConversationId, localExecutionPort, user.id, user.userName])

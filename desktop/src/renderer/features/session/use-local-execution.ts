@@ -515,20 +515,27 @@ export function useLocalExecution(
         ...(target?.scope.conversationId === id ? {
           ...(preparedForTarget && screen?.knowledgeStatus ? { knowledgeStatus: screen.knowledgeStatus } : {}),
           directoryStatus: !target.directory
-            ? "confirmation-required"
+            ? undefined
             : preparedForTarget ? screen?.directoryStatus ?? "checking" : "checking",
         } : {}),
       }
     },
     async confirmDirectory(id) {
       const selected = current.current.target
-      if (!selected || selected.scope.conversationId !== id || confirming.current) return
+      if (!selected?.directory || selected.scope.conversationId !== id || confirming.current) return
       confirming.current = true
       try {
         const result = await host.confirmDirectory(selected.scope)
         if (!mounted.current || current.current.target !== selected) return
         if (result.ok) {
           if (result.value) retryPreparation()
+          else {
+            const screen = screens.current.get(selected.key)
+            if (screen) {
+              screen.availability = { available: false, reason: "已取消目录确认，草稿已保留。确认或重新选择目录后可发送。" }
+              refresh()
+            }
+          }
         } else {
           const screen = screens.current.get(selected.key)
           if (screen) {

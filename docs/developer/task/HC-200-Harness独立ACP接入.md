@@ -12,7 +12,7 @@ scope: 在独立 Harness Agent 实现内提供 Python ACP 接入适配，复用�
 acceptance: 真实 Harness 经 ACP 可建会话、流式运行、取消/回答和恢复；平台不导入内核类型，切换到其他 Agent 无需 Harness/Python；ACP通信.md 缺口表中归属 HC-200 的行全部「已关闭」附测试证据或用户确认放弃带日期。
 user_docs: 实现阶段按范围更新独立桌面用户指南、docs/user/快速开始.md、docs/user/安全与沙箱.md 与 docs/user/Web界面.md；当前不新增产品运行承诺
 developer_docs: docs/developer/architecture/多人协作工作台顶层设计.md、docs/developer/architecture/ACP通信.md；后续按本 Task 同名文件补 Spec、Plan、Todo
-test_evidence: -
+test_evidence: 2026-11-25 M1 会话 MCP 定向 6 通过；真实本机 MCP 发现与调用通过；详见维护停点 M1
 references: docs/developer/task/HC-192-协作工作台与会话交接.md；设计基线 02505619be4026c3dba0ec27aca729ae01a26968
 completed_at: -
 ---
@@ -368,3 +368,27 @@ G4：`npm run project:check` 与 `npm run check:boundaries -- --self-check` 通�
 Python/TypeScript 双端以 mock 模型验证真实 ACP 进程、取消/恢复和人工交互，另记录真实 Agent 手工互通；真实模型和私有 SDK 证据分别留存。
 
 本 Task 确认后先写同名 Spec；Spec 确认后写 Plan/Todo，并按可演示停点实施。继续遵守用户跳过 Skill 调用的要求，不因生成任务而直接写生产代码、认领分支或改变其他任务状态。当前只有任务文档，未运行上述产品验收。
+
+## 维护停点 M1：会话 MCP 构图失败（2026-11-25，待验收）
+
+本轮由统筹派发，范围为既有 GAP-21/27 的 Python Host 会话 MCP 资源选择和借用生命周期。正式日志中 MCP 已连接并加载 4 个工具，随后两次 `runtime.acquire.failed → run.failed`，均未进入模型调用；日志只保留 RuntimeError 类型，未保留异常消息。
+
+隔离 Host、临时配置目录、真实 stdio MCP 已在未修改生产代码时复现：`tests/host/test_session_mcp_runtime.py` 于 `_build_default_agent_engine` 全局快照检查抛出 `MCP_RESOURCE_SNAPSHOT_UNAVAILABLE`（1 failed）。会话 MCP 已登记侧路资源，但构图只接受全局快照，因而拒绝。只改快照选择后，用例继续复现解绑强关：`runtime.connected` 提前变为 false，Engine 清理记录借用计数错误。
+
+已修复：`agent_host.py` 对会话借用已登记的合并快照；全局过滤子视图继续按完整服务器配置核对并借用全局资源，工具白名单保持生效。`mcp.py` 的侧路释放改为停止新借用并沿用回收机制，等待所有 Engine 释放后关闭，不再强制清零借用计数。生产改动只涉及这两个 Python 文件，未加新协议或替代路径。
+
+验证证据：
+
+- 在 `agent/` 执行 `.venv/bin/python -m pytest tests/host/test_session_mcp_runtime.py tests/host/test_server.py::test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view tests/host/test_server.py::test_agent_engine_pool_builds_empty_mcp_plugin_profile_without_manager tests/host/test_session_config_services.py::test_session_mcp_skips_sse_and_name_collisions tests/extensions/test_mcp.py -k 'session_mcp or filters_plugin_mcp or empty_mcp_plugin or apply_snapshot_keeps_old_resource or apply_snapshot_reaps_idle_old_resource' -q --tb=short`：`6 passed, 86 deselected`。
+- 新回归使用临时目录和真实 stdio MCP，模型工厂与图构造用桩：父/子工具白名单、两名会话共享、最后解绑后拒绝新借用、已有工具真实调用、最后一个 Engine 关闭后资源回收均通过；同名服务器配置变化和不存在的工具仍在模型构造前拒绝；构图失败时 provider/workspace 租约均释放。
+- `npm run docs:check`、`npm run tasks:check`、`git diff --check` 通过。现有虚拟环境缺少 pytest，本次仅按 `agent/pyproject.toml` 版本安装 pytest/pytest-asyncio，未改锁文件。
+- `openwiki code --update --print`：退出 127，命令不存在；未手改生成页。
+- 未操作用户 A/B 实例、未向其会话发送消息、未调用真实模型或修改模型配置；未改 HC-255 UI，未提交或推送。正式日志不包含异常消息，本次精确异常来自隔离复现；正式实例恢复仍待用户复验。未跑全库或四工作区构建。
+
+手工检视 diff 已确认：不放宽快照配置与工具视图核对，不强关有借用者的侧路连接。需重新启动对应 Harness Agent 进程以重新导入 Python；若通过桌面重启，须确认旧 Agent 退出并拉起新进程，单独刷新界面不足。不需要重编译四个 TypeScript 工作区。Task 与本停点保持待验收，不自动归档。
+
+### Rebase 整合复核（2026-11-25，上游 fd787904）
+
+`ae4101ff` 已由同事交付会话 MCP 选择器 `McpConnectionManager.acquire_covering` 及 `agent/tests/test_session_mcp_engine.py`。本次冲突选择远端实现，不保留我方另一套全局/会话 selector；只叠加 `release_side_runtime` 的停止新借用、等待已有 Engine 释放后回收。原有 M1 复现与修复记录是 rebase 前证据，不将远端选择器记作本次新增。
+
+合并后在 `agent/` 执行 `.venv/bin/python -m pytest tests/test_session_mcp_engine.py tests/host/test_session_mcp_runtime.py tests/host/test_server.py::test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view -q --tb=short`：4 通过。覆盖远端精确/覆盖资源选择与配置漂移拒绝、本机真实 MCP 工具调用、父/子工具白名单、解绑后的租约保留及 acquire_covering 不再借用已排空资源。未继续 rebase 或暂存；交统筹处理 Git 流程。

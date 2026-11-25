@@ -15,6 +15,7 @@ import {
   localTurnsToTimelineEntries,
   makePersonalScopeKey,
   mergeLoadedPersonalRuntime,
+  projectLocalConversationHistory,
   partitionPersonalRecords,
   resolvePublishTargets,
   type PersonalRuntimeState,
@@ -300,4 +301,29 @@ test("mergeLoadedPersonalRuntime 对同作用域已加载记录保持幂等并�
   assert.equal(shiftedMerged.needsPersist, true)
   assert.equal(shiftedMerged.runtime.loadedScopeKey, scopeB)
   assert.equal(shiftedMerged.runtime.personal.draft.text, "内存中最新草稿")
+})
+
+test("Project 本人本机终态保留失败与停止，按实际正文配对成功轮且保留全部云端序号", () => {
+  const turns = [
+    makeTurn({ turnId: "failed", status: "failed", userText: "失败原文", reply: "部分回答", failure: "运行失败" }),
+    makeTurn({ turnId: "cancelled", status: "cancelled", userText: "停止原文", reply: "部分停止回答" }),
+    makeTurn({ turnId: "completed", userText: "成功原文", reply: "成功回答", acceptedAtMs: 2000, completedAtMs: 3000 }),
+  ]
+  const messages = [
+    { sequence: 10, type: "user" as const, occurredAtMs: 9000, payload: JSON.stringify({ text: "别的设备时间更晚的历史" }) },
+    { sequence: 11, type: "assistant" as const, occurredAtMs: 9500, payload: JSON.stringify({ text: "其他历史回复" }) },
+    { sequence: 12, type: "user" as const, occurredAtMs: 2000, payload: JSON.stringify({ text: "成功原文" }) },
+    { sequence: 13, type: "assistant" as const, occurredAtMs: 3000, payload: JSON.stringify({ text: "成功回答" }) },
+  ]
+  const owner = { userId: "u-1", displayName: "本人" }
+  const entries = projectLocalConversationHistory(messages, turns, owner)
+  assert.deepEqual(entries.filter(entry => entry.id.startsWith("seq-")).map(entry => entry.id), ["seq-10", "seq-11", "seq-12", "seq-13"])
+  assert.equal(entries.filter(entry => entry.kind === "message" && entry.text === "成功原文").length, 1)
+  assert.ok(entries.some(entry => entry.kind === "message" && entry.text === "部分回答\n\n运行失败"))
+  assert.ok(entries.some(entry => entry.kind === "message" && entry.text === "部分停止回答\n\n本轮已停止。"))
+  assert.ok(entries.findIndex(entry => entry.id === "local-turn:failed:user") < entries.findIndex(entry => entry.id === "seq-12"))
+  const live = [{ kind: "message" as const, id: "local-execution:cancelled:user", role: "user" as const, text: "停止原文", createdAtMs: 1 }]
+  const beforeLive = projectLocalConversationHistory([], turns.slice(0, 2), owner, live)
+  assert.ok(beforeLive.some(entry => entry.id === "local-turn:failed:user"))
+  assert.ok(!beforeLive.some(entry => entry.id === "local-turn:cancelled:user"))
 })

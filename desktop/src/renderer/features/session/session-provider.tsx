@@ -10,7 +10,7 @@
 import type { ReactElement, ReactNode } from "react"
 import type { UserSummary } from "@workbench/collaboration-client/types"
 import type { LocalConversationTurn, PersonalDraftImage } from "../../../shared/index.js"
-import { localTurnsToTimelineEntries } from "../personal-sessions/personal-sessions-model.js"
+import { projectLocalConversationHistory } from "../personal-sessions/personal-sessions-model.js"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -169,31 +169,20 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         syncError: syncState.syncError,
       })
       const localTurns = isLocal ? controller.localTurnsByConversation?.[conversation.conversationId] : undefined
-      const entries = localTurns && localTurns.length > 0
-        ? (() => {
-            const activeEntries = controller.execution.getView?.(conversation.conversationId)?.entries
-            const liveTurnIds = new Set<string>()
-            for (const entry of activeEntries ?? []) {
-              const match = /^local-execution:([^:]+):/.exec(entry.id)
-              if (match?.[1]) liveTurnIds.add(match[1])
-            }
-            let cutoff = localTurns.length
-            while (cutoff > 0 && liveTurnIds.has(localTurns[cutoff - 1]!.turnId)) {
-              cutoff -= 1
-            }
-            return localTurnsToTimelineEntries(
-              localTurns.slice(0, cutoff),
-              { userId: conversation.ownerUserId, displayName: ownerName },
-            )
-          })()
-        : decodeHistoryToTimelineEntries(
-            syncState.messages,
-            {
-              userId: conversation.ownerUserId,
-              displayName: ownerName,
-            },
-            controller.sentImagesByConversation?.[conversation.conversationId],
-          )
+      const entries = localTurns?.length ? projectLocalConversationHistory(
+        syncState.messages,
+        localTurns,
+        { userId: conversation.ownerUserId, displayName: ownerName },
+        controller.execution.getView?.(conversation.conversationId)?.entries,
+        controller.sentImagesByConversation?.[conversation.conversationId],
+      ) : decodeHistoryToTimelineEntries(
+        syncState.messages,
+        {
+          userId: conversation.ownerUserId,
+          displayName: ownerName,
+        },
+        controller.sentImagesByConversation?.[conversation.conversationId],
+      )
       const convScope: ConversationScope = {
         namespace: scope.namespace,
         accountId: scope.accountId,
@@ -213,7 +202,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             recentDirectories={controller.recentDirectories}
             gitSummary={controller.getGitSummary?.(conversation.conversationId) ?? null}
             entries={entries}
-            contentRevision={Math.max(syncState.localSyncedSequence, localTurns?.length ?? 0)}
+            contentRevision={syncState.localSyncedSequence + (localTurns?.length ?? 0)}
             personal={personal}
             execution={controller.execution}
             rendering={controller.rendering}
