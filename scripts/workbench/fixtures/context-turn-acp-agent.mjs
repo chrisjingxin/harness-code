@@ -15,16 +15,21 @@ async function prompt(m){
  if(text.startsWith('HC241_CONTEXT_NONE')||text.startsWith('/context-smoke')){
   if(text.includes('<本机记忆'))throw Error('无团队或斜杠消息不应附带材料')
  }else{
-  if(!text.includes('<本机记忆 team.md>')||!text.includes('<本机记忆 personal.md>')||!text.includes('propose_project_memory_update'))throw Error('本轮完整正文未送达')
-  const items=(await call('list_team_knowledge',{scope:'all'})).items
-  const rule=items.find(x=>x.title==='匹配仓库规约'),experience=items.find(x=>x.title==='真实工具知识')
-  const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read')
-  if(!duplicate.alreadyRead||duplicate.text)throw Error('实际自动规约未同轮登记')
   if(text.startsWith('HC241_CONTEXT_TWO')){
-   if(!text.includes('跨轮验证工程'))throw Error('第一轮提案未在第二轮材料中出现')
+   if(!text.includes('<本机记忆 team.md（已更新）>')||!text.includes('跨轮验证工程'))throw Error('第一轮提案更新的team.md未以增量送达第二轮')
+   if(text.includes('<本机记忆 personal.md'))throw Error('未变更的personal.md不应在第二轮重复送达')
+   const items=(await call('list_team_knowledge',{scope:'all'})).items
+   const rule=items.find(x=>x.title==='匹配仓库规约')
+   const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read')
+   if(!duplicate.alreadyRead||duplicate.text)throw Error('已提供规约未跨轮登记')
    const memory=await call('query_project_memory',{query:'跨轮验证工程'})
    if(memory.entries.length!==1)throw Error('第一轮提案没有保存')
   }else{
+   if(!text.includes('<本机记忆 team.md>')||!text.includes('<本机记忆 personal.md>')||!text.includes('propose_project_memory_update'))throw Error('首轮基线完整正文未送达')
+   const items=(await call('list_team_knowledge',{scope:'all'})).items
+   const rule=items.find(x=>x.title==='匹配仓库规约'),experience=items.find(x=>x.title==='真实工具知识')
+   const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read')
+   if(!duplicate.alreadyRead||duplicate.text)throw Error('实际自动规约未在会话登记')
    const read=await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-read')
    if(!read.text||!(await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-repeat')).alreadyRead)throw Error('真实读取/去重失败')
    update(m.params.sessionId,{sessionUpdate:'tool_call',toolCallId:'knowledge-read',title:'read_team_knowledge',kind:'read',status:'completed',rawOutput:read,content:[{type:'content',content:{type:'text',text:JSON.stringify(read)}}]})

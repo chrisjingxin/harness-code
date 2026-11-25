@@ -89,6 +89,10 @@ export type LocalPromptContextResult = {
 export type LocalExecutionContextAssembler = {
   /** 仅在材料已纳入本轮实际 blocks 且 ACP 受理后登记；不触发工具读取命中。 */
   registerFixedKnowledge?(scope: LocalExecutionScope, turnId: string, materials: readonly FixedKnowledgeMaterial[]): void
+  /** 仅在 ACP 受理 sendPrompt 后提交本轮已送达基线或差量快照。 */
+  confirmTurnDelivered?(scope: LocalExecutionScope, turnId: string, materials?: readonly FixedKnowledgeMaterial[]): void
+  /** 在会话重建、切换原生 sessionId 或疑似触发上下文压缩时重置已送达快照，下一轮自动补发完整基线。 */
+  resetDeliveredContext?(scope: LocalExecutionScope, reason?: "session-reset" | "session-reopened" | "compaction"): void
   /**
    * 在真实账号与会话上下文有效时组装本轮自动材料。
    * 当 scope.workspaceId === null 时协调器直接跳过调用，保证无团队会话零注入。
@@ -183,6 +187,8 @@ type Binding = {
   queuePause?: true | string
   shareTail?: Promise<void>
   contextPending?: Promise<void>
+  lastNativeSessionId?: string
+  lastContextTokens?: number
 }
 
 const unavailableMessages: Record<UnavailableReason | "empty-text", string> = {
@@ -503,6 +509,15 @@ export function createLocalExecutionCoordinator(
     return pending
   }
 
+  /** 根据输入上下文 Token 的断崖式回落识别隐式上下文压缩，重置已送达快照以便下轮补全基线。 */
+  function recordContextTokens(binding: Binding, tokens: number | undefined): void {
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) return
+    if (binding.lastContextTokens !== undefined && binding.lastContextTokens >= 12_000 && tokens <= binding.lastContextTokens * 0.6) {
+      options?.contextAssembler?.resetDeliveredContext?.(binding.currentScope, "compaction")
+    }
+    binding.lastContextTokens = tokens
+  }
+
   async function release(key: string, binding: Binding): Promise<void> {
     // 先撤销工具凭据，再等待Agent退出，关闭期间的迟到工具请求不能继续读取或提交。
     options?.contextSession?.release(binding.scope, binding.id)
@@ -808,9 +823,15 @@ export function createLocalExecutionCoordinator(
       toolStates: new Map(),
       finalizedTools: new Map(),
     }
-    if (context && preparedKnowledge.length) {
-      // sendPrompt 已受理且正文在上述实际 blocks 中；仅准备但拒绝发送的规约不会到这里。
-      try { options?.contextAssembler?.registerFixedKnowledge?.(context.scope, context.key, preparedKnowledge) } catch {
+    if (context) {
+      // sendPrompt 已受理且本轮 blocks 已交由 ACP 发送；确认提交本轮快照或仅登记固定材料。
+      try {
+        if (options?.contextAssembler?.confirmTurnDelivered) {
+          options.contextAssembler.confirmTurnDelivered(context.scope, context.key, preparedKnowledge)
+        } else if (preparedKnowledge.length) {
+          options?.contextAssembler?.registerFixedKnowledge?.(context.scope, context.key, preparedKnowledge)
+        }
+      } catch {
         // ACP 已受理，登记失败不能把已发送的本轮伪装成拒绝；沿原受理状态报告实际问题。
         knowledgeStatus = { code: "unavailable", message: "本轮团队资料登记失败，请确认会话资格后重试。" }
       }
@@ -1369,6 +1390,7 @@ export function createLocalExecutionCoordinator(
             clientMeta,
             providerReason,
             session,
+            lastNativeSessionId: session.getState?.()?.sessionId,
             unsubscribe: session.subscribe(event => {
               const activeScope = binding.currentScope
               const source = { scope: activeScope, bindingId, turnId: event.turnId, sequence: event.sequence }
@@ -1422,6 +1444,13 @@ export function createLocalExecutionCoordinator(
               }
               if (event.type === "completed" && enabled("commands") && parseHarnessCommandMeta(event.rawMeta)?.ephemeral === true) turn.ephemeral = true
               const metrics = event.type === "completed" && enabled("runSummary") ? parseHarnessRunMeta(event.rawMeta) : undefined
+              if (event.type === "completed") {
+                recordContextTokens(binding, metrics?.usage?.inputTokens)
+              } else if (event.type === "failed" && event.reason === "agent-disconnected") {
+                binding.lastContextTokens = undefined
+                binding.lastNativeSessionId = undefined
+                options?.contextAssembler?.resetDeliveredContext?.(activeScope, "session-reopened")
+              }
               const completedAtMs = Date.now()
               const agentInfo = event.type === "completed" ? session.getState?.()?.agentInfo : undefined
               const agentName = binding.providerId === "harness" ? "Harness Code" : agentInfo?.title?.trim() || agentInfo?.name
@@ -1549,7 +1578,28 @@ export function createLocalExecutionCoordinator(
                 return
               }
               if (sessionEvent.type === "replay") return
+              if (sessionEvent.type === "session-reset") {
+                binding.lastNativeSessionId = sessionEvent.sessionId
+                binding.lastContextTokens = undefined
+                options?.contextAssembler?.resetDeliveredContext?.(activeScope, "session-reset")
+                publishSessionSnapshot(login, activeScope, binding)
+                return
+              }
+              if (sessionEvent.type === "usage") {
+                recordContextTokens(binding, sessionEvent.usage.used)
+                publishSessionSnapshot(login, activeScope, binding)
+                return
+              }
               if (sessionEvent.type === "initialized" || sessionEvent.type === "session-opened") {
+                if (sessionEvent.type === "session-opened") {
+                  const nextId = sessionEvent.state.sessionId
+                  if ((binding.lastNativeSessionId && nextId && binding.lastNativeSessionId !== nextId)
+                    || sessionEvent.state.restoreStatus.kind === "reset") {
+                    binding.lastContextTokens = undefined
+                    options?.contextAssembler?.resetDeliveredContext?.(activeScope, "session-reopened")
+                  }
+                  if (nextId) binding.lastNativeSessionId = nextId
+                }
                 publish(login, {
                   scope: activeScope,
                   bindingId,

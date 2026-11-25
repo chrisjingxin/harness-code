@@ -27,12 +27,13 @@ const json = body => new Response(JSON.stringify({ returnCode: "SUC0000", errorM
 const transport = async input => {
   const url = new URL(String(input))
   if (url.pathname.endsWith("/csrf")) return json({ headerName: "X-CSRF-TOKEN", token: "test-only" })
-  if (url.pathname.endsWith("/demo-login") || url.pathname.endsWith("/me")) return json({ user: { id: user, userNo: "80000001", userName: "冒烟用户", photo: "", orgId: "org", orgNo: "001", orgName: "研发", orgPathName: "研发" }, workspaces: [{ id: workspaceId, slug: "smoke", name: "冒烟团队" }] })
+  if (url.pathname.endsWith("/demo-login") || url.pathname.endsWith("/me")) return json({ user: { id: user, userNo: "80000001", userName: "冒烟用户", photo: "", orgId: "org", orgNo: "001", orgName: "研发", orgPathName: "研发" }, workspaces: [{ id: workspaceId, slug: "smoke", name: "冒烟团队", role: "admin", memberVersion: 1, accessVersion: 1 }] })
   if (url.pathname.endsWith("/logout")) return json(null)
+  if (url.pathname.endsWith("/reads")) return json({ versionReadCount: 1, totalReadCount: 1 })
   if (url.pathname.endsWith("/projects")) return json({ workspaceId, projects: [project(projectId), project(otherProject)] })
   if (url.pathname.includes("/projects/")) return json({ project: project(url.pathname.split("/").at(-1)), members: [], repositories: [] })
   if (url.pathname.endsWith("/repositories")) return json({ workspaceId, repositories: [] })
-  if (url.pathname.endsWith("/knowledge")) { titleReads++; return json({ items: [{ knowledgeId, termKey: "errors", category: "规范", title, currentVersionId: versionId, version: 1, archived: false, updatedAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",health:{readCount:0,usefulCount:0,expiredCount:0,needsReview:false,lastReviewedAtMs:1,feedbackWatermark:0} }], nextAfterId: null }) }
+  if (url.pathname.endsWith("/knowledge")) { const level = url.searchParams.get("level"); if (!level) titleReads++; return json({ items: level === "rule" || level === "term" ? [] : [{ knowledgeId, termKey: "errors", category: "规范", title, currentVersionId: versionId, version: 1, archived: false, updatedAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",health:{readCount:0,usefulCount:0,expiredCount:0,needsReview:false,lastReviewedAtMs:1,feedbackWatermark:0} }], nextAfterId: null }) }
   if (url.pathname.endsWith(`/versions/${versionId}`)) return json({ knowledgeId, termKey: "errors", archived: false, version: { versionId, version: 1, category: "规范", title, authorId: user, createdAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",contributors:[user],reviewerId:null,reviewedAtMs:null,proposalId:null }, text: "已发布规范正文：团队工程用途依据。" })
   throw new Error(`未预期请求:${url.pathname}`)
 }
@@ -60,11 +61,15 @@ try {
   const loginResult = await identity.signIn("80000001"); assert.equal(loginResult.ok, true, JSON.stringify(loginResult))
   const firstSetup = await setup("binding-1"), server = serverOf(firstSetup)
   assert.equal(new URL(server.url).hostname, "127.0.0.1")
-  assert.equal((await rpc(server, "initialize", { protocolVersion: "2025-03-26" })).protocolVersion, "2025-03-26")
+  const init = await rpc(server, "initialize", { protocolVersion: "2025-03-26" })
+  assert.equal(init.protocolVersion, "2025-03-26")
+  assert.ok(init.instructions.includes("list_team_knowledge") && init.instructions.includes("current_turn_user"))
   assert.equal((await rpc(server, "tools/list")).tools.length, 4)
   assert.ok(Buffer.byteLength(MEMORY_UPDATE_REMINDER) <= 256)
   const context = await assemble("first")
   assert.ok(context.contextBlocks[0].text.includes("其他工程"), context.contextBlocks[0].text)
+  assert.ok(!context.contextBlocks[0].text.includes("团队知识标题（按需读取固定版本）"))
+  service.confirmTurnDelivered(scope, "first", context.preparedKnowledge)
   await assert.rejects(tool(server, "query_project_memory", { workspaceId: "伪造范围" }), /参数无效/)
   await assert.rejects(tool(server, "propose_project_memory_update", { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "无来源", summary: "" }, sourceIds: ["未读来源"] }), /实际读过/)
   const query = await tool(server, "query_project_memory")
@@ -74,6 +79,7 @@ try {
   assert.equal((await tool(server, "read_team_knowledge", { referenceId })).text.includes("已发布规范正文"), true)
   assert.equal((await tool(server, "read_team_knowledge", { referenceId })).alreadyRead, true)
   assert.equal((await tool(server, "read_team_knowledge", { referenceId })).text, undefined)
+  assert.equal((await tool(server, "read_team_knowledge", { referenceId, force: true })).text.includes("已发布规范正文"), true)
   const proposal = { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "新增工程", summary: "来自真实读取的固定规范", aliases: ["new"] }, sourceIds: [referenceId] }
   const pending = await tool(server, "propose_project_memory_update", proposal, "proposal-1")
   assert.equal(pending.status, "pending")
@@ -127,11 +133,13 @@ try {
   const direct = await service.confirmDirectory(unconnectedScope, { path: root, fields: { name: "本人选定工程", summary: "直接确认" }, baseEntryRevision: 0 })
   assert.equal(direct.status, "no_change")
   const cacheBefore = titleReads
-  await Promise.all([service.knowledge.directory({ ...memoryScope, generation: identity.personalIdentity().generation }), service.knowledge.directory({ ...memoryScope, generation: identity.personalIdentity().generation })])
-  assert.equal(titleReads, cacheBefore)
-  title = "更新后标题"; service.knowledge.invalidate(workspaceId)
-  assert.equal((await service.knowledge.directory({ ...memoryScope, generation: identity.personalIdentity().generation })).items[0].title, title)
+  await Promise.all([service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation }), service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })])
   assert.equal(titleReads, cacheBefore + 1)
+  await service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })
+  assert.equal(titleReads, cacheBefore + 1)
+  title = "更新后标题"; service.knowledge.invalidate(workspaceId)
+  assert.equal((await service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })).items[0].title, title)
+  assert.equal(titleReads, cacheBefore + 2)
   let view = applyLocalExecutionUpdate(emptyLocalExecutionView, { kind: "accepted", turnId: "ui", text: "用户原文", author: { id: user, displayName: "本人" } })
   view = applyLocalExecutionUpdate(view, { kind: "context-tool", turnId: "ui", tool: { id: "project-memory:1", title: "准备更新项目记忆", status: "in_progress" } })
   view = applyLocalExecutionUpdate(view, { kind: "finished", turnId: "ui" })
@@ -143,8 +151,14 @@ try {
   const agent = fileURLToPath(new URL("./fixtures/context-acp-agent.mjs", import.meta.url))
   host = new LocalAcpHost({ executable: process.execPath, args: [agent] }, { bindingDirectory: join(root, "native-bindings"), bindingNamespace: origin, restorePolicy: "fallback-new" })
   const agentSetup = await setup("agent-binding"), session = await host.bind(scope, cwd, agentSetup)
-  const send = async (session, contextId) => {
+  const send = async (session, contextId, mode = "baseline") => {
     const assembled = await assemble(contextId)
+    if (mode === "zero") assert.equal(assembled.contextBlocks.length, 0)
+    else if (mode === "team-delta") {
+      assert.equal(assembled.contextBlocks.length, 1)
+      assert.ok(assembled.contextBlocks[0].text.includes("<本机记忆 team.md（已更新）>"))
+      assert.ok(!assembled.contextBlocks[0].text.includes("<本机记忆 personal.md"))
+    } else assert.ok(assembled.contextBlocks.length > 0)
     let unsubscribe, timeout
     const done = new Promise((resolve, reject) => {
       timeout = setTimeout(() => reject(new Error("受控ACP超时")), 20_000)
@@ -152,13 +166,16 @@ try {
     })
     try {
       assert.equal(session.sendPrompt([{ type: "text", text: "用户原文" }, ...assembled.contextBlocks]).status, "accepted")
+      service.confirmTurnDelivered(scope, contextId, assembled.preparedKnowledge)
       const event = await done
       assert.equal(event.type, "completed", JSON.stringify(event))
       await settle(contextId)
     } finally { clearTimeout(timeout); unsubscribe?.() }
   }
-  await send(session, "agent-first")
+  await send(session, "agent-first", "baseline")
   assert.ok((await entries()).some(e => e.name === "Agent归纳工程"))
+  await send(session, "agent-second-delta", "team-delta")
+  await send(session, "agent-third-zero", "zero")
   await session.close()
   const restoredSetup = await setup("agent-restored")
   const restored = await host.bind(scope, cwd, restoredSetup)

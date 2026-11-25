@@ -21,7 +21,7 @@ const json = body => new Response(JSON.stringify({ returnCode: "SUC0000", errorM
 const identity = new CollaborationState(origin, async input => {
   const path = new URL(String(input)).pathname
   if (path.endsWith("/csrf")) return json({ headerName: "X-CSRF-TOKEN", token: "test-only" })
-  if (path.endsWith("/demo-login") || path.endsWith("/me")) return json({ user: { id: accountId, userNo: "80000001", userName: "接点冒烟", photo: "", orgId: "org", orgNo: "001", orgName: "研发", orgPathName: "研发" }, workspaces: [{ id: workspaceId, slug: "smoke", name: "团队" }] })
+  if (path.endsWith("/demo-login") || path.endsWith("/me")) return json({ user: { id: accountId, userNo: "80000001", userName: "接点冒烟", photo: "", orgId: "org", orgNo: "001", orgName: "研发", orgPathName: "研发" }, workspaces: [{ id: workspaceId, slug: "smoke", name: "团队", role: "admin", memberVersion: 1, accessVersion: 1 }] })
   if (path.endsWith("/logout")) return json(null)
   if (path.includes("/conversations/")) return json({ conversation: { conversationId: path.split("/").at(-1), projectId, ownerUserId: accountId, title: "本人会话", status: "idle", briefText: "", briefSource: "rule", briefUpdatedAtMs: 1, syncedSequence: 0, updatedAt: "2026-11-23T00:00:00.000Z", shareMode: "full", shareStatus: "active", stoppedAt: null, repositories: [] } })
   throw Error("未预期请求")

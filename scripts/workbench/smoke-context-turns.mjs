@@ -36,7 +36,7 @@ let bound,setup,firstKey
 const context=new WorkbenchContextService({origin,identity,store:new ProjectMemoryStore(join(runRoot,'memory')),authorizeBinding:async s=>{const r=await local.getRecord(s.accountId,s.conversationId);return r?.workspaceId===s.workspaceId},onFeedback:f=>feedback.push(f)})
 const coordinator=createLocalExecutionCoordinator({isDestroyed:()=>false,webContents:{isDestroyed:()=>false,send:(_,n)=>notices.push(n)}},identity,null,{host:{bind:async(...args)=>{bound=await host.bind(...args);return bound},subscribeDiagnostics:f=>host.subscribeDiagnostics(f)}},{origin,grantsDir:join(runRoot,'grants'),localConversations:local,contextSession:{prepare:async(s,id)=>{setup=await context.prepareSession(s,id);return setup},release:(s,id)=>context.revokeSession(s,id)},contextAssembler:{
  assembleTurnContext:async input=>{const r=await context.assembleTurnContext(input),pair=await context.store.read(memoryScope);assembled.push({key:input.turnId,result:r,team:renderMemory('team.md',pair['team.md'].entries),personal:renderMemory('personal.md',pair['personal.md'].entries)});if(input.userText.includes('TWO'))await context.onTurnSettled({scope,turnId:firstKey,outcome:'completed'});if(input.userText.includes('REJECT'))await bound.close();return r},
- registerFixedKnowledge:(...args)=>context.registerFixedKnowledge(...args),onTurnSettled:input=>context.onTurnSettled(input),
+ registerFixedKnowledge:(...args)=>context.registerFixedKnowledge(...args),confirmTurnDelivered:(...args)=>context.confirmTurnDelivered(...args),resetDeliveredContext:s=>context.resetDeliveredContext(s),onTurnSettled:input=>context.onTurnSettled(input),
 }})
 async function until(action,label){for(let i=0;i<150;i++){if(await action())return;await pause(50)}throw Error('等待'+label+'超时')}
 const entries=async()=>Object.values(await context.store.read(memoryScope)).flatMap(d=>d.entries)
@@ -51,7 +51,16 @@ try{
  assert.ok(feedback.some(f=>f.turnId===one.key&&f.toolId==='project-memory:memory-write'&&f.result.status==='saved'),'真实上下文键定位原ACP工具卡')
  const two=await send('HC241_CONTEXT_TWO',[ruleRef]);assert.equal((await finish(two)).failure,undefined)
  const prompts=(await readFile(report,'utf8')).trim().split('\n').map(JSON.parse)
- for(let i=0;i<2;i++){const text=prompts[i].prompt.filter(b=>b.type==='text').map(b=>b.text).join('\n');assert.ok(text.includes(assembled[i].team),'完整team.md每轮送达');assert.ok(text.includes(assembled[i].personal),'完整personal.md每轮送达');assert.ok(text.includes(ruleRef));assert.ok(text.includes('真实工具知识'));assert.equal(text.split(rule.current.text).length-1,1,'手动同版不与自动规约重复')}
+ const firstText=prompts[0].prompt.filter(b=>b.type==='text').map(b=>b.text).join('\n')
+ const secondText=prompts[1].prompt.filter(b=>b.type==='text').map(b=>b.text).join('\n')
+ assert.ok(firstText.includes(assembled[0].team),'首轮送达完整team.md');assert.ok(firstText.includes(assembled[0].personal),'首轮送达完整personal.md')
+ assert.ok(firstText.includes(rule.current.text),'首轮送达适用规约正文')
+ assert.ok(!firstText.includes('团队知识标题（按需读取固定版本）'),'首轮不再附带标题目录')
+ assert.ok(secondText.includes(assembled[1].team),'变更后次轮仅补发更新后的team.md')
+ assert.ok(!secondText.includes('<本机记忆 personal.md'),'未变更的personal.md次轮不重复送达')
+ assert.ok(secondText.includes(ruleRef))
+ assert.equal(firstText.split(rule.current.text).length-1,1,'首轮规约只出现1次')
+ assert.equal(secondText.split(rule.current.text).length-1,1,'手动同版不与自动规约重复')
  assert.ok(prompts[1].prompt.some(b=>b.type==='text'&&b.text.includes('跨轮验证工程')))
  await until(async()=> (await ok(admin.readKnowledgeFeedback(ws,experience.item.knowledgeId,experience.item.currentVersionId))).versionReadCount===beforeReads+1,'真实工具读取命中')
  assert.equal((await ok(admin.readKnowledgeFeedback(ws,rule.item.knowledgeId,rule.item.currentVersionId))).versionReadCount,0,'自动注入/手动引用不计工具命中')
