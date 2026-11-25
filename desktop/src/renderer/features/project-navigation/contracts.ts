@@ -28,6 +28,29 @@ export function resolveProjectPageNavTarget(kind: ProjectPage["kind"]): ProjectP
   return { nav: "chat", targetSpace: "team", preserveTeamPage: true }
 }
 
+/**
+ * 当顶层导航停留在看板或团队知识且当前团队子页尚未对齐时，决定是否补跳兜底子页。
+ * 存在待消费的任务定位（`pendingRevealKind === "task"`）时禁止回落到普通 `"board"`，
+ * 避免同帧 `useEffect` 覆盖刚打开的 `{ kind: "task", taskId }` 抽屉。
+ */
+export function resolveFallbackTeamPageForTopNav(input: {
+  readonly topNav: WorkbenchNavId
+  readonly page: ProjectPage
+  readonly pendingRevealKind?: "task" | "conversation" | null
+}): ProjectPage | null {
+  if (input.topNav === "board") {
+    if (input.pendingRevealKind === "task") return null
+    if (input.page.kind !== "board" && input.page.kind !== "tasks" && input.page.kind !== "task") {
+      return { kind: "board" }
+    }
+    return null
+  }
+  if (input.topNav === "knowledge" && input.page.kind !== "knowledge") {
+    return { kind: "knowledge" }
+  }
+  return null
+}
+
 /** 当前导航范围；各模块按它隔离自己的状态，异步结果返回时须核对仍属于当前范围。 */
 export type ProjectNavigationScope = {
   namespace: string

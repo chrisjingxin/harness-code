@@ -24,7 +24,10 @@ import {
 } from "../src/renderer/features/board/board-model.ts"
 import { buildCommandPaletteGroups } from "../src/renderer/features/collaboration-views/command-palette-model.ts"
 import { resolveDeepLinkNavigation } from "../src/renderer/features/inbox/inbox-model.ts"
-import { resolveProjectPageNavTarget } from "../src/renderer/features/project-navigation/contracts.ts"
+import {
+  resolveFallbackTeamPageForTopNav,
+  resolveProjectPageNavTarget,
+} from "../src/renderer/features/project-navigation/contracts.ts"
 import { ProjectNavigation } from "../src/ui/navigation/index.tsx"
 import { buildSessionBadge } from "../src/renderer/features/session/session-model.ts"
 
@@ -418,4 +421,47 @@ test("resolveProjectPageNavTarget 为项目资料与团队会话保留目标子�
   assert.deepEqual(resolveProjectPageNavTarget("tasks"), { nav: "board" })
   assert.deepEqual(resolveProjectPageNavTarget("task"), { nav: "board" })
   assert.deepEqual(resolveProjectPageNavTarget("knowledge"), { nav: "knowledge" })
+})
+
+test("resolveFallbackTeamPageForTopNav 存在待定位任务时不覆盖非看板旧子页", () => {
+  assert.equal(
+    resolveFallbackTeamPageForTopNav({
+      topNav: "board",
+      page: { kind: "info" },
+      pendingRevealKind: "task",
+    }),
+    null,
+  )
+  assert.equal(
+    resolveFallbackTeamPageForTopNav({
+      topNav: "board",
+      page: { kind: "conversation", conversationId: "conv-1" },
+      pendingRevealKind: "task",
+    }),
+    null,
+  )
+  assert.equal(
+    resolveFallbackTeamPageForTopNav({
+      topNav: "board",
+      page: { kind: "task", taskId: "task-1" },
+      pendingRevealKind: null,
+    }),
+    null,
+  )
+  assert.deepEqual(
+    resolveFallbackTeamPageForTopNav({
+      topNav: "board",
+      page: { kind: "info" },
+      pendingRevealKind: null,
+    }),
+    { kind: "board" },
+  )
+  assert.deepEqual(
+    resolveFallbackTeamPageForTopNav({
+      topNav: "knowledge",
+      page: { kind: "info" },
+      pendingRevealKind: null,
+    }),
+    { kind: "knowledge" },
+  )
 })

@@ -29,7 +29,7 @@ import type {
 } from "../shared/index.js"
 import { ACCENT_OPTIONS, AppRail, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "../ui/index.js"
 import type { AccentId, NavigationInboxView, NavigationSpaceKind, NavigationWorkspaceItem, WorkbenchNavId } from "../ui/index.js"
-import { useProjectShell, useProjectWorkbenchSlots } from "./features/project-navigation/index.js"
+import { resolveFallbackTeamPageForTopNav, useProjectShell, useProjectWorkbenchSlots } from "./features/project-navigation/index.js"
 import type { DualTrackNavigationProps, ProjectPageProviders } from "./features/project-navigation/index.js"
 import { LocalSessionPage, createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
 import type { LocalSessionExecutionPort, ProjectConversationSummary } from "./features/session/index.js"
@@ -687,14 +687,16 @@ function ConfirmedUserWorkbench(props: Hosts & {
 
   // 当项目列表稍后就绪时，同步当前一级页所需的团队子页（看板 / 团队知识）。
   const teamPage = team.slots.page
+  const pendingRevealKind = pendingReveal?.kind ?? null
   useEffect(() => {
     if (!hasTeamOnline || !team.shell.projectId) return
-    if (topNav === "board" && !isBoardRoutePage(teamPage)) {
-      team.shell.openPage({ kind: "board" })
-    } else if (topNav === "knowledge" && teamPage.kind !== "knowledge") {
-      team.shell.openPage({ kind: "knowledge" })
-    }
-  }, [hasTeamOnline, team.shell.projectId, topNav, teamPage.kind])
+    const fallback = resolveFallbackTeamPageForTopNav({
+      topNav,
+      page: teamPage,
+      pendingRevealKind,
+    })
+    if (fallback) team.shell.openPage(fallback)
+  }, [hasTeamOnline, team.shell.projectId, topNav, teamPage.kind, pendingRevealKind])
 
   // 只有在当前真正停留在某条对话上时才豁免该会话的等待通知。
   const activeViewedConversationId = topNav !== "chat"
@@ -1115,13 +1117,13 @@ function ConfirmedUserWorkbench(props: Hosts & {
       onSelectSession={conversationId => {
         if (!hasTeamOnline) return
         props.onSelectSpace("team")
-        selectTopNav("chat", "team")
+        selectTopNav("chat", "team", { preserveTeamPage: true })
         team.shell.openPage({ kind: "conversation", conversationId })
       }}
       onSelectTask={taskId => {
         if (!hasTeamOnline) return
         props.onSelectSpace("team")
-        selectTopNav("board")
+        selectTopNav("board", "team", { preserveTeamPage: true })
         team.shell.openPage({ kind: "task", taskId })
       }}
       onSelectKnowledge={knowledgeId => {
@@ -1445,7 +1447,7 @@ function useTeamWorkspaceBridge(props: {
     if (!shell.scope || shell.scope.projectId !== reveal.projectId) return
     const targetScope = shell.scope
     if (reveal.kind === "task") {
-      props.onSelectNav("board")
+      props.onSelectNav("board", "team", { preserveTeamPage: true })
       refreshTaskMetadata(targetScope)
       setTaskDetailRevision(value => value + 1)
       shell.openPage({ kind: "task", taskId: reveal.taskId })
@@ -1543,7 +1545,7 @@ function useTeamWorkspaceBridge(props: {
   } : undefined
 
   const openTask = (taskId: string) => {
-    props.onSelectNav("board")
+    props.onSelectNav("board", "team", { preserveTeamPage: true })
     shell.openPage({ kind: "task", taskId })
   }
 
