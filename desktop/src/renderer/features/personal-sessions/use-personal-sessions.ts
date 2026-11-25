@@ -48,7 +48,10 @@ import {
   groupPersonalRecordsByDirectory,
   localRecordToConversationSummary,
   localTurnsToTimelineEntries,
+  makePersonalScopeKey,
+  mergeLoadedPersonalRuntime,
   partitionPersonalRecords,
+  type PersonalRuntimeState,
 } from "./personal-sessions-model.js"
 import type { PersonalNewSessionDraft } from "./personal-new-session-page.js"
 import type { PublishConversationSubmitInput } from "./publish-conversation-dialog.js"
@@ -96,15 +99,9 @@ type DetailEntry = {
   readonly error?: string
 }
 
-type RecordPersonalRuntime = {
-  readonly loaded: boolean
-  readonly personal: ConversationPersonalState
-  readonly providerId: string | null
-  readonly sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>
-}
-
-const DEFAULT_PERSONAL_RUNTIME: RecordPersonalRuntime = {
+const DEFAULT_PERSONAL_RUNTIME: PersonalRuntimeState = {
   loaded: false,
+  loadedScopeKey: null,
   personal: EMPTY_PERSONAL_STATE,
   providerId: null,
 }
@@ -133,13 +130,23 @@ function boundSentImages(
   return Object.fromEntries(entries.slice(-MAX_SENT_IMAGE_RECORDS))
 }
 
-function restorePersonalFromSaved(saved: ConversationPersonal | null): RecordPersonalRuntime {
+function restorePersonalFromSaved(
+  saved: ConversationPersonal | null,
+  loadedScopeKey: string,
+  fallbackProviderId: string | null,
+): PersonalRuntimeState {
   if (!saved) {
-    return { loaded: true, personal: EMPTY_PERSONAL_STATE, providerId: null }
+    return {
+      loaded: true,
+      loadedScopeKey,
+      personal: EMPTY_PERSONAL_STATE,
+      providerId: fallbackProviderId,
+    }
   }
   return {
     loaded: true,
-    providerId: saved.providerId ?? null,
+    loadedScopeKey,
+    providerId: saved.providerId ?? fallbackProviderId,
     ...(saved.sentImages ? { sentImages: saved.sentImages } : {}),
     personal: {
       scroll: saved.scroll,
@@ -156,7 +163,7 @@ function restorePersonalFromSaved(saved: ConversationPersonal | null): RecordPer
 }
 
 function toPersistablePersonal(
-  runtime: RecordPersonalRuntime,
+  runtime: PersonalRuntimeState,
   record: LocalConversationRecord | undefined,
 ): ConversationPersonal {
   const { interactions: _ignored, ...rest } = runtime.personal
@@ -215,9 +222,10 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const [listError, setListError] = useState("")
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [detailsById, setDetailsById] = useState<Readonly<Record<string, DetailEntry>>>({})
-  const [personalRuntimes, setPersonalRuntimes] = useState<Readonly<Record<string, RecordPersonalRuntime>>>({})
+  const [personalRuntimes, setPersonalRuntimes] = useState<Readonly<Record<string, PersonalRuntimeState>>>({})
   const personalRuntimesRef = useRef(personalRuntimes)
   personalRuntimesRef.current = personalRuntimes
+  const personalLoadInFlightRef = useRef(new Map<string, Promise<PersonalRuntimeState | null>>())
 
   const [agentTitles, setAgentTitles] = useState<Readonly<Record<string, string>>>({})
   const [checkingProviders, setCheckingProviders] = useState(false)
@@ -319,42 +327,63 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     return () => { unsubscribe?.() }
   }, [localConversations, reloadList, loadDetail])
 
-  const ensurePersonalRuntimeLoaded = useCallback(async (record: LocalConversationRecord): Promise<RecordPersonalRuntime> => {
+  const ensurePersonalRuntimeLoaded = useCallback(async (record: LocalConversationRecord): Promise<PersonalRuntimeState | null> => {
+    const scopeKey = makePersonalScopeKey(record)
     const existing = personalRuntimesRef.current[record.conversationId]
-    if (existing?.loaded) return existing
-    const res = await persistence.load({
-      kind: "conversation",
-      workspaceId: record.workspaceId,
-      projectId: record.projectId,
-      conversationId: record.conversationId,
+    if (existing?.loaded && existing.loadedScopeKey === scopeKey) return existing
+    const flightKey = `${record.conversationId}:${scopeKey}`
+    const inFlight = personalLoadInFlightRef.current.get(flightKey)
+    if (inFlight) return inFlight
+
+    const promise = (async (): Promise<PersonalRuntimeState | null> => {
+      const res = await persistence.load({
+        kind: "conversation",
+        workspaceId: record.workspaceId,
+        projectId: record.projectId,
+        conversationId: record.conversationId,
+      })
+      if (!mountedRef.current || !res.ok) return null
+      const loaded = restorePersonalFromSaved(
+        res.value.data as ConversationPersonal | null,
+        scopeKey,
+        record.providerId,
+      )
+      const merged = mergeLoadedPersonalRuntime(personalRuntimesRef.current[record.conversationId], loaded)
+      const nextMap = { ...personalRuntimesRef.current, [record.conversationId]: merged.runtime }
+      personalRuntimesRef.current = nextMap
+      setPersonalRuntimes(nextMap)
+      if (merged.needsPersist) {
+        persistence.save(
+          {
+            kind: "conversation",
+            workspaceId: record.workspaceId,
+            projectId: record.projectId,
+            conversationId: record.conversationId,
+          },
+          toPersistablePersonal(merged.runtime, record),
+        )
+      }
+      return merged.runtime
+    })().finally(() => {
+      if (personalLoadInFlightRef.current.get(flightKey) === promise) {
+        personalLoadInFlightRef.current.delete(flightKey)
+      }
     })
-    const loaded = res.ok
-      ? restorePersonalFromSaved(res.value.data as ConversationPersonal | null)
-      : { loaded: true, personal: EMPTY_PERSONAL_STATE, providerId: record.providerId }
-    if (!mountedRef.current) return loaded
-    setPersonalRuntimes(prev => {
-      if (prev[record.conversationId]?.loaded) return prev
-      const next = { ...prev, [record.conversationId]: loaded }
-      personalRuntimesRef.current = next
-      return next
-    })
-    return loaded
+    personalLoadInFlightRef.current.set(flightKey, promise)
+    return promise
   }, [persistence])
 
   const mutatePersonalRuntime = useCallback((
     record: LocalConversationRecord,
-    updater: (prev: RecordPersonalRuntime) => RecordPersonalRuntime,
+    updater: (prev: PersonalRuntimeState) => PersonalRuntimeState,
     persist = true,
   ) => {
-    const prev = personalRuntimesRef.current[record.conversationId] ?? {
-      ...DEFAULT_PERSONAL_RUNTIME,
-      loaded: true,
-    }
+    const prev = personalRuntimesRef.current[record.conversationId] ?? DEFAULT_PERSONAL_RUNTIME
     const next = updater(prev)
     const nextMap = { ...personalRuntimesRef.current, [record.conversationId]: next }
     personalRuntimesRef.current = nextMap
     setPersonalRuntimes(nextMap)
-    if (persist && next.loaded) {
+    if (persist && next.loaded && next.loadedScopeKey === makePersonalScopeKey(record)) {
       persistence.save(
         {
           kind: "conversation",
@@ -369,10 +398,8 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
 
   useEffect(() => {
     if (!selectedConversationId || activeSpace !== "personal") return
-    const rec = recordsRef.current.find(item => item.conversationId === selectedConversationId)
     void loadDetail(selectedConversationId)
-    if (rec) void ensurePersonalRuntimeLoaded(rec)
-  }, [selectedConversationId, activeSpace, loadDetail, ensurePersonalRuntimeLoaded])
+  }, [selectedConversationId, activeSpace, loadDetail])
 
   // 当发布或停止共享弹窗针对任意会话打开时，按需加载其已定稿历史轮次以便摘要/历史范围准确预览。
   const modalConversationId = publishDialogConvId ?? stopSharingDialogConvId
@@ -385,6 +412,10 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     () => (selectedConversationId ? records.find(item => item.conversationId === selectedConversationId) ?? null : null),
     [records, selectedConversationId],
   )
+  useEffect(() => {
+    if (!selectedRecord || activeSpace !== "personal") return
+    void ensurePersonalRuntimeLoaded(selectedRecord)
+  }, [selectedRecord, activeSpace, ensurePersonalRuntimeLoaded])
   const selectedDetailEntry = selectedConversationId ? detailsById[selectedConversationId] : undefined
   const selectedDetail = selectedDetailEntry?.detail
 
@@ -413,7 +444,6 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     if (!rec || source.accountId !== user.id) return
     mutatePersonalRuntime(rec, prev => ({
       ...prev,
-      loaded: true,
       personal: applyConversationPersonalChange(prev.personal, { kind: "clear-draft", expectedRevision: revision }),
     }), true)
   }, [user.id, mutatePersonalRuntime])
@@ -451,7 +481,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const onExecutionProviderChange = useCallback((scope: LocalExecutionScope, providerId: string) => {
     const rec = recordsRef.current.find(item => item.conversationId === scope.conversationId)
     if (!rec) return
-    mutatePersonalRuntime(rec, prev => (prev.providerId === providerId ? prev : { ...prev, loaded: true, providerId }), true)
+    mutatePersonalRuntime(rec, prev => (prev.providerId === providerId ? prev : { ...prev, providerId }), true)
   }, [mutatePersonalRuntime])
 
   const onExecutionTurnUploaded = useCallback((
@@ -466,7 +496,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
         ...(prev.sentImages ?? {}),
         [String(userSequence)]: images,
       })
-      return { ...prev, loaded: true, ...(merged ? { sentImages: merged } : {}) }
+      return { ...prev, ...(merged ? { sentImages: merged } : {}) }
     }, true)
   }, [mutatePersonalRuntime])
 
@@ -604,13 +634,14 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
       }
       const created = res.value
       // 新建会话必须先向 PersonalPersistence 完成首次 load 登记，否则随后的 save 会被静默丢弃。
-      await persistence.load({
+      const loadRes = await persistence.load({
         kind: "conversation",
         workspaceId: created.workspaceId,
         projectId: created.projectId,
         conversationId: created.conversationId,
       }).catch(() => null)
       if (!mountedRef.current) return
+      const createdScopeKey = makePersonalScopeKey(created)
       setRecords(prev => [created, ...prev.filter(item => item.conversationId !== created.conversationId)])
       setDetailsById(prev => ({
         ...prev,
@@ -621,7 +652,8 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
       }))
       const draftRevision = 1
       mutatePersonalRuntime(created, () => ({
-        loaded: true,
+        loaded: Boolean(loadRes?.ok),
+        loadedScopeKey: loadRes?.ok ? createdScopeKey : null,
         providerId: created.providerId,
         personal: {
           ...EMPTY_PERSONAL_STATE,
@@ -716,7 +748,6 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
       if (!picked.length || !mountedRef.current) return
       mutatePersonalRuntime(rec, prev => ({
         ...prev,
-        loaded: true,
         personal: applyConversationPersonalChange(prev.personal, {
           kind: "draft-attachments",
           attachmentIds: mergeAttachmentPaths(prev.personal.draft.attachmentIds, picked),
@@ -730,7 +761,6 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     if (!rec) return
     mutatePersonalRuntime(rec, prev => ({
       ...prev,
-      loaded: true,
       personal: applyConversationPersonalChange(prev.personal, change),
     }), true)
   }, [mutatePersonalRuntime])

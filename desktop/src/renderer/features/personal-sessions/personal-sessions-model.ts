@@ -6,11 +6,17 @@
  * 【协作边界】仅依赖 `../../../shared/` 与 `../../../ui/` 纯类型及 `@workbench/collaboration-client/types`。
  */
 import type { ProjectSummary } from "@workbench/collaboration-client/types"
-import type {
-  LocalConversationRecord,
-  LocalConversationTurn,
+import {
+  MAX_DRAFT_ANNOTATIONS,
+  MAX_DRAFT_IMAGES,
+  type LocalConversationRecord,
+  type LocalConversationTurn,
+  type PersonalDraftImage,
 } from "../../../shared/index.js"
-import type { ConversationTimelineEntry } from "../../../ui/index.js"
+import type {
+  ConversationPersonalState,
+  ConversationTimelineEntry,
+} from "../../../ui/index.js"
 import type { ProjectConversationSummary } from "../session/contracts.js"
 import { directoryBasename } from "../session/session-model.js"
 
@@ -269,4 +275,128 @@ export function buildDefaultPublishBrief(
   const ans = latestCompleted.reply.replace(/\s+/g, " ").trim().slice(0, 120)
   if (!req && !ans) return (record.title || "个人会话").slice(0, 240)
   return `诉求：${req}\n结果：${ans}`.slice(0, 240)
+}
+
+/** 个人会话内存态：记录是否已完成该归属范围下的首轮磁盘加载，防止挂载期滚动事件覆盖已落盘草稿。 */
+export interface PersonalRuntimeState {
+  readonly loaded: boolean
+  readonly loadedScopeKey: string | null
+  readonly personal: ConversationPersonalState
+  readonly providerId: string | null
+  readonly sentImages?: Readonly<Record<string, readonly PersonalDraftImage[]>>
+}
+
+/** 计算个人持久化密钥对应的团队/项目归属键，用于识别发布或停止共享后的范围切换。 */
+export function makePersonalScopeKey(
+  record: Pick<LocalConversationRecord, "workspaceId" | "projectId">,
+): string {
+  return JSON.stringify([record.workspaceId, record.projectId])
+}
+
+function dedupeById<T extends { readonly id: string }>(
+  base: readonly T[],
+  extra: readonly T[],
+  limit: number,
+): readonly T[] {
+  const merged: T[] = []
+  const seen = new Set<string>()
+  for (const item of [...base, ...extra]) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    merged.push(item)
+    if (merged.length >= limit) break
+  }
+  return merged
+}
+
+function dedupeStrings(base: readonly string[], extra: readonly string[]): readonly string[] {
+  const merged: string[] = []
+  const seen = new Set<string>()
+  for (const item of [...base, ...extra]) {
+    if (seen.has(item)) continue
+    seen.add(item)
+    merged.push(item)
+  }
+  return merged
+}
+
+/**
+ * 合并异步加载回来的磁盘个人状态与加载前可能已发生的内存交互：
+ * - 若挂载期间仅发生滚动等只读位置变化（`draft.revision === 0`），完全采用磁盘草稿与阅读状态；
+ * - 若加载尚未完成前用户已提前编辑草稿，则将磁盘摘录/图片与预加载修改合并并标记需重新落盘。
+ */
+export function mergeLoadedPersonalRuntime(
+  current: PersonalRuntimeState | undefined,
+  loaded: PersonalRuntimeState,
+): { readonly runtime: PersonalRuntimeState; readonly needsPersist: boolean } {
+  if (current?.loaded && current.loadedScopeKey === loaded.loadedScopeKey) {
+    return { runtime: current, needsPersist: false }
+  }
+  if (!current) {
+    return { runtime: loaded, needsPersist: false }
+  }
+  if (current.loaded) {
+    if (current.personal.draft.revision > loaded.personal.draft.revision) {
+      return {
+        runtime: { ...current, loadedScopeKey: loaded.loadedScopeKey },
+        needsPersist: true,
+      }
+    }
+    return { runtime: loaded, needsPersist: false }
+  }
+
+  let needsPersist = false
+  let personal = loaded.personal
+  if (current.personal.draft.revision > 0) {
+    const loadedDraft = loaded.personal.draft
+    const currentDraft = current.personal.draft
+    const useCurrentText = currentDraft.text.length > 0
+    personal = {
+      ...loaded.personal,
+      draft: {
+        ...loadedDraft,
+        text: useCurrentText ? currentDraft.text : loadedDraft.text,
+        selectionStart: useCurrentText ? currentDraft.selectionStart : loadedDraft.selectionStart,
+        selectionEnd: useCurrentText ? currentDraft.selectionEnd : loadedDraft.selectionEnd,
+        revision: Math.max(loadedDraft.revision, currentDraft.revision) + 1,
+        referenceIds: dedupeStrings(loadedDraft.referenceIds, currentDraft.referenceIds),
+        attachmentIds: dedupeStrings(loadedDraft.attachmentIds, currentDraft.attachmentIds),
+        annotations: dedupeById(
+          loadedDraft.annotations ?? [],
+          currentDraft.annotations ?? [],
+          MAX_DRAFT_ANNOTATIONS,
+        ),
+        images: dedupeById(
+          loadedDraft.images ?? [],
+          currentDraft.images ?? [],
+          MAX_DRAFT_IMAGES,
+        ),
+      },
+    }
+    needsPersist = true
+  }
+
+  const providerId = current.providerId ?? loaded.providerId
+  if (current.providerId && current.providerId !== loaded.providerId) {
+    needsPersist = true
+  }
+
+  const hasCurrentSentImages = Boolean(current.sentImages && Object.keys(current.sentImages).length > 0)
+  const sentImages = hasCurrentSentImages
+    ? { ...(loaded.sentImages ?? {}), ...current.sentImages }
+    : loaded.sentImages
+  if (hasCurrentSentImages) {
+    needsPersist = true
+  }
+
+  return {
+    runtime: {
+      loaded: true,
+      loadedScopeKey: loaded.loadedScopeKey,
+      personal,
+      providerId,
+      ...(sentImages ? { sentImages } : {}),
+    },
+    needsPersist,
+  }
 }

@@ -13,9 +13,13 @@ import {
   inspectPublishHistory,
   localRecordToConversationSummary,
   localTurnsToTimelineEntries,
+  makePersonalScopeKey,
+  mergeLoadedPersonalRuntime,
   partitionPersonalRecords,
   resolvePublishTargets,
+  type PersonalRuntimeState,
 } from "../src/renderer/features/personal-sessions/personal-sessions-model.ts"
+import { EMPTY_PERSONAL_STATE, applyConversationPersonalChange } from "../src/renderer/features/session/session-model.ts"
 
 const makeRecord = (overrides: Partial<LocalConversationRecord> = {}): LocalConversationRecord => ({
   conversationId: "conv-1",
@@ -151,4 +155,149 @@ test("localTurnsToTimelineEntries 与 localRecordToConversationSummary 正确投
 
   const brief = buildDefaultPublishBrief(makeRecord({ title: "重构" }), [makeTurn({ userText: "怎么拆？", reply: "按域拆。" })])
   assert.match(brief, /按域拆/)
+})
+
+test("mergeLoadedPersonalRuntime 在挂载期仅收到滚动事件时完整恢复磁盘草稿摘录、批注与图片", () => {
+  const scopeKey = makePersonalScopeKey({ workspaceId: null, projectId: null })
+  const scrolledBeforeLoad: PersonalRuntimeState = {
+    loaded: false,
+    loadedScopeKey: null,
+    providerId: null,
+    personal: applyConversationPersonalChange(EMPTY_PERSONAL_STATE, {
+      kind: "scroll",
+      value: { anchorEntryId: null, offsetPx: 0, following: true, seenContentRevision: 0 },
+    }),
+  }
+  const diskLoaded: PersonalRuntimeState = {
+    loaded: true,
+    loadedScopeKey: scopeKey,
+    providerId: "custom",
+    personal: {
+      ...EMPTY_PERSONAL_STATE,
+      scroll: { anchorEntryId: "local-turn:t1:user", offsetPx: 20, following: false, seenContentRevision: 4 },
+      draft: {
+        text: "请看这个片段",
+        selectionStart: 6,
+        selectionEnd: 6,
+        revision: 6,
+        referenceIds: [],
+        attachmentIds: [],
+        annotations: [{
+          id: "ann-1",
+          selectedText: "export function submitOrderDraft()",
+          comment: "请重点看这里的幂等校验",
+          sourceLabel: "src/service.ts:L10-L13",
+        }],
+        images: [{
+          id: "pending-c606aafa-47a8-40c2-a404-ab5bf5df0262",
+          name: "sample-ui-bug.png",
+          mimeType: "image/png",
+          sizeBytes: 5884,
+          width: 800,
+          height: 450,
+        }],
+      },
+    },
+  }
+
+  const merged = mergeLoadedPersonalRuntime(scrolledBeforeLoad, diskLoaded)
+  assert.equal(merged.needsPersist, false)
+  assert.equal(merged.runtime.loaded, true)
+  assert.equal(merged.runtime.loadedScopeKey, scopeKey)
+  assert.equal(merged.runtime.providerId, "custom")
+  assert.equal(merged.runtime.personal.scroll.anchorEntryId, "local-turn:t1:user")
+  assert.equal(merged.runtime.personal.draft.text, "请看这个片段")
+  assert.equal(merged.runtime.personal.draft.annotations?.length, 1)
+  assert.equal(merged.runtime.personal.draft.annotations?.[0]?.comment, "请重点看这里的幂等校验")
+  assert.equal(merged.runtime.personal.draft.annotations?.[0]?.sourceLabel, "src/service.ts:L10-L13")
+  assert.equal(merged.runtime.personal.draft.images?.length, 1)
+  assert.equal(merged.runtime.personal.draft.images?.[0]?.id, "pending-c606aafa-47a8-40c2-a404-ab5bf5df0262")
+})
+
+test("mergeLoadedPersonalRuntime 在加载完成前已有新编辑时保留并合并双方草稿且触发落盘", () => {
+  const scopeKey = makePersonalScopeKey({ workspaceId: "ws-1", projectId: null })
+  const editedBeforeLoad: PersonalRuntimeState = {
+    loaded: false,
+    loadedScopeKey: null,
+    providerId: null,
+    personal: applyConversationPersonalChange(
+      applyConversationPersonalChange(EMPTY_PERSONAL_STATE, {
+        kind: "draft-text",
+        text: "新补充的提问",
+        selectionStart: 6,
+        selectionEnd: 6,
+      }),
+      {
+        kind: "draft-annotations",
+        annotations: [{ id: "ann-new", selectedText: "new snippet", sourceLabel: "src/a.ts:L1" }],
+      },
+    ),
+  }
+  const diskLoaded: PersonalRuntimeState = {
+    loaded: true,
+    loadedScopeKey: scopeKey,
+    providerId: "harness",
+    personal: {
+      ...EMPTY_PERSONAL_STATE,
+      draft: {
+        text: "旧草稿文字",
+        selectionStart: 0,
+        selectionEnd: 0,
+        revision: 4,
+        referenceIds: [],
+        attachmentIds: [],
+        annotations: [{ id: "ann-disk", selectedText: "disk snippet", comment: "旧批注", sourceLabel: "src/b.ts:L2" }],
+        images: [{
+          id: "pending-11111111-1111-4111-8111-111111111111",
+          name: "old.png",
+          mimeType: "image/png",
+          sizeBytes: 1024,
+        }],
+      },
+    },
+  }
+
+  const merged = mergeLoadedPersonalRuntime(editedBeforeLoad, diskLoaded)
+  assert.equal(merged.needsPersist, true)
+  assert.equal(merged.runtime.personal.draft.text, "新补充的提问")
+  assert.deepEqual(merged.runtime.personal.draft.annotations?.map(a => a.id), ["ann-disk", "ann-new"])
+  assert.equal(merged.runtime.personal.draft.images?.length, 1)
+  assert.ok(merged.runtime.personal.draft.revision > 4)
+})
+
+test("mergeLoadedPersonalRuntime 对同作用域已加载记录保持幂等并在归属作用域变化时更新作用域键", () => {
+  const scopeA = makePersonalScopeKey({ workspaceId: "ws-1", projectId: "proj-1" })
+  const scopeB = makePersonalScopeKey({ workspaceId: "ws-1", projectId: null })
+  const alreadyLoaded: PersonalRuntimeState = {
+    loaded: true,
+    loadedScopeKey: scopeA,
+    providerId: "harness",
+    personal: {
+      ...EMPTY_PERSONAL_STATE,
+      draft: { ...EMPTY_PERSONAL_STATE.draft, text: "内存中最新草稿", revision: 9 },
+    },
+  }
+  const staleDiskForSameScope: PersonalRuntimeState = {
+    loaded: true,
+    loadedScopeKey: scopeA,
+    providerId: "harness",
+    personal: EMPTY_PERSONAL_STATE,
+  }
+  const sameScopeMerged = mergeLoadedPersonalRuntime(alreadyLoaded, staleDiskForSameScope)
+  assert.equal(sameScopeMerged.needsPersist, false)
+  assert.equal(sameScopeMerged.runtime, alreadyLoaded)
+
+  const shiftedScopeLoaded: PersonalRuntimeState = {
+    loaded: true,
+    loadedScopeKey: scopeB,
+    providerId: "harness",
+    personal: {
+      ...EMPTY_PERSONAL_STATE,
+      draft: { ...EMPTY_PERSONAL_STATE.draft, revision: 5 },
+    },
+  }
+  const shiftedMerged = mergeLoadedPersonalRuntime(alreadyLoaded, shiftedScopeLoaded)
+  assert.equal(shiftedMerged.needsPersist, true)
+  assert.equal(shiftedMerged.runtime.loadedScopeKey, scopeB)
+  assert.equal(shiftedMerged.runtime.personal.draft.text, "内存中最新草稿")
 })
