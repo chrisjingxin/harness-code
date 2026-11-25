@@ -19,6 +19,9 @@ import {
   type ConversationPersonal,
   type DesktopHost,
   type DesktopLocalExecutionHost,
+  type LocalConversationDetail,
+  type LocalConversationTurn,
+  type LocalConversationsHost,
   type LocalDirectoryHost,
   type LocalExecutionScope,
   type PersonalDraftImage,
@@ -205,6 +208,7 @@ function deriveSessionTitle(text: string): string {
 export type UseProjectSessionsOptions = {
   readonly host: DesktopHost
   readonly projectConversations: ProjectConversationHost
+  readonly localConversations?: LocalConversationsHost
   readonly localDirectory?: LocalDirectoryHost
   readonly localExecution?: DesktopLocalExecutionHost
   readonly persistence: PersonalPersistence
@@ -224,6 +228,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const {
     host,
     projectConversations,
+    localConversations,
     localDirectory,
     localExecution,
     persistence,
@@ -265,6 +270,9 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const [recordsByKey, setRecordsByKey] = useState<Readonly<Record<string, ConversationRecordState>>>({})
   const recordsRef = useRef(recordsByKey)
   recordsRef.current = recordsByKey
+  const [localDetailsById, setLocalDetailsById] = useState<Readonly<Record<string, LocalConversationDetail>>>({})
+  const localDetailsRef = useRef(localDetailsById)
+  localDetailsRef.current = localDetailsById
 
   const listGenRef = useRef(0)
   const loadInFlightRef = useRef(new Map<string, Promise<ConversationRecordState | null>>())
@@ -370,6 +378,34 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     })
   }, [currentScopeKey, persistence, refreshMetadata])
 
+  const loadLocalDetail = useCallback(async (conversationId: string): Promise<LocalConversationDetail | null> => {
+    if (!localConversations) return null
+    const res = await localConversations.get(conversationId).catch(() => null)
+    if (!mountedRef.current || !res?.ok) return null
+    const detail = res.value
+    setLocalDetailsById(prev => {
+      const next = { ...prev, [conversationId]: detail }
+      localDetailsRef.current = next
+      return next
+    })
+    const activeScope = scope
+    const activeKey = activeScopeKeyRef.current
+    if (activeScope && activeKey) {
+      const recKey = makeRecordKey(activeKey, conversationId)
+      const currentRec = recordsRef.current[recKey]
+      if (currentRec?.loaded && ((!currentRec.directoryPath && detail.record.directoryPath) || (!currentRec.providerId && detail.record.providerId))) {
+        const nextRec: ConversationRecordState = {
+          ...currentRec,
+          directoryPath: currentRec.directoryPath ?? detail.record.directoryPath ?? null,
+          providerId: currentRec.providerId ?? detail.record.providerId ?? null,
+        }
+        recordsRef.current = { ...recordsRef.current, [recKey]: nextRec }
+        setRecordsByKey(prev => ({ ...prev, [recKey]: nextRec }))
+      }
+    }
+    return detail
+  }, [localConversations, scope])
+
   const ensureRecordLoaded = useCallback(async (
     targetScope: ProjectNavigationScope,
     targetKey: string,
@@ -382,13 +418,26 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     if (existingPromise) return existingPromise
 
     const promise = (async (): Promise<ConversationRecordState | null> => {
-      const result = await persistence.load({
-        kind: "conversation",
-        workspaceId: targetScope.workspaceId,
-        projectId: targetScope.projectId,
-        conversationId,
-      })
+      const [result, localRes] = await Promise.all([
+        persistence.load({
+          kind: "conversation",
+          workspaceId: targetScope.workspaceId,
+          projectId: targetScope.projectId,
+          conversationId,
+        }),
+        localConversations
+          ? localConversations.get(conversationId).catch(() => null)
+          : Promise.resolve(null),
+      ])
       if (!stillActive(targetKey)) return null
+      const localDetail = localRes?.ok ? localRes.value : null
+      if (localDetail) {
+        setLocalDetailsById(prev => {
+          const next = { ...prev, [conversationId]: localDetail }
+          localDetailsRef.current = next
+          return next
+        })
+      }
       if (!result.ok) {
         const failedRecord: ConversationRecordState = {
           ...(recordsRef.current[recKey] ?? DEFAULT_RECORD),
@@ -404,8 +453,8 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
         loaded: true,
         loadError: null,
         personal: personalFromSaved(saved),
-        directoryPath: saved?.localDirectoryPath ?? null,
-        providerId: saved?.providerId ?? null,
+        directoryPath: saved?.localDirectoryPath ?? localDetail?.record.directoryPath ?? null,
+        providerId: saved?.providerId ?? localDetail?.record.providerId ?? null,
         customTitle: saved?.customTitle,
         ...(saved?.sentImages ? { sentImages: saved.sentImages } : {}),
         syncState: syncStateFromPersonal(saved),
@@ -421,7 +470,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     })
     loadInFlightRef.current.set(recKey, promise)
     return promise
-  }, [persistence])
+  }, [persistence, localConversations])
 
   const activeList = currentScopeKey ? listsByScope[currentScopeKey] : undefined
   const activeConversations = activeList?.conversations ?? EMPTY_CONVERSATIONS
@@ -902,6 +951,15 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     return map
   }, [currentScopeKey, activeConversations, recordsByKey])
 
+  const localTurnsByConversation = useMemo(() => {
+    const map: Record<string, readonly LocalConversationTurn[]> = {}
+    for (const conv of activeConversations) {
+      const detail = localDetailsById[conv.conversationId]
+      if (detail?.turns.length) map[conv.conversationId] = detail.turns
+    }
+    return map
+  }, [activeConversations, localDetailsById])
+
   const currentPersonalStates = useMemo(() => {
     const map: Record<string, ConversationPersonalState> = {}
     if (!currentScopeKey) return map
@@ -1082,6 +1140,20 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
   const selectedRecKey = currentScopeKey && selectedConversationId ? makeRecordKey(currentScopeKey, selectedConversationId) : ""
   const selectedRecord = selectedRecKey ? recordsByKey[selectedRecKey] : undefined
   useEffect(() => {
+    if (!selectedConversationId || !selectedIsLocal) return
+    void loadLocalDetail(selectedConversationId)
+  }, [selectedConversationId, selectedIsLocal, loadLocalDetail])
+
+  useEffect(() => {
+    if (!localConversations?.onChanged) return
+    return localConversations.onChanged(event => {
+      const inList = activeConversations.some(item => item.conversationId === event.conversationId)
+      if (!inList && !localDetailsRef.current[event.conversationId]) return
+      void loadLocalDetail(event.conversationId)
+    })
+  }, [localConversations, activeConversations, loadLocalDetail])
+
+  useEffect(() => {
     if (!selectedConv || !selectedIsLocal || !selectedRecord?.loaded) return
     if (selectedConv.syncedSequence <= selectedRecord.syncState.localSyncedSequence) return
     if (selectedRecord.syncState.syncing || selectedRecord.syncState.syncError) return
@@ -1157,6 +1229,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     currentUserId: userId,
     conversations: effectiveConversations,
     syncStates: currentSyncStates,
+    localTurnsByConversation,
     personalStates: currentPersonalStates,
     sentImagesByConversation: currentSentImages,
     directories: currentDirectories,
@@ -1273,6 +1346,7 @@ export function useProjectSessions(options: UseProjectSessionsOptions) {
     userId,
     effectiveConversations,
     currentSyncStates,
+    localTurnsByConversation,
     currentPersonalStates,
     currentDirectories,
     currentDraft,

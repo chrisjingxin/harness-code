@@ -9,9 +9,17 @@
 import { randomUUID } from "node:crypto"
 import type {
   CollaborationError, CollaborationResult, ConversationDetailResponse, CurrentUserResponse,
-  DemoUsersResponse, IdentityState, MembersResponse, WorkspaceSummary,
+  DemoUsersResponse, IdentityState, MembersResponse, UserSummary, WorkspaceSummary,
 } from "./types/index.js"
 import { CollaborationClient } from "./collaboration-client.js"
+
+export type CollaborationStateOptions = {
+  /** 可选：启动时恢复上次已知账号（进入待向服务端复核的离线只读态，不视为已在线登录）。 */
+  readonly initialIdentity?: {
+    readonly user: UserSummary
+    readonly workspaces?: readonly WorkspaceSummary[]
+  }
+}
 
 /** 边界统一生成可序列化业务错误，不向外泄露原生异常对象。 */
 export function identityError(code: CollaborationError["code"], message: string): { ok: false; error: CollaborationError } {
@@ -30,10 +38,18 @@ export class CollaborationState {
   #listeners = new Set<(state: IdentityState) => void>()
 
   /** origin 只来自宿主启动配置；缺失或无效时保持脱机安全态，基础壳层仍可使用。 */
-  constructor(origin?: string, transport?: typeof fetch) {
+  constructor(origin?: string, transport?: typeof fetch, options?: CollaborationStateOptions) {
     try {
       if (!origin) throw new Error("未配置")
       this.#client = new CollaborationClient(origin, transport)
+      if (options?.initialIdentity?.user) {
+        this.#lastKnownWorkspaces = structuredClone([...(options.initialIdentity.workspaces ?? [])])
+        this.#state = {
+          status: "connectionError",
+          lastKnownUser: structuredClone(options.initialIdentity.user),
+          error: identityError("NETWORK_UNAVAILABLE", "无法确认服务连接，请重试读取").error,
+        }
+      }
     } catch {
       this.#state = { status: "connectionError", lastKnownUser: null, error: identityError("NETWORK_UNAVAILABLE", "协作服务地址未配置或无效，请配置后重启。").error }
     }

@@ -482,7 +482,10 @@ function SessionRow({ entry, active, landing, showMeTag, localDeviceName, select
   const rowRef = useRef<HTMLButtonElement>(null);
   useScrollIntoViewOnLanding(rowRef, landing);
   const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
-  const hasUnread = entry.badge?.tone === "accent" || entry.badge?.tone === "warning";
+  const isStopped = entry.badge?.text === "已停止同步";
+  const hasUnread = !isStopped && Boolean(
+    entry.badge?.text.includes("有更新") || entry.badge?.text.includes("未同步"),
+  );
   const deviceLabel = isOtherDevice ? "其他设备 · 只读" : localDeviceName ? `本机 · ${localDeviceName}` : "本机";
 
   return (
@@ -1149,10 +1152,10 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                     {group.sessions.map((entry) => {
                                       const active = effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId;
                                       const landing = view.landingConversationId === entry.conversationId;
-                                      const hasPeerUpdate = entry.badge?.tone === "warning"
-                                        || entry.badge?.tone === "accent"
-                                        || entry.badge?.text.includes("有更新")
-                                        || entry.badge?.text.includes("未同步");
+                                      const isStopped = entry.badge?.text === "已停止同步";
+                                      const hasPeerUpdate = !isStopped && Boolean(
+                                        entry.badge?.text.includes("有更新") || entry.badge?.text.includes("未同步"),
+                                      );
                                       return (
                                         <button
                                           key={`${project.projectId}:${entry.conversationId}`}

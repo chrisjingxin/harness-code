@@ -603,6 +603,14 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
         return
       }
       const created = res.value
+      // 新建会话必须先向 PersonalPersistence 完成首次 load 登记，否则随后的 save 会被静默丢弃。
+      await persistence.load({
+        kind: "conversation",
+        workspaceId: created.workspaceId,
+        projectId: created.projectId,
+        conversationId: created.conversationId,
+      }).catch(() => null)
+      if (!mountedRef.current) return
       setRecords(prev => [created, ...prev.filter(item => item.conversationId !== created.conversationId)])
       setDetailsById(prev => ({
         ...prev,
@@ -770,6 +778,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     if (!markRes || !markRes.ok) {
       return markRes ? markRes.error.message : "本地发布状态更新失败，请重试。"
     }
+    await persistence.flush().catch(() => false)
     await reloadList()
     await loadDetail(conversationId)
     onNotify?.(`已发布到「${input.projectName}」· 已切换至团队空间`)
@@ -789,6 +798,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     loadDetail,
     onNotify,
     onPublished,
+    persistence,
   ])
 
   const stopConversationSharing = useCallback(async (conversationId: string): Promise<string | null> => {

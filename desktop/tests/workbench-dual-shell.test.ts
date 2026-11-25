@@ -24,6 +24,8 @@ import {
 } from "../src/renderer/features/board/board-model.ts"
 import { buildCommandPaletteGroups } from "../src/renderer/features/collaboration-views/command-palette-model.ts"
 import { resolveDeepLinkNavigation } from "../src/renderer/features/inbox/inbox-model.ts"
+import { ProjectNavigation } from "../src/ui/navigation/index.tsx"
+import { buildSessionBadge } from "../src/renderer/features/session/session-model.ts"
 
 const ACCOUNT_SELF = "user-self"
 const ACCOUNT_PEER = "user-peer"
@@ -319,4 +321,78 @@ test("看板抽屉与 DeepLink 路由映射收敛至 board/.t-drawer，管理台
   }))
   assert.match(adminPanel, /Harness Code/)
   assert.match(adminPanel, /重新检测/)
+})
+
+test("队友已停止同步会话（含 summary_only）不再显示有未同步更新红点", () => {
+  const stoppedBadge = buildSessionBadge({
+    kind: "remote_other",
+    syncStatus: "unsynced",
+    remoteSyncedSequence: 0,
+    shareMode: "summary_only",
+    shareStatus: "stopped",
+  })
+  assert.deepEqual(stoppedBadge, { text: "已停止同步", tone: "warning" })
+
+  const activeUpdateBadge = buildSessionBadge({
+    kind: "remote_other",
+    syncStatus: "has_update",
+    remoteSyncedSequence: 4,
+    shareMode: "full",
+    shareStatus: "active",
+  })
+  assert.deepEqual(activeUpdateBadge, { text: "有更新", tone: "warning" })
+
+  const renderPeer = (badge: NavigationSessionEntry["badge"]) =>
+    renderToStaticMarkup(createElement(ProjectNavigation, {
+      view: {
+        accountName: "张景新",
+        workspaceName: "平台架构二组协作区",
+        currentWorkspaceId: "ws-1",
+        projects: [{ projectId: "proj-1", name: "零售核心架构演进", archived: false }],
+        projectsAvailability: { state: "ready" },
+        currentProjectId: "proj-1",
+        groups: [
+          {
+            userId: ACCOUNT_PEER,
+            label: "沈北辰",
+            initial: "沈",
+            self: false,
+            collapsed: false,
+            sessions: [{
+              conversationId: "conv-peer",
+              ownerUserId: ACCOUNT_PEER,
+              title: "摘要会话",
+              timeLabel: "10:00",
+              badge,
+            }],
+          },
+        ],
+        membersAvailability: { state: "ready" },
+        sessionsAvailability: { state: "ready" },
+        search: "",
+        activePage: "conversation",
+        selectedConversationId: null,
+        taskCount: 0,
+        activeSpace: "team",
+      },
+      actions: {
+        selectProject: () => {},
+        createProject: () => {},
+        openProjectSettings: () => {},
+        openPage: () => {},
+        selectConversation: () => {},
+        toggleMember: () => {},
+        setSearch: () => {},
+        retry: () => {},
+        openSettings: () => {},
+      },
+    }))
+
+  const stoppedHtml = renderPeer(stoppedBadge)
+  assert.match(stoppedHtml, /已停止同步/)
+  assert.doesNotMatch(stoppedHtml, /aria-label="有未同步更新"/)
+
+  const updateHtml = renderPeer(activeUpdateBadge)
+  assert.match(updateHtml, /有更新/)
+  assert.match(updateHtml, /aria-label="有未同步更新"/)
 })

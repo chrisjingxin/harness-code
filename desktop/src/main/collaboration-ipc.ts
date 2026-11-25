@@ -11,7 +11,8 @@ import { bindWorkspaceIpc } from "./workspace-ipc.js"
  */
 import { app, dialog } from "electron"
 import type { BrowserWindow } from "electron"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type {
   CollaborationAppsHost,
@@ -29,6 +30,8 @@ import type {
   TaskPatchRequest,
   TaskStatus,
   TaskTransitionRequest,
+  UserSummary,
+  WorkspaceSummary,
 } from "@workbench/collaboration-client/types"
 import { CollaborationState, ConversationUploads, type CollaborationClient } from "@workbench/collaboration-client"
 import {
@@ -58,6 +61,69 @@ import type { DeepLinkBroker } from "./deep-link.js"
 
 const CONVERSATION_STATUSES = new Set(["idle", "running", "waiting_approval", "error"])
 const TASK_STATUSES = new Set(["todo", "doing", "review", "done", "cancelled"])
+const LAST_KNOWN_IDENTITY_FILE = "last-known-identity.json"
+
+type PersistedIdentity = {
+  readonly version: 1
+  readonly originHash: string
+  readonly user: UserSummary
+  readonly workspaces: readonly WorkspaceSummary[]
+}
+
+function originDigest(origin: string): string {
+  return createHash("sha256").update(origin).digest("hex")
+}
+
+function readPersistedIdentity(userData: string, origin: string): { user: UserSummary; workspaces: WorkspaceSummary[] } | undefined {
+  if (!origin) return undefined
+  const file = join(userData, LAST_KNOWN_IDENTITY_FILE)
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<PersistedIdentity>
+    if (
+      !parsed
+      || parsed.version !== 1
+      || parsed.originHash !== originDigest(origin)
+      || !isPlainObject(parsed.user)
+      || !isUserId(parsed.user.id)
+      || typeof parsed.user.userNo !== "string"
+      || typeof parsed.user.userName !== "string"
+      || !Array.isArray(parsed.workspaces)
+    ) {
+      return undefined
+    }
+    return {
+      user: parsed.user as unknown as UserSummary,
+      workspaces: parsed.workspaces as WorkspaceSummary[],
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function writePersistedIdentity(userData: string, origin: string, user: UserSummary, workspaces: readonly WorkspaceSummary[]): void {
+  if (!origin) return
+  const target = join(userData, LAST_KNOWN_IDENTITY_FILE)
+  const temp = `${target}.${randomUUID()}.tmp`
+  try {
+    mkdirSync(userData, { recursive: true, mode: 0o700 })
+    const payload: PersistedIdentity = {
+      version: 1,
+      originHash: originDigest(origin),
+      user,
+      workspaces,
+    }
+    writeFileSync(temp, JSON.stringify(payload), { encoding: "utf8", mode: 0o600 })
+    renameSync(temp, target)
+  } catch {
+    try { rmSync(temp, { force: true }) } catch { /* ignore */ }
+  }
+}
+
+function clearPersistedIdentity(userData: string): void {
+  try {
+    rmSync(join(userData, LAST_KNOWN_IDENTITY_FILE), { force: true })
+  } catch { /* ignore */ }
+}
 
 const invalidAppRequest = () => Promise.resolve(formatIpcError("INVALID_REQUEST", "请求参数无效。"))
 
@@ -194,7 +260,17 @@ export function bindCollaborationIpc(
   deepLinkBroker?: DeepLinkBroker,
 ) {
   const origin = process.env.WORKBENCH_SERVICE_ORIGIN
-  const identity = new CollaborationState(origin)
+  const userData = app.getPath("userData")
+  const initialIdentity = origin ? readPersistedIdentity(userData, origin) : undefined
+  // 支持离线走查环境变量：保持相同服务 origin 以便命中本地会话存储，同时将所有网络请求拦截为断网故障。
+  const offlineTransport: typeof fetch | undefined = process.env.WORKBENCH_SIMULATE_OFFLINE === "1"
+    ? async () => { throw new TypeError("Simulated offline transport") }
+    : undefined
+  const identity = new CollaborationState(
+    origin,
+    offlineTransport,
+    initialIdentity ? { initialIdentity } : undefined,
+  )
   const client = identity.network()
   const localConversations = new LocalConversationStore(app.getPath("userData"), origin ?? "")
   const personal = new PersonalStore(identity, client ? origin! : "", app.getPath("userData"), localConversations)
@@ -311,6 +387,9 @@ export function bindCollaborationIpc(
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "", workspaceId => context.knowledge.invalidate(workspaceId))
   const unbindInbox = bindInboxIpc(window, trustedUrl, identity, origin ?? "")
   const unsubscribe = identity.onStateChanged(state => {
+    if (state.status === "signedIn" && origin) {
+      writePersistedIdentity(userData, origin, state.user, state.workspaces)
+    }
     uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
     deepLinkBroker?.setSignedIn(state.status === "signedIn")
     if (!window.isDestroyed()) window.webContents.send("collaboration:state", state)
@@ -330,7 +409,10 @@ export function bindCollaborationIpc(
   ipc.handle("collaboration:demo-users", 0, () => identity.listDemoUsers())
   ipc.handle("collaboration:sign-in", 1, userNo => typeof userNo === "string" && /^[0-9a-z][0-9a-z_-]{0,31}$/.test(userNo)
     ? identity.signIn(userNo) : formatIpcError("INVALID_REQUEST", "员工工号无效。"))
-  ipc.handle("collaboration:sign-out", 0, () => identity.signOut())
+  ipc.handle("collaboration:sign-out", 0, () => {
+    clearPersistedIdentity(userData)
+    return identity.signOut()
+  })
   ipc.handle("collaboration:members", 1, id => isUuid(id) ? identity.listMembers(id) : formatIpcError("INVALID_REQUEST", "工作区标识无效。"))
 
   // 显式按 CollaborationAppsHost 逐一注册编译期受检处理器，保证方法名、参数个数与返回契约一致。

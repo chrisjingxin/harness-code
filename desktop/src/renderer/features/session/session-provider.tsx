@@ -9,7 +9,8 @@
  */
 import type { ReactElement, ReactNode } from "react"
 import type { UserSummary } from "@workbench/collaboration-client/types"
-import type { PersonalDraftImage } from "../../../shared/index.js"
+import type { LocalConversationTurn, PersonalDraftImage } from "../../../shared/index.js"
+import { localTurnsToTimelineEntries } from "../personal-sessions/personal-sessions-model.js"
 import type {
   CollaborationContextView,
   ConversationActions,
@@ -44,6 +45,7 @@ export type SessionPageController = {
   readonly currentUserId: string
   readonly conversations: readonly ProjectConversationSummary[]
   readonly syncStates: Readonly<Record<string, SessionSyncState>>
+  readonly localTurnsByConversation?: Readonly<Record<string, readonly LocalConversationTurn[]>>
   readonly personalStates: Readonly<Record<string, ConversationPersonalState>>
   readonly sentImagesByConversation?: Readonly<Record<string, Readonly<Record<string, readonly PersonalDraftImage[]>>>>
   readonly directories: Readonly<Record<string, string | null>>
@@ -166,14 +168,32 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
         syncing: syncState.syncing,
         syncError: syncState.syncError,
       })
-      const entries = decodeHistoryToTimelineEntries(
-        syncState.messages,
-        {
-          userId: conversation.ownerUserId,
-          displayName: ownerName,
-        },
-        controller.sentImagesByConversation?.[conversation.conversationId],
-      )
+      const localTurns = isLocal ? controller.localTurnsByConversation?.[conversation.conversationId] : undefined
+      const entries = localTurns && localTurns.length > 0
+        ? (() => {
+            const activeEntries = controller.execution.getView?.(conversation.conversationId)?.entries
+            const liveTurnIds = new Set<string>()
+            for (const entry of activeEntries ?? []) {
+              const match = /^local-execution:([^:]+):/.exec(entry.id)
+              if (match?.[1]) liveTurnIds.add(match[1])
+            }
+            let cutoff = localTurns.length
+            while (cutoff > 0 && liveTurnIds.has(localTurns[cutoff - 1]!.turnId)) {
+              cutoff -= 1
+            }
+            return localTurnsToTimelineEntries(
+              localTurns.slice(0, cutoff),
+              { userId: conversation.ownerUserId, displayName: ownerName },
+            )
+          })()
+        : decodeHistoryToTimelineEntries(
+            syncState.messages,
+            {
+              userId: conversation.ownerUserId,
+              displayName: ownerName,
+            },
+            controller.sentImagesByConversation?.[conversation.conversationId],
+          )
       const convScope: ConversationScope = {
         namespace: scope.namespace,
         accountId: scope.accountId,
@@ -193,7 +213,7 @@ export function createSessionPageProvider(controller: SessionPageController): Pr
             recentDirectories={controller.recentDirectories}
             gitSummary={controller.getGitSummary?.(conversation.conversationId) ?? null}
             entries={entries}
-            contentRevision={syncState.localSyncedSequence}
+            contentRevision={Math.max(syncState.localSyncedSequence, localTurns?.length ?? 0)}
             personal={personal}
             execution={controller.execution}
             rendering={controller.rendering}

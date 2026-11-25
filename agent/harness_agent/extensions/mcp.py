@@ -650,6 +650,51 @@ class McpConnectionManager:
                 continue
         raise RuntimeError("MCP_RESOURCE_SNAPSHOT_UNAVAILABLE")
 
+    async def acquire_covering(
+        self,
+        snapshot: McpConfigSnapshot,
+    ) -> SharedResourceLease[_McpRuntime]:
+        """借用精确匹配或完整覆盖目标服务器集合的 READY 运行时（含会话级侧路快照）。"""
+        for resource in reversed(self._resources.get(snapshot.digest, ())):
+            if resource.state is not ResourceState.READY:
+                continue
+            try:
+                return await resource.acquire()
+            except SharedResourceUnavailableError:
+                continue
+
+        candidates: list[SharedResourceHandle[_McpRuntime]] = []
+        seen_ids: set[int] = set()
+        for candidate in (
+            self._current_resource,
+            *(
+                item
+                for resources in self._resources.values()
+                for item in reversed(resources)
+            ),
+        ):
+            if id(candidate) in seen_ids:
+                continue
+            seen_ids.add(id(candidate))
+            candidates.append(candidate)
+
+        for resource in candidates:
+            if resource.state is not ResourceState.READY:
+                continue
+            runtime_servers = {
+                server.name: server for server in resource.value.snapshot.servers
+            }
+            if any(
+                runtime_servers.get(server.name) != server
+                for server in snapshot.servers
+            ):
+                continue
+            try:
+                return await resource.acquire()
+            except SharedResourceUnavailableError:
+                continue
+        raise RuntimeError("MCP_RESOURCE_SNAPSHOT_UNAVAILABLE")
+
     def get_server_statuses(self) -> list[dict[str, object]]:
         """返回每个 MCP 服务器的连接状态和工具列表。
 

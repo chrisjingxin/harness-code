@@ -210,12 +210,13 @@ function DesktopSession(props: Hosts & {
       if (!result.ok) { setAccount("failed"); return }
       const saved = result.value.data as AccountPersonal | null
       if (saved?.workspaceId) setChosen(saved.workspaceId)
-      if (saved?.activeView === "workspace") setActiveSpace("team")
+      if (isOffline) setActiveSpace("personal")
+      else if (saved?.activeView === "workspace") setActiveSpace("team")
       else if (saved?.activeView === "solo") setActiveSpace("personal")
       setAccount("ready")
     })
     return () => { current = false }
-  }, [activeUser?.id, persistence, attempt])
+  }, [activeUser?.id, isOffline, persistence, attempt])
 
   const titleBarClassName = "desktop-titlebar" + (navigator.platform.startsWith("Mac") ? " desktop-titlebar-macos"
     : navigator.platform.startsWith("Win") ? " desktop-titlebar-windows" : "")
@@ -232,10 +233,10 @@ function DesktopSession(props: Hosts & {
     saveAccountPrefs(workspaceId, activeSpace)
   }
 
-  const selectSpace = (space: NavigationSpaceKind) => {
+  const selectSpace = useCallback((space: NavigationSpaceKind) => {
     setActiveSpace(space)
     saveAccountPrefs(workspace?.id ?? chosen, space)
-  }
+  }, [workspace?.id, chosen])
 
   if (activeUser && account === "ready") {
     return (
@@ -344,12 +345,19 @@ function ConfirmedUserWorkbench(props: Hosts & {
     }, 900)
   }, [])
 
-  const selectTopNav = useCallback((next: WorkbenchNavId, targetSpace?: NavigationSpaceKind) => {
+  const selectTopNav = useCallback((
+    next: WorkbenchNavId,
+    targetSpace?: NavigationSpaceKind,
+    options?: { readonly preserveTeamPage?: boolean },
+  ) => {
+    if (targetSpace) props.onSelectSpace(targetSpace)
     setTopNav(next)
     if (next === "admin") setLeftOpen(true)
     if (next !== "inbox") setReturnToInbox(false)
-    syncTeamPageOnNavRef.current(next, targetSpace)
-  }, [])
+    if (!options?.preserveTeamPage) {
+      syncTeamPageOnNavRef.current(next, targetSpace)
+    }
+  }, [props.onSelectSpace])
 
   useEffect(() => {
     if (!toast) return
@@ -616,6 +624,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
     collaborationApps: props.collaborationApps,
     projectUpdates: props.projectUpdates,
     projectConversations: props.projectConversations,
+    localConversations: props.localConversations,
     localDirectory: props.localDirectory,
     localExecution: props.localExecution,
     referenceSnapshots: props.referenceSnapshots,
@@ -1304,6 +1313,7 @@ function useTeamWorkspaceBridge(props: {
   collaborationApps?: CollaborationAppsHost
   projectUpdates?: ProjectUpdatesHost
   projectConversations: ProjectConversationHost
+  localConversations?: LocalConversationsHost
   localDirectory?: LocalDirectoryHost
   localExecution?: DesktopLocalExecutionHost
   referenceSnapshots?: ReferenceActions["readSnapshot"]
@@ -1319,7 +1329,7 @@ function useTeamWorkspaceBridge(props: {
   inboxActive: boolean
   cloudActionCount: number
   returnToInbox: boolean
-  onSelectNav(nav: WorkbenchNavId, targetSpace?: NavigationSpaceKind): void
+  onSelectNav(nav: WorkbenchNavId, targetSpace?: NavigationSpaceKind, options?: { readonly preserveTeamPage?: boolean }): void
   onOpenCommandPalette(): void
   onToggleLeftSidebar(): void
   onOpenRightPanel(): void
@@ -1390,13 +1400,15 @@ function useTeamWorkspaceBridge(props: {
       title: conversation.title,
       timeLabel: "",
     }])
-    if (ok) props.onSelectNav("chat", "team")
+    // 新对话页已在 shell.locateConversation 中入队，切回团队对话时禁止再用 lastChatPageRef 覆盖。
+    if (ok) props.onSelectNav("chat", "team", { preserveTeamPage: true })
     return ok
   }
 
   const projectSessions = useProjectSessions({
     host: props.host,
     projectConversations: props.projectConversations,
+    localConversations: props.localConversations,
     localDirectory: props.localDirectory,
     localExecution: props.localExecution,
     persistence: props.persistence,
@@ -1441,7 +1453,7 @@ function useTeamWorkspaceBridge(props: {
       return
     }
     void integration.refreshMetadata(targetScope).finally(() => {
-      props.onSelectNav("chat", "team")
+      props.onSelectNav("chat", "team", { preserveTeamPage: true })
       shell.openPage({ kind: "conversation", conversationId: reveal.conversationId })
       props.onConversationRevealed?.(reveal.conversationId, Boolean(reveal.land))
       props.onConsumeReveal?.()

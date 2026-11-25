@@ -468,7 +468,10 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
   const myEntries = sessions.entries.filter(item => item.ownerUserId === user.id)
   const peerEntries = sessions.entries.filter(item => item.ownerUserId !== user.id)
   const myLocalEntries = sessions.entries.filter(item => item.ownerUserId === user.id && item.badge?.text === "本机")
-  const hasPeerUpdates = peerEntries.some(item => item.badge?.tone === "warning" || item.badge?.text.includes("有更新") || item.badge?.text.includes("未同步"))
+  const hasPeerUpdates = peerEntries.some(
+    item => item.badge?.text !== "已停止同步"
+      && Boolean(item.badge?.text.includes("有更新") || item.badge?.text.includes("未同步")),
+  )
 
   const activePage: NavigationPageKind | null = !projectId ? null : page.kind === "task" ? "tasks" : page.kind
   const inboxActive = Boolean(props.inboxView?.active && props.inboxPage)

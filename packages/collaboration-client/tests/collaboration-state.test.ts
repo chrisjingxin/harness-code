@@ -228,3 +228,60 @@ test("CollaborationState 断网进入 connectionError 时保留本机离线身�
 
   state.dispose()
 })
+
+test("CollaborationState.initialIdentity 在离线冷重启时进入离线只读态，并在 401 时退回登录态", async () => {
+  let networkDown = true
+  let unauthorized = false
+  const user = {
+    id: USER_ID,
+    userNo: "80000001",
+    userName: "测试用户",
+    photo: "",
+    orgId: "org-1",
+    orgNo: "001",
+    orgName: "研发组",
+    orgPathName: "研发部/研发组",
+  }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer" as const, memberVersion: 1, accessVersion: 1 }
+  const transport: typeof fetch = async input => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+    if (url.endsWith("/api/v1/auth/me")) {
+      if (networkDown) throw new Error("offline")
+      if (unauthorized) return jsonError("AUTHENTICATION_REQUIRED", "请先登录", 401)
+      return jsonOk({ user, workspaces: [workspace] })
+    }
+    return new Response("not found", { status: 404 })
+  }
+
+  // 1. 离线冷重启：保留上次登录账号，可进入本机个人空间
+  const offlineBoot = new CollaborationState(ORIGIN, transport, {
+    initialIdentity: { user, workspaces: [workspace] },
+  })
+  const offlineRes = await offlineBoot.getState()
+  assert.equal(offlineRes.ok, true)
+  if (offlineRes.ok) {
+    assert.equal(offlineRes.value.status, "connectionError")
+    if (offlineRes.value.status === "connectionError") {
+      assert.equal(offlineRes.value.lastKnownUser?.id, USER_ID)
+    }
+  }
+  assert.deepEqual(offlineBoot.personalIdentity(), {
+    generation: 0,
+    accountId: USER_ID,
+    workspaces: [WORKSPACE_ID],
+    offline: true,
+  })
+  offlineBoot.dispose()
+
+  // 2. 恢复在线但服务端无 Cookie（401）：立即退回 signedOut，不保留未认证缓存身份
+  networkDown = false
+  unauthorized = true
+  const expiredBoot = new CollaborationState(ORIGIN, transport, {
+    initialIdentity: { user, workspaces: [workspace] },
+  })
+  const expiredRes = await expiredBoot.getState()
+  assert.equal(expiredRes.ok, true)
+  if (expiredRes.ok) assert.equal(expiredRes.value.status, "signedOut")
+  assert.equal(expiredBoot.personalIdentity(), null)
+  expiredBoot.dispose()
+})

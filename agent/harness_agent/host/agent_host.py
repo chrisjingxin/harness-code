@@ -6324,19 +6324,9 @@ class AgentHost:
                     raise RuntimeError("RUNTIME_MCP_TOOL_VIEW_MISMATCH")
                 if self._mcp_manager is None:
                     raise RuntimeError("RUNTIME_MCP_MANAGER_REQUIRED")
-                current_snapshot = self._mcp_manager.snapshot
-                current_servers = {
-                    server.name: server for server in current_snapshot.servers
-                }
-                if any(
-                    current_servers.get(server.name) != server
-                    for server in spec.mcp_snapshot.servers
-                ):
-                    raise RuntimeError("MCP_RESOURCE_SNAPSHOT_UNAVAILABLE")
-                # 子 Profile 的 digest 是过滤视图的 digest，manager 只注册完整
-                # Host snapshot；借用完整 resource 后再按 canonical tool name
-                # 过滤，lease 仍保证其底层连接在 Engine 生命周期内有效。
-                mcp_lease = await self._mcp_manager.acquire(current_snapshot)
+                # 团队会话的 workbench-context MCP 挂载在侧路 runtime，子代理则是父/会话快照的过滤视图；
+                # 通过 acquire_covering 借用精确匹配或完整覆盖该服务器集合的 READY 运行时，再按工具名严格投影。
+                mcp_lease = await self._mcp_manager.acquire_covering(spec.mcp_snapshot)
                 allowed_mcp_names = set(resolved_mcp_names)
                 available_tools = tuple(mcp_lease.value.tools)
                 mcp_tools = [
