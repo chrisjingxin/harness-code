@@ -4,9 +4,29 @@
  */
 import type { ReactNode } from "react"
 import type { ProjectPage } from "../../../shared/index.js"
-import type { CollaborationContextView, NavigationSessionEntry, WorkbenchRightSlot } from "../../../ui/index.js"
+import type {
+  CollaborationContextView,
+  NavigationSessionEntry,
+  NavigationSpaceKind,
+  WorkbenchNavId,
+  WorkbenchRightSlot,
+} from "../../../ui/index.js"
 
 export type { NavigationSessionEntry, ProjectPage }
+
+/** 项目内部子页切回顶层工作台时的导航目标；`info` 与团队会话必须切到团队空间并保留目标子页。 */
+export type ProjectPageNavTarget = {
+  readonly nav: WorkbenchNavId
+  readonly targetSpace?: NavigationSpaceKind
+  readonly preserveTeamPage?: boolean
+}
+
+/** 将项目子页映射到工作台顶层导航目标；项目资料与团队会话必须落入团队空间并保留目标子页。 */
+export function resolveProjectPageNavTarget(kind: ProjectPage["kind"]): ProjectPageNavTarget {
+  if (kind === "board" || kind === "tasks" || kind === "task") return { nav: "board" }
+  if (kind === "knowledge") return { nav: "knowledge" }
+  return { nav: "chat", targetSpace: "team", preserveTeamPage: true }
+}
 
 /** 当前导航范围；各模块按它隔离自己的状态，异步结果返回时须核对仍属于当前范围。 */
 export type ProjectNavigationScope = {

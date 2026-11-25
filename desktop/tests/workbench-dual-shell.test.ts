@@ -24,6 +24,7 @@ import {
 } from "../src/renderer/features/board/board-model.ts"
 import { buildCommandPaletteGroups } from "../src/renderer/features/collaboration-views/command-palette-model.ts"
 import { resolveDeepLinkNavigation } from "../src/renderer/features/inbox/inbox-model.ts"
+import { resolveProjectPageNavTarget } from "../src/renderer/features/project-navigation/contracts.ts"
 import { ProjectNavigation } from "../src/ui/navigation/index.tsx"
 import { buildSessionBadge } from "../src/renderer/features/session/session-model.ts"
 
@@ -395,4 +396,26 @@ test("队友已停止同步会话（含 summary_only）不再显示有未同步�
   const updateHtml = renderPeer(activeUpdateBadge)
   assert.match(updateHtml, /有更新/)
   assert.match(updateHtml, /aria-label="有未同步更新"/)
+})
+
+test("resolveProjectPageNavTarget 为项目资料与团队会话保留目标子页并切回团队空间", () => {
+  assert.deepEqual(resolveProjectPageNavTarget("info"), {
+    nav: "chat",
+    targetSpace: "team",
+    preserveTeamPage: true,
+  })
+  assert.deepEqual(resolveProjectPageNavTarget("new"), {
+    nav: "chat",
+    targetSpace: "team",
+    preserveTeamPage: true,
+  })
+  assert.deepEqual(resolveProjectPageNavTarget("conversation"), {
+    nav: "chat",
+    targetSpace: "team",
+    preserveTeamPage: true,
+  })
+  assert.deepEqual(resolveProjectPageNavTarget("board"), { nav: "board" })
+  assert.deepEqual(resolveProjectPageNavTarget("tasks"), { nav: "board" })
+  assert.deepEqual(resolveProjectPageNavTarget("task"), { nav: "board" })
+  assert.deepEqual(resolveProjectPageNavTarget("knowledge"), { nav: "knowledge" })
 })

@@ -39,13 +39,14 @@ import {
   memberRoleLabel,
 } from "../collaboration-views/index.js"
 import "../collaboration-views/collab-views.css"
-import type {
-  NavigationSessionEntry,
-  NavigationSessionSource,
-  ProjectNavigationScope,
-  ProjectNavigator,
-  ProjectPageProvider,
-  ProjectPageProviders,
+import {
+  resolveProjectPageNavTarget,
+  type NavigationSessionEntry,
+  type NavigationSessionSource,
+  type ProjectNavigationScope,
+  type ProjectNavigator,
+  type ProjectPageProvider,
+  type ProjectPageProviders,
 } from "./contracts.js"
 import { CreateProjectDialog } from "./create-project-dialog.js"
 import { ProjectInfoPage } from "./project-info-page.js"
@@ -353,7 +354,7 @@ export type ProjectWorkbenchProps = {
   onReturnToInbox?(): void
   onSelectKnowledge?(knowledgeId: string): void
   /** 单壳层集成控制：切页同步到外层 56px Rail、共享命令面板与左栏收展开关。 */
-  onSelectNav?(nav: WorkbenchNavId): void
+  onSelectNav?(nav: WorkbenchNavId, targetSpace?: NavigationSpaceKind, options?: { readonly preserveTeamPage?: boolean }): void
   onOpenCommandPalette?(): void
   onToggleLeftSidebar?(): void
   disableGlobalShortcuts?: boolean
@@ -386,6 +387,18 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const pendingSettingsProjectIdRef = useRef<string | null>(null)
   const lastChatPageRef = useRef<ProjectPage>({ kind: "new" })
+  const selectNavForPage = (targetKind: ProjectPage["kind"]) => {
+    if (!props.onSelectNav) {
+      props.onCloseInbox?.()
+      return
+    }
+    const target = resolveProjectPageNavTarget(targetKind)
+    props.onSelectNav(
+      target.nav,
+      target.targetSpace,
+      target.preserveTeamPage ? { preserveTeamPage: true } : undefined,
+    )
+  }
 
   // 项目切换后关闭旧结果浮层，避免用户在新项目点击旧任务或知识。
   useEffect(() => { setPaletteOpen(false); setCollabPopoverOpen(false) }, [shell.scope])
@@ -407,7 +420,7 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
     const targetProjectId = pendingSettingsProjectIdRef.current
     if (!targetProjectId || shell.projectId !== targetProjectId) return
     pendingSettingsProjectIdRef.current = null
-    props.onSelectNav?.("chat")
+    selectNavForPage("info")
     shell.openPage({ kind: "info" })
   }, [shell.projectId, shell.openPage])
 
@@ -446,14 +459,13 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
 
   const navigator: ProjectNavigator = {
     openPage: target => {
-      if (target.kind === "board" || target.kind === "tasks" || target.kind === "task") props.onSelectNav?.("board")
-      else if (target.kind === "knowledge") props.onSelectNav?.("knowledge")
-      else props.onSelectNav?.("chat")
+      selectNavForPage(target.kind)
       shell.openPage(target)
     },
     locateConversation: conversationId => {
-      props.onSelectNav?.("chat")
-      return shell.locateConversation(conversationId, sessions.entries)
+      const located = shell.locateConversation(conversationId, sessions.entries)
+      if (located) selectNavForPage("conversation")
+      return located
     },
   }
 
@@ -516,39 +528,33 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
     },
     createProject: shell.openCreateDialog,
     openProjectSettings: () => {
-      props.onCloseInbox?.()
-      props.onSelectNav?.("chat")
+      selectNavForPage("info")
       shell.openPage({ kind: "info" })
     },
     openProjectSettingsFor: targetProjectId => {
-      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
       if (targetProjectId === shell.projectId) {
-        props.onSelectNav?.("chat")
+        selectNavForPage("info")
         shell.openPage({ kind: "info" })
         return
       }
+      if (!props.onSelectNav) props.onCloseInbox?.()
       pendingSettingsProjectIdRef.current = targetProjectId
       shell.selectProject(targetProjectId)
     },
     openPage: kind => {
-      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
-      if (kind === "board" || kind === "tasks") props.onSelectNav?.("board")
-      else if (kind === "knowledge") props.onSelectNav?.("knowledge")
-      else props.onSelectNav?.("chat")
+      selectNavForPage(kind)
       shell.openPage({ kind })
     },
     createSession: () => {
-      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
-      props.onSelectNav?.("chat")
+      selectNavForPage("new")
       shell.openPage({ kind: "new" })
     },
     selectConversation: conversationId => {
-      props.onCloseInbox?.()
       setCollabPopoverOpen(false)
-      props.onSelectNav?.("chat")
+      selectNavForPage("conversation")
       shell.openPage({ kind: "conversation", conversationId })
     },
     renameConversation: sessions.renameConversation,
@@ -706,9 +712,8 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
           peerEntries={peerEntries}
           onClose={() => setCollabPopoverOpen(false)}
           onOpenConversation={conversationId => {
-            props.onCloseInbox?.()
             setCollabPopoverOpen(false)
-            props.onSelectNav?.("chat")
+            selectNavForPage("conversation")
             shell.openPage({ kind: "conversation", conversationId })
           }}
         />

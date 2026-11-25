@@ -1705,7 +1705,7 @@ function useTeamWorkspaceBridge(props: {
     onOpenInbox: () => props.onSelectNav("inbox"),
     onCloseInbox: () => props.onSelectNav("chat"),
     onReturnToInbox: props.onReturnToInbox,
-    onSelectNav: nav => props.onSelectNav(nav),
+    onSelectNav: props.onSelectNav,
     onOpenCommandPalette: props.onOpenCommandPalette,
     onToggleLeftSidebar: props.onToggleLeftSidebar,
     disableGlobalShortcuts: true,
