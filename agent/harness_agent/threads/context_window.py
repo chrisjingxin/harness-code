@@ -43,8 +43,17 @@ from harness_agent.threads.prompting import (
     input_cap_tokens,
     normalized_tool_schemas,
 )
+from harness_agent.runtime.execution_binding import ExecutionMode
 from harness_agent.runtime.run_context import RunContext, thread_id_for_runtime
 from harness_agent.threads.thread_persistence import ContextState, ThreadPersistence
+
+
+def _is_child_execution(runtime: object) -> bool:
+    """判断当前是否为子代理执行，避免用父 thread_id 投影未完成的父 Transcript。"""
+    context = _run_context(runtime)
+    return isinstance(context, RunContext) and (
+        context.parent_execution_id is not None or context.execution_mode is ExecutionMode.INLINE
+    )
 
 
 _SAFE_CONTEXT_WIRE_TOKEN = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
@@ -204,10 +213,14 @@ class ContextWindowMiddleware(AgentMiddleware):
 
         prepared = list(request.messages)
         rewrite = False
-        projection = await self._canonical_projection(
-            thread_id,
-            request.messages,
-            allow_legacy=not isinstance(_run_context(request.runtime), RunContext),
+        projection = (
+            None
+            if _is_child_execution(request.runtime)
+            else await self._canonical_projection(
+                thread_id,
+                request.messages,
+                allow_legacy=not isinstance(_run_context(request.runtime), RunContext),
+            )
         )
         if projection is not None and self._compactor is not None:
             pressure = self._measure_pressure(
@@ -325,10 +338,14 @@ class ContextWindowMiddleware(AgentMiddleware):
         """只为第一次模型 overflow 创建一次 typed recovery 请求。"""
         if self._compactor is None:
             return None
-        projection = await self._canonical_projection(
-            thread_id,
-            messages,
-            allow_legacy=not isinstance(_run_context(request.runtime), RunContext),
+        projection = (
+            None
+            if _is_child_execution(request.runtime)
+            else await self._canonical_projection(
+                thread_id,
+                messages,
+                allow_legacy=not isinstance(_run_context(request.runtime), RunContext),
+            )
         )
         if projection is None:
             return CompressionResult(

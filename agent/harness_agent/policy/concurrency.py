@@ -62,6 +62,19 @@ _BLOCK_PATTERNS: list[re.Pattern[str]] = [
 
 # 输出重定向 / 管道到写命令
 _REDIRECT_PATTERN = re.compile(r"(>>?|&>)")
+# 仅丢弃到 /dev/null 或合并标准输出/错误流的重定向，不触及任何普通文件。
+_SAFE_REDIRECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:(?<=^)|(?<=[\s;|&(]))(?:[012]?>>?|&>>?)\s*/dev/null(?=\s|[;|&)]|$)"),
+    re.compile(r"(?:(?<=^)|(?<=[\s;|&(]))[12]?>&[12](?=\s|[;|&)]|$)"),
+)
+
+
+def _strip_safe_redirections(command: str) -> str:
+    """移除明确不写磁盘文件的 /dev/null 与 fd 复制重定向。"""
+    cleaned = command
+    for pattern in _SAFE_REDIRECTION_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    return cleaned.strip()
 _PIPE_WRITE_COMMANDS = frozenset({
     "tee", "dd", "install", "cp", "mv", "rm", "mkdir", "touch",
     "chmod", "chown", "ln", "truncate",
@@ -91,7 +104,9 @@ def is_shell_command_read_only(command: str) -> bool:
     if not command or not command.strip():
         return False
 
-    command = command.strip()
+    command = _strip_safe_redirections(command.strip())
+    if not command:
+        return False
 
     # 复合命令：拆分子命令后逐一判定
     if _COMPOUND_SEPARATORS.search(command):
@@ -128,7 +143,9 @@ def is_shell_command_mutating(command: str) -> bool:
     if not command or not command.strip():
         return False
 
-    command = command.strip()
+    command = _strip_safe_redirections(command.strip())
+    if not command:
+        return False
     unwrapped = strip_wrappers(command)
     if unwrapped != command:
         return is_shell_command_mutating(unwrapped)

@@ -606,9 +606,11 @@ class ManagedAgentExecutor:
                     )
                 return result
             except asyncio.CancelledError:
+                _record_partial_ledger_usage(request, runtime, session, usage_before)
                 session.restore(attempt_snapshot)
                 raise
             except ExecutionStreamError as exc:
+                _record_partial_ledger_usage(request, runtime, session, usage_before)
                 _restore_failed_attempt(session, attempt_snapshot, exc)
                 _log_model_failure(
                     request,
@@ -637,6 +639,7 @@ class ManagedAgentExecutor:
                     retryable=exc.code == "PROVIDER_OUTPUT_INTERRUPTED",
                 ) from exc
             except Exception as exc:  # noqa: BLE001 - retry 边界需要判定任何错误
+                _record_partial_ledger_usage(request, runtime, session, usage_before)
                 _restore_failed_attempt(session, attempt_snapshot, exc)
                 _log_model_failure(
                     request,
@@ -832,6 +835,32 @@ def _round_usage(session: Any, usage_before: Mapping[str, int]) -> dict[str, int
             "cached_input_tokens": raw.get("cached_tokens"),
         }
     return _usage_delta(usage_before, session.usage)
+
+
+def _record_partial_ledger_usage(
+    request: ManagedAgentRequest,
+    runtime: ManagedAgentRuntime,
+    session: StreamSession,
+    usage_before: Mapping[str, int],
+) -> None:
+    """取消或异常中止前把已发生的模型 token 记入 usage_ledger，防止 child 用量丢失。"""
+    ledger = getattr(request, "usage_ledger", None)
+    record = getattr(ledger, "record", None)
+    if not callable(record):
+        return
+    partial = _round_usage(session, usage_before)
+    if not ((partial.get("input_tokens") or 0) > 0 or (partial.get("output_tokens") or 0) > 0):
+        return
+    record(
+        execution_id=request.execution_ref,
+        agent_id=str(getattr(runtime.run_context, "agent_id", "") or "main"),
+        profile_id=request.model_profile_id,
+        usage={
+            "input_tokens": partial.get("input_tokens"),
+            "output_tokens": partial.get("output_tokens"),
+            "cached_input_tokens": partial.get("cached_input_tokens"),
+        },
+    )
 
 
 def _usage_delta(

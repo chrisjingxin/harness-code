@@ -187,6 +187,8 @@ class RunContext:
     code_index_query_lease: Any | None = field(default=None, repr=False)
     goal_store: Any | None = field(default=None, repr=False)
     verification_registry: Any | None = field(default=None, repr=False)
+    # 子代理执行预算：仅子执行持有；根执行保持 None。
+    subagent_budget: Any | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """在执行前验证 thread 与 snapshot 的绑定，阻止跨 project 注入。"""

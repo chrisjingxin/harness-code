@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,77 @@ if TYPE_CHECKING:
 VIRTUAL_ROOT = "/.harness"
 MAX_VIRTUAL_READ_LINES = 2_000
 _ARTIFACT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{8,80}$")
+TOOL_OUTPUT_SUBDIRS = frozenset({"tool-outputs", "large_tool_results"})
+_SAFE_TOOL_OUTPUT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
+_SAFE_THREAD_DIR = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
+
+
+def tool_output_disk_path(
+    thread_id: str,
+    subdir: str,
+    filename: str,
+    home: Path | None = None,
+) -> Path:
+    """返回长工具输出在本机 home 的安全落盘路径，不进入工作区。"""
+    if not isinstance(thread_id, str) or not thread_id:
+        raise ValueError("tool output requires a thread_id")
+    if subdir not in TOOL_OUTPUT_SUBDIRS:
+        raise ValueError("unknown tool output virtual directory")
+    if (
+        not isinstance(filename, str)
+        or filename in {".", ".."}
+        or not _SAFE_TOOL_OUTPUT_NAME.fullmatch(filename)
+    ):
+        raise ValueError("invalid tool output filename")
+    safe_thread = (
+        thread_id
+        if _SAFE_THREAD_DIR.fullmatch(thread_id) and thread_id not in {".", ".."}
+        else hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:32]
+    )
+    return (
+        (home or Path.home())
+        / ".harness"
+        / "tool-outputs"
+        / safe_thread
+        / subdir
+        / filename
+    )
+
+
+def _write_tool_output_file(
+    thread_id: str,
+    subdir: str,
+    filename: str,
+    content: str,
+    home: Path | None = None,
+) -> Path:
+    """将完整工具输出写入 0700/0600 私有目录，避免弄脏用户仓库。"""
+    disk = tool_output_disk_path(thread_id, subdir, filename, home)
+    disk.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for directory in (disk.parent.parent.parent, disk.parent.parent, disk.parent):
+        try:
+            directory.chmod(0o700)
+        except OSError:
+            pass
+    disk.write_text(content, encoding="utf-8")
+    try:
+        disk.chmod(0o600)
+    except OSError:
+        pass
+    return disk
+
+
+def _read_tool_output_file(
+    thread_id: str,
+    subdir: str,
+    filename: str,
+    home: Path | None = None,
+) -> str:
+    """读取已落盘的工具输出全文；不存在时抛出明确的 ValueError。"""
+    disk = tool_output_disk_path(thread_id, subdir, filename, home)
+    if not disk.is_file():
+        raise ValueError("tool output file does not exist")
+    return disk.read_text(encoding="utf-8", errors="replace")
 
 
 class HarnessVirtualBackend:
@@ -75,6 +147,10 @@ class HarnessVirtualBackend:
             skill_identity: tuple[str, str] | None = None
             if self._is_plan_path(path):
                 content = self._read_plan()
+            elif path.parts[0] in TOOL_OUTPUT_SUBDIRS:
+                content = _read_tool_output_file(
+                    self._thread_id, path.parts[0], path.parts[1], self._home
+                )
             elif path.parts[0] == "skills":
                 content, skill_id, kind = self._read_skill(path)
                 skill_identity = (skill_id, kind)
@@ -96,6 +172,10 @@ class HarnessVirtualBackend:
             skill_identity: tuple[str, str] | None = None
             if self._is_plan_path(path):
                 content = self._read_plan()
+            elif path.parts[0] in TOOL_OUTPUT_SUBDIRS:
+                content = _read_tool_output_file(
+                    self._thread_id, path.parts[0], path.parts[1], self._home
+                )
             elif path.parts[0] == "skills":
                 content, skill_id, kind = self._read_skill(path)
                 skill_identity = (skill_id, kind)
@@ -151,11 +231,19 @@ class HarnessVirtualBackend:
         return self.grep(pattern, path, glob)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """计划约束下允许覆盖写会话计划文件；其它虚拟路径仍只读。"""
+        """计划约束下允许覆盖写会话计划文件；内部工具输出可落盘到私有目录。"""
         try:
             path = self._validated_path(file_path)
         except ValueError as exc:
             return WriteResult(error=str(exc))
+        if path.parts[0] in TOOL_OUTPUT_SUBDIRS:
+            try:
+                _write_tool_output_file(
+                    self._thread_id, path.parts[0], path.parts[1], content, self._home
+                )
+            except (OSError, ValueError) as exc:
+                return WriteResult(error=str(exc))
+            return WriteResult(path=f"{VIRTUAL_ROOT}/{path.as_posix()}")
         if not self._is_plan_path(path):
             return WriteResult(error="/.harness is read-only")
         if not self._plan_writable:
@@ -220,9 +308,16 @@ class HarnessVirtualBackend:
             raise ValueError("virtual path must not contain traversal segments")
         if self._is_plan_path(path):
             return path
-        if not path.parts or path.parts[0] not in {"skills", "history"}:
+        if not path.parts or path.parts[0] not in {"skills", "history", *TOOL_OUTPUT_SUBDIRS}:
             raise ValueError("unknown /.harness virtual path")
-        if path.parts[0] == "history":
+        if path.parts[0] in TOOL_OUTPUT_SUBDIRS:
+            if (
+                len(path.parts) != 2
+                or path.parts[1] in {".", ".."}
+                or not _SAFE_TOOL_OUTPUT_NAME.fullmatch(path.parts[1])
+            ):
+                raise ValueError("tool output path must be /.harness/tool-outputs/<name>")
+        elif path.parts[0] == "history":
             if len(path.parts) != 2 or not path.name.endswith(".md") or not _ARTIFACT_ID.fullmatch(path.stem):
                 raise ValueError("history path must be /.harness/history/<artifact-id>.md")
         elif len(path.parts) < 3:
@@ -302,6 +397,7 @@ def mount_harness_virtual_files(
     """把虚拟后端挂在真实 backend 之前，文件工具仍使用统一 ``read_file``。"""
     return CompositeBackend(
         default=default_backend,
+        artifacts_root=VIRTUAL_ROOT,
         routes={
             f"{VIRTUAL_ROOT}/": HarnessVirtualBackend(
                 registry=registry,
@@ -438,6 +534,7 @@ def mount_run_scoped_virtual_files(
     """
     return CompositeBackend(
         default=default_backend,
+        artifacts_root=VIRTUAL_ROOT,
         routes={
             f"{VIRTUAL_ROOT}/": RunScopedHarnessVirtualBackend(
                 thread_persistence=thread_persistence,

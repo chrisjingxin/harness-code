@@ -5847,6 +5847,11 @@ class AgentHost:
                     usage_ledger=getattr(parent_context, "usage_ledger", None)
                     if parent_context is not None
                     else None,
+                    subagent_budget=_subagent_budget_for(
+                        agent_id=resolved.agent_id,
+                        configured_max_turns=getattr(resolved, "max_turns", None),
+                        timeout_seconds=command.timeout_seconds,
+                    ),
                 )
                 checkpoint_namespace = child_ref.checkpoint_namespace(
                     resolved.project_fingerprint
@@ -6170,6 +6175,11 @@ class AgentHost:
                     usage_ledger=getattr(parent_context, "usage_ledger", None)
                     if parent_context is not None
                     else None,
+                    subagent_budget=_subagent_budget_for(
+                        agent_id=resolved.agent_id,
+                        configured_max_turns=getattr(resolved, "max_turns", None),
+                        timeout_seconds=command.timeout_seconds,
+                    ),
                 )
 
                 def clear_child_process_state() -> None:
@@ -7097,6 +7107,22 @@ def _thread_message_payload(message: Any) -> dict[str, object]:
             tool_status, "completed"
         )
     return payload
+
+
+def _subagent_budget_for(
+    *,
+    agent_id: str,
+    configured_max_turns: int | None,
+    timeout_seconds: float | None,
+) -> Any:
+    """为 Managed child 构建独立轮次与截止时间预算。"""
+    from harness_agent.runtime.subagent_budget import SubagentBudget
+
+    return SubagentBudget.for_delegation(
+        agent_id=agent_id,
+        configured_max_turns=configured_max_turns,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def _compose_rpc_error(error: ComposeSessionError) -> RpcError:

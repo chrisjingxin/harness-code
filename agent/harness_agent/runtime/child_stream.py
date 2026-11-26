@@ -66,7 +66,13 @@ class ChildStreamPorts(ExecutionStreamPorts):
         return None
 
 
-def child_context_for(parent: RunContext, *, child_ref: ExecutionRef, agent_id: str) -> RunContext:
+def child_context_for(
+    parent: RunContext,
+    *,
+    child_ref: ExecutionRef,
+    agent_id: str,
+    subagent_budget: Any | None = None,
+) -> RunContext:
     """以 child execution 身份派生 RunContext，并动态继承父审批交集。"""
     from harness_agent.runtime.builtin_agents import resolve_child_approval_mode
     from harness_agent.runtime.run_context import current_approval_mode
@@ -107,6 +113,7 @@ def child_context_for(parent: RunContext, *, child_ref: ExecutionRef, agent_id: 
         record_approval=parent.record_approval,
         model_call_lifecycle=parent.model_call_lifecycle,
         usage_ledger=getattr(parent, "usage_ledger", None),
+        subagent_budget=subagent_budget,
         diagnostic_log=bind_execution_log(
             getattr(parent, "diagnostic_log", None),
             thread_id=parent.thread_id,
@@ -126,6 +133,7 @@ async def stream_inline_child(
     agent_id: str,
     task: str,
     cancelled: Callable[[], bool],
+    subagent_budget: Any | None = None,
 ) -> dict[str, Any]:
     """流式运行 Inline child 图，事件带 child 身份；返回父 task 需要的状态。
 
@@ -134,7 +142,12 @@ async def stream_inline_child(
     工具结果不回传父图。
     """
     event_port = getattr(parent, "event_port", None)
-    child_context = child_context_for(parent, child_ref=child_ref, agent_id=agent_id)
+    child_context = child_context_for(
+        parent,
+        child_ref=child_ref,
+        agent_id=agent_id,
+        subagent_budget=subagent_budget,
+    )
     diagnostic_log = ensure_log(child_context.diagnostic_log)
     started_at = time.monotonic()
     lifecycle_fields = {"kind": "child", "agent_id": agent_id}
@@ -155,6 +168,41 @@ async def stream_inline_child(
     stream_input: object = {"messages": [HumanMessage(content=task)]}
     resume: object | None = None
     final_content = ""
+    recorded_input = 0
+    recorded_output = 0
+    recorded_cached = 0
+
+    def flush_usage_ledger() -> None:
+        nonlocal recorded_input, recorded_output, recorded_cached
+        ledger = getattr(child_context, "usage_ledger", None)
+        record = getattr(ledger, "record", None)
+        if not callable(record):
+            return
+        usage = session.usage if isinstance(session.usage, Mapping) else {}
+        total_input = int(usage.get("input_tokens") or 0)
+        total_output = int(usage.get("output_tokens") or 0)
+        total_cached = int(
+            usage.get("cached_input_tokens", usage.get("cached_tokens")) or 0
+        )
+        delta_input = max(0, total_input - recorded_input)
+        delta_output = max(0, total_output - recorded_output)
+        delta_cached = max(0, total_cached - recorded_cached)
+        if delta_input == 0 and delta_output == 0 and delta_cached == 0:
+            return
+        record(
+            execution_id=child_ref.execution_id,
+            agent_id=agent_id,
+            profile_id="inherit",
+            usage={
+                "input_tokens": delta_input,
+                "output_tokens": delta_output,
+                "cached_input_tokens": delta_cached,
+            },
+        )
+        recorded_input += delta_input
+        recorded_output += delta_output
+        recorded_cached += delta_cached
+
     try:
         while True:
             if resume is not None:
@@ -174,6 +222,7 @@ async def stream_inline_child(
                 break
             resume = result.resume
     except asyncio.CancelledError:
+        flush_usage_ledger()
         diagnostic_log.warn(
             "execution.failed",
             {
@@ -187,6 +236,7 @@ async def stream_inline_child(
         )
         raise
     except ExecutionStreamError as exc:
+        flush_usage_ledger()
         diagnostic_log.warn(
             "execution.failed",
             {
@@ -203,6 +253,7 @@ async def stream_inline_child(
             raise asyncio.CancelledError from exc
         raise
     except Exception as exc:
+        flush_usage_ledger()
         diagnostic_log.warn(
             "execution.failed",
             {
@@ -223,15 +274,5 @@ async def stream_inline_child(
             "duration_ms": max(0, int((time.monotonic() - started_at) * 1000)),
         },
     )
-    ledger = getattr(child_context, "usage_ledger", None)
-    record = getattr(ledger, "record", None)
-    if callable(record):
-        leftover = dict(session.last_call_usage) if session.last_call_usage else None
-        for usage in (*session.call_usages, *(() if leftover is None else (leftover,))):
-            record(
-                execution_id=child_ref.execution_id,
-                agent_id=agent_id,
-                profile_id="inherit",
-                usage=usage,
-            )
+    flush_usage_ledger()
     return {"messages": [AIMessage(content=final_content)]}

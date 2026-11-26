@@ -160,6 +160,7 @@ def create_execution_context(
         backend = LocalShellBackend(
             root_dir=workspace,
             virtual_mode=True,
+            max_output_bytes=1_000_000,
             inherit_env=False,
             env=_local_tool_environment(),
         )

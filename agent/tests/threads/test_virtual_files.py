@@ -459,3 +459,40 @@ def test_workspace_boundary_allows_plan_file_write_and_edit(tmp_path: Path):
     assert not middleware.allows_approval(delete_plan)
     denied = middleware.wrap_tool_call(delete_plan, handler)
     assert getattr(denied, "status", None) == "error"
+
+
+def test_composite_backend_uses_virtual_artifacts_root_and_isolates_large_results(
+    tmp_path: Path,
+) -> None:
+    """CompositeBackend 默认 artifacts_root 指向 /.harness，large_tool_results 不写进工作区。"""
+    from deepagents.backends import LocalShellBackend
+    from harness_agent.threads.virtual_files import (
+        VIRTUAL_ROOT,
+        mount_harness_virtual_files,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    home = tmp_path / "home"
+    composite = mount_harness_virtual_files(
+        LocalShellBackend(root_dir=workspace, virtual_mode=True),
+        registry=None,
+        thread_id="thread-artifacts",
+        home=home,
+    )
+    assert composite.artifacts_root == VIRTUAL_ROOT
+
+    written = composite.write("/.harness/large_tool_results/call_xyz", "line1\nline2\n")
+    assert not written.error
+    read_back = composite.read("/.harness/large_tool_results/call_xyz", offset=0, limit=10)
+    assert read_back.file_data and read_back.file_data["content"] == "line1\nline2\n"
+    assert not (workspace / "large_tool_results").exists()
+    assert list(workspace.iterdir()) == []
+    assert (
+        home
+        / ".harness"
+        / "tool-outputs"
+        / "thread-artifacts"
+        / "large_tool_results"
+        / "call_xyz"
+    ).read_text(encoding="utf-8") == "line1\nline2\n"

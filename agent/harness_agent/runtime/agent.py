@@ -391,8 +391,14 @@ def _create_controlled_inline_subagents(
             from harness_agent.tools.file_tools import HarnessFileToolsMiddleware
 
             child_middleware.append(HarnessFileToolsMiddleware(file_tool_contract))
-        from harness_agent.tracing.model import TraceModelMiddleware
+        if child_view.allows_tool("execute"):
+            from harness_agent.tools.execute_output import ExecuteOutputMiddleware
 
+            child_middleware.append(ExecuteOutputMiddleware(backend=backend))
+        from harness_agent.tracing.model import TraceModelMiddleware
+        from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
+
+        child_middleware.append(SubagentBudgetMiddleware())
         child_middleware.append(TraceModelMiddleware())
         prompt = record.prompt
         if workspace is not None:
@@ -419,6 +425,7 @@ def _create_controlled_inline_subagents(
         async def run_inline(command: DelegateAgent) -> dict[str, Any]:
             """流式执行子图：过程事件带 child 身份进 Interactive Core，不闷跑。"""
             from harness_agent.runtime.child_stream import stream_inline_child
+            from harness_agent.runtime.subagent_budget import SubagentBudget
 
             token = bind_child_command(command)
             try:
@@ -430,6 +437,10 @@ def _create_controlled_inline_subagents(
                     agent_id=agent_id,
                     task=command.task,
                     cancelled=lambda: command.cancellation_token.cancelled,
+                    subagent_budget=SubagentBudget.for_delegation(
+                        agent_id=agent_id,
+                        timeout_seconds=command.timeout_seconds,
+                    ),
                 )
             finally:
                 reset_child_command(token)
@@ -953,7 +964,7 @@ def create_harness_agent(
     backend = (
         execution_context.backend
         if execution_context is not None
-        else LocalShellBackend(root_dir=root, virtual_mode=True)
+        else LocalShellBackend(root_dir=root, virtual_mode=True, max_output_bytes=1_000_000)
     )
     sandboxed = bool(getattr(execution_context, "sandboxed", False))
     prompt_workspace = str(getattr(execution_context, "workspace_path", root))
@@ -1420,9 +1431,15 @@ def create_harness_agent(
     # path/virtual route 校验，并发锁再覆盖实际 dispatch，最后由 seam 短路
     # DeepAgents builtin handler。
     agent_middleware.append(HarnessFileToolsMiddleware(file_tool_contract))
+    from harness_agent.tools.execute_output import ExecuteOutputMiddleware
+
+    agent_middleware.append(ExecuteOutputMiddleware(backend=backend))
 
     # 6. 预算中间件在模型调用前管理工具结果和摘要；不暴露模型可调用压缩工具。
+    from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
     from harness_agent.threads.context_window import ContextWindowMiddleware
+
+    agent_middleware.append(SubagentBudgetMiddleware())
 
     profile = getattr(resolved_model, "profile", None)
     profile_window = profile.get("max_input_tokens") if isinstance(profile, dict) else None

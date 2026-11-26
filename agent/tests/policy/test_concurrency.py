@@ -10,6 +10,7 @@ import pytest
 from harness_agent.policy.concurrency import (
     AsyncRWLock,
     is_concurrency_safe,
+    is_shell_command_mutating,
     is_shell_command_read_only,
 )
 from harness_agent.policy.concurrency_guard import ConcurrencyGuardMiddleware
@@ -147,6 +148,50 @@ def test_pipe_shell_commands(command: str, expected: bool):
 def test_edge_case_shell_commands_fail_closed(command: str):
     """空字符串、未知命令和畸形引号保守返回 False。"""
     assert is_shell_command_read_only(command) is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls -la 2>/dev/null",
+        "ls -la >/dev/null",
+        "git status 2>&1",
+        "git log --oneline -5 2>/dev/null",
+        "cat file.txt 2>/dev/null | grep pattern",
+        "find . -name '*.py' 2>/dev/null",
+        "git log -n 5 2>/dev/null && ls 2>&1",
+        "ls 1>&2",
+        "ls >&2",
+    ],
+)
+def test_safe_redirections_keep_read_only_commands_concurrent(command: str):
+    """仅将 stderr/stdout 丢弃到 /dev/null 或合并到 fd 的只读命令保持可并发。"""
+    assert is_shell_command_read_only(command) is True
+    assert is_shell_command_mutating(command) is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls 2>/dev/null > out.txt",
+        "ls > out.txt 2>&1",
+        "echo hi > /dev/nullfoo",
+        "echo hi > /dev/null/sub",
+        "ls 2>/tmp/err.log",
+        "cat a >> b 2>/dev/null",
+    ],
+)
+def test_mixed_or_real_file_redirections_remain_mutating(command: str):
+    """混有真实文件重定向或伪装 /dev/null 前缀的命令仍按写操作 fail-closed。"""
+    assert is_shell_command_read_only(command) is False
+    assert is_shell_command_mutating(command) is True
+
+
+def test_non_readonly_command_with_dev_null_not_marked_mutating():
+    """不在只读白名单的命令带 2>/dev/null 时，不误判为只读，也不误判为文件写入。"""
+    cmd = "python3 -m pip list 2>/dev/null | head -20"
+    assert is_shell_command_read_only(cmd) is False
+    assert is_shell_command_mutating(cmd) is False
 
 
 # ---------------------------------------------------------------------------
