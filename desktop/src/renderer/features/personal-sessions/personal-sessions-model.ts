@@ -51,24 +51,37 @@ function utf8ByteLength(text: string): number {
 /**
  * 拆分个人栏位待展示会话与已发布协作会话：
  * - 个人栏位展示所有未发布（`local_only`）和已停止共享（`stopped`）的个人会话，不按团队筛选；
+ * - `pinned` 为未归档且置顶的会话（按 `pinnedAtMs` 倒序），独立渲染于「置顶」区；
+ * - `archived` 为已归档的会话（按 `archivedAtMs` 倒序），渲染于默认折叠的「已归档」区；
+ * - `personal` 为其余未归档、未置顶会话，继续按工程目录分组展示；
  * - 处于 `active` 共享中的会话只在「团队」空间按 Project 组织展示，统计其数量用于底部提示。
  */
 export function partitionPersonalRecords(
   records: readonly LocalConversationRecord[],
 ): {
+  readonly pinned: readonly LocalConversationRecord[]
   readonly personal: readonly LocalConversationRecord[]
+  readonly archived: readonly LocalConversationRecord[]
   readonly publishedCount: number
 } {
+  const pinned: LocalConversationRecord[] = []
   const personal: LocalConversationRecord[] = []
+  const archived: LocalConversationRecord[] = []
   let publishedCount = 0
   for (const record of records) {
     if (record.shareStatus === "active") {
       publishedCount += 1
+    } else if (record.archivedAtMs !== undefined) {
+      archived.push(record)
+    } else if (record.pinnedAtMs !== undefined) {
+      pinned.push(record)
     } else {
       personal.push(record)
     }
   }
-  return { personal, publishedCount }
+  pinned.sort((a, b) => (b.pinnedAtMs ?? 0) - (a.pinnedAtMs ?? 0) || b.conversationId.localeCompare(a.conversationId))
+  archived.sort((a, b) => (b.archivedAtMs ?? 0) - (a.archivedAtMs ?? 0) || b.conversationId.localeCompare(a.conversationId))
+  return { pinned, personal, archived, publishedCount }
 }
 
 /** 将本机个人会话按工程目录分组并按最近更新时间倒序排列。 */
@@ -99,6 +112,50 @@ export function groupPersonalRecordsByDirectory(
     label: value.label,
     records: value.records,
   }))
+}
+
+/**
+ * 将一段本机个人会话导出为 Markdown 文本（供「复制为 Markdown」菜单项使用）：
+ * - 按 `sequenceStart` 升序逐轮输出 `## 用户` / `## 用户（追加）` / `## 助手` 小节，各节之间空一行；
+ * - 附件只输出展示名（`label`），不输出任何绝对路径；图片折叠为 `[图片 ×N]` 一行；
+ * - 终态为停止/失败时助手小节追加 `（本轮已停止）` / `（本轮失败：{failure}）`；
+ * - 不输出引用标识与工具摘要；结尾保留单个换行符。
+ */
+export function conversationToMarkdown(
+  title: string,
+  turns: readonly LocalConversationTurn[],
+  options: { readonly historyTrimmed?: boolean } = {},
+): string {
+  const sorted = [...turns].sort(
+    (a, b) => a.sequenceStart - b.sequenceStart || a.turnId.localeCompare(b.turnId),
+  )
+  const blocks: string[] = [`# ${title.trim() || "新会话"}`]
+  if (options.historyTrimmed) {
+    blocks.push("> 早期轮次已折叠或省略。")
+  }
+  for (const turn of sorted) {
+    const userLines = [`## 用户`, turn.userText]
+    if (turn.attachments?.length) {
+      userLines.push(`附件：${turn.attachments.map(item => item.label).join("、")}`)
+    }
+    if (turn.images?.length) {
+      userLines.push(`[图片 ×${turn.images.length}]`)
+    }
+    blocks.push(userLines.join("\n"))
+    for (const followUp of turn.followUps ?? []) {
+      blocks.push([`## 用户（追加）`, followUp.text].join("\n"))
+    }
+    const notice = turn.status === "cancelled"
+      ? "（本轮已停止）"
+      : turn.status === "failed"
+        ? `（本轮失败：${turn.failure ?? "未知原因"}）`
+        : null
+    const assistantContent = [turn.reply, notice].filter(Boolean).join("\n\n")
+    if (assistantContent) {
+      blocks.push([`## 助手`, assistantContent].join("\n"))
+    }
+  }
+  return `${blocks.join("\n\n")}\n`
 }
 
 /** 将本机独立存储 `LocalConversationTurn[]` 投影为通用对话时间线条目。 */

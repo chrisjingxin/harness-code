@@ -582,6 +582,36 @@ export class PersonalStore {
     return entry.writing
   }
 
+  /**
+   * 删除会话的全部个人视图文件（会话草稿、右侧面板、待发队列）并失效内存缓存。
+   * 文件名只由来源、账号、类型与会话 ID 计算，与 workspaceId/projectId 无关，无需授权；
+   * 先等待在途写盘结束再删，避免删除后被回写。供本机会话删除后的清理调用。
+   */
+  async removeConversation(accountId: string, conversationId: string): Promise<void> {
+    const conversationName = this.#name([accountId, "conversation", conversationId])
+    const names = [
+      conversationName,
+      this.#name([accountId, "sessionWorkspace", conversationId]),
+      "prompt-queue-" + conversationName,
+    ]
+    for (const name of names) {
+      const pending = this.#entries.get(name)
+      this.#entries.delete(name)
+      const entry = pending ? await pending.catch(() => null) : null
+      if (entry) while (entry.writing) await entry.writing.catch(() => {})
+      await rm(join(this.#root, `${name}.json`), { force: true }).catch(() => {})
+    }
+    for (const [cacheKey, cached] of this.#permissions) {
+      if (cached.identity.accountId !== accountId) continue
+      // 键形为 `generation:accountId:{JSON}`，解析尾部 JSON 匹配会话键
+      const json = cacheKey.slice(cacheKey.indexOf(":") + 1)
+      try {
+        const key = JSON.parse(json.slice(json.indexOf(":") + 1)) as { conversationId?: unknown }
+        if (key.conversationId === conversationId) this.#permissions.delete(cacheKey)
+      } catch { /* 非会话范围键保持原样 */ }
+    }
+  }
+
   /** 只供主进程确认旧会话是否也记录了相同或重叠的目录。 */
   async otherConversationDirectories(scope: LocalExecutionScope): Promise<readonly string[]> {
     const own = this.#name([scope.accountId, "conversation", scope.conversationId]) + ".json"

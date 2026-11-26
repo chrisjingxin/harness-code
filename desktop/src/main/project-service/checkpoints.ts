@@ -89,6 +89,29 @@ export class CodeCheckpoints {
     return parsed
   }
 
+  /**
+   * 删除指定会话作用域的全部数据：轮次索引文件、该作用域的目录登记与内存预览。
+   * 目录登记按（作用域, 目录）成对保存，仅移除属于本会话作用域的行；
+   * 用户磁盘目录、Git 仓库内容与其他会话数据一律不动。幂等，供删除会话后的清理调用。
+   */
+  async removeConversation(accountId: string, conversationId: string): Promise<void> {
+    const scopeId = this.#scope({ accountId, workspaceId: null, projectId: null, conversationId })
+    this.#previews.delete(scopeId)
+    await rm(this.#index(scopeId), { force: true })
+    const dir = join(this.directory, "directories")
+    const names = await readdir(dir).catch(() => [] as string[])
+    for (const name of names) {
+      if (!/^[0-9a-f]{64}\.json$/.test(name)) continue
+      try {
+        const row: BindingOnDisk = JSON.parse(await readFile(join(dir, name), "utf8"))
+        if (row && row.scope === scopeId) {
+          await rm(join(dir, name), { force: true })
+          this.#registered.delete(digest(JSON.stringify(row)))
+        }
+      } catch { /* 损坏的登记文件交由既有校验路径处理，不阻塞会话清理 */ }
+    }
+  }
+
   /** 绑定过的空闲会话也可能已写入文件。登记保留到应用重启之后。 */
   async register(scope: LocalExecutionScope, directory: DirectoryGrant): Promise<void> {
     const record: BindingOnDisk = { scope: this.#scope(scope), path: directory.path }

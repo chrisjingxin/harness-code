@@ -3,12 +3,13 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 import { inspectDirectory } from "../src/main/local-directory-grants.ts"
 import { CodeCheckpoints } from "../src/main/project-service/checkpoints.ts"
+import { digest } from "../src/main/project-service/git-command.ts"
 
 const scope = { accountId: "user", workspaceId: "team", projectId: "project", conversationId: "mine" }
 const current = () => true
@@ -153,6 +154,56 @@ test("CodeCheckpoints 在无团队个人会话发布到 Project 前后延续同�
     assert.equal(history.turns[0]!.turnId, turnId)
     const diff = await cpAfterPublish.run(publishedScope, grant, { kind: "diff", turnId, path: "app.txt" }, current, noOthers)
     assert.ok(diff.kind === "diff" && diff.text.includes("+v2"))
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})
+
+test("CodeCheckpoints.removeConversation 只清理该会话作用域的轮次记录与目录登记", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "hc257-checkpoints-forget-"))
+  try {
+    const data = join(scratch, "checkpoints")
+    const mine = {
+      accountId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      conversationId: "33333333-3333-4333-8333-333333333333",
+      workspaceId: null,
+      projectId: null,
+    }
+    const other = { ...mine, conversationId: "44444444-4444-4444-8444-444444444444" }
+    const dirA = join(scratch, "dir-a"), dirB = join(scratch, "dir-b")
+    await mkdir(dirA, { recursive: true })
+    await mkdir(dirB, { recursive: true })
+    const grantA = await inspectDirectory(dirA)
+    const grantB = await inspectDirectory(dirB)
+
+    const checkpoints = new CodeCheckpoints(data, "fixture")
+    await checkpoints.register(mine, grantA)
+    await checkpoints.register(other, grantB)
+
+    const scopeId = digest(JSON.stringify(["fixture", mine.accountId, mine.conversationId])).slice(0, 32)
+    const otherId = digest(JSON.stringify(["fixture", other.accountId, other.conversationId])).slice(0, 32)
+    await writeFile(join(data, `${scopeId}.json`), "[]")
+    await writeFile(join(data, `${otherId}.json`), "[]")
+    assert.equal((await readdir(join(data, "directories"))).length, 2)
+
+    await checkpoints.removeConversation(mine.accountId, mine.conversationId)
+
+    // 本会话的索引文件与目录登记被删除；其他会话的数据与共享目录原样保留
+    const remaining = (await readdir(data)).sort()
+    assert.deepEqual(remaining, [`${otherId}.json`, "directories"].sort())
+    const boundFiles = await readdir(join(data, "directories"))
+    assert.equal(boundFiles.length, 1)
+    const bound = JSON.parse(await readFile(join(data, "directories", boundFiles[0]!), "utf8")) as { scope: string; path: string }
+    assert.equal(bound.scope, otherId)
+    assert.equal(await readFile(join(data, `${otherId}.json`), "utf8"), "[]")
+    await assert.rejects(readFile(join(data, `${scopeId}.json`), "utf8"))
+    // 用户磁盘目录本身不动
+    await assert.doesNotReject(readdir(dirA))
+    await assert.doesNotReject(readdir(dirB))
+
+    // 幂等：重复删除与缺失作用域都不报错
+    await checkpoints.removeConversation(mine.accountId, mine.conversationId)
+    await checkpoints.removeConversation("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "55555555-5555-4555-8555-555555555555")
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }

@@ -474,3 +474,179 @@ test("resolveReturnToInboxOnNav 在任务定位跳转看板时保留返回按钮
   assert.equal(resolveReturnToInboxOnNav(true, "inbox"), true)
   assert.equal(resolveReturnToInboxOnNav(false, "board", { preserveReturnToInbox: true }), false)
 })
+
+/**
+ * HC-257 个人栏整理（置顶/已归档/目录分组批量操作）：
+ * 菜单项规划纯函数覆盖 Spec 6.3 的条件与置灰原因，静态渲染验证置顶/已归档区与「含已归档」开关。
+ */
+import {
+  planGroupMenu,
+  planPersonalMenu,
+  type NavigationPersonalEntry,
+  type PersonalNavigationDirectoryGroup,
+  type ProjectNavigationActions,
+} from "../src/ui/navigation/index.tsx"
+
+const personalEntry = (overrides: Partial<NavigationPersonalEntry> = {}): NavigationPersonalEntry => ({
+  conversationId: "conv-p1",
+  title: "个人会话",
+  timeLabel: "10:00",
+  status: "idle",
+  shareStatus: "local_only",
+  directoryLabel: "retail-core",
+  hasDirectory: true,
+  ...overrides,
+})
+
+const allPersonalActions: ProjectNavigationActions = {
+  selectProject: () => {},
+  createProject: () => {},
+  openProjectSettings: () => {},
+  openPage: () => {},
+  selectConversation: () => {},
+  toggleMember: () => {},
+  setSearch: () => {},
+  retry: () => {},
+  openSettings: () => {},
+  renamePersonalConversation: async () => null,
+  publishPersonalConversation: () => {},
+  pinPersonalConversation: async () => null,
+  archivePersonalConversation: async () => null,
+  restorePersonalConversation: async () => null,
+  deletePersonalConversation: async () => null,
+  copyPersonalConversationMarkdown: async () => null,
+  copyPersonalDirectoryPath: async () => null,
+  revealPersonalDirectory: async () => null,
+  archivePersonalGroup: async () => null,
+  deletePersonalGroup: async () => null,
+  newPersonalSessionInDirectory: () => {},
+  setPersonalIncludeArchived: () => {},
+}
+
+test("planPersonalMenu 未归档会话按 Spec 6.3 输出全部菜单项", () => {
+  const items = planPersonalMenu(personalEntry(), allPersonalActions)
+  assert.deepEqual(
+    items.map(item => item.id),
+    ["rename", "pin", "copy-markdown", "copy-directory", "reveal-directory", "publish", "archive", "delete"],
+  )
+  assert.equal(items.find(item => item.id === "pin")?.label, "置顶")
+  assert.equal(items.find(item => item.id === "delete")?.danger, true)
+  assert.ok(items.every(item => !item.disabled))
+})
+
+test("planPersonalMenu 运行中会话置灰归档/删除，已停止共享置灰删除，已归档只出取消归档", () => {
+  const running = planPersonalMenu(personalEntry({ status: "running" }), allPersonalActions)
+  assert.equal(running.find(item => item.id === "archive")?.disabled, true)
+  assert.equal(running.find(item => item.id === "archive")?.disabledReason, "会话正在运行，请先停止")
+  assert.equal(running.find(item => item.id === "delete")?.disabledReason, "会话正在运行，请先停止")
+
+  const stopped = planPersonalMenu(personalEntry({ shareStatus: "stopped" }), allPersonalActions)
+  assert.equal(stopped.find(item => item.id === "delete")?.disabled, true)
+  assert.equal(stopped.find(item => item.id === "delete")?.disabledReason, "该会话在团队侧仍有记录，暂不能删除")
+  assert.equal(stopped.find(item => item.id === "publish"), undefined)
+
+  const archived = planPersonalMenu(personalEntry({ archived: true }), allPersonalActions)
+  assert.deepEqual(
+    archived.map(item => item.id),
+    ["rename", "copy-markdown", "copy-directory", "reveal-directory", "restore", "delete"],
+  )
+})
+
+test("planPersonalMenu 无目录会话隐藏目录项，离线时发布置灰，置顶项按状态切换文案", () => {
+  const noDir = planPersonalMenu(personalEntry({ directoryLabel: "未设置目录", hasDirectory: false }), allPersonalActions)
+  assert.equal(noDir.find(item => item.id === "copy-directory"), undefined)
+  assert.equal(noDir.find(item => item.id === "reveal-directory"), undefined)
+
+  const offline = planPersonalMenu(personalEntry(), allPersonalActions, { offline: true })
+  assert.equal(offline.find(item => item.id === "publish")?.disabled, true)
+  assert.equal(offline.find(item => item.id === "publish")?.disabledReason, "协作服务离线，暂不可发布")
+
+  const pinned = planPersonalMenu(personalEntry({ pinned: true }), allPersonalActions)
+  assert.equal(pinned.find(item => item.id === "pin")?.label, "取消置顶")
+})
+
+test("planGroupMenu 按目录与组内会话产出分组「更多」菜单项", () => {
+  const withDir: PersonalNavigationDirectoryGroup = {
+    directoryKey: "/repo/retail-core",
+    directoryPath: "/repo/retail-core",
+    label: "retail-core",
+    records: [personalEntry()],
+  }
+  assert.deepEqual(
+    planGroupMenu(withDir, allPersonalActions).map(item => item.id),
+    ["new-in-directory", "copy-directory", "reveal-directory", "archive-group", "delete-group"],
+  )
+  assert.equal(planGroupMenu(withDir, allPersonalActions).find(item => item.id === "delete-group")?.danger, true)
+
+  const noDir: PersonalNavigationDirectoryGroup = { ...withDir, directoryPath: null, label: "未设置目录" }
+  assert.deepEqual(
+    planGroupMenu(noDir, allPersonalActions).map(item => item.id),
+    ["archive-group", "delete-group"],
+  )
+})
+
+test("个人空间静态渲染：置顶/已归档区与「含已归档」开关可见，已归档默认折叠", () => {
+  const html = renderToStaticMarkup(createElement(ProjectNavigation, {
+    view: {
+      accountName: "张景新",
+      workspaceName: "平台架构二组协作区",
+      currentWorkspaceId: "ws-1",
+      projects: [],
+      projectsAvailability: { state: "ready" },
+      currentProjectId: null,
+      groups: [],
+      membersAvailability: { state: "ready" },
+      sessionsAvailability: { state: "ready" },
+      search: "",
+      activePage: null,
+      selectedConversationId: null,
+      taskCount: null,
+      activeSpace: "personal",
+      canPublishPersonal: true,
+      personalGroups: [{
+        directoryKey: "/repo/retail-core",
+        directoryPath: "/repo/retail-core",
+        label: "retail-core",
+        records: [personalEntry()],
+      }],
+      pinnedPersonal: [personalEntry({ conversationId: "conv-pin", pinned: true, title: "置顶会话" })],
+      archivedPersonal: [personalEntry({ conversationId: "conv-arc", archived: true, title: "归档会话" })],
+      personalSearch: "",
+      selectedPersonalConversationId: null,
+      publishedSessionCount: 2,
+    },
+    actions: {
+      ...allPersonalActions,
+      setPersonalSearch: () => {},
+    },
+  }))
+  assert.match(html, /置顶/)
+  assert.match(html, /置顶会话/)
+  assert.match(html, /已归档/)
+  assert.match(html, /aria-pressed="false"/)
+  assert.match(html, /目录操作：retail-core/)
+  // 已归档区默认折叠（grp-collapse data-open="0"），目录分组默认展开
+  assert.match(html, /data-open="0"/)
+  assert.match(html, /另有 2 个会话已发布到项目/)
+})
+
+test("planPersonalMenu 依据 hasDirectory 字段而非目录文案判断有无目录", () => {
+  // 目录恰好叫「未设置目录」时，显式字段仍应判为有目录
+  const realDir = planPersonalMenu(
+    personalEntry({ directoryLabel: "未设置目录", hasDirectory: true }),
+    allPersonalActions,
+  )
+  assert.ok(realDir.find(item => item.id === "copy-directory"))
+  assert.ok(realDir.find(item => item.id === "reveal-directory"))
+
+  const unsetDir = planPersonalMenu(
+    personalEntry({ directoryLabel: "未设置目录", hasDirectory: false }),
+    allPersonalActions,
+  )
+  assert.equal(unsetDir.find(item => item.id === "copy-directory"), undefined)
+  assert.equal(unsetDir.find(item => item.id === "reveal-directory"), undefined)
+
+  const missingField = planPersonalMenu(personalEntry({ hasDirectory: undefined }), allPersonalActions)
+  assert.equal(missingField.find(item => item.id === "copy-directory"), undefined)
+  assert.equal(missingField.find(item => item.id === "reveal-directory"), undefined)
+})

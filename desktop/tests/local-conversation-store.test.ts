@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict"
 import { createHash, randomUUID } from "node:crypto"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -227,6 +227,180 @@ test("LocalConversationStore 校验 500 条会话上限并在文件损坏时拒�
     assert.equal((await store.list(USER_A)).ok, false)
     assert.equal((await store.create(USER_A, { workspaceId: null })).ok, false)
     assert.equal(await readFile(join(accountDir, "index.json"), "utf8"), brokenIndex)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("LocalConversationStore 归档/置顶/删除：幂等互斥、不改 updatedAtMs、运行中与共享中拒绝", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc257-local-tidy-"))
+  try {
+    const store = new LocalConversationStore(dir, ORIGIN)
+    const MISSING = "55555555-5555-4555-8555-555555555555"
+
+    // 不存在的会话三种操作统一返回 RESOURCE_NOT_FOUND
+    for (const missing of [
+      await store.setArchived(USER_A, MISSING, true),
+      await store.setPinned(USER_A, MISSING, true),
+      await store.remove(USER_A, MISSING),
+    ]) {
+      assert.equal(missing.ok, false)
+      if (!missing.ok) assert.equal(missing.error.code, "RESOURCE_NOT_FOUND")
+    }
+
+    const created = await store.create(USER_A, { workspaceId: null, title: "整理目标" })
+    assert.equal(created.ok, true)
+    if (!created.ok) return
+    const id = created.value.conversationId
+    const baseline = created.value.updatedAtMs
+
+    // 归档：写 archivedAtMs 且不动 updatedAtMs；重复归档幂等返回原值
+    const archived = await store.setArchived(USER_A, id, true)
+    assert.equal(archived.ok, true)
+    if (!archived.ok) return
+    assert.equal(typeof archived.value.archivedAtMs, "number")
+    assert.equal(archived.value.updatedAtMs, baseline)
+    const archivedAgain = await store.setArchived(USER_A, id, true)
+    assert.equal(archivedAgain.ok && archivedAgain.value.archivedAtMs, archived.value.archivedAtMs)
+
+    // 已归档会话不能置顶
+    const pinArchived = await store.setPinned(USER_A, id, true)
+    assert.equal(pinArchived.ok, false)
+    if (!pinArchived.ok) {
+      assert.equal(pinArchived.error.code, "INVALID_REQUEST")
+      assert.equal(pinArchived.error.message, "已归档会话不能置顶。")
+    }
+
+    // 取消归档幂等且不改动 updatedAtMs
+    const restored = await store.setArchived(USER_A, id, false)
+    assert.equal(restored.ok && restored.value.archivedAtMs, undefined)
+    assert.equal(restored.ok && restored.value.updatedAtMs, baseline)
+    assert.equal((await store.setArchived(USER_A, id, false)).ok, true)
+
+    // 置顶幂等、取消置顶幂等、均不改 updatedAtMs
+    const pinned = await store.setPinned(USER_A, id, true)
+    assert.equal(pinned.ok, true)
+    if (!pinned.ok) return
+    assert.equal(typeof pinned.value.pinnedAtMs, "number")
+    assert.equal(pinned.value.updatedAtMs, baseline)
+    const pinnedAgain = await store.setPinned(USER_A, id, true)
+    assert.equal(pinnedAgain.ok && pinnedAgain.value.pinnedAtMs, pinned.value.pinnedAtMs)
+    const unpinned = await store.setPinned(USER_A, id, false)
+    assert.equal(unpinned.ok && unpinned.value.pinnedAtMs, undefined)
+    assert.equal((await store.setPinned(USER_A, id, false)).ok, true)
+
+    // 归档自动清除置顶
+    assert.equal((await store.setPinned(USER_A, id, true)).ok, true)
+    const reArchived = await store.setArchived(USER_A, id, true)
+    assert.equal(reArchived.ok && reArchived.value.pinnedAtMs, undefined)
+
+    // 写入新轮次自动恢复归档
+    const revived = await store.appendTurn(USER_A, id, {
+      turnId: "revive-1",
+      userText: "归档后继续提问",
+      reply: "已恢复",
+      status: "completed",
+      acceptedAtMs: 1,
+      completedAtMs: 2,
+    })
+    assert.equal(revived.ok && revived.value.record.archivedAtMs, undefined)
+
+    // 运行中会话拒绝归档与删除
+    assert.equal((await store.updateBinding(USER_A, id, { status: "running" })).ok, true)
+    const archiveBusy = await store.setArchived(USER_A, id, true)
+    assert.equal(archiveBusy.ok, false)
+    if (!archiveBusy.ok) {
+      assert.equal(archiveBusy.error.code, "EXECUTION_STATE_CONFLICT")
+      assert.equal(archiveBusy.error.message, "会话正在运行，请先停止后再归档。")
+    }
+    const removeBusy = await store.remove(USER_A, id)
+    assert.equal(removeBusy.ok, false)
+    if (!removeBusy.ok) {
+      assert.equal(removeBusy.error.code, "EXECUTION_STATE_CONFLICT")
+      assert.equal(removeBusy.error.message, "会话正在运行，请先停止后再删除。")
+    }
+    assert.equal((await store.updateBinding(USER_A, id, { status: "idle" })).ok, true)
+
+    // 已发布会话不能归档、置顶或删除；停止共享后删除仍拒绝但归档恢复可用
+    const team = await store.create(USER_A, { workspaceId: WS_A, title: "团队会话" })
+    assert.equal(team.ok, true)
+    if (!team.ok) return
+    assert.equal((await store.markPublished(USER_A, team.value.conversationId, {
+      workspaceId: WS_A,
+      projectId: PROJECT_A,
+      shareMode: "full",
+    })).ok, true)
+    for (const rejected of [
+      await store.setArchived(USER_A, team.value.conversationId, true),
+      await store.setPinned(USER_A, team.value.conversationId, true),
+    ]) {
+      assert.equal(rejected.ok, false)
+      if (!rejected.ok) {
+        assert.equal(rejected.error.code, "INVALID_REQUEST")
+        assert.equal(rejected.error.message, "已发布到项目的会话请在团队空间处理。")
+      }
+    }
+    const removeActive = await store.remove(USER_A, team.value.conversationId)
+    assert.equal(removeActive.ok, false)
+    if (!removeActive.ok) {
+      assert.equal(removeActive.error.code, "INVALID_REQUEST")
+      assert.equal(removeActive.error.message, "该会话在团队侧仍有记录，暂不能删除。")
+    }
+    assert.equal((await store.markSharingStopped(USER_A, team.value.conversationId)).ok, true)
+    const removeStopped = await store.remove(USER_A, team.value.conversationId)
+    assert.equal(removeStopped.ok, false)
+    if (!removeStopped.ok) {
+      assert.equal(removeStopped.error.code, "INVALID_REQUEST")
+      assert.equal(removeStopped.error.message, "该会话在团队侧仍有记录，暂不能删除。")
+    }
+    assert.equal((await store.setArchived(USER_A, team.value.conversationId, true)).ok, true)
+
+    // local_only 空闲会话删除成功且正文一并清除
+    assert.equal((await store.remove(USER_A, id)).ok, true)
+    assert.equal((await store.get(USER_A, id)).ok, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("LocalConversationStore isRecord 接受缺省的归档/置顶字段并拒绝非数值", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc257-isrecord-"))
+  try {
+    const store = new LocalConversationStore(dir, ORIGIN)
+    const originHash = createHash("sha256").update(ORIGIN).digest("hex")
+    const accountDir = join(dir, "workbench", "local-conversations", originHash, USER_A)
+    await mkdir(accountDir, { recursive: true })
+    const base = {
+      conversationId: randomUUID(),
+      workspaceId: null,
+      projectId: null,
+      shareMode: null,
+      shareStatus: "local_only",
+      title: "校验样本",
+      directoryPath: null,
+      providerId: null,
+      status: "idle",
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      publishedAtMs: null,
+      stoppedAtMs: null,
+      syncedSequence: 0,
+    }
+    await writeFile(join(accountDir, "index.json"), JSON.stringify({
+      version: 1,
+      records: [
+        { ...base, archivedAtMs: 123 },
+        { ...base, conversationId: randomUUID(), pinnedAtMs: 456 },
+      ],
+    }))
+    const listed = await store.list(USER_A)
+    assert.equal(listed.ok && listed.value.length, 2)
+
+    await writeFile(join(accountDir, "index.json"), JSON.stringify({
+      version: 1,
+      records: [{ ...base, archivedAtMs: "昨天" }],
+    }))
+    assert.equal((await store.list(USER_A)).ok, false)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

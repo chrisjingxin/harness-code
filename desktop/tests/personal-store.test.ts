@@ -3,7 +3,7 @@
  * 并发在途请求去重、身份代次切换淘汰以及授权失败清理。
  */
 import assert from "node:assert/strict"
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -15,7 +15,7 @@ import type {
 import type { CollaborationState } from "@workbench/collaboration-client"
 import { PersonalStore } from "../src/main/personal-store.ts"
 import { LocalConversationStore } from "../src/main/local-conversation-store.ts"
-import type { ConversationPersonal, ProjectNavigationPersonal } from "../src/shared/index.ts"
+import type { ConversationPersonal, ProjectNavigationPersonal, ProjectPersonalRecord } from "../src/shared/index.ts"
 
 const ORIGIN = "http://127.0.0.1:9999"
 const USER_A = "11111111111111111111111111111111"
@@ -656,3 +656,65 @@ test("HC-239 PersonalStore 支持 AccountPersonal.activeView 与个人会话发�
   }
 })
 
+
+test("PersonalStore.removeConversation 删除会话三类文件并使内存缓存失效", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hc257-personal-remove-"))
+  try {
+    const mock = createFakeCollaborationState({ generation: 1, accountId: USER_A, workspaces: [WORKSPACE_ID] })
+    const store = new PersonalStore(mock.state, ORIGIN, dir)
+    const convKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    const panelKey = { kind: "sessionWorkspace", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID } as const
+    const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+    const otherConvId = "55555555-5555-4555-8555-555555555555"
+    const otherKey = { kind: "conversation", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: otherConvId } as const
+    const requestId = "44444444-4444-4444-8444-444444444444"
+
+    const panelData: ProjectPersonalRecord = {
+      personal: {
+        view: {
+          dockOpen: true,
+          dockWidthPx: 320,
+          panel: "files",
+          selectedPath: null,
+          fileTabs: [],
+          activeFilePath: null,
+          selectedChanges: [],
+          commitMessage: "",
+        },
+        expanded: [],
+        centralPaths: [],
+        activeCentral: null,
+        diffPath: null,
+      },
+      positions: [],
+    }
+    // save 依赖已确认授权缓存，先经 load 完成授权再写入
+    assert.equal((await store.load(convKey)).ok, true)
+    assert.equal((await store.load(panelKey)).ok, true)
+    assert.equal((await store.load(otherKey)).ok, true)
+    assert.equal((await store.save(convKey, 1, sampleConversation)).ok, true)
+    assert.equal((await store.save(panelKey, 1, panelData)).ok, true)
+    assert.equal((await store.save(otherKey, 1, sampleConversation)).ok, true)
+    const queued = await store.conversationPromptQueue(scope, {
+      items: [{ requestId, text: "待发消息", referenceIds: [], attachments: [] }],
+    })
+    assert.equal(queued.ok, true)
+    assert.equal((await readdir(join(dir, "personal-view-v2"))).length, 4)
+
+    await store.removeConversation(USER_A, CONV_ID)
+
+    // 只剩另一个会话的文件；同键 load 返回空记录，另一会话不受影响
+    assert.equal((await readdir(join(dir, "personal-view-v2"))).length, 1)
+    assert.deepEqual(await store.load(convKey), { ok: true, value: { revision: 0, data: null } })
+    assert.deepEqual(await store.load(panelKey), { ok: true, value: { revision: 0, data: null } })
+    assert.deepEqual(await store.conversationPromptQueue(scope), { ok: true, value: { items: [] } })
+    const kept = await store.load(otherKey)
+    assert.equal(kept.ok && kept.value.revision, 1)
+
+    // 幂等：重复删除与缺失文件都不报错
+    await store.removeConversation(USER_A, CONV_ID)
+    await store.removeConversation(USER_A, "66666666-6666-4666-8666-666666666666")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

@@ -6,7 +6,15 @@ import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import type { ThemeMode, WindowState } from "../../shared/index.js"
 import { ProjectNavigation, WorkbenchLayout, buildMemberGroups } from "../../ui/index.js"
-import type { NavigationMember, NavigationPageKind, NavigationSessionEntry, ProjectNavigationActions } from "../../ui/index.js"
+import type {
+  NavigationMember,
+  NavigationPageKind,
+  NavigationPersonalEntry,
+  NavigationSessionEntry,
+  NavigationSpaceKind,
+  PersonalNavigationDirectoryGroup,
+  ProjectNavigationActions,
+} from "../../ui/index.js"
 import "../../ui/theme.css"
 import "../../ui/navigation/navigation.css"
 import "../../ui/layout/layout.css"
@@ -53,6 +61,40 @@ const projects: readonly Fixture[] = [
     entries: [entry("c-10", self, "下线检查清单", "10-21", { text: "本机", tone: "neutral" })],
   },
 ]
+/** HC-257 演示数据：置顶、目录分组与已归档个人会话，用于预览新区域与分组「更多」菜单。 */
+const personalEntry = (
+  conversationId: string,
+  title: string,
+  timeLabel: string,
+  overrides: Partial<NavigationPersonalEntry> = {},
+): NavigationPersonalEntry => ({ conversationId, title, timeLabel, status: "idle", shareStatus: "local_only", ...overrides })
+
+const personalPinned: readonly NavigationPersonalEntry[] = [
+  personalEntry("pc-pin-1", "对账脚本线上排查", "09:41", { pinned: true, directoryLabel: "retail-core", hasDirectory: true, status: "running" }),
+  personalEntry("pc-pin-2", "每日构建失败跟踪", "昨天", { pinned: true, directoryLabel: "未设置目录" }),
+]
+const personalArchived: readonly NavigationPersonalEntry[] = [
+  personalEntry("pc-arc-1", "旧网关压测记录", "11-02", { archived: true, directoryLabel: "gateway-bench", hasDirectory: true }),
+  personalEntry("pc-arc-2", "移动端灰度方案草稿", "10-28", { archived: true, directoryLabel: "未设置目录", shareStatus: "stopped" }),
+]
+const personalGroupsFixture: readonly PersonalNavigationDirectoryGroup[] = [
+  {
+    directoryKey: "/Users/dev/Projects/retail-core",
+    directoryPath: "/Users/dev/Projects/retail-core",
+    label: "retail-core",
+    records: [
+      personalEntry("pc-1", "支付链路超时复盘", "16:20", { hasDirectory: true }),
+      personalEntry("pc-2", "结算任务幂等改造", "15:05", { shareStatus: "stopped", hasDirectory: true }),
+      personalEntry("pc-3", "库存扣减回滚脚本", "11-19", { hasDirectory: true }),
+    ],
+  },
+  {
+    directoryKey: "__unset__",
+    directoryPath: null,
+    label: "未设置目录",
+    records: [personalEntry("pc-4", "随手记的接口问题", "11-15")],
+  },
+]
 const pageNames: Record<Page["kind"], string> = {
   new: "新对话准备页", conversation: "会话", board: "项目看板", tasks: "项目任务", info: "项目资料", knowledge: "团队知识",
 }
@@ -66,6 +108,10 @@ function Preview() {
     "p-payment": { page: { kind: "conversation", conversationId: "c-1" }, expandedMembers: [], selfCollapsed: false },
   })
   const [search, setSearch] = useState("")
+  const [space, setSpace] = useState<NavigationSpaceKind>("personal")
+  const [personalSearch, setPersonalSearch] = useState("")
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const [selectedPersonalId, setSelectedPersonalId] = useState<string | null>("pc-1")
   const [settings, setSettings] = useState(false)
   const [notice, setNotice] = useState("")
   const [left, setLeft] = useState({ open: true, width: 280 })
@@ -104,6 +150,23 @@ function Preview() {
     setSearch,
     retry: () => {},
     openSettings: () => setSettings(true),
+    selectSpace: next => { setSpace(next); setNotice("") },
+    createPersonalSession: () => { setSelectedPersonalId(null); setNotice("演示：新建个人会话") },
+    selectPersonalConversation: id => { setSelectedPersonalId(id); setNotice("") },
+    renamePersonalConversation: async () => { setNotice("演示：重命名个人会话"); return null },
+    publishPersonalConversation: () => { setNotice("演示：发布到项目…") },
+    pinPersonalConversation: async () => { setNotice("演示：置顶/取消置顶"); return null },
+    archivePersonalConversation: async () => { setNotice("演示：归档会话"); return null },
+    restorePersonalConversation: async () => { setNotice("演示：取消归档"); return null },
+    deletePersonalConversation: async () => { setNotice("演示：删除会话"); return null },
+    copyPersonalConversationMarkdown: async () => { setNotice("演示：复制为 Markdown"); return null },
+    copyPersonalDirectoryPath: async () => { setNotice("演示：复制目录路径"); return null },
+    revealPersonalDirectory: async () => { setNotice("演示：在文件管理器中显示"); return null },
+    archivePersonalGroup: async () => { setNotice("演示：归档整组"); return null },
+    deletePersonalGroup: async () => { setNotice("演示：删除整组会话"); return null },
+    newPersonalSessionInDirectory: () => { setSelectedPersonalId(null); setNotice("演示：在此目录新建会话") },
+    setPersonalSearch: text => setPersonalSearch(text),
+    setPersonalIncludeArchived: next => setIncludeArchived(next),
   }
   return (
     <WorkbenchLayout
@@ -121,6 +184,15 @@ function Preview() {
         activePage: page.kind,
         selectedConversationId: page.kind === "conversation" ? page.conversationId : null,
         taskCount: projectId === "p-payment" ? 2 : null,
+        activeSpace: space,
+        canPublishPersonal: true,
+        personalGroups: personalGroupsFixture,
+        pinnedPersonal: personalPinned,
+        archivedPersonal: personalArchived,
+        personalIncludeArchived: includeArchived,
+        personalSearch,
+        selectedPersonalConversationId: selectedPersonalId,
+        publishedSessionCount: 3,
       }} actions={actions} />}
       center={<section className="hc217-page" aria-label="中央页面">
         <h1>{selected?.title ?? pageNames[page.kind]}</h1>

@@ -9,7 +9,7 @@ import { bindWorkspaceIpc } from "./workspace-ipc.js"
  * - 保留 `bindLocalExecutionIpc` 装配接点供独立本机 ACP 执行桥接使用。
  * - 所有 `CollaborationAppsHost` 通道均由编译期映射表逐项绑定，不再使用绕过类型检查的动态下标强转。
  */
-import { app, dialog } from "electron"
+import { app, dialog, shell } from "electron"
 import type { BrowserWindow } from "electron"
 import { createHash, randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
@@ -380,7 +380,16 @@ export function bindCollaborationIpc(
   },personal)
   const unbindKnowledgeDrafts=bindKnowledgeDraftIpc(window,trustedUrl,knowledgeDrafts)
   const unbindExecution = execution ? bindLocalExecutionIpc(window, trustedUrl, execution) : () => {}
-  const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads)
+  const unbindLocalConversations = bindLocalConversationsIpc(window, trustedUrl, identity, localConversations, uploads, undefined, {
+    cleanup: execution ? {
+      isBusy: (accountId, conversationId) => execution.hasActiveTurn(accountId, conversationId),
+      forget: async (accountId, conversationId) => {
+        await execution.forgetConversation(accountId, conversationId).catch(() => {})
+        await personal.removeConversation(accountId, conversationId).catch(() => {})
+      },
+    } : undefined,
+    revealPath: path => shell.openPath(path),
+  })
   const unbindWorkspace = bindWorkspaceIpc(window, trustedUrl, identity)
   const unbindOrganization = bindOrganizationIpc(window, trustedUrl, identity)
   const unbindProjectUpdates = bindProjectUpdatesIpc(window, trustedUrl, identity, origin ?? "", workspaceId => context.knowledge.invalidate(workspaceId))

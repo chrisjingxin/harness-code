@@ -119,6 +119,8 @@ function isRecord(value: unknown): value is LocalConversationRecord {
     && typeof item.updatedAtMs === "number" && Number.isFinite(item.updatedAtMs)
     && (item.publishedAtMs === null || (typeof item.publishedAtMs === "number" && Number.isFinite(item.publishedAtMs)))
     && (item.stoppedAtMs === null || (typeof item.stoppedAtMs === "number" && Number.isFinite(item.stoppedAtMs)))
+    && (item.archivedAtMs === undefined || (typeof item.archivedAtMs === "number" && Number.isFinite(item.archivedAtMs)))
+    && (item.pinnedAtMs === undefined || (typeof item.pinnedAtMs === "number" && Number.isFinite(item.pinnedAtMs)))
     && typeof item.syncedSequence === "number" && Number.isSafeInteger(item.syncedSequence) && item.syncedSequence >= 0
 }
 
@@ -779,8 +781,10 @@ export class LocalConversationStore {
           const compact = turnInput.userText.replace(/\s+/g, " ").trim()
           if (compact) nextTitle = [...compact].slice(0, 24).join("")
         }
+        // 归档中的会话收到新轮次即恢复为普通会话
+        const { archivedAtMs: _archivedAtMs, ...recordRest } = existing
         const updatedRecord: LocalConversationRecord = {
-          ...existing,
+          ...recordRest,
           title: nextTitle,
           status: turnInput.status === "failed" ? "error" : "idle",
           updatedAtMs: turnInput.completedAtMs,
@@ -800,6 +804,85 @@ export class LocalConversationStore {
     })
   }
 
+  /** 归档或恢复个人会话；运行中与已发布活跃会话拒绝，归档同时清除置顶，均不动 updatedAtMs。 */
+  async setArchived(
+    accountId: string,
+    conversationId: string,
+    archived: boolean,
+  ): Promise<CollaborationResult<LocalConversationRecord>> {
+    if (!validAccountId(accountId) || !validUuid(conversationId)) {
+      return identityError("INVALID_REQUEST", "会话标识无效。")
+    }
+    return this.#enqueue(accountId, async () => {
+      try {
+        const index = await this.#readIndex(accountId)
+        const idx = index.records.findIndex(item => item.conversationId === conversationId)
+        if (idx < 0) return identityError("RESOURCE_NOT_FOUND", "本机会话不存在。")
+        const existing = index.records[idx]!
+        if (!archived) {
+          if (existing.archivedAtMs === undefined) return ok(structuredClone(existing))
+          const { archivedAtMs: _archivedAtMs, ...restored } = existing
+          index.records[idx] = restored
+          await this.#writeIndex(accountId, index)
+          return ok(structuredClone(restored))
+        }
+        if (existing.status === "running" || existing.status === "waiting_approval") {
+          return identityError("EXECUTION_STATE_CONFLICT", "会话正在运行，请先停止后再归档。")
+        }
+        if (existing.shareStatus === "active") {
+          return identityError("INVALID_REQUEST", "已发布到项目的会话请在团队空间处理。")
+        }
+        if (existing.archivedAtMs !== undefined) return ok(structuredClone(existing))
+        const { pinnedAtMs: _pinnedAtMs, ...rest } = existing
+        const updated: LocalConversationRecord = { ...rest, archivedAtMs: Date.now() }
+        index.records[idx] = updated
+        await this.#writeIndex(accountId, index)
+        return ok(structuredClone(updated))
+      } catch (error) {
+        return this.#wrapError(error, "无法更新会话归档状态。")
+      }
+    })
+  }
+
+  /** 置顶或取消置顶个人会话；已归档与已发布活跃会话拒绝，均不动 updatedAtMs。 */
+  async setPinned(
+    accountId: string,
+    conversationId: string,
+    pinned: boolean,
+  ): Promise<CollaborationResult<LocalConversationRecord>> {
+    if (!validAccountId(accountId) || !validUuid(conversationId)) {
+      return identityError("INVALID_REQUEST", "会话标识无效。")
+    }
+    return this.#enqueue(accountId, async () => {
+      try {
+        const index = await this.#readIndex(accountId)
+        const idx = index.records.findIndex(item => item.conversationId === conversationId)
+        if (idx < 0) return identityError("RESOURCE_NOT_FOUND", "本机会话不存在。")
+        const existing = index.records[idx]!
+        if (!pinned) {
+          if (existing.pinnedAtMs === undefined) return ok(structuredClone(existing))
+          const { pinnedAtMs: _pinnedAtMs, ...restored } = existing
+          index.records[idx] = restored
+          await this.#writeIndex(accountId, index)
+          return ok(structuredClone(restored))
+        }
+        if (existing.archivedAtMs !== undefined) {
+          return identityError("INVALID_REQUEST", "已归档会话不能置顶。")
+        }
+        if (existing.shareStatus === "active") {
+          return identityError("INVALID_REQUEST", "已发布到项目的会话请在团队空间处理。")
+        }
+        if (existing.pinnedAtMs !== undefined) return ok(structuredClone(existing))
+        const updated: LocalConversationRecord = { ...existing, pinnedAtMs: Date.now() }
+        index.records[idx] = updated
+        await this.#writeIndex(accountId, index)
+        return ok(structuredClone(updated))
+      } catch (error) {
+        return this.#wrapError(error, "无法更新会话置顶状态。")
+      }
+    })
+  }
+
   async remove(accountId: string, conversationId: string): Promise<CollaborationResult<null>> {
     if (!validAccountId(accountId) || !validUuid(conversationId)) {
       return identityError("INVALID_REQUEST", "会话标识无效。")
@@ -807,11 +890,17 @@ export class LocalConversationStore {
     return this.#enqueue(accountId, async () => {
       try {
         const index = await this.#readIndex(accountId)
-        const nextRecords = index.records.filter(item => item.conversationId !== conversationId)
-        if (nextRecords.length === index.records.length) {
+        const existing = index.records.find(item => item.conversationId === conversationId)
+        if (!existing) {
           return identityError("RESOURCE_NOT_FOUND", "本机会话不存在。")
         }
-        index.records = nextRecords
+        if (existing.status === "running" || existing.status === "waiting_approval") {
+          return identityError("EXECUTION_STATE_CONFLICT", "会话正在运行，请先停止后再删除。")
+        }
+        if (existing.shareStatus !== "local_only") {
+          return identityError("INVALID_REQUEST", "该会话在团队侧仍有记录，暂不能删除。")
+        }
+        index.records = index.records.filter(item => item.conversationId !== conversationId)
         await this.#writeIndex(accountId, index)
         await rm(this.#detailPath(accountId, conversationId), { force: true })
         return ok(null)

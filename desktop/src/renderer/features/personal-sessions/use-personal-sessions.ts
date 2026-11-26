@@ -45,6 +45,7 @@ import { EMPTY_PERSONAL_STATE, applyConversationPersonalChange } from "../sessio
 import { useLocalDirectory } from "../session/use-local-directory.js"
 import { useLocalExecution } from "../session/use-local-execution.js"
 import {
+  conversationToMarkdown,
   groupPersonalRecordsByDirectory,
   localRecordToConversationSummary,
   localTurnsToTimelineEntries,
@@ -603,11 +604,13 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     })
   }, [selectedRecord, executionScope, localExecutionPort, selectedAvailability?.available])
 
-  // 个人栏位展示所有未处于 active 共享态的个人会话，按工程目录折叠分组（不按团队筛选）。
+  // 个人栏位展示所有未处于 active 共享态的个人会话：置顶区与已归档区独立列出，其余按工程目录折叠分组（不按团队筛选）。
   const personalPartition = useMemo(() => {
-    const { personal, publishedCount } = partitionPersonalRecords(records)
+    const { pinned, personal, archived, publishedCount } = partitionPersonalRecords(records)
     return {
+      pinned,
       personal,
+      archived,
       publishedCount,
       groups: groupPersonalRecordsByDirectory(personal),
     }
@@ -760,6 +763,227 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
       setDirectorySelectionRevision(v => v + 1)
     }).catch(() => {})
   }, [localConversations])
+
+  /** 将宿主返回的最新记录写回列表与详情缓存（与 renameConversation 同步记录的方式一致）。 */
+  const applyUpdatedRecord = useCallback((record: LocalConversationRecord) => {
+    setRecords(prev => prev.map(item => (item.conversationId === record.conversationId ? record : item)))
+    setDetailsById(prev => {
+      const existing = prev[record.conversationId]
+      if (!existing?.detail) return prev
+      return {
+        ...prev,
+        [record.conversationId]: { ...existing, detail: { ...existing.detail, record } },
+      }
+    })
+  }, [])
+
+  /** 会话被删除后按 Spec 第 8 节清理列表、详情与个人运行时缓存，选中项被删时回到新建页。 */
+  const removeConversationsFromState = useCallback((conversationIds: readonly string[]) => {
+    const idSet = new Set(conversationIds)
+    setRecords(prev => prev.filter(item => !idSet.has(item.conversationId)))
+    setDetailsById(prev => {
+      const next = { ...prev }
+      let changed = false
+      for (const id of conversationIds) {
+        if (id in next) {
+          delete next[id]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    const nextRuntimes = { ...personalRuntimesRef.current }
+    let runtimeChanged = false
+    for (const id of conversationIds) {
+      if (id in nextRuntimes) {
+        delete nextRuntimes[id]
+        runtimeChanged = true
+      }
+    }
+    if (runtimeChanged) {
+      personalRuntimesRef.current = nextRuntimes
+      setPersonalRuntimes(nextRuntimes)
+    }
+    setSelectedConversationId(current => (current && idSet.has(current) ? null : current))
+    setCreateError(null)
+  }, [])
+
+  /** 渲染层判断运行中：仅依据索引记录 `status`，真正的拦截以主进程返回错误为准。 */
+  const isRecordRunning = (record: LocalConversationRecord | undefined): boolean =>
+    record?.status === "running" || record?.status === "waiting_approval"
+
+  const pinConversation = useCallback(async (conversationId: string, pinned: boolean): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const res = await localConversations.setPinned(conversationId, pinned).catch(() => null)
+    if (!res) {
+      onNotify?.(pinned ? "会话置顶失败，请重试。" : "取消置顶失败，请重试。")
+      return pinned ? "会话置顶失败，请重试。" : "取消置顶失败，请重试。"
+    }
+    if (!res.ok) {
+      onNotify?.(res.error.message)
+      return res.error.message
+    }
+    if (mountedRef.current) applyUpdatedRecord(res.value)
+    return null
+  }, [localConversations, applyUpdatedRecord, onNotify])
+
+  const archiveConversation = useCallback(async (conversationId: string): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const res = await localConversations.setArchived(conversationId, true).catch(() => null)
+    if (!res || !res.ok) {
+      const message = !res ? "归档会话失败，请重试。" : res.error.message
+      onNotify?.(message)
+      return message
+    }
+    if (mountedRef.current) applyUpdatedRecord(res.value)
+    onNotify?.(`已归档「${res.value.title || "新会话"}」`)
+    return null
+  }, [localConversations, applyUpdatedRecord, onNotify])
+
+  const restoreConversation = useCallback(async (conversationId: string): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const res = await localConversations.setArchived(conversationId, false).catch(() => null)
+    if (!res || !res.ok) {
+      const message = !res ? "取消归档失败，请重试。" : res.error.message
+      onNotify?.(message)
+      return message
+    }
+    if (mountedRef.current) applyUpdatedRecord(res.value)
+    return null
+  }, [localConversations, applyUpdatedRecord, onNotify])
+
+  const deleteConversation = useCallback(async (conversationId: string): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const title = recordsRef.current.find(item => item.conversationId === conversationId)?.title
+    const res = await localConversations.remove(conversationId).catch(() => null)
+    if (!res || !res.ok) {
+      const message = !res ? "删除会话失败，请重试。" : res.error.message
+      onNotify?.(message)
+      return message
+    }
+    if (mountedRef.current) removeConversationsFromState([conversationId])
+    onNotify?.(`已删除「${title || "新会话"}」`)
+    return null
+  }, [localConversations, removeConversationsFromState, onNotify])
+
+  /**
+   * 逐条串行归档一组会话（Spec 第 7 节）：跳过已归档 / active / 运行中会话，
+   * 单个失败不中断其余项，结束后汇总提示，全部失败时返回首条失败原因。
+   */
+  const archiveConversations = useCallback(async (conversationIds: readonly string[]): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    let done = 0
+    let skipped = 0
+    let failed = 0
+    let firstError: string | null = null
+    for (const conversationId of conversationIds) {
+      const record = recordsRef.current.find(item => item.conversationId === conversationId)
+      if (!record || record.archivedAtMs !== undefined || record.shareStatus === "active" || isRecordRunning(record)) {
+        skipped += 1
+        continue
+      }
+      const res = await localConversations.setArchived(conversationId, true).catch(() => null)
+      if (res?.ok) {
+        done += 1
+      } else {
+        failed += 1
+        if (!firstError) firstError = res ? res.error.message : "归档会话失败，请重试。"
+      }
+    }
+    if (mountedRef.current) await reloadList()
+    if (failed === conversationIds.length && conversationIds.length > 0) {
+      onNotify?.(firstError ?? "归档会话失败，请重试。")
+      return firstError ?? "归档会话失败，请重试。"
+    }
+    const summary = `已归档 ${done} 条${skipped ? `，跳过 ${skipped} 条` : ""}${failed ? `，失败 ${failed} 条` : ""}`
+    onNotify?.(summary)
+    return null
+  }, [localConversations, reloadList, onNotify])
+
+  /**
+   * 逐条串行删除一组会话（Spec 第 7 节）：跳过 active / 已停止共享 / 运行中会话，
+   * 成功的条目从列表、详情与个人运行时缓存移除，选中项被删时回到新建页。
+   */
+  const deleteConversations = useCallback(async (conversationIds: readonly string[]): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    let done = 0
+    let skipped = 0
+    let failed = 0
+    let firstError: string | null = null
+    const deletedIds: string[] = []
+    for (const conversationId of conversationIds) {
+      const record = recordsRef.current.find(item => item.conversationId === conversationId)
+      if (!record || record.shareStatus !== "local_only" || isRecordRunning(record)) {
+        skipped += 1
+        continue
+      }
+      const res = await localConversations.remove(conversationId).catch(() => null)
+      if (res?.ok) {
+        done += 1
+        deletedIds.push(conversationId)
+      } else {
+        failed += 1
+        if (!firstError) firstError = res ? res.error.message : "删除会话失败，请重试。"
+      }
+    }
+    if (deletedIds.length && mountedRef.current) removeConversationsFromState(deletedIds)
+    if (mountedRef.current) await reloadList()
+    if (failed === conversationIds.length && conversationIds.length > 0) {
+      onNotify?.(firstError ?? "删除会话失败，请重试。")
+      return firstError ?? "删除会话失败，请重试。"
+    }
+    const summary = `已删除 ${done} 条${skipped ? `，跳过 ${skipped} 条` : ""}${failed ? `，失败 ${failed} 条` : ""}`
+    onNotify?.(summary)
+    return null
+  }, [localConversations, removeConversationsFromState, reloadList, onNotify])
+
+  const copyConversationMarkdown = useCallback(async (conversationId: string): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const res = await localConversations.get(conversationId).catch(() => null)
+    if (!res || !res.ok) {
+      const message = !res ? "读取会话内容失败，请重试。" : res.error.message
+      onNotify?.(message)
+      return message
+    }
+    const markdown = conversationToMarkdown(
+      res.value.record.title || "新会话",
+      res.value.turns,
+      { historyTrimmed: res.value.historyTrimmed },
+    )
+    const copied = await host.copyText(markdown).then(() => true).catch(() => false)
+    if (!copied) {
+      onNotify?.("复制到剪贴板失败，请重试。")
+      return "复制到剪贴板失败，请重试。"
+    }
+    onNotify?.("已复制为 Markdown")
+    return null
+  }, [localConversations, host, onNotify])
+
+  const copyDirectoryPath = useCallback(async (conversationId: string): Promise<string | null> => {
+    const directoryPath = recordsRef.current.find(item => item.conversationId === conversationId)?.directoryPath?.trim()
+    if (!directoryPath) {
+      onNotify?.("该会话尚未绑定工作目录。")
+      return "该会话尚未绑定工作目录。"
+    }
+    const copied = await host.copyText(directoryPath).then(() => true).catch(() => false)
+    if (!copied) {
+      onNotify?.("复制目录路径失败，请重试。")
+      return "复制目录路径失败，请重试。"
+    }
+    onNotify?.("已复制目录路径")
+    return null
+  }, [host, onNotify])
+
+  const revealDirectory = useCallback(async (conversationId: string): Promise<string | null> => {
+    if (!localConversations) return "本机会话存储尚未启用。"
+    const res = await localConversations.revealDirectory(conversationId).catch(() => null)
+    if (!res || !res.ok) {
+      const message = !res ? "无法打开该目录。" : res.error.message
+      onNotify?.(message)
+      return message
+    }
+    return null
+  }, [localConversations, onNotify])
 
   const appendLocalAttachments = useCallback((conversationId: string, choose: () => Promise<readonly string[]>) => {
     const rec = recordsRef.current.find(item => item.conversationId === conversationId)
@@ -1008,9 +1232,18 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     personalPartition,
     selectedConversationId,
     selectConversation: (conversationId: string | null) => setSelectedConversationId(conversationId),
-    startNewDraft: () => {
+    startNewDraft: (init?: { readonly directoryPath?: string; readonly providerId?: string | null }) => {
       setSelectedConversationId(null)
       setCreateError(null)
+      // 供目录分组菜单「在此目录新建会话」预填目录与 Agent；无参调用保持原行为。
+      if (init) {
+        setNewDraft(prev => ({
+          ...prev,
+          directoryPath: init.directoryPath ?? null,
+          providerId: init.providerId ?? null,
+          revision: prev.revision + 1,
+        }))
+      }
     },
     selectedRecord,
     selectedSummary,
@@ -1044,6 +1277,15 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     renameConversation,
     chooseSessionDirectory,
     selectSessionDirectory,
+    pinConversation,
+    archiveConversation,
+    restoreConversation,
+    deleteConversation,
+    archiveConversations,
+    deleteConversations,
+    copyConversationMarkdown,
+    copyDirectoryPath,
+    revealDirectory,
     chooseLocalFiles: (id: string) => appendLocalAttachments(id, () => host.chooseFiles()),
     chooseLocalDirectories: (id: string) => appendLocalAttachments(id, () => host.chooseContextDirectories()),
     openChangesPanel: (id: string) => {

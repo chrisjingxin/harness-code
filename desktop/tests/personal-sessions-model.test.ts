@@ -17,6 +17,7 @@ import {
   mergeLoadedPersonalRuntime,
   projectLocalConversationHistory,
   partitionPersonalRecords,
+  conversationToMarkdown,
   resolvePublishTargets,
   shouldPersistAgentTitle,
   type PersonalRuntimeState,
@@ -79,6 +80,25 @@ test("partitionPersonalRecords 在个人栏位展示全部未共享及已停止�
 
   const result = partitionPersonalRecords(records)
   assert.deepEqual(result.personal.map(r => r.conversationId), ["solo-1", "ws1-local", "ws1-stopped", "ws2-local"])
+  assert.deepEqual(result.pinned, [])
+  assert.deepEqual(result.archived, [])
+  assert.equal(result.publishedCount, 1)
+})
+
+test("partitionPersonalRecords 置顶与归档分区各自排序且不参与个人分组", () => {
+  const records: LocalConversationRecord[] = [
+    makeRecord({ conversationId: "plain", workspaceId: null, shareStatus: "local_only" }),
+    makeRecord({ conversationId: "pin-old", workspaceId: null, shareStatus: "local_only", pinnedAtMs: 100 }),
+    makeRecord({ conversationId: "pin-new", workspaceId: null, shareStatus: "stopped", pinnedAtMs: 300 }),
+    makeRecord({ conversationId: "arc-old", workspaceId: null, shareStatus: "local_only", archivedAtMs: 50 }),
+    makeRecord({ conversationId: "arc-new", workspaceId: null, shareStatus: "local_only", archivedAtMs: 400 }),
+    makeRecord({ conversationId: "ws-active", workspaceId: "ws-1", shareStatus: "active", pinnedAtMs: 500 }),
+  ]
+
+  const result = partitionPersonalRecords(records)
+  assert.deepEqual(result.pinned.map(r => r.conversationId), ["pin-new", "pin-old"])
+  assert.deepEqual(result.personal.map(r => r.conversationId), ["plain"])
+  assert.deepEqual(result.archived.map(r => r.conversationId), ["arc-new", "arc-old"])
   assert.equal(result.publishedCount, 1)
 })
 
@@ -92,6 +112,93 @@ test("groupPersonalRecordsByDirectory 按目录分组并处理未设置目录与
   assert.equal(groups[0]?.label, "app-a")
   assert.deepEqual(groups[0]?.records.map(r => r.conversationId), ["c-new", "c-old"])
   assert.equal(groups[1]?.label, "未设置目录")
+})
+
+test("conversationToMarkdown 按轮次升序输出用户/追加/助手小节与终态标记", () => {
+  const turns: LocalConversationTurn[] = [
+    makeTurn({ turnId: "t-2", sequenceStart: 3, userText: "再确认一遍", reply: "复核无误。" }),
+    makeTurn({
+      turnId: "t-1",
+      sequenceStart: 1,
+      userText: "检查接口",
+      reply: "已检查完成。",
+      followUps: [{ text: "顺便看下超时", occurredAtMs: 1_700_000_000_300 }],
+    }),
+    makeTurn({ turnId: "t-3", sequenceStart: 5, userText: "停一下", reply: "", status: "cancelled" }),
+  ]
+  const md = conversationToMarkdown("联调记录", turns)
+  assert.equal(
+    md,
+    [
+      "# 联调记录",
+      "",
+      "## 用户",
+      "检查接口",
+      "",
+      "## 用户（追加）",
+      "顺便看下超时",
+      "",
+      "## 助手",
+      "已检查完成。",
+      "",
+      "## 用户",
+      "再确认一遍",
+      "",
+      "## 助手",
+      "复核无误。",
+      "",
+      "## 用户",
+      "停一下",
+      "",
+      "## 助手",
+      "（本轮已停止）",
+      "",
+    ].join("\n"),
+  )
+})
+
+test("conversationToMarkdown 覆盖失败标记、附件/图片行与历史折叠提示，且不输出绝对路径或工具信息", () => {
+  const turns: LocalConversationTurn[] = [
+    makeTurn({
+      turnId: "t-1",
+      sequenceStart: 1,
+      userText: "看下这两个文件",
+      reply: "",
+      status: "failed",
+      failure: "额度不足",
+      attachments: [
+        { label: "main.ts", kind: "file", path: "/abs/path/to/main.ts" },
+        { label: "docs", kind: "directory", path: "/abs/path/to/docs" },
+      ],
+      images: [
+        { id: "img-1", name: "截图.png", mimeType: "image/png", sizeBytes: 10 },
+        { id: "img-2", name: "界面.png", mimeType: "image/png", sizeBytes: 20 },
+      ],
+      referenceIds: ["ref-1"],
+      tools: [{ toolName: "read", inputSummary: "main.ts" } as never],
+    }),
+  ]
+  const md = conversationToMarkdown("  ", turns, { historyTrimmed: true })
+  assert.equal(
+    md,
+    [
+      "# 新会话",
+      "",
+      "> 早期轮次已折叠或省略。",
+      "",
+      "## 用户",
+      "看下这两个文件",
+      "附件：main.ts、docs",
+      "[图片 ×2]",
+      "",
+      "## 助手",
+      "（本轮失败：额度不足）",
+      "",
+    ].join("\n"),
+  )
+  assert.ok(!md.includes("/abs/path"))
+  assert.ok(!md.includes("ref-1"))
+  assert.ok(!md.includes("read"))
 })
 
 test("resolvePublishTargets 汇总已加入全部团队中的活跃 Project 供个人会话发布", () => {

@@ -345,6 +345,15 @@
 }
 .grp-body { display: flex; flex-direction: column; gap: 2px; padding-left: 19px; }
 
+/* 目录分组标题行：标题按钮与独立「更多」按钮（悬停或键盘聚焦时显现） */
+.grp-head-row { display: flex; align-items: center; gap: 2px; }
+.grp-head-row .grp-head { flex: 1 1 0; min-width: 0; }
+.grp-head-row .grp-more { position: static; flex: none; }
+.grp-head-row:hover .grp-more,
+.grp-head-row:focus-within .grp-more {
+  opacity: 1;
+}
+
 /* 团队空间按 Project 分组（对齐方案 B 原型 .cp-proj） */
 .cp-proj { display: flex; flex-direction: column; margin-bottom: 4px; }
 .cp-proj-row { display: flex; align-items: center; gap: 2px; }
@@ -549,7 +558,16 @@
   background: var(--surface);
   box-shadow: 0 0 0 1px var(--border, var(--line));
 }
-.sb-filter-wrap { flex: none; }
+.sb-filter-wrap { flex: none; display: flex; align-items: center; gap: 6px; }
+.sb-filter-wrap .pnav-search { flex: 1 1 auto; min-width: 0; }
+/* 个人搜索框右侧「含已归档」开关（aria-pressed 表示激活态） */
+.sb-filter-wrap .pnav-archived-toggle { flex: none; width: 32px; height: 32px; }
+.pnav-archived-toggle[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+/* 确认弹窗正文与必须勾选的确认复选框 */
+.pnav-confirm-text { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); color: var(--fg-2, var(--text-soft)); line-height: 1.6; }
+.pnav-confirm-text p { margin: 0; }
+.pnav-confirm-ack { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--fg-2, var(--text-soft)); cursor: pointer; }
+.pnav-rename-body .pnav-confirm-ack input { flex: none; width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); }
 
 .project-navigation[data-dual="true"] .my-sessions {
   padding-top: 0;

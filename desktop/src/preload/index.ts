@@ -71,6 +71,9 @@ const localConversations: LocalConversationsHost = {
   updateBinding: (conversationId, patch) => ipcRenderer.invoke("workbench:local-conversations:update-binding", conversationId, patch),
   markPublished: (conversationId, binding) => ipcRenderer.invoke("workbench:local-conversations:mark-published", conversationId, binding),
   markSharingStopped: (conversationId, stoppedAtMs) => ipcRenderer.invoke("workbench:local-conversations:mark-sharing-stopped", conversationId, stoppedAtMs),
+  setArchived: (conversationId, archived) => ipcRenderer.invoke("workbench:local-conversations:set-archived", conversationId, archived),
+  setPinned: (conversationId, pinned) => ipcRenderer.invoke("workbench:local-conversations:set-pinned", conversationId, pinned),
+  revealDirectory: conversationId => ipcRenderer.invoke("workbench:local-conversations:reveal-directory", conversationId),
   remove: conversationId => ipcRenderer.invoke("workbench:local-conversations:remove", conversationId),
   onChanged: listener => {
     const receive = (_event: unknown, payload: { readonly conversationId: string }) => listener(payload)

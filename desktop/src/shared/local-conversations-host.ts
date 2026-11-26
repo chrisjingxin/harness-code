@@ -47,6 +47,10 @@ export type LocalConversationRecord = {
   readonly updatedAtMs: number
   readonly publishedAtMs: number | null
   readonly stoppedAtMs: number | null
+  /** 归档时间戳；归档不改 updatedAtMs，归档时清除置顶。 */
+  readonly archivedAtMs?: number
+  /** 置顶时间戳；未归档会话才可置顶。 */
+  readonly pinnedAtMs?: number
   readonly syncedSequence: number
 }
 
@@ -124,6 +128,13 @@ export interface LocalConversationsHost {
     binding: MarkLocalConversationPublishedInput,
   ): Promise<CollaborationResult<LocalConversationRecord>>
   markSharingStopped(conversationId: string, stoppedAtMs?: number): Promise<CollaborationResult<LocalConversationRecord>>
+  /** 归档/取消归档个人会话；运行中或已发布活跃会话拒绝。 */
+  setArchived(conversationId: string, archived: boolean): Promise<CollaborationResult<LocalConversationRecord>>
+  /** 置顶/取消置顶个人会话；已归档或已发布活跃会话拒绝。 */
+  setPinned(conversationId: string, pinned: boolean): Promise<CollaborationResult<LocalConversationRecord>>
+  /** 在系统文件管理器中显示会话绑定的本机目录；路径由主进程从记录读取。 */
+  revealDirectory(conversationId: string): Promise<CollaborationResult<null>>
+  /** 删除本机会话；运行中或团队侧仍有记录的会话拒绝，成功后清理本机残留数据。 */
   remove(conversationId: string): Promise<CollaborationResult<null>>
   /** 监听主进程落盘完成（如一轮定稿写入）后的会话索引与轮次变更事件。 */
   onChanged?(listener: (event: { readonly conversationId: string }) => void): () => void

@@ -14,6 +14,10 @@ export type SessionMetaHeaderProps = {
   readonly shareMode: ConversationShareMode | null
   readonly offline: boolean
   readonly hasPublishableTeams: boolean
+  /** 会话已归档时额外展示「已归档」徽章。 */
+  readonly archived?: boolean
+  /** 已归档会话提供「取消归档」入口。 */
+  readonly onRestore?: () => void
   readonly onOpenPublish?: () => void
   readonly onOpenStopSharing?: () => void
 }
@@ -24,6 +28,8 @@ export function SessionMetaHeader({
   shareMode,
   offline,
   hasPublishableTeams,
+  archived,
+  onRestore,
   onOpenPublish,
   onOpenStopSharing,
 }: SessionMetaHeaderProps): ReactElement {
@@ -55,9 +61,24 @@ export function SessionMetaHeader({
             : <IconLockFilled size={12} aria-hidden="true" />}
           <span>{visibilityLabel}</span>
         </span>
+        {archived && (
+          <span className="hui-badge" data-tone="muted" data-size="xs" title="已归档">
+            <span>已归档</span>
+          </span>
+        )}
       </div>
 
       <div className="psess-head-actions">
+        {archived && onRestore && (
+          <button
+            type="button"
+            className="wb-button wb-button-secondary wb-button-xs"
+            title="将该会话移出已归档区"
+            onClick={onRestore}
+          >
+            取消归档
+          </button>
+        )}
         {shareStatus === "active" && onOpenStopSharing && (
           <button
             type="button"

@@ -23,6 +23,7 @@ import type {
   CollaborationContextView,
   NavigationInboxView,
   NavigationPageKind,
+  NavigationPersonalEntry,
   NavigationSpaceKind,
   NavigationWorkspaceItem,
   PersonalNavigationDirectoryGroup,
@@ -298,6 +299,9 @@ export type DualTrackNavigationProps = {
   readonly offline?: boolean
   readonly canPublishPersonal?: boolean
   readonly personalGroups?: readonly PersonalNavigationDirectoryGroup[]
+  readonly pinnedPersonal?: readonly NavigationPersonalEntry[]
+  readonly archivedPersonal?: readonly NavigationPersonalEntry[]
+  readonly personalIncludeArchived?: boolean
   readonly personalSearch?: string
   readonly selectedPersonalConversationId?: string | null
   readonly landingConversationId?: string | null
@@ -316,6 +320,17 @@ export type DualTrackNavigationProps = {
       readonly projectName?: string | null
     },
   ): void
+  pinPersonalConversation?(conversationId: string, pinned: boolean): Promise<string | null>
+  archivePersonalConversation?(conversationId: string): Promise<string | null>
+  restorePersonalConversation?(conversationId: string): Promise<string | null>
+  deletePersonalConversation?(conversationId: string): Promise<string | null>
+  copyPersonalConversationMarkdown?(conversationId: string): Promise<string | null>
+  copyPersonalDirectoryPath?(conversationId: string): Promise<string | null>
+  revealPersonalDirectory?(conversationId: string): Promise<string | null>
+  archivePersonalGroup?(conversationIds: readonly string[]): Promise<string | null>
+  deletePersonalGroup?(conversationIds: readonly string[]): Promise<string | null>
+  newPersonalSessionInDirectory?(directoryPath: string): void
+  setPersonalIncludeArchived?(include: boolean): void
   setPersonalSearch(text: string): void
   reconnect(): void
 }
@@ -516,6 +531,17 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
           renamePersonalConversation: props.dualTrack.renamePersonalConversation,
           publishPersonalConversation: props.dualTrack.publishPersonalConversation,
           stopSharingConversation: props.dualTrack.stopSharingConversation,
+          pinPersonalConversation: props.dualTrack.pinPersonalConversation,
+          archivePersonalConversation: props.dualTrack.archivePersonalConversation,
+          restorePersonalConversation: props.dualTrack.restorePersonalConversation,
+          deletePersonalConversation: props.dualTrack.deletePersonalConversation,
+          copyPersonalConversationMarkdown: props.dualTrack.copyPersonalConversationMarkdown,
+          copyPersonalDirectoryPath: props.dualTrack.copyPersonalDirectoryPath,
+          revealPersonalDirectory: props.dualTrack.revealPersonalDirectory,
+          archivePersonalGroup: props.dualTrack.archivePersonalGroup,
+          deletePersonalGroup: props.dualTrack.deletePersonalGroup,
+          newPersonalSessionInDirectory: props.dualTrack.newPersonalSessionInDirectory,
+          setPersonalIncludeArchived: props.dualTrack.setPersonalIncludeArchived,
           setPersonalSearch: props.dualTrack.setPersonalSearch,
           reconnect: props.dualTrack.reconnect,
         }
@@ -868,6 +894,9 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
           offline: props.dualTrack.offline,
           canPublishPersonal: props.dualTrack.canPublishPersonal,
           personalGroups: props.dualTrack.personalGroups,
+          pinnedPersonal: props.dualTrack.pinnedPersonal,
+          archivedPersonal: props.dualTrack.archivedPersonal,
+          personalIncludeArchived: props.dualTrack.personalIncludeArchived,
           personalSearch: props.dualTrack.personalSearch,
           selectedPersonalConversationId: props.dualTrack.selectedPersonalConversationId,
           landingConversationId: props.dualTrack.landingConversationId,

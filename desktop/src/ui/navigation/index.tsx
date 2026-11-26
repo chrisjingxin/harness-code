@@ -6,30 +6,37 @@
 import {
   IconAdjustmentsHorizontal,
   IconAlertTriangle,
+  IconArchive,
   IconBan,
   IconBook,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconCopy,
   IconDots,
   IconFolder,
+  IconFolderOpen,
   IconInbox,
   IconLayoutGrid,
   IconListCheck,
   IconLockFilled,
   IconPencil,
+  IconPin,
   IconPlus,
   IconRefresh,
+  IconRestore,
   IconSearch,
   IconSettings,
+  IconTrash,
   IconUpload,
   IconUser,
   IconUsers,
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { safeAvatarUrl } from "../common/avatar.js";
 import type { NavigationMemberGroup, NavigationSessionEntry } from "./members.js";
+import { ConfirmDialog } from "./confirm-dialog.js";
 import {
   RenameSessionDialog,
   SessionContextMenu,
@@ -84,6 +91,14 @@ export type NavigationPersonalEntry = {
   timeLabel: string;
   status: "idle" | "running" | "waiting_approval" | "error";
   shareStatus: "local_only" | "active" | "stopped";
+  /** 置顶区条目标记：未归档且有置顶时间。 */
+  pinned?: boolean;
+  /** 已归档区条目标记。 */
+  archived?: boolean;
+  /** 行下方小字展示的工程目录名；无目录时为「未设置目录」。 */
+  directoryLabel?: string;
+  /** 会话是否绑定了本机工作目录（菜单据此决定是否展示目录相关项，不依赖目录文案反推）。 */
+  hasDirectory?: boolean;
 };
 
 /** 个人空间按本机工程目录聚合的可折叠分组。 */
@@ -123,6 +138,12 @@ export type ProjectNavigationView = {
   offline?: boolean;
   canPublishPersonal?: boolean;
   personalGroups?: readonly PersonalNavigationDirectoryGroup[];
+  /** 个人栏「置顶」区条目（未归档且置顶，按置顶时间倒序）。 */
+  pinnedPersonal?: readonly NavigationPersonalEntry[];
+  /** 个人栏「已归档」区条目（按归档时间倒序）。 */
+  archivedPersonal?: readonly NavigationPersonalEntry[];
+  /** 个人搜索非空时是否把已归档会话纳入匹配；默认关闭。 */
+  personalIncludeArchived?: boolean;
   personalSearch?: string;
   selectedPersonalConversationId?: string | null;
   landingConversationId?: string | null;
@@ -149,6 +170,17 @@ export type ProjectNavigationActions = {
   renamePersonalConversation?(conversationId: string, title: string): Promise<string | null>;
   publishPersonalConversation?(conversationId: string): void;
   stopSharingConversation?(conversationId: string): void;
+  pinPersonalConversation?(conversationId: string, pinned: boolean): Promise<string | null>;
+  archivePersonalConversation?(conversationId: string): Promise<string | null>;
+  restorePersonalConversation?(conversationId: string): Promise<string | null>;
+  deletePersonalConversation?(conversationId: string): Promise<string | null>;
+  copyPersonalConversationMarkdown?(conversationId: string): Promise<string | null>;
+  copyPersonalDirectoryPath?(conversationId: string): Promise<string | null>;
+  revealPersonalDirectory?(conversationId: string): Promise<string | null>;
+  archivePersonalGroup?(conversationIds: readonly string[]): Promise<string | null>;
+  deletePersonalGroup?(conversationIds: readonly string[]): Promise<string | null>;
+  newPersonalSessionInDirectory?(directoryPath: string): void;
+  setPersonalIncludeArchived?(include: boolean): void;
   setPersonalSearch?(text: string): void;
   reconnect?(): void;
   openInbox?(): void;
@@ -173,6 +205,141 @@ const fallback: Record<Exclude<NavigationAvailability["state"], "ready">, string
 };
 const text = (value: NavigationAvailability) =>
   value.state === "ready" ? "" : (value.message ?? fallback[value.state]);
+
+/** 个人会话菜单的动作标识；视图按标识补图标与回调，便于纯函数测试菜单条件与置灰原因。 */
+export type PersonalMenuActionId =
+  | "rename"
+  | "pin"
+  | "copy-markdown"
+  | "copy-directory"
+  | "reveal-directory"
+  | "publish"
+  | "archive"
+  | "restore"
+  | "delete";
+
+export type PersonalMenuPlanItem = {
+  readonly id: PersonalMenuActionId;
+  readonly label: string;
+  readonly danger?: boolean;
+  readonly disabled?: boolean;
+  readonly disabledReason?: string;
+  readonly separatorBefore?: boolean;
+};
+
+/**
+ * 规划个人会话右键/「更多」菜单项（Spec 第 6.3 节）：
+ * 未提供对应 action 时不产出菜单项；运行中会话的归档/删除置灰并附原因，
+ * 已停止共享会话的删除置灰（团队侧仍有记录）。
+ */
+export function planPersonalMenu(
+  entry: NavigationPersonalEntry,
+  actions: ProjectNavigationActions,
+  options: { readonly offline?: boolean; readonly canPublishPersonal?: boolean } = {},
+): readonly PersonalMenuPlanItem[] {
+  const running = entry.status === "running" || entry.status === "waiting_approval";
+  const archived = entry.archived === true;
+  const hasDirectory = entry.hasDirectory === true;
+  const items: PersonalMenuPlanItem[] = [];
+
+  if (actions.renamePersonalConversation) {
+    items.push({ id: "rename", label: "重命名" });
+  }
+  if (!archived && actions.pinPersonalConversation) {
+    items.push({ id: "pin", label: entry.pinned ? "取消置顶" : "置顶" });
+  }
+  if (actions.copyPersonalConversationMarkdown) {
+    items.push({ id: "copy-markdown", label: "复制为 Markdown", separatorBefore: items.length > 0 });
+  }
+  if (hasDirectory && actions.copyPersonalDirectoryPath) {
+    items.push({ id: "copy-directory", label: "复制目录路径" });
+  }
+  if (hasDirectory && actions.revealPersonalDirectory) {
+    items.push({ id: "reveal-directory", label: "在文件管理器中显示" });
+  }
+  if (!archived && entry.shareStatus === "local_only" && actions.publishPersonalConversation) {
+    const canPublish = !options.offline && options.canPublishPersonal !== false;
+    items.push({
+      id: "publish",
+      label: "发布到项目…",
+      separatorBefore: items.length > 0,
+      disabled: !canPublish,
+      disabledReason: options.offline ? "协作服务离线，暂不可发布" : "当前账号尚未加入团队",
+    });
+  }
+  if (!archived && actions.archivePersonalConversation) {
+    items.push({
+      id: "archive",
+      label: "归档",
+      separatorBefore: items.length > 0,
+      disabled: running,
+      disabledReason: running ? "会话正在运行，请先停止" : undefined,
+    });
+  }
+  if (archived && actions.restorePersonalConversation) {
+    items.push({ id: "restore", label: "取消归档", separatorBefore: items.length > 0 });
+  }
+  if (actions.deletePersonalConversation) {
+    const stopped = entry.shareStatus === "stopped";
+    items.push({
+      id: "delete",
+      label: "删除",
+      danger: true,
+      separatorBefore: items.length > 0,
+      disabled: running || stopped,
+      disabledReason: running
+        ? "会话正在运行，请先停止"
+        : stopped
+          ? "该会话在团队侧仍有记录，暂不能删除"
+          : undefined,
+    });
+  }
+  return items;
+}
+
+/** 目录分组「更多」菜单的动作标识。 */
+export type GroupMenuActionId =
+  | "new-in-directory"
+  | "copy-directory"
+  | "reveal-directory"
+  | "archive-group"
+  | "delete-group";
+
+export type GroupMenuPlanItem = {
+  readonly id: GroupMenuActionId;
+  readonly label: string;
+  readonly danger?: boolean;
+  readonly separatorBefore?: boolean;
+};
+
+/**
+ * 规划目录分组标题行「更多」菜单项（Spec 第 6.3 节）：
+ * 「未设置目录」分组不含目录相关前三项；归档/删除整组要求组内至少一条会话。
+ */
+export function planGroupMenu(
+  group: PersonalNavigationDirectoryGroup,
+  actions: ProjectNavigationActions,
+): readonly GroupMenuPlanItem[] {
+  const items: GroupMenuPlanItem[] = [];
+  const hasDirectory = group.directoryPath !== null;
+  const firstConversationId = group.records[0]?.conversationId;
+  if (hasDirectory && actions.newPersonalSessionInDirectory) {
+    items.push({ id: "new-in-directory", label: "在此目录新建会话" });
+  }
+  if (hasDirectory && firstConversationId && actions.copyPersonalDirectoryPath) {
+    items.push({ id: "copy-directory", label: "复制目录路径", separatorBefore: items.length > 0 });
+  }
+  if (hasDirectory && firstConversationId && actions.revealPersonalDirectory) {
+    items.push({ id: "reveal-directory", label: "在文件管理器中显示" });
+  }
+  if (group.records.length > 0 && actions.archivePersonalGroup) {
+    items.push({ id: "archive-group", label: "归档整组", separatorBefore: items.length > 0 });
+  }
+  if (group.records.length > 0 && actions.deletePersonalGroup) {
+    items.push({ id: "delete-group", label: "删除整组会话", danger: true, separatorBefore: items.length > 0 });
+  }
+  return items;
+}
 
 function Status({ value, area, actions }: { value: NavigationAvailability; area: NavigationRetryArea; actions: ProjectNavigationActions }) {
   if (value.state === "ready") return null;
@@ -580,8 +747,17 @@ function PersonalSessionRow({
           {entry.shareStatus === "stopped" && (
             <span className="hui-badge" data-tone="warn" data-size="xs">已停止同步</span>
           )}
-          <span className="line">{entry.shareStatus === "stopped" ? entry.timeLabel : `本机 · ${entry.timeLabel}`}</span>
+          <span className="line">
+            {entry.archived
+              ? `已归档 · ${entry.timeLabel}`
+              : entry.shareStatus === "stopped"
+                ? entry.timeLabel
+                : `本机 · ${entry.timeLabel}`}
+          </span>
         </span>
+        {entry.directoryLabel && (
+          <span className="sess-meta"><span className="line pnav-ellipsis">{entry.directoryLabel}</span></span>
+        )}
       </button>
       {canOpenMenu && (
         <button
@@ -618,6 +794,15 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
     readonly initialTitle: string;
     readonly onSubmit: (title: string) => Promise<string | null>;
   } | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{
+    readonly title: string;
+    readonly body: ReactNode;
+    readonly confirmLabel: string;
+    readonly danger?: boolean;
+    readonly requireAckLabel?: string;
+    readonly onSubmit: () => Promise<string | null>;
+  } | null>(null);
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
 
   const hasProject = view.currentProjectId !== null;
   const selfGroup = view.groups.find((g) => g.self);
@@ -685,7 +870,11 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   }, [hasProject, actions.openCommandPalette, isPersonalSpace]);
 
   const personalQuery = (view.personalSearch ?? "").trim().toLocaleLowerCase();
-  const totalPersonalCount = (view.personalGroups ?? []).reduce((sum, group) => sum + group.records.length, 0);
+  // 分段页签计数含全部个人会话（含置顶与已归档）；「我的个人会话」块头只计目录分组内条目。
+  const groupedPersonalCount = (view.personalGroups ?? []).reduce((sum, group) => sum + group.records.length, 0);
+  const totalPersonalCount = groupedPersonalCount
+    + (view.pinnedPersonal ?? []).length
+    + (view.archivedPersonal ?? []).length;
   const visiblePersonalGroups = (view.personalGroups ?? [])
     .map((group) => ({
       ...group,
@@ -697,38 +886,167 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
         : group.records,
     }))
     .filter((group) => group.records.length > 0);
+  const matchesPersonalQuery = (entry: NavigationPersonalEntry) =>
+    entry.title.toLocaleLowerCase().includes(personalQuery)
+    || (entry.directoryLabel ?? "").toLocaleLowerCase().includes(personalQuery);
+  // 置顶区按标题/目录名参与同一搜索规则；已归档区仅当「含已归档」开关打开时参与匹配。
+  const visiblePinned = (view.pinnedPersonal ?? []).filter(
+    (entry) => !personalQuery || matchesPersonalQuery(entry),
+  );
+  const includeArchived = Boolean(view.personalIncludeArchived);
+  const visibleArchived = personalQuery && !includeArchived
+    ? []
+    : (view.archivedPersonal ?? []).filter(
+        (entry) => !personalQuery || matchesPersonalQuery(entry),
+      );
+  const archivedSectionOpen = Boolean(personalQuery) || archivedExpanded;
+  const hasAnyPersonalRows = visiblePersonalGroups.length > 0 || visiblePinned.length > 0 || visibleArchived.length > 0;
+
+  const personalMenuIcons: Record<PersonalMenuActionId, ReactNode> = {
+    rename: <IconPencil size={15} aria-hidden="true" />,
+    pin: <IconPin size={15} aria-hidden="true" />,
+    "copy-markdown": <IconCopy size={15} aria-hidden="true" />,
+    "copy-directory": <IconCopy size={15} aria-hidden="true" />,
+    "reveal-directory": <IconFolderOpen size={15} aria-hidden="true" />,
+    publish: <IconUpload size={15} aria-hidden="true" />,
+    archive: <IconArchive size={15} aria-hidden="true" />,
+    restore: <IconRestore size={15} aria-hidden="true" />,
+    delete: <IconTrash size={15} aria-hidden="true" />,
+  };
+  const groupMenuIcons: Record<GroupMenuActionId, ReactNode> = {
+    "new-in-directory": <IconPlus size={15} aria-hidden="true" />,
+    "copy-directory": <IconCopy size={15} aria-hidden="true" />,
+    "reveal-directory": <IconFolderOpen size={15} aria-hidden="true" />,
+    "archive-group": <IconArchive size={15} aria-hidden="true" />,
+    "delete-group": <IconTrash size={15} aria-hidden="true" />,
+  };
 
   function openPersonalMenu(entry: NavigationPersonalEntry, x: number, y: number) {
-    const items: SessionContextMenuItem[] = [];
-    if (actions.renamePersonalConversation) {
-      const rename = actions.renamePersonalConversation;
-      items.push({
-        id: "rename",
-        label: "重命名",
-        icon: <IconPencil size={15} aria-hidden="true" />,
-        onSelect: () => {
-          setRenameTarget({
-            conversationId: entry.conversationId,
-            initialTitle: entry.title,
-            onSubmit: (nextTitle) => rename(entry.conversationId, nextTitle),
-          });
-        },
-      });
-    }
-    if (entry.shareStatus === "local_only" && actions.publishPersonalConversation) {
-      const publish = actions.publishPersonalConversation;
-      const canPublish = !view.offline && view.canPublishPersonal !== false;
-      items.push({
-        id: "publish",
-        label: "发布到项目…",
-        icon: <IconUpload size={15} aria-hidden="true" />,
-        separatorBefore: items.length > 0,
-        disabled: !canPublish,
-        disabledReason: view.offline ? "协作服务离线，暂不可发布" : "当前账号尚未加入团队",
-        onSelect: () => publish(entry.conversationId),
-      });
-    }
-    if (items.length > 0) setContextMenu({ x, y, items });
+    const plan = planPersonalMenu(entry, actions, {
+      offline: view.offline,
+      canPublishPersonal: view.canPublishPersonal,
+    });
+    if (plan.length === 0) return;
+    const items: SessionContextMenuItem[] = plan.map((item) => ({
+      ...item,
+      icon: personalMenuIcons[item.id],
+      onSelect: () => {
+        switch (item.id) {
+          case "rename": {
+            const rename = actions.renamePersonalConversation;
+            if (rename) {
+              setRenameTarget({
+                conversationId: entry.conversationId,
+                initialTitle: entry.title,
+                onSubmit: (nextTitle) => rename(entry.conversationId, nextTitle),
+              });
+            }
+            break;
+          }
+          case "pin":
+            void actions.pinPersonalConversation?.(entry.conversationId, !entry.pinned);
+            break;
+          case "copy-markdown":
+            void actions.copyPersonalConversationMarkdown?.(entry.conversationId);
+            break;
+          case "copy-directory":
+            void actions.copyPersonalDirectoryPath?.(entry.conversationId);
+            break;
+          case "reveal-directory":
+            void actions.revealPersonalDirectory?.(entry.conversationId);
+            break;
+          case "publish":
+            actions.publishPersonalConversation?.(entry.conversationId);
+            break;
+          case "archive":
+            void actions.archivePersonalConversation?.(entry.conversationId);
+            break;
+          case "restore":
+            void actions.restorePersonalConversation?.(entry.conversationId);
+            break;
+          case "delete":
+            openDeletePersonalConfirm(entry);
+            break;
+        }
+      },
+    }));
+    setContextMenu({ x, y, items });
+  }
+
+  function openGroupMenu(group: PersonalNavigationDirectoryGroup, x: number, y: number) {
+    const plan = planGroupMenu(group, actions);
+    if (plan.length === 0) return;
+    const firstConversationId = group.records[0]?.conversationId;
+    const items: SessionContextMenuItem[] = plan.map((item) => ({
+      ...item,
+      icon: groupMenuIcons[item.id],
+      onSelect: () => {
+        switch (item.id) {
+          case "new-in-directory":
+            if (group.directoryPath) actions.newPersonalSessionInDirectory?.(group.directoryPath);
+            break;
+          case "copy-directory":
+            if (firstConversationId) void actions.copyPersonalDirectoryPath?.(firstConversationId);
+            break;
+          case "reveal-directory":
+            if (firstConversationId) void actions.revealPersonalDirectory?.(firstConversationId);
+            break;
+          case "archive-group":
+            openArchiveGroupConfirm(group);
+            break;
+          case "delete-group":
+            openDeleteGroupConfirm(group);
+            break;
+        }
+      },
+    }));
+    setContextMenu({ x, y, items });
+  }
+
+  /** 单条删除确认（Spec 6.4）：无需勾选，主按钮红色「删除」。 */
+  function openDeletePersonalConfirm(entry: NavigationPersonalEntry) {
+    setConfirmTarget({
+      title: `删除会话“${entry.title}”？`,
+      body: "将清除本机的对话记录、草稿与待发消息，不会删除磁盘上的工程目录。此操作无法撤销。",
+      confirmLabel: "删除",
+      danger: true,
+      onSubmit: () => actions.deletePersonalConversation?.(entry.conversationId) ?? Promise.resolve(null),
+    });
+  }
+
+  /** 整组删除确认（Spec 6.4）：必须勾选「我已了解，不会删除磁盘目录」才可提交。 */
+  function openDeleteGroupConfirm(group: PersonalNavigationDirectoryGroup) {
+    const ids = group.records.map((entry) => entry.conversationId);
+    const skipped = group.records.filter(
+      (entry) => entry.shareStatus === "stopped" || entry.status === "running" || entry.status === "waiting_approval",
+    ).length;
+    setConfirmTarget({
+      title: `删除“${group.label}”下的 ${ids.length} 条会话？`,
+      body: (
+        <>
+          <p>将清除本机的对话记录、草稿与待发消息，不会删除磁盘上的工程目录。此操作无法撤销。</p>
+          {skipped > 0 && <p>另有 {skipped} 条会话将被跳过（已停止共享或正在运行）。</p>}
+        </>
+      ),
+      confirmLabel: "删除",
+      danger: true,
+      requireAckLabel: "我已了解，不会删除磁盘目录",
+      onSubmit: () => actions.deletePersonalGroup?.(ids) ?? Promise.resolve(null),
+    });
+  }
+
+  /** 整组归档确认（Spec 6.4）：普通确认，运行中的会话由批量逻辑跳过。 */
+  function openArchiveGroupConfirm(group: PersonalNavigationDirectoryGroup) {
+    const ids = group.records.map((entry) => entry.conversationId);
+    const runningCount = group.records.filter(
+      (entry) => entry.status === "running" || entry.status === "waiting_approval",
+    ).length;
+    setConfirmTarget({
+      title: `归档“${group.label}”下的会话？`,
+      body: `将归档 ${ids.length} 条会话；运行中的 ${runningCount} 条会被跳过。归档后可在“已归档”中恢复。`,
+      confirmLabel: "归档",
+      onSubmit: () => actions.archivePersonalGroup?.(ids) ?? Promise.resolve(null),
+    });
   }
 
   function openTeamSessionMenu(entry: NavigationSessionEntry, x: number, y: number) {
@@ -880,18 +1198,53 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                     onChange={(event) => actions.setPersonalSearch?.(event.target.value)}
                   />
                 </label>
+                {(view.archivedPersonal ?? []).length > 0 && actions.setPersonalIncludeArchived && (
+                  <button
+                    type="button"
+                    className="pnav-icon-button pnav-archived-toggle"
+                    aria-label="含已归档"
+                    title="搜索时包含已归档会话"
+                    aria-pressed={includeArchived}
+                    onClick={() => actions.setPersonalIncludeArchived?.(!includeArchived)}
+                  >
+                    <IconArchive size={15} aria-hidden="true" />
+                  </button>
+                )}
               </div>
             )}
           </div>
 
           <div className="my-sessions" aria-label="个人会话">
             <div className="sb-scroll">
+              {visiblePinned.length > 0 && (
+                <>
+                  <div className="sb-block-head">
+                    <span>置顶</span>
+                    <span className="sb-block-act count">{visiblePinned.length}</span>
+                  </div>
+                  {visiblePinned.map((entry) => (
+                    <PersonalSessionRow
+                      key={entry.conversationId}
+                      entry={entry}
+                      active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
+                      landing={view.landingConversationId === entry.conversationId}
+                      select={actions.selectPersonalConversation}
+                      canOpenMenu={planPersonalMenu(entry, actions, {
+                        offline: view.offline,
+                        canPublishPersonal: view.canPublishPersonal,
+                      }).length > 0}
+                      onOpenMenu={(x, y) => openPersonalMenu(entry, x, y)}
+                    />
+                  ))}
+                </>
+              )}
+
               <div className="sb-block-head">
                 <span>我的个人会话</span>
-                {totalPersonalCount > 0 && <span className="sb-block-act count">{totalPersonalCount}</span>}
+                {groupedPersonalCount > 0 && <span className="sb-block-act count">{groupedPersonalCount}</span>}
               </div>
 
-              {visiblePersonalGroups.length === 0 ? (
+              {!hasAnyPersonalRows ? (
                 <p className="side-empty">
                   {personalQuery ? (
                     "没有匹配的本机个人会话。"
@@ -906,25 +1259,43 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               ) : (
                 visiblePersonalGroups.map((group) => {
                   const open = Boolean(personalQuery) || collapsedDirs[group.directoryKey] !== true;
+                  const groupMenu = planGroupMenu(group, actions);
                   return (
                     <div key={group.directoryKey} className="sb-grp">
-                      <button
-                        type="button"
-                        className={`grp-head${open ? "" : " is-closed"}`}
-                        aria-expanded={open}
-                        title={group.directoryPath ?? group.label}
-                        onClick={() => setCollapsedDirs((prev) => ({
-                          ...prev,
-                          [group.directoryKey]: open,
-                        }))}
-                      >
-                        <span className="chev">
-                          <IconChevronDown size={13} aria-hidden="true" />
-                        </span>
-                        <IconFolder size={15} aria-hidden="true" />
-                        <span className="d pnav-ellipsis">{group.label}</span>
-                        <span className="n">{group.records.length}</span>
-                      </button>
+                      <div className="grp-head-row">
+                        <button
+                          type="button"
+                          className={`grp-head${open ? "" : " is-closed"}`}
+                          aria-expanded={open}
+                          title={group.directoryPath ?? group.label}
+                          onClick={() => setCollapsedDirs((prev) => ({
+                            ...prev,
+                            [group.directoryKey]: open,
+                          }))}
+                        >
+                          <span className="chev">
+                            <IconChevronDown size={13} aria-hidden="true" />
+                          </span>
+                          <IconFolder size={15} aria-hidden="true" />
+                          <span className="d pnav-ellipsis">{group.label}</span>
+                          <span className="n">{group.records.length}</span>
+                        </button>
+                        {groupMenu.length > 0 && (
+                          <button
+                            type="button"
+                            className="pnav-icon-button pnav-session-actions grp-more"
+                            aria-label={`目录操作：${group.label}`}
+                            aria-haspopup="menu"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              openGroupMenu(group, rect.left, rect.bottom + 4);
+                            }}
+                          >
+                            <IconDots size={15} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
                       <div className="grp-collapse" data-open={open ? "1" : "0"} inert={!open || undefined}>
                         <div className="grp-collapse-inner">
                           <div className="grp-body">
@@ -935,10 +1306,10 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                 active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
                                 landing={view.landingConversationId === entry.conversationId}
                                 select={actions.selectPersonalConversation}
-                                canOpenMenu={Boolean(
-                                  actions.renamePersonalConversation
-                                  || (entry.shareStatus === "local_only" && actions.publishPersonalConversation),
-                                )}
+                                canOpenMenu={planPersonalMenu(entry, actions, {
+                                  offline: view.offline,
+                                  canPublishPersonal: view.canPublishPersonal,
+                                }).length > 0}
                                 onOpenMenu={(x, y) => openPersonalMenu(entry, x, y)}
                               />
                             ))}
@@ -948,6 +1319,45 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                     </div>
                   );
                 })
+              )}
+
+              {visibleArchived.length > 0 && (
+                <div className="sb-grp">
+                  <button
+                    type="button"
+                    className={`grp-head${archivedSectionOpen ? "" : " is-closed"}`}
+                    aria-expanded={archivedSectionOpen}
+                    title="已归档的个人会话"
+                    onClick={() => setArchivedExpanded((prev) => !prev)}
+                  >
+                    <span className="chev">
+                      <IconChevronDown size={13} aria-hidden="true" />
+                    </span>
+                    <IconArchive size={15} aria-hidden="true" />
+                    <span className="d pnav-ellipsis">已归档</span>
+                    <span className="n">{visibleArchived.length}</span>
+                  </button>
+                  <div className="grp-collapse" data-open={archivedSectionOpen ? "1" : "0"} inert={!archivedSectionOpen || undefined}>
+                    <div className="grp-collapse-inner">
+                      <div className="grp-body">
+                        {visibleArchived.map((entry) => (
+                          <PersonalSessionRow
+                            key={entry.conversationId}
+                            entry={entry}
+                            active={!inboxActive && view.selectedPersonalConversationId === entry.conversationId}
+                            landing={view.landingConversationId === entry.conversationId}
+                            select={actions.selectPersonalConversation}
+                            canOpenMenu={planPersonalMenu(entry, actions, {
+                              offline: view.offline,
+                              canPublishPersonal: view.canPublishPersonal,
+                            }).length > 0}
+                            onOpenMenu={(x, y) => openPersonalMenu(entry, x, y)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
               {(view.publishedSessionCount ?? 0) > 0 && (
                 <button
@@ -1383,6 +1793,17 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
           initialTitle={renameTarget.initialTitle}
           onClose={() => setRenameTarget(null)}
           onSubmit={renameTarget.onSubmit}
+        />
+      )}
+      {confirmTarget && (
+        <ConfirmDialog
+          title={confirmTarget.title}
+          body={confirmTarget.body}
+          confirmLabel={confirmTarget.confirmLabel}
+          danger={confirmTarget.danger}
+          requireAckLabel={confirmTarget.requireAckLabel}
+          onClose={() => setConfirmTarget(null)}
+          onSubmit={confirmTarget.onSubmit}
         />
       )}
     </nav>

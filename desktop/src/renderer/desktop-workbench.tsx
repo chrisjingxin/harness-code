@@ -324,6 +324,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
   const { user, workspaces, workspace, activeSpace, isOffline } = props
   const hasTeamOnline = Boolean(!isOffline && workspace)
   const [personalSearch, setPersonalSearch] = useState("")
+  const [personalIncludeArchived, setPersonalIncludeArchived] = useState(false)
   const [pendingReveal, setPendingReveal] = useState<PendingReveal | null>(null)
   const [topNav, setTopNav] = useState<WorkbenchNavId>("chat")
   const [adminSection, setAdminSection] = useState<AdminSectionId>("appearance")
@@ -543,9 +544,41 @@ function ConfirmedUserWorkbench(props: Hosts & {
         timeLabel: formatShortTime(rec.updatedAtMs),
         status: rec.status,
         shareStatus: rec.shareStatus,
+        hasDirectory: Boolean(rec.directoryPath?.trim()),
       })),
     })),
     [personalPartition.groups],
+  )
+
+  const personalDirectoryLabel = (directoryPath: string | null) =>
+    directoryPath ? (directoryBasename(directoryPath) || directoryPath) : "未设置目录"
+
+  // 置顶区按置顶时间倒序；已归档区按归档时间倒序，行内展示归档时间而非更新时间。
+  const personalNavPinned = useMemo(
+    () => personalPartition.pinned.map(rec => ({
+      conversationId: rec.conversationId,
+      title: rec.title || "新会话",
+      timeLabel: formatShortTime(rec.updatedAtMs),
+      status: rec.status,
+      shareStatus: rec.shareStatus,
+      pinned: true,
+      directoryLabel: personalDirectoryLabel(rec.directoryPath),
+      hasDirectory: Boolean(rec.directoryPath?.trim()),
+    })),
+    [personalPartition.pinned],
+  )
+  const personalNavArchived = useMemo(
+    () => personalPartition.archived.map(rec => ({
+      conversationId: rec.conversationId,
+      title: rec.title || "新会话",
+      timeLabel: formatShortTime(rec.archivedAtMs ?? rec.updatedAtMs),
+      status: rec.status,
+      shareStatus: rec.shareStatus,
+      archived: true,
+      directoryLabel: personalDirectoryLabel(rec.directoryPath),
+      hasDirectory: Boolean(rec.directoryPath?.trim()),
+    })),
+    [personalPartition.archived],
   )
 
   const workspaceItems: NavigationWorkspaceItem[] = useMemo(
@@ -593,6 +626,9 @@ function ConfirmedUserWorkbench(props: Hosts & {
     offline: isOffline,
     canPublishPersonal: workspaces.length > 0,
     personalGroups: personalNavGroups,
+    pinnedPersonal: personalNavPinned,
+    archivedPersonal: personalNavArchived,
+    personalIncludeArchived,
     personalSearch,
     selectedPersonalConversationId: personalSessions.selectedConversationId,
     landingConversationId,
@@ -617,7 +653,27 @@ function ConfirmedUserWorkbench(props: Hosts & {
     renamePersonalConversation: personalSessions.renameConversation,
     publishPersonalConversation: id => personalSessions.openPublishDialog(id),
     stopSharingConversation: (id, fallback) => personalSessions.openStopSharingDialog(id, fallback),
+    pinPersonalConversation: personalSessions.pinConversation,
+    archivePersonalConversation: personalSessions.archiveConversation,
+    restorePersonalConversation: personalSessions.restoreConversation,
+    deletePersonalConversation: personalSessions.deleteConversation,
+    copyPersonalConversationMarkdown: personalSessions.copyConversationMarkdown,
+    copyPersonalDirectoryPath: personalSessions.copyDirectoryPath,
+    revealPersonalDirectory: personalSessions.revealDirectory,
+    archivePersonalGroup: personalSessions.archiveConversations,
+    deletePersonalGroup: personalSessions.deleteConversations,
+    // 「在此目录新建会话」：预填该目录并沿用组内最近更新且有 Agent 绑定的会话的 providerId。
+    newPersonalSessionInDirectory: directoryPath => {
+      setReturnToInbox(false)
+      const providerId = personalSessions.records
+        .filter(rec => rec.directoryPath?.trim() === directoryPath && rec.providerId)
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)[0]?.providerId ?? null
+      personalSessions.startNewDraft({ directoryPath, providerId })
+      props.onSelectSpace("personal")
+      selectTopNav("chat", "personal")
+    },
     setPersonalSearch: setPersonalSearch,
+    setPersonalIncludeArchived,
     reconnect: () => { void props.identity.refresh() },
   }
 
@@ -887,6 +943,8 @@ function ConfirmedUserWorkbench(props: Hosts & {
         shareMode={selectedRecord.shareMode}
         offline={isOffline}
         hasPublishableTeams={workspaces.length > 0}
+        archived={selectedRecord.archivedAtMs !== undefined}
+        onRestore={() => { void personalSessions.restoreConversation(selectedRecord.conversationId) }}
         onOpenPublish={() => personalSessions.openPublishDialog(selectedRecord.conversationId)}
         onOpenStopSharing={() => personalSessions.openStopSharingDialog(selectedRecord.conversationId)}
       />
@@ -1234,6 +1292,9 @@ function ConfirmedUserWorkbench(props: Hosts & {
         offline: isOffline,
         canPublishPersonal: workspaces.length > 0,
         personalGroups: personalNavGroups,
+        pinnedPersonal: personalNavPinned,
+        archivedPersonal: personalNavArchived,
+        personalIncludeArchived,
         personalSearch,
         selectedPersonalConversationId: personalSessions.selectedConversationId,
         landingConversationId,
@@ -1246,6 +1307,17 @@ function ConfirmedUserWorkbench(props: Hosts & {
         renamePersonalConversation: dualTrack.renamePersonalConversation,
         publishPersonalConversation: dualTrack.publishPersonalConversation,
         stopSharingConversation: id => dualTrack.stopSharingConversation(id),
+        pinPersonalConversation: dualTrack.pinPersonalConversation,
+        archivePersonalConversation: dualTrack.archivePersonalConversation,
+        restorePersonalConversation: dualTrack.restorePersonalConversation,
+        deletePersonalConversation: dualTrack.deletePersonalConversation,
+        copyPersonalConversationMarkdown: dualTrack.copyPersonalConversationMarkdown,
+        copyPersonalDirectoryPath: dualTrack.copyPersonalDirectoryPath,
+        revealPersonalDirectory: dualTrack.revealPersonalDirectory,
+        archivePersonalGroup: dualTrack.archivePersonalGroup,
+        deletePersonalGroup: dualTrack.deletePersonalGroup,
+        newPersonalSessionInDirectory: dualTrack.newPersonalSessionInDirectory,
+        setPersonalIncludeArchived: dualTrack.setPersonalIncludeArchived,
         setPersonalSearch: dualTrack.setPersonalSearch,
         reconnect: dualTrack.reconnect,
         openInbox: () => selectTopNav("inbox"),

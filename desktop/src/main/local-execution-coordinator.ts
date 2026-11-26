@@ -1760,6 +1760,26 @@ export function createLocalExecutionCoordinator(
       })
     },
 
+    /** 该会话当前是否有进行中的轮次；供会话归档/删除的 busy 判定调用。 */
+    hasActiveTurn(accountId: string, conversationId: string): boolean {
+      const key = localExecutionKey({ accountId, workspaceId: null, projectId: null, conversationId })
+      return bindings.get(key)?.activeTurn !== undefined
+    },
+
+    /**
+     * 遗忘会话：走既有 release 释放绑定（含上下文会话与在途收尾），清除其待发队列项，
+     * 并按会话作用域清理代码检查点数据。幂等，供删除本机会话后的清理调用。
+     */
+    async forgetConversation(accountId: string, conversationId: string): Promise<void> {
+      const key = localExecutionKey({ accountId, workspaceId: null, projectId: null, conversationId })
+      return enqueue(async () => {
+        const binding = bindings.get(key)
+        if (binding) await release(key, binding)
+        steeringQueueItems.delete(key)
+        await checkpoints?.removeConversation(accountId, conversationId)
+      })
+    },
+
     async dispose(): Promise<void> {
       disposed = true
       unsubscribe()
