@@ -68,13 +68,17 @@
 /* 预留底栏空间，鼠标移入或键盘聚焦时显示，避免悬停改变消息位置。 */
 .wb-conversation-message-actions { display: flex; align-items: center; gap: 6px; min-height: 24px; margin-top: 2px; color: var(--muted); font-size: var(--text-2xs); opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-standard); }
 .wb-conversation-message-user .wb-conversation-message-actions { margin-top: 0; padding-inline-end: 4px; }
-.wb-conversation-message-copy { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard); }
+.wb-conversation-message-copy,
+.wb-conversation-message-action { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard); }
 .wb-conversation-message-assistant .wb-conversation-message-copy { margin-left: -5px; }
 .wb-conversation-agent-group:is(:hover, :focus-within) .wb-conversation-message-actions,
 .wb-conversation-message:is(:hover, :focus-within) .wb-conversation-message-actions { opacity: 1; pointer-events: auto; }
-.wb-conversation-message-copy:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.wb-conversation-message-copy:hover:not(:disabled),
+.wb-conversation-message-action:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.wb-conversation-message-action:disabled { opacity: .45; cursor: not-allowed; }
 .wb-conversation-message-copy[data-copied="true"] { color: var(--success-text); }
-.wb-conversation-message-copy svg { width: 14px; height: 14px; }
+.wb-conversation-message-copy svg,
+.wb-conversation-message-action svg { width: 14px; height: 14px; }
 @media (hover: none) { .wb-conversation-message-actions { opacity: 1; pointer-events: auto; } }
 
 /* 新条目进场：只对挂载后新出现的元素播放；默认状态保持可见，动画被禁用时不会留白。 */

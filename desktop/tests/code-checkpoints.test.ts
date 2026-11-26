@@ -69,6 +69,10 @@ test("轮次 Diff、回退和保护快照可跨重开访问，保留 HEAD、暂�
 
     const history = await reopened.run(scope, grant, { kind: "history" }, current, noOthers)
     assert.equal(history.kind, "history")
+    assert.deepEqual(history.turns[0]!.files, [
+      { path: "code file.txt", added: 1, removed: 1 },
+      { path: "image.bin", added: null, removed: null },
+    ])
     const guardId = history.turns[0].guards[0].id
     const guard = await reopened.run(scope, grant, { kind: "preview", turnId, target: "guard", guardId }, current, noOthers)
     assert.ok(guard.kind === "preview")
@@ -152,6 +156,22 @@ test("CodeCheckpoints 在无团队个人会话发布到 Project 前后延续同�
     assert.equal(history.kind, "history")
     assert.equal(history.turns.length, 1)
     assert.equal(history.turns[0]!.turnId, turnId)
+    assert.deepEqual(history.turns[0]!.files, [
+      { path: "app.txt", added: 1, removed: 1 },
+    ])
+
+    // 兼容旧版落盘记录：若磁盘 JSON 未缓存 files 字段，history 仍可从 base/post 懒算补全。
+    const scopeId = digest(JSON.stringify(["fixture", publishedScope.accountId, publishedScope.conversationId])).slice(0, 32)
+    const indexPath = join(data, `${scopeId}.json`)
+    const rawRecords = JSON.parse(await readFile(indexPath, "utf8")) as Array<Record<string, unknown>>
+    delete rawRecords[0]!.files
+    await writeFile(indexPath, JSON.stringify(rawRecords))
+    const lazyHistory = await new CodeCheckpoints(data, "fixture").run(publishedScope, grant, { kind: "history" }, current, noOthers)
+    assert.equal(lazyHistory.kind, "history")
+    assert.deepEqual(lazyHistory.turns[0]!.files, [
+      { path: "app.txt", added: 1, removed: 1 },
+    ])
+
     const diff = await cpAfterPublish.run(publishedScope, grant, { kind: "diff", turnId, path: "app.txt" }, current, noOthers)
     assert.ok(diff.kind === "diff" && diff.text.includes("+v2"))
   } finally {

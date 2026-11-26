@@ -185,18 +185,26 @@ export type CodeCheckpointAction =
   | { kind: "preview"; turnId: string; target: "base" | "post" | "guard"; guardId?: string }
   | { kind: "restore"; token: string }
 
+export type CodeCheckpointFileChange = {
+  readonly path: string
+  readonly oldPath?: string
+  readonly added: number | null
+  readonly removed: number | null
+}
+
 export type CodeCheckpointTurn = {
   turnId: string
   ordinal: number
   createdAtMs: number
   status: "completed" | "cancelled" | "failed"
   unavailable?: string
+  files?: readonly CodeCheckpointFileChange[]
   guards: readonly { id: string; createdAtMs: number }[]
 }
 
 export type CodeCheckpointReply =
   | { kind: "history"; turns: readonly CodeCheckpointTurn[]; restoreBlocked?: string }
-  | { kind: "changes"; files: readonly { path: string; oldPath?: string; added: number | null; removed: number | null }[] }
+  | { kind: "changes"; files: readonly CodeCheckpointFileChange[] }
   | { kind: "diff"; text: string; truncated: boolean }
   | { kind: "preview"; token: string; paths: readonly string[] }
   | { kind: "restored"; paths: readonly string[]; failure?: string }

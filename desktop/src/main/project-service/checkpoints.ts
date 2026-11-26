@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { CodeCheckpointAction, CodeCheckpointReply, CodeCheckpointTurn, LocalExecutionScope } from "../../shared/local-execution-host.js"
+import type { CodeCheckpointAction, CodeCheckpointFileChange, CodeCheckpointReply, CodeCheckpointTurn, LocalExecutionScope } from "../../shared/local-execution-host.js"
 import { inspectDirectory, sameDirectory, type DirectoryGrant } from "../local-directory-grants.js"
 import {
   applyCheckpointTree, captureCheckpointTree, checkpointChanges, CHECKPOINT_BUDGET_MS, objectId, readCheckpointChanges,
@@ -19,8 +19,10 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const scopePattern = /^[0-9a-f]{32}$/
 const MAX_RECORDS = 2_000
 type Guard = { id: string; createdAtMs: number; oid: string }
-type RecordOnDisk = Omit<CodeCheckpointTurn, "guards"> & {
-  gitRoot: string; dev: string; ino: string; base: string | null; post: string | null; guards: Guard[]
+type RecordOnDisk = Omit<CodeCheckpointTurn, "guards" | "files"> & {
+  gitRoot: string; dev: string; ino: string; base: string | null; post: string | null
+  files?: readonly CodeCheckpointFileChange[]
+  guards: Guard[]
 }
 type BindingOnDisk = { scope: string; path: string }
 type Phase = "base" | "post" | "guard"
@@ -36,6 +38,15 @@ function message(error: unknown): string {
   return error instanceof Error && !("code" in error) ? error.message : "无法访问本机轮次快照。"
 }
 
+function validFileChange(value: unknown): value is CodeCheckpointFileChange {
+  if (!value || typeof value !== "object") return false
+  const f = value as Partial<CodeCheckpointFileChange>
+  return typeof f.path === "string"
+    && (f.oldPath === undefined || typeof f.oldPath === "string")
+    && (f.added === null || Number.isSafeInteger(f.added))
+    && (f.removed === null || Number.isSafeInteger(f.removed))
+}
+
 function validRecord(value: unknown): value is RecordOnDisk {
   if (!value || typeof value !== "object") return false
   const r = value as Partial<RecordOnDisk>
@@ -45,6 +56,7 @@ function validRecord(value: unknown): value is RecordOnDisk {
     && typeof r.gitRoot === "string" && typeof r.dev === "string" && typeof r.ino === "string"
     && [r.base, r.post].every(value => value === null || typeof value === "string" && objectId.test(value))
     && (r.unavailable === undefined || typeof r.unavailable === "string")
+    && (r.files === undefined || (Array.isArray(r.files) && r.files.every(validFileChange)))
     && Array.isArray(r.guards) && r.guards.every(g => g && uuid.test(g.id) && objectId.test(g.oid) && Number.isFinite(g.createdAtMs))
 }
 
@@ -156,6 +168,7 @@ export class CodeCheckpoints {
     if (!uuid.test(turnId)) return
     let post: string | null = null
     let unavailable = start.unavailable
+    let files: readonly CodeCheckpointFileChange[] | undefined
     if (!unavailable && start.repo && start.base) {
       if (!stopped) unavailable = "无法确认 Agent 已停止写入，本轮 Diff 不可用。"
       else {
@@ -165,6 +178,7 @@ export class CodeCheckpoints {
           if (repository?.gitDir !== start.repo.gitDir || repository.commonDir !== start.repo.commonDir) throw new Error("Git 工作树已变化。")
           const { tree } = await captureCheckpointTree(repository, deadline)
           post = await writeCheckpointRef(repository, tree, ref(start.scope, start.ordinal, "post"), deadline)
+          files = await readCheckpointChanges(repository, start.base, post).catch(() => undefined)
         } catch (error) { unavailable = message(error) }
       }
     }
@@ -173,7 +187,9 @@ export class CodeCheckpoints {
     await atomicJson(this.#index(start.scope), [...records, {
       turnId, createdAtMs, status, ordinal: start.ordinal, gitRoot: start.directory.path,
       dev: String(start.directory.dev), ino: String(start.directory.ino), base: start.base, post,
-      ...(unavailable ? { unavailable } : {}), guards: [],
+      ...(unavailable ? { unavailable } : {}),
+      ...(files ? { files } : {}),
+      guards: [],
     }])
   }
 
@@ -240,15 +256,26 @@ export class CodeCheckpoints {
     const repo = await this.#repository(directory)
     const matches = (row: RecordOnDisk) => row.gitRoot === directory.path && row.dev === String(directory.dev) && row.ino === String(directory.ino)
     if (action.kind === "history") {
-      const restoreBlocked = repo
-        ? await this.#restoreBlocked(scopeId, repo, otherDirectories).catch(() => "无法确认当前工作树的隔离情况。")
-        : "仅在 Git 工作树根目录记录代码快照。"
+      const matched = records.filter(matches)
+      const restoreBlocked = !repo
+        ? "仅在 Git 工作树根目录记录代码快照。"
+        : matched.length > 0
+          ? await this.#restoreBlocked(scopeId, repo, otherDirectories).catch(() => "无法确认当前工作树的隔离情况。")
+          : undefined
+      const turns = await Promise.all(matched.map(async ({ turnId, ordinal, createdAtMs, status, unavailable, base, post, files, guards }) => {
+        const resolvedFiles = files ?? (repo && base && post && !unavailable
+          ? await readCheckpointChanges(repo, base, post).catch(() => undefined)
+          : undefined)
+        return {
+          turnId, ordinal, createdAtMs, status,
+          ...(unavailable ? { unavailable } : {}),
+          ...(resolvedFiles ? { files: resolvedFiles } : {}),
+          guards: guards.map(({ id, createdAtMs: time }) => ({ id, createdAtMs: time })),
+        }
+      }))
       return {
         kind: "history", ...(restoreBlocked ? { restoreBlocked } : {}),
-        turns: records.filter(matches).map(({ turnId, ordinal, createdAtMs, status, unavailable, guards }) => ({
-          turnId, ordinal, createdAtMs, status, ...(unavailable ? { unavailable } : {}),
-          guards: guards.map(({ id, createdAtMs: time }) => ({ id, createdAtMs: time })),
-        })).reverse(),
+        turns: turns.reverse(),
       }
     }
     if (!repo) throw new Error("当前目录没有 Git 工作树。")

@@ -8,7 +8,7 @@
  */
 import { IconArrowDown, IconBrain, IconCheck, IconChevronRight, IconCopy, IconFolder, IconLoader2, IconTool } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 
 import { FileTypeIcon } from "../common/file-type-icon.js"
 import { formatElapsed } from "../common/formatters.js"
@@ -627,8 +627,8 @@ function TimelineRow({
           {[duration === undefined ? "" : (duration / 1000).toFixed(1) + " 秒",
             cachedTokens === undefined ? "" : "缓存 " + cachedTokens + " Token"].filter(Boolean).join(" · ")}
         </small>}
-        {copyText || sentAt ? (
-          <MessageActions text={entry.text} copyText={copyText} sentAt={sentAt} role={entry.role} />
+        {copyText || sentAt || entry.extraActions ? (
+          <MessageActions text={entry.text} copyText={copyText} sentAt={sentAt} role={entry.role} extraActions={entry.extraActions} />
         ) : null}
       </div>
     )
@@ -692,12 +692,13 @@ function formatMessageTime(date: Date): string {
   return `${sameYear ? "" : String(year).padStart(4, "0") + "-"}${monthDay} ${time}`
 }
 
-/** 用户消息与已完成回答共用复制反馈；用户消息底栏同时展示本机时间。 */
-function MessageActions({ text, copyText, sentAt, role }: {
+/** 用户消息与已完成回答共用复制反馈；用户消息底栏同时展示本机时间，并允许外层注入附加操作。 */
+function MessageActions({ text, copyText, sentAt, role, extraActions }: {
   text: string
   copyText?: RenderingActions["copyText"]
   sentAt?: Date
   role: "user" | "assistant"
+  extraActions?: ReactNode
 }): ReactElement {
   const [copied, setCopied] = useState(false)
   const [announce, setAnnounce] = useState("")
@@ -721,6 +722,7 @@ function MessageActions({ text, copyText, sentAt, role }: {
   }
   return (
     <div className="wb-conversation-message-actions" data-selection-ignore="true">
+      {extraActions}
       {copyText ? <button type="button" className="wb-conversation-message-copy" data-copied={copied || undefined}
         aria-label={copyLabel} title={copyLabel} onClick={() => { void copy() }}>
         {copied ? <IconCheck aria-hidden="true" /> : <IconCopy aria-hidden="true" />}

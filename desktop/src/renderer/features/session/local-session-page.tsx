@@ -18,6 +18,7 @@ import {
   IconChevronRight,
   IconFileText,
   IconLoader2,
+  IconRotate2,
   IconX,
 } from "@tabler/icons-react"
 import {
@@ -34,7 +35,7 @@ import {
   preparePastedImage,
 } from "../../../ui/index.js"
 import { MAX_DRAFT_IMAGES, MAX_TOTAL_IMAGE_BYTES, isSteerText } from "../../../shared/index.js"
-import type { PersonalDraftImage } from "../../../shared/index.js"
+import type { CodeCheckpointReply, PersonalDraftImage } from "../../../shared/index.js"
 import type {
   ConversationActions,
   ConversationComposerView,
@@ -61,7 +62,8 @@ import { attachmentUnavailableReason } from "./use-local-execution.js"
 import type { LocalDirectoryGitSummary } from "./use-local-directory.js"
 import { resolveSessionFileReference } from "./session-file-reference.js"
 import { buildDirectoryContextView, handleDirectoryContextAction } from "./session-model.js"
-import { CodeCheckpointPanel } from "./code-checkpoint-panel.js"
+import { CheckpointRestoreDialog, TurnChangedFilesCard, TurnDiffPane } from "./code-checkpoint-panel.js"
+import { matchTurnSpans } from "./turn-checkpoint-model.js"
 import { PromptQueuePanel } from "./prompt-queue-panel.js"
 
 export type LocalSessionPageProps = {
@@ -170,9 +172,13 @@ export function LocalSessionPage({
     onPersonalChange(scope, { kind: "draft-annotations", annotations: nextAnnotations })
   }
 
-  useEffect(() => {
-    if (!viewingFile) setPvMax(false)
-  }, [viewingFile])
+  const [checkpointHistory, setCheckpointHistory] = useState<Extract<CodeCheckpointReply, { kind: "history" }> | null>(null)
+  const [activeTurnDiff, setActiveTurnDiff] = useState<{ readonly turnId: string; readonly path: string } | null>(null)
+  const [restoreTurnId, setRestoreTurnId] = useState<string | null>(null)
+  const [checkpointRefreshTick, setCheckpointRefreshTick] = useState(0)
+  const prevActiveTurnIdRef = useRef<string | null>(null)
+  const checkpointRequestSeq = useRef(0)
+  const prevCentralFileRef = useRef<string | null>(centralFiles?.activeCentral ?? null)
 
   useEffect(() => {
     setCapabilityError(null)
@@ -388,6 +394,59 @@ export function LocalSessionPage({
       })
     }
   const isRunning = Boolean(activeExecution?.activeTurnId)
+  const canLoadCheckpoints = Boolean(visible && execution.codeCheckpoint && availability.available)
+
+  const loadCheckpointHistory = async () => {
+    if (!execution.codeCheckpoint || !availability.available) return
+    const seq = ++checkpointRequestSeq.current
+    const sourceKey = referenceKey
+    try {
+      const reply = await execution.codeCheckpoint(conversation.conversationId, { kind: "history" })
+      if (checkpointRequestSeq.current !== seq || activeReference.current.key !== sourceKey) return
+      if (reply.kind === "history") setCheckpointHistory(reply)
+    } catch {
+      // 非 Git 目录或本机绑定尚未就绪时静默跳过，不在对话区暴露异常提示。
+    }
+  }
+
+  useEffect(() => {
+    setCheckpointHistory(null)
+    setActiveTurnDiff(null)
+    setRestoreTurnId(null)
+    prevActiveTurnIdRef.current = null
+  }, [referenceKey])
+
+  useEffect(() => {
+    const currentTurnId = activeExecution?.activeTurnId ?? null
+    const prevTurnId = prevActiveTurnIdRef.current
+    prevActiveTurnIdRef.current = currentTurnId
+    if (prevTurnId && currentTurnId !== prevTurnId) {
+      setCheckpointRefreshTick(tick => tick + 1)
+    }
+  }, [activeExecution?.activeTurnId])
+
+  useEffect(() => {
+    if (!canLoadCheckpoints) return
+    void loadCheckpointHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canLoadCheckpoints, referenceKey, checkpointRefreshTick])
+
+  useEffect(() => {
+    const nextCentral = centralFiles?.activeCentral ?? null
+    if (nextCentral !== prevCentralFileRef.current) {
+      prevCentralFileRef.current = nextCentral
+      if (nextCentral !== null) setActiveTurnDiff(null)
+    }
+  }, [centralFiles?.activeCentral])
+
+  const activeDiffTurn = activeTurnDiff
+    ? checkpointHistory?.turns.find(t => t.turnId === activeTurnDiff.turnId) ?? null
+    : null
+  const viewingSplit = viewingFile || activeDiffTurn !== null
+
+  useEffect(() => {
+    if (!viewingSplit) setPvMax(false)
+  }, [viewingSplit])
   const capabilities = buildComposerCapabilities({
     providers,
     selectedProviderId,
@@ -652,7 +711,67 @@ export function LocalSessionPage({
   const referencedEntries = hooks?.renderHistoryReferences?.(view.entries) ?? view.entries
   // 个人视图的 __solo__ 只是阅读状态命名空间，知识权限始终取真实执行绑定。
   const knowledgeWorkspaceId = executionScope ? executionScope.workspaceId : scope.workspaceId
-  const renderedEntries = knowledgeWorkspaceId ? withKnowledgeToolFeedback(referencedEntries,window.collaborationApps,knowledgeWorkspaceId,scope.accountId) : referencedEntries
+  const baseEntries = knowledgeWorkspaceId ? withKnowledgeToolFeedback(referencedEntries,window.collaborationApps,knowledgeWorkspaceId,scope.accountId) : referencedEntries
+  const matchedTurns = checkpointHistory?.turns.length
+    ? matchTurnSpans(baseEntries, checkpointHistory.turns, activeExecution?.activeTurnId)
+    : []
+  const userActionByIndex = new Map<number, (typeof matchedTurns)[number]["turn"]>()
+  const endCardsByIndex = new Map<number, (typeof matchedTurns)[number]["turn"][]>()
+  for (const span of matchedTurns) {
+    if (!checkpointHistory?.restoreBlocked && (!span.turn.unavailable || span.turn.guards.length > 0)) {
+      userActionByIndex.set(span.userIndex, span.turn)
+    }
+    if (span.turn.files && span.turn.files.length > 0) {
+      const list = endCardsByIndex.get(span.endIndex) ?? []
+      list.push(span.turn)
+      endCardsByIndex.set(span.endIndex, list)
+    }
+  }
+  const renderedEntries: ConversationTimelineEntry[] = []
+  for (let index = 0; index < baseEntries.length; index += 1) {
+    const entry = baseEntries[index]!
+    const revertTurn = userActionByIndex.get(index)
+    if (revertTurn && entry.kind === "message" && entry.role === "user") {
+      renderedEntries.push({
+        ...entry,
+        extraActions: (
+          <>
+            {entry.extraActions}
+            <button
+              type="button"
+              className="wb-conversation-message-action"
+              aria-label="回退代码至此消息前"
+              title="回退代码至此消息前"
+              disabled={isRunning}
+              onClick={() => setRestoreTurnId(revertTurn.turnId)}
+            >
+              <IconRotate2 aria-hidden="true" />
+            </button>
+          </>
+        ),
+      })
+    } else {
+      renderedEntries.push(entry)
+    }
+    const endTurns = endCardsByIndex.get(index)
+    if (endTurns) {
+      for (const turn of endTurns) {
+        renderedEntries.push({
+          kind: "extension",
+          id: `turn-checkpoint:${turn.turnId}`,
+          content: (
+            <TurnChangedFilesCard
+              turn={turn}
+              onOpenDiff={(targetTurn, filePath) => setActiveTurnDiff({
+                turnId: targetTurn.turnId,
+                path: filePath ?? targetTurn.files?.[0]?.path ?? "",
+              })}
+            />
+          ),
+        })
+      }
+    }
+  }
 
   const restoreKey = sessionState?.restoreStatus.kind === "reset"
     ? `${conversation.conversationId}:${sessionState.restoreStatus.sessionId}`
@@ -661,13 +780,8 @@ export function LocalSessionPage({
   const activePlans = sessionState?.plans ?? []
 
   const diagnostic = sessionState?.setupDiagnostics?.join(" ")
-  const aboveTimelineSlot = execution.codeCheckpoint || showRestoreBanner || capabilityError || diagnostic || activePlans.length > 0 ? (
+  const aboveTimelineSlot = showRestoreBanner || capabilityError || diagnostic || activePlans.length > 0 ? (
     <div className="session-above-timeline">
-      {execution.codeCheckpoint && <CodeCheckpointPanel
-        key={referenceKey}
-        running={Boolean(activeExecution?.activeTurnId)}
-        run={action => execution.codeCheckpoint!(conversation.conversationId, action)}
-      />}
       {diagnostic && <p className="session-restore-banner" role="status">{diagnostic}</p>}
       {showRestoreBanner ? (
         <div className="session-restore-banner" role="status">
@@ -830,9 +944,13 @@ export function LocalSessionPage({
       }
     : undefined
 
+  const restoreTurn = restoreTurnId
+    ? checkpointHistory?.turns.find(t => t.turnId === restoreTurnId) ?? null
+    : null
+
   return (
     <section className="session-center" aria-label={conversation.title || "本机会话"}>
-      <div className={`session-chat-split${viewingFile ? " has-split" : ""}${viewingFile && pvMax ? " is-max" : ""}`}>
+      <div className={`session-chat-split${viewingSplit ? " has-split" : ""}${viewingSplit && pvMax ? " is-max" : ""}`}>
         <div className="session-conversation-column">
           {headerBar}
           <div className="session-conversation-wrap">
@@ -841,7 +959,7 @@ export function LocalSessionPage({
               {...view}
               entries={renderedEntries}
               scope={scope}
-              visible={visible && !(viewingFile && pvMax)}
+              visible={visible && !(viewingSplit && pvMax)}
               interaction={interaction}
               personal={personal}
               actions={{
@@ -992,17 +1110,41 @@ export function LocalSessionPage({
             />
           </div>
         </div>
-        {centralFiles && viewingFile ? (
+        {viewingSplit ? (
           <div className="session-central-file-pane">
-            <SessionCentralFilePanels
-              state={centralFiles}
-              maximized={pvMax}
-              onToggleMaximized={() => setPvMax(value => !value)}
-              onAddSelectionToChat={handleAddSelectionToChat}
-            />
+            {activeDiffTurn && execution.codeCheckpoint ? (
+              <TurnDiffPane
+                turn={activeDiffTurn}
+                selectedPath={activeTurnDiff?.path ?? activeDiffTurn.files?.[0]?.path ?? ""}
+                restoreBlocked={checkpointHistory?.restoreBlocked}
+                running={isRunning}
+                maximized={pvMax}
+                onSelectPath={path => setActiveTurnDiff({ turnId: activeDiffTurn.turnId, path })}
+                onToggleMaximized={() => setPvMax(value => !value)}
+                onClose={() => setActiveTurnDiff(null)}
+                onRequestRestore={turn => setRestoreTurnId(turn.turnId)}
+                run={action => execution.codeCheckpoint!(conversation.conversationId, action)}
+              />
+            ) : centralFiles && viewingFile ? (
+              <SessionCentralFilePanels
+                state={centralFiles}
+                maximized={pvMax}
+                onToggleMaximized={() => setPvMax(value => !value)}
+                onAddSelectionToChat={handleAddSelectionToChat}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
+      {restoreTurn && execution.codeCheckpoint ? (
+        <CheckpointRestoreDialog
+          turn={restoreTurn}
+          running={isRunning}
+          run={action => execution.codeCheckpoint!(conversation.conversationId, action)}
+          onClose={() => setRestoreTurnId(null)}
+          onRestored={loadCheckpointHistory}
+        />
+      ) : null}
       {expandedPlan ? (
         <div
           className="session-plan-zoom-backdrop"

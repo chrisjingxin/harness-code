@@ -40,6 +40,8 @@ export type ConversationTimelineEntry =
       readonly attachments?: readonly ConversationMessageAttachment[]
       /** 本机发送附带的图片元数据（仅作本机时间线与重开会话后的缩略图/放大回显）。 */
       readonly images?: readonly ConversationDraftImage[]
+      /** 由外层装配注入的消息底栏附加操作按钮（仅在消息 hover/focus 时随操作栏浮现）。 */
+      readonly extraActions?: ReactNode
     }
   | { readonly kind: "reasoning"; readonly id: string; readonly text: string; readonly active: boolean }
   | {
