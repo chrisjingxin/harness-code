@@ -136,6 +136,9 @@ test("CollaborationState.withWorkspace 校验工作区成员关系、代次隔�
   assert.equal(authFailed.ok, false)
   const afterAuthFail = await state.getState()
   assert.equal(afterAuthFail.ok && afterAuthFail.value.status, "signedOut")
+  if (afterAuthFail.ok && afterAuthFail.value.status === "signedOut") {
+    assert.equal(afterAuthFail.value.reason, "expired")
+  }
 
   state.dispose()
 })
@@ -225,6 +228,11 @@ test("CollaborationState 断网进入 connectionError 时保留本机离线身�
   assert.notEqual(state.personalIdentity(), null)
   await state.signOut()
   assert.equal(state.personalIdentity(), null)
+  const signedOutState = await state.getState()
+  assert.equal(signedOutState.ok && signedOutState.value.status, "signedOut")
+  if (signedOutState.ok && signedOutState.value.status === "signedOut") {
+    assert.equal(signedOutState.value.reason, undefined)
+  }
 
   state.dispose()
 })
@@ -281,7 +289,64 @@ test("CollaborationState.initialIdentity 在离线冷重启时进入离线只读
   })
   const expiredRes = await expiredBoot.getState()
   assert.equal(expiredRes.ok, true)
-  if (expiredRes.ok) assert.equal(expiredRes.value.status, "signedOut")
+  if (expiredRes.ok) {
+    assert.equal(expiredRes.value.status, "signedOut")
+    if (expiredRes.value.status === "signedOut") assert.equal(expiredRes.value.reason, "expired")
+  }
   assert.equal(expiredBoot.personalIdentity(), null)
   expiredBoot.dispose()
+})
+
+test("CollaborationState.getProjectConversation 与 listMembers 遇瞬时网络异常时保留局部错误并在 401 时标记过期退出", async () => {
+  let networkDown = true
+  let failAuth = false
+  const user = {
+    id: USER_ID,
+    userNo: "80000001",
+    userName: "测试用户",
+    photo: "",
+    orgId: "org-1",
+    orgNo: "001",
+    orgName: "研发组",
+    orgPathName: "研发部/研发组",
+  }
+  const workspace = { id: WORKSPACE_ID, slug: "ws", name: "测试团队", role: "developer", memberVersion: 1, accessVersion: 1 }
+  const transport: typeof fetch = async input => {
+    const url = String(input)
+    if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+    if (url.endsWith("/api/v1/auth/demo-login") || url.endsWith("/api/v1/auth/me")) {
+      return jsonOk({ user, workspaces: [workspace] })
+    }
+    if (url.endsWith(`/projects/${PROJECT_ID}/conversations/${CONV_ID}`) && networkDown) {
+      throw new Error("conversation detail timeout")
+    }
+    if (url.endsWith(`/api/v1/workspaces/${WORKSPACE_ID}/members`)) {
+      if (failAuth) return jsonError("AUTHENTICATION_REQUIRED", "登录已过期", 401)
+      if (networkDown) throw new Error("members timeout")
+    }
+    return new Response("not found", { status: 404 })
+  }
+
+  const state = new CollaborationState(ORIGIN, transport)
+  assert.equal((await state.signIn("80000001")).ok, true)
+
+  const convFail = await state.getProjectConversation(WORKSPACE_ID, PROJECT_ID, CONV_ID)
+  assert.equal(convFail.ok, false)
+  const afterConvFail = await state.getState()
+  assert.equal(afterConvFail.ok && afterConvFail.value.status, "signedIn")
+
+  const memberFail = await state.listMembers(WORKSPACE_ID)
+  assert.equal(memberFail.ok, false)
+  const afterMemberFail = await state.getState()
+  assert.equal(afterMemberFail.ok && afterMemberFail.value.status, "signedIn")
+
+  failAuth = true
+  const memberAuthFail = await state.listMembers(WORKSPACE_ID)
+  assert.equal(memberAuthFail.ok, false)
+  const afterAuthFail = await state.getState()
+  assert.equal(afterAuthFail.ok && afterAuthFail.value.status, "signedOut")
+  if (afterAuthFail.ok && afterAuthFail.value.status === "signedOut") {
+    assert.equal(afterAuthFail.value.reason, "expired")
+  }
+  state.dispose()
 })

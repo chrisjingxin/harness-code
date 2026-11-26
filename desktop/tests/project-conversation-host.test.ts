@@ -222,3 +222,50 @@ test("PersonalStore 支持 projectDraft 与 conversation 超 800KB 正文自动�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("PersonalStore.load 校验远端会话遇瞬时网络异常时保留局部错误，不把全局身份踢入离线态", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "f12-personal-store-"))
+  let transientNetworkError = false
+  try {
+    const user = {
+      id: USER_ID,
+      userNo: "80278668",
+      userName: "张景新",
+      photo: "",
+      orgId: "org-1",
+      orgNo: "001",
+      orgName: "平台部",
+      orgPathName: "平台部",
+    }
+    const workspace = { id: WORKSPACE_ID, slug: "ws", name: "协作区", role: "developer" as const, memberVersion: 1, accessVersion: 1 }
+    const transport: typeof fetch = async input => {
+      const url = String(input)
+      if (url.endsWith("/api/v1/auth/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-1" })
+      if (url.endsWith("/api/v1/auth/demo-login") || url.endsWith("/api/v1/auth/me")) return jsonOk({ user, workspaces: [workspace] })
+      if (url.includes(`/projects/${PROJECT_ID}/conversations/${CONV_ID}`) && transientNetworkError) {
+        throw new Error("socket hang up")
+      }
+      return new Response("not found", { status: 404 })
+    }
+
+    const state = new CollaborationState(ORIGIN, transport)
+    assert.equal((await state.signIn("80278668")).ok, true)
+    const store = new PersonalStore(state, ORIGIN, dir)
+
+    transientNetworkError = true
+    const loaded = await store.load({
+      kind: "conversation",
+      workspaceId: WORKSPACE_ID,
+      projectId: PROJECT_ID,
+      conversationId: CONV_ID,
+    })
+    assert.equal(loaded.ok, false)
+
+    const identity = await state.getState()
+    assert.equal(identity.ok, true)
+    if (identity.ok) assert.equal(identity.value.status, "signedIn")
+    state.dispose()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

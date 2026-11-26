@@ -388,6 +388,7 @@ export class PersonalStore {
               const detail = await this.identity.withWorkspace(
                 key.workspaceId,
                 client => client.getProjectConversation(key.workspaceId!, key.projectId!, key.conversationId),
+                { publishConnectionError: false },
               )
               if (!detail.ok || !this.#current(identity)) {
                 this.#permissions.delete(cacheKey)

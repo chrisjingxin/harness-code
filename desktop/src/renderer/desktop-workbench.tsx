@@ -255,8 +255,10 @@ function DesktopSession(props: Hosts & {
   }
 
   const status = identity.state.status
+  const sessionExpired = identity.state.status === "signedOut" && identity.state.reason === "expired"
   const message = status === "loading" ? "正在确认账号。"
     : status === "connectionError" ? identity.state.error.message
+    : sessionExpired ? "当前登录已过期，请重新登录以继续团队协作。"
     : !activeUser ? "请先登录演示账号，立即在本机开始对话或协作。"
     : account === "failed" ? props.personalError || "无法恢复个人视图。"
     : "正在恢复个人视图…"
@@ -269,7 +271,7 @@ function DesktopSession(props: Hosts & {
     center={<section className="desktop-login-stage" aria-label="开始">
       <div className="desktop-login-card">
         <h1>协作工作台</h1>
-        <p role={account === "failed" ? "alert" : "status"}>{message}</p>
+        <p role={account === "failed" || sessionExpired ? "alert" : "status"} className={sessionExpired ? "error" : undefined}>{message}</p>
         {!activeUser && status !== "loading" && (
           <IdentityPanel host={props.collaboration} identity={identity} workspaceId={workspace?.id ?? null} />
         )}

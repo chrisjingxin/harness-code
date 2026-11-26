@@ -53,7 +53,7 @@ export interface ErrorDetail { code: ServerErrorCode; requestId: string; retryab
 export interface ErrorEnvelope { returnCode: string; errorMsg: string; body: ErrorDetail }
 export type CollaborationResult<T> = { ok: true; value: T } | { ok: false; error: CollaborationError }
 /** 连接故障保留上次身份提示，不能据此继续发送业务请求。 */
-export type IdentityState = { status: "signedOut" } | { status: "loading" } | { status: "signedIn"; user: UserSummary; workspaces: WorkspaceSummary[] } | { status: "connectionError"; lastKnownUser: UserSummary | null; error: CollaborationError }
+export type IdentityState = { status: "signedOut"; reason?: "expired" } | { status: "loading" } | { status: "signedIn"; user: UserSummary; workspaces: WorkspaceSummary[] } | { status: "connectionError"; lastKnownUser: UserSummary | null; error: CollaborationError }
 /** 具名身份接口；监听必须解绑，账号切换先退出再登录，不接受任意网络参数。 */
 export interface CollaborationHost {
   getState(): Promise<CollaborationResult<IdentityState>>

@@ -389,6 +389,8 @@ export function bindCollaborationIpc(
   const unsubscribe = identity.onStateChanged(state => {
     if (state.status === "signedIn" && origin) {
       writePersistedIdentity(userData, origin, state.user, state.workspaces)
+    } else if (state.status === "signedOut" && state.reason === "expired") {
+      clearPersistedIdentity(userData)
     }
     uploads?.useAccount(state.status === "signedIn" ? state.user.id : null)
     deepLinkBroker?.setSignedIn(state.status === "signedIn")
@@ -485,21 +487,21 @@ export function bindCollaborationIpc(
       : formatIpcError("INVALID_REQUEST", "项目会话列表参数无效。"))
   ipc.handle("workbench:project-conversations:register", 3, (workspaceId, projectId, request) =>
     isUuid(workspaceId) && isUuid(projectId) && isConversationRegisterRequest(request)
-      ? identity.withWorkspace(workspaceId, c => c.registerProjectConversation(workspaceId, projectId, request))
+      ? identity.withWorkspace(workspaceId, c => c.registerProjectConversation(workspaceId, projectId, request), { publishConnectionError: false })
       : formatIpcError("INVALID_REQUEST", "项目会话登记参数无效。"))
   ipc.handle("workbench:project-conversations:get", 3, (workspaceId, projectId, conversationId) =>
     isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
-      ? identity.getProjectConversation(workspaceId, projectId, conversationId)
+      ? identity.withWorkspace(workspaceId, c => c.getProjectConversation(workspaceId, projectId, conversationId), { publishConnectionError: false })
       : formatIpcError("INVALID_REQUEST", "项目会话标识无效。"))
   ipc.handle("workbench:project-conversations:history", 5, (workspaceId, projectId, conversationId, afterSequence, limit) =>
     isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
     && isNonNegativeSafeInteger(afterSequence)
     && isHistoryLimit(limit)
-      ? identity.withWorkspace(workspaceId, c => c.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit))
+      ? identity.withWorkspace(workspaceId, c => c.readProjectConversationHistory(workspaceId, projectId, conversationId, afterSequence, limit), { publishConnectionError: false })
       : formatIpcError("INVALID_REQUEST", "项目会话历史参数无效。"))
   ipc.handle("workbench:project-conversations:stop-sharing", 3, (workspaceId, projectId, conversationId) =>
     isUuid(workspaceId) && isUuid(projectId) && isUuid(conversationId)
-      ? identity.stopProjectConversationSharing(workspaceId, projectId, conversationId)
+      ? identity.withWorkspace(workspaceId, c => c.stopProjectConversationSharing(workspaceId, projectId, conversationId), { publishConnectionError: false })
       : formatIpcError("INVALID_REQUEST", "停止共享参数无效。"))
 
   ipc.handle("workbench:local-directory:bind", 4, (workspaceId, projectId, conversationKey, directoryPath) =>

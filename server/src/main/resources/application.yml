@@ -27,7 +27,7 @@ server:
         name: WBSESSION
         http-only: true
         same-site: strict
-      timeout: 30m
+      timeout: 24h
 
 mybatis-plus:
   configuration:

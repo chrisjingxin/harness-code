@@ -52,7 +52,7 @@ export function bindOrganizationIpc(window: BrowserWindow, trustedUrl: string, i
       : invalid())
   ipc.handle("organization:create-project", 2, (workspace, request) =>
     isUuid(workspace) && isProjectCreateRequest(request)
-      ? identity.withWorkspace(workspace, client => client.createProject(workspace, request))
+      ? identity.withWorkspace(workspace, client => client.createProject(workspace, request), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:get-project", 2, (workspace, project) =>
     isUuid(workspace) && isUuid(project)
@@ -60,27 +60,27 @@ export function bindOrganizationIpc(window: BrowserWindow, trustedUrl: string, i
       : invalid())
   ipc.handle("organization:update-project", 3, (workspace, project, request) =>
     isUuid(workspace) && isUuid(project) && isProjectPatchRequest(request)
-      ? identity.withWorkspace(workspace, client => client.updateProject(workspace, project, request))
+      ? identity.withWorkspace(workspace, client => client.updateProject(workspace, project, request), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:add-member", 3, (workspace, project, request) =>
     isUuid(workspace) && isUuid(project) && isProjectMemberAddRequest(request)
-      ? identity.withWorkspace(workspace, client => client.addProjectMember(workspace, project, request))
+      ? identity.withWorkspace(workspace, client => client.addProjectMember(workspace, project, request), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:remove-member", 3, (workspace, project, user) =>
     isUuid(workspace) && isUuid(project) && isUserId(user)
-      ? identity.withWorkspace(workspace, client => client.removeProjectMember(workspace, project, user))
+      ? identity.withWorkspace(workspace, client => client.removeProjectMember(workspace, project, user), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:list-repositories", 1, workspace =>
     isUuid(workspace)
-      ? identity.withWorkspace(workspace, client => client.listRepositories(workspace))
+      ? identity.withWorkspace(workspace, client => client.listRepositories(workspace), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:link-repository", 3, (workspace, project, repository) =>
     isUuid(workspace) && isUuid(project) && isUuid(repository)
-      ? identity.withWorkspace(workspace, client => client.linkRepository(workspace, project, repository))
+      ? identity.withWorkspace(workspace, client => client.linkRepository(workspace, project, repository), { publishConnectionError: false })
       : invalid())
   ipc.handle("organization:unlink-repository", 3, (workspace, project, repository) =>
     isUuid(workspace) && isUuid(project) && isUuid(repository)
-      ? identity.withWorkspace(workspace, client => client.unlinkRepository(workspace, project, repository))
+      ? identity.withWorkspace(workspace, client => client.unlinkRepository(workspace, project, repository), { publishConnectionError: false })
       : invalid())
 
   return () => ipc.dispose()

@@ -73,7 +73,13 @@ export class CollaborationState {
     for (const listener of this.#listeners) listener(structuredClone(state))
   }
   #failure(error: CollaborationError) {
-    if (error.code === "AUTHENTICATION_REQUIRED") { this.#generation++; this.#publish({ status: "signedOut" }); return }
+    if (error.code === "AUTHENTICATION_REQUIRED") {
+      const wasAuthenticated = this.#state.status === "signedIn"
+        || (this.#state.status === "connectionError" && Boolean(this.#state.lastKnownUser))
+      this.#generation++
+      this.#publish(wasAuthenticated ? { status: "signedOut", reason: "expired" } : { status: "signedOut" })
+      return
+    }
     if (["NETWORK_UNAVAILABLE", "TLS_ERROR", "INVALID_SERVER_RESPONSE", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR"].includes(error.code)) {
       const user = this.#state.status === "signedIn" ? this.#state.user : this.#state.status === "connectionError" ? this.#state.lastKnownUser : null
       if (!user) this.#lastKnownWorkspaces = []
@@ -160,7 +166,7 @@ export class CollaborationState {
     } finally { this.#exiting = false }
   }
 
-  /** 只在身份确认后读取成员；不缓存跨身份结果，旧代回包不交付给消费端。 */
+  /** 只在身份确认后读取成员；不缓存跨身份结果，旧代回包不交付给消费端；瞬时网络故障保留局部错误。 */
   async listMembers(workspaceId: string): Promise<CollaborationResult<MembersResponse>> {
     if (this.#disposed || this.#state.status !== "signedIn" || !this.#client) return this.#cancelled()
     const generation = this.#generation
@@ -168,7 +174,7 @@ export class CollaborationState {
     const result = await this.#client.listMembers(workspaceId)
     if (!this.#current(generation)) return this.#cancelled()
     if (revision !== (this.#workspaceRevisions.get(workspaceId) ?? 0)) return identityError("VERSION_CONFLICT", "团队权限已变化，请重新读取。")
-    if (!result.ok) this.#failure(result.error)
+    if (!result.ok && result.error.code === "AUTHENTICATION_REQUIRED") this.#failure(result.error)
     return result
   }
 
@@ -221,9 +227,13 @@ export class CollaborationState {
     return this.withWorkspace(workspaceId, request, { publishConnectionError: false })
   }
 
-  /** 校验本机发送或加载前的项目会话归属；通过统一工作区守卫执行。 */
+  /** 校验本机发送或加载前的项目会话归属；通过统一工作区守卫执行，瞬时故障留在局部重试。 */
   getProjectConversation(workspaceId: string, projectId: string, conversationId: string): Promise<CollaborationResult<ConversationDetailResponse>> {
-    return this.withWorkspace(workspaceId, client => client.getProjectConversation(workspaceId, projectId, conversationId))
+    return this.withWorkspace(
+      workspaceId,
+      client => client.getProjectConversation(workspaceId, projectId, conversationId),
+      { publishConnectionError: false },
+    )
   }
 
   /** 会话创建者停止继续向团队同步该会话；通过统一工作区守卫执行。 */
