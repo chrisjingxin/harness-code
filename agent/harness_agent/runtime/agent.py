@@ -331,6 +331,11 @@ def _create_controlled_inline_subagents(
         # 先在 ToolNode 前收敛 provider 的 tool_calls；Inline child 与 root
         # 共用同一门禁，避免子图把畸形响应写入父图或 checkpoint。
         child_middleware.append(ModelOutputGuardMiddleware())
+        from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
+
+        # 预算拦截必须位于 FilesystemMiddleware 与 HarnessFileToolsMiddleware 之前，
+        # 否则文件工具在内层短路返回，子代理永远不会被 max_rounds/max_tokens 拦住。
+        child_middleware.append(SubagentBudgetMiddleware())
         if dynamic:
             # Inline child 的 system prompt 不来自根 snapshot，必须在模型边界
             # 移除构图期档位并读取父 Run 的实时求交视图。
@@ -396,9 +401,7 @@ def _create_controlled_inline_subagents(
 
             child_middleware.append(ExecuteOutputMiddleware(backend=backend))
         from harness_agent.tracing.model import TraceModelMiddleware
-        from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
 
-        child_middleware.append(SubagentBudgetMiddleware())
         child_middleware.append(TraceModelMiddleware())
         prompt = record.prompt
         if workspace is not None:
@@ -1028,12 +1031,16 @@ def create_harness_agent(
         prompt = None
 
     from harness_agent.diagnostic_log.middleware import DiagnosticToolMiddleware
+    from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
 
     agent_middleware: list[Any] = [
         DiagnosticToolMiddleware(),
         # guard 必须位于所有 ToolNode/策略路径之前，非法 tool_calls 只会
         # 进入 ManagedAgentExecutor 的有界 retry，不进入 transcript。
         ModelOutputGuardMiddleware(),
+        # 预算拦截必须位于 HarnessFileToolsMiddleware 等短路文件工具之前，
+        # 否则子代理在超过 max_rounds/max_tokens 后仍可继续读文件直到派发超时。
+        SubagentBudgetMiddleware(),
     ]
     if rules_provider is not None:
         # deny 规则必须最先执行：命中即硬拒绝，任何审批模式（包括 yolo）不可覆盖。
@@ -1435,11 +1442,8 @@ def create_harness_agent(
 
     agent_middleware.append(ExecuteOutputMiddleware(backend=backend))
 
-    # 6. 预算中间件在模型调用前管理工具结果和摘要；不暴露模型可调用压缩工具。
-    from harness_agent.runtime.subagent_budget import SubagentBudgetMiddleware
+    # 6. 上下文窗口中间件在模型调用前管理工具结果和摘要；不暴露模型可调用压缩工具。
     from harness_agent.threads.context_window import ContextWindowMiddleware
-
-    agent_middleware.append(SubagentBudgetMiddleware())
 
     profile = getattr(resolved_model, "profile", None)
     profile_window = profile.get("max_input_tokens") if isinstance(profile, dict) else None

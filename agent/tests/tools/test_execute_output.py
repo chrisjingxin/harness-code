@@ -11,6 +11,8 @@ from deepagents.backends import LocalShellBackend
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
+from langchain_core.tools import StructuredTool
+from pydantic import Field
 
 from harness_agent.extensions.plugin_skills import SkillRegistry
 from harness_agent.policy.workspace_boundary import WorkspaceBoundaryMiddleware
@@ -21,6 +23,7 @@ from harness_agent.threads.virtual_files import (
     mount_harness_virtual_files,
 )
 from harness_agent.tools.execute_output import (
+    _EXECUTE_DESCRIPTION_HINT,
     DEFAULT_MAX_INLINE_CHARS,
     ExecuteOutputMiddleware,
 )
@@ -236,3 +239,87 @@ async def test_create_harness_agent_folds_120kb_execute_before_deepagents_evicti
     assert "/large_tool_results/" not in content
     assert not (workspace / "large_tool_results").exists()
     assert sorted(p.name for p in workspace.iterdir()) == ["emit.py"]
+
+
+@pytest.mark.asyncio
+async def test_execute_output_middleware_appends_execute_hint_idempotently(
+    tmp_path: Path,
+) -> None:
+    """ExecuteOutputMiddleware 同步与异步均只为 execute 幂等追加一次提示且不改原工具。"""
+    middleware = ExecuteOutputMiddleware()
+    original_execute = StructuredTool.from_function(
+        func=lambda command: command,
+        name="execute",
+        description="Execute a shell command.",
+    )
+    original_read = StructuredTool.from_function(
+        func=lambda file_path: file_path,
+        name="read_file",
+        description="Read a file.",
+    )
+
+    class _FakeModelRequest:
+        def __init__(self, tools: list[Any]) -> None:
+            self.tools = tools
+
+        def override(self, **kwargs: Any) -> "_FakeModelRequest":
+            return _FakeModelRequest(list(kwargs["tools"]))
+
+    seen_tools: list[list[Any]] = []
+
+    def sync_handler(req: Any) -> str:
+        seen_tools.append(req.tools)
+        return "ok"
+
+    async def async_handler(req: Any) -> str:
+        seen_tools.append(req.tools)
+        return "ok"
+
+    req = _FakeModelRequest([original_execute, original_read])
+    assert middleware.wrap_model_call(req, sync_handler) == "ok"  # type: ignore[arg-type]
+    assert await middleware.awrap_model_call(req, async_handler) == "ok"  # type: ignore[arg-type]
+    # 重复经过中间件不能叠写两次提示
+    nested_req = _FakeModelRequest(seen_tools[0])
+    assert await middleware.awrap_model_call(nested_req, async_handler) == "ok"  # type: ignore[arg-type]
+
+    assert original_execute.description == "Execute a shell command."
+    for batch in seen_tools:
+        exec_tool = next(t for t in batch if t.name == "execute")
+        read_tool = next(t for t in batch if t.name == "read_file")
+        assert exec_tool.description.count(_EXECUTE_DESCRIPTION_HINT.strip()) == 1
+        assert read_tool.description == "Read a file."
+
+
+@pytest.mark.asyncio
+async def test_create_harness_agent_exposes_execute_hint_in_model_tools(
+    tmp_path: Path,
+) -> None:
+    """create_harness_agent 发给模型的 execute 工具声明包含防截断与防 cd <workspace> 提示。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class _BindRecordingModel(_ToolCallingModel):
+        bound_batches: list[list[Any]] = Field(default_factory=list)
+
+        def bind_tools(self, tools: Any, **_kwargs: Any) -> Runnable:
+            self.bound_batches.append(list(tools))
+            return self
+
+    model = _BindRecordingModel(messages=iter([AIMessage(content="done")]))
+    agent = create_harness_agent(
+        model,
+        cwd=str(workspace),
+        approval_mode="yolo",
+        enable_memory=False,
+        enable_skills=False,
+        enable_ask_user=False,
+    )
+    state = await agent.ainvoke(
+        {"messages": [HumanMessage(content="check")]},
+        config={"configurable": {"thread_id": "test-execute-hint"}},
+    )
+    assert state["messages"][-1].content == "done"
+    assert model.bound_batches
+    exec_tool = next(t for t in model.bound_batches[-1] if getattr(t, "name", None) == "execute")
+    assert _EXECUTE_DESCRIPTION_HINT.strip() in exec_tool.description
+    assert exec_tool.description.count(_EXECUTE_DESCRIPTION_HINT.strip()) == 1

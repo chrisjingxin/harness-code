@@ -17,9 +17,15 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from deepagents.backends import CompositeBackend
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.types import Command
 
 DEFAULT_MAX_INLINE_CHARS = 12_000
@@ -31,6 +37,11 @@ DEFAULT_MAX_LINE_CHARS = 500
 
 _SAFE_ID_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 _VIRTUAL_TOOL_OUTPUT_PREFIX = "/.harness/tool-outputs"
+_EXECUTE_DESCRIPTION_HINT = (
+    "\n注意：命令默认已在当前工作区根目录执行，不要写 cd <workspace>；"
+    "超长输出会自动头尾折叠并保存完整日志到 /.harness/tool-outputs/...，"
+    "请直接运行命令本身，不要在命令尾拼接 | tail 或 | grep 截断后反复重跑。"
+)
 
 
 def _extract_text(content: object) -> str:
@@ -173,6 +184,51 @@ class ExecuteOutputMiddleware(AgentMiddleware):
         self._tail_lines = tail_lines
         self._head_char_budget = head_char_budget
         self._tail_char_budget = tail_char_budget
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse | ExtendedModelResponse],
+    ) -> ModelResponse | ExtendedModelResponse:
+        """同步注入 ``execute`` 工具说明。"""
+        return handler(self._with_execute_hint(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse | ExtendedModelResponse]],
+    ) -> ModelResponse | ExtendedModelResponse:
+        """异步注入 ``execute`` 工具说明。"""
+        return await handler(self._with_execute_hint(request))
+
+    @staticmethod
+    def _with_execute_hint(request: ModelRequest) -> ModelRequest:
+        """在发给模型前为 ``execute`` 工具声明追加工作目录与输出折叠说明。"""
+        tools = getattr(request, "tools", None)
+        if not tools:
+            return request
+        hint_marker = _EXECUTE_DESCRIPTION_HINT.strip()
+        updated_tools: list[Any] = []
+        changed = False
+        for tool in tools:
+            if isinstance(tool, BaseTool) and tool.name == "execute":
+                desc = tool.description or ""
+                if hint_marker not in desc:
+                    updated_tools.append(
+                        tool.model_copy(update={"description": f"{desc}{_EXECUTE_DESCRIPTION_HINT}"})
+                    )
+                    changed = True
+                    continue
+            elif isinstance(tool, dict) and tool.get("name") == "execute":
+                desc = str(tool.get("description") or "")
+                if hint_marker not in desc:
+                    updated_tools.append({**tool, "description": f"{desc}{_EXECUTE_DESCRIPTION_HINT}"})
+                    changed = True
+                    continue
+            updated_tools.append(tool)
+        if not changed:
+            return request
+        return request.override(tools=updated_tools)
 
     def wrap_tool_call(
         self,

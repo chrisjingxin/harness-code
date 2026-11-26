@@ -364,3 +364,94 @@ async def test_create_harness_agent_mounts_subagent_budget_middleware(tmp_path: 
         config={"configurable": {"thread_id": "root-no-budget"}},
     )
     assert state["messages"][-1].content == "root ok"
+
+
+@pytest.mark.asyncio
+async def test_subagent_budget_blocks_read_file_before_harness_file_tools_middleware(
+    tmp_path: Path,
+) -> None:
+    """create_harness_agent(shared_engine=True) 中预算拦截位于文件工具外层，达限后能拦住 read_file。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sample = workspace / "sample.txt"
+    sample.write_text("HELLO_BUDGET_CHECK\n", encoding="utf-8")
+
+    model = _RecordingModel(
+        messages=iter(
+            [
+                # 第 1 轮（normal）：允许通过 HarnessFileToolsMiddleware 读取文件
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "read_file",
+                            "args": {"file_path": str(sample)},
+                            "id": "call_read_1",
+                        }
+                    ],
+                ),
+                # 第 2 轮（force_wrap_up）：模型仍顽固调用 read_file -> 必须在进入文件工具前被拦截
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "read_file",
+                            "args": {"file_path": str(sample)},
+                            "id": "call_read_2",
+                        }
+                    ],
+                ),
+                # 第 3 轮：交付最终摘要
+                AIMessage(content="BUDGET_WRAPPED_UP_IN_SHARED_ENGINE"),
+            ]
+        )
+    )
+    agent = create_harness_agent(
+        model,
+        cwd=str(workspace),
+        approval_mode="yolo",
+        enable_memory=False,
+        enable_skills=False,
+        enable_ask_user=False,
+        shared_engine=True,
+    )
+    budget = SubagentBudget(max_rounds=2)
+    run_context = RunContext(
+        thread_id="thread-budget-read",
+        run_id="run-budget-read",
+        approval_mode="yolo",
+        context_snapshot=prepare_embedded_context_snapshot(
+            thread_id="thread-budget-read",
+            system_prompt="child base prompt",
+            workspace=str(workspace),
+            sandboxed=False,
+            provider=None,
+            approval_mode="yolo",
+            skill_registry=None,
+            enable_memory=False,
+            enable_skills=False,
+            enable_ask_user=False,
+        ),
+        execution_id="child-budget-read",
+        parent_execution_id="root",
+        agent_id="explore",
+        execution_mode=ExecutionMode.INLINE,
+        cancellation_token=RunCancellationToken(),
+        subagent_budget=budget,
+    )
+    state = await agent.ainvoke(
+        {"messages": [HumanMessage(content="read sample.txt")]},
+        config={"configurable": {"thread_id": "thread-budget-read"}},
+        context=run_context,
+    )
+    assert state["messages"][-1].content == "BUDGET_WRAPPED_UP_IN_SHARED_ENGINE"
+    tool_msgs = [m for m in state["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 2
+    assert "HELLO_BUDGET_CHECK" in str(tool_msgs[0].content)
+    assert tool_msgs[0].status != "error"
+    assert tool_msgs[1].status == "error"
+    assert "已达到子代理轮次/时间预算上限" in str(tool_msgs[1].content)
+    assert "HELLO_BUDGET_CHECK" not in str(tool_msgs[1].content)
+    assert len(model.received) == 3
+    round2_text = "\n".join(str(getattr(m, "content", "")) for m in model.received[1])
+    assert "【预算已达上限】" in round2_text
