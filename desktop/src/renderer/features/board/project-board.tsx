@@ -173,10 +173,10 @@ export function ProjectBoard(props: ProjectBoardProps) {
 
   return (
     <div className="project-board-scroll">
-      <main className="project-board page-shell" aria-label="Project 看板">
+      <main className="project-board page-shell" aria-label="项目看板">
         <header className="page-head project-board-head">
           <div>
-            <h1 className="sr">Project 看板</h1>
+            <h1 className="sr">项目看板</h1>
             <p>{description?.trim() ? description : `${projectName} · 统一追踪任务四列流转与成员协同进展`}</p>
           </div>
           <div className="project-board-actions">
@@ -235,7 +235,7 @@ export function ProjectBoard(props: ProjectBoardProps) {
           {projects && projects.length > 0 && props.onSelectProject && (
             <select
               className="c4-select project-board-select"
-              aria-label="选择 Project"
+              aria-label="选择项目"
               value={currentProjectId ?? ""}
               onChange={event => props.onSelectProject?.(event.target.value)}
             >

@@ -790,7 +790,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     input: PublishConversationSubmitInput,
   ): Promise<string | null> => {
     if (!localConversations) return "本机会话存储尚未启用。"
-    if (offline) return "协作服务当前离线，无法发布到 Project。"
+    if (offline) return "协作服务当前离线，无法发布到项目。"
     const detailRes = await localConversations.get(conversationId).catch(() => null)
     if (!detailRes?.ok) return detailRes ? detailRes.error.message : "无法读取会话详情。"
     const { record, turns } = detailRes.value
@@ -862,7 +862,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     const targetWorkspaceId = record?.workspaceId ?? stopSharingTarget?.workspaceId ?? null
     const targetProjectId = record?.projectId ?? stopSharingTarget?.projectId ?? null
     if (!targetWorkspaceId || !targetProjectId) {
-      return "该会话当前未关联已发布 Project。"
+      return "该会话当前未关联已发布项目。"
     }
     const remoteRes = await projectConversations.stopSharing(targetWorkspaceId, targetProjectId, conversationId)
       .catch(() => null)

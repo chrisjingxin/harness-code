@@ -216,7 +216,7 @@ test("buildCommandPaletteGroups 在个人离线与在线团队模式下均正确
   })
   assert.deepEqual(fullDefault.map(g => g.label), [
     "个人本机会话",
-    "当前 Project 会话",
+    "当前项目会话",
     "队友会话（只读）",
     "任务",
     "知识",

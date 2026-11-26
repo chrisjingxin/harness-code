@@ -103,8 +103,8 @@ export function CreateProjectDialog({
       >
         <div className="dlg-head">
           <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h2 id="dlgProjectTitle">新建 Project</h2>
-            <p className="dlg-sub">{workspaceName ? `会创建在「${workspaceName}」下` : "在当前 Workspace 下创建协作事项"}</p>
+            <h2 id="dlgProjectTitle">新建项目</h2>
+            <p className="dlg-sub">{workspaceName ? `会创建在「${workspaceName}」下` : "在当前协作空间下创建协作事项"}</p>
           </div>
           <button
             type="button"
@@ -147,7 +147,7 @@ export function CreateProjectDialog({
 
           {teamMembers && teamMembers.length > 0 && (
             <div className="fld">
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>从当前 Workspace 勾选成员</span>
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>从当前协作空间勾选成员</span>
               <p className="help">创建者{selfUser ? ` ${selfUser.userName} ` : ""}默认是项目管理员，不可取消。</p>
               <div style={{ maxHeight: 168, overflowY: "auto" }}>
                 {teamMembers.map(item => {
@@ -176,7 +176,7 @@ export function CreateProjectDialog({
           )}
 
           <p className="meta" style={{ fontSize: "var(--text-xs)" }}>
-            关联仓库可在创建后于「Project 资料与成员」中绑定 Workspace 下已有仓库。
+            关联仓库可在创建后于「项目资料与成员」中绑定协作空间下已有仓库。
           </p>
         </div>
 

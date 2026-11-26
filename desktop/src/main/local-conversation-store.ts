@@ -427,7 +427,7 @@ export class LocalConversationStore {
     if (!validAccountId(accountId) || conversation.ownerUserId !== accountId
       || !validUuid(workspaceId) || !validUuid(conversation.projectId) || !validUuid(conversation.conversationId)
       || !SHARE_MODES.has(conversation.shareMode) || !SHARE_STATUSES.has(conversation.shareStatus)) {
-      return identityError("INVALID_REQUEST", "本人 Project 会话归属或共享状态无效。")
+      return identityError("INVALID_REQUEST", "本人项目会话归属或共享状态无效。")
     }
     return this.#enqueue(accountId, async () => {
       try {
@@ -458,7 +458,7 @@ export class LocalConversationStore {
         index.records.push(record)
         await this.#writeIndex(accountId, index)
         return ok(structuredClone(record))
-      } catch (error) { return this.#wrapError(error, "无法保存本人 Project 会话记录。") }
+      } catch (error) { return this.#wrapError(error, "无法保存本人项目会话记录。") }
     })
   }
 

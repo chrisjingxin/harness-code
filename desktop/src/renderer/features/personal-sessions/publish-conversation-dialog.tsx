@@ -149,7 +149,7 @@ export function PublishConversationDialog({
     if (busy) return
     setSubmitError("")
     if (!selectedTarget) {
-      setSubmitError("请选择要发布到的活跃 Project。")
+      setSubmitError("请选择要发布到的活跃项目。")
       return
     }
     if (shareMode === "summary_only" && !briefText.trim()) {
@@ -173,7 +173,7 @@ export function PublishConversationDialog({
         ? { historyFromTurnIndex: selectedStartTurnIndex }
         : {}),
       initialBrief,
-    }).catch(() => "发布到 Project 失败，请重试。")
+    }).catch(() => "发布到项目失败，请重试。")
     setBusy(false)
     if (err) {
       setSubmitError(err)
@@ -199,7 +199,7 @@ export function PublishConversationDialog({
       >
         <div className="dlg-head">
           <div className="od-stack" style={{ ["--od-gap" as string]: "2px" }}>
-            <h2 id="dlgPublishTitle">发布到 Project</h2>
+            <h2 id="dlgPublishTitle">发布到项目</h2>
             <p className="dlg-sub">{record.title || "未命名会话"}</p>
           </div>
           <button
@@ -216,15 +216,15 @@ export function PublishConversationDialog({
 
         <div className="dlg-body">
           <p className="psess-dlg-lead">
-            发布后 Project 成员可见会话简报；已被他人同步的内容无法收回。本机草稿、自动材料与本机记忆绝不上传。
+            发布后项目成员可见会话简报；已被他人同步的内容无法收回。本机草稿、自动材料与本机记忆绝不上传。
           </p>
 
           <div className="fld">
-            <label htmlFor="shareTargetProject">目标 Project</label>
+            <label htmlFor="shareTargetProject">目标项目</label>
             {loadingTargets ? (
-              <p className="help" role="status">正在读取可发布 Project…</p>
+              <p className="help" role="status">正在读取可发布项目…</p>
             ) : targets.length === 0 ? (
-              <p className="err" role="status">{loadError || "当前没有可发布到的活跃 Project，请先新建或加入项目。"}</p>
+              <p className="err" role="status">{loadError || "当前没有可发布到的活跃项目，请先新建或加入项目。"}</p>
             ) : (
               <select
                 id="shareTargetProject"
@@ -344,7 +344,7 @@ export function PublishConversationDialog({
               onChange={event => { setConfirmed(event.target.checked); setSubmitError("") }}
             />
             <span>
-              我确认向目标 Project 成员共享
+              我确认向目标项目成员共享
               {shareMode === "full" ? "（含后续定稿对话，已同步内容不可收回）" : "（仅状态与成果摘要）"}
             </span>
           </label>

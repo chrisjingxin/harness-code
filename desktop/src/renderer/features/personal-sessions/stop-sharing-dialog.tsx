@@ -70,7 +70,7 @@ export function StopSharingDialog({
 
         <div className="dlg-body">
           <p className="psess-dlg-lead">
-            停止向{projectName ? `「${projectName}」` : " Project "}共享后，本机后续新对话不再上传，但已被团队成员同步或留在项目中的内容无法收回，将继续保持只读可见。
+            停止向{projectName ? `「${projectName}」` : "项目"}共享后，本机后续新对话不再上传，但已被团队成员同步或留在项目中的内容无法收回，将继续保持只读可见。
           </p>
           <p className="help">此会话仍完整保存在本机「个人」空间，已有团队上下文不变，可以继续本地对话。</p>
           {error && <p className="err" role="alert">{error}</p>}

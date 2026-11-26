@@ -265,7 +265,7 @@ function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & 
           onClick={() => setOpen((value) => !value)}
         >
           <span className="ws-dot" aria-hidden="true" />
-          <span className="ws-pill-name">{view.workspaceName ?? "未选择团队"}</span>
+          <span className="ws-pill-name">{view.workspaceName ?? "未选择协作空间"}</span>
           {view.workspaceRoleLabel && <span className="ws-pill-role">{view.workspaceRoleLabel}</span>}
           <IconChevronDown size={12} className="chev" aria-hidden="true" />
         </button>
@@ -289,10 +289,10 @@ function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & 
             <MemberAvatar initial={(view.workspaceName ?? "W").slice(0, 1)} self size={22} />
           )}
           <span className="switch-txt">
-            <span className="switch-name od-truncate">{view.workspaceName ?? "未选择团队"}</span>
+            <span className="switch-name od-truncate">{view.workspaceName ?? "未选择协作空间"}</span>
             <span className="switch-sub">
               <span className="od-truncate">
-                Workspace{memberCount ? ` · ${memberCount} 人` : ""}
+                协作空间{memberCount ? ` · ${memberCount} 人` : ""}
               </span>
             </span>
           </span>
@@ -301,8 +301,8 @@ function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & 
       )}
 
       {open && workspaces.length > 0 && (
-        <div className="pnav-menu" role="menu" aria-label="切换 Workspace">
-          <div className="pnav-menu-label">团队</div>
+        <div className="pnav-menu" role="menu" aria-label="切换协作空间">
+          <div className="pnav-menu-label">协作空间</div>
           {workspaces.map((ws) => {
             const on = ws.workspaceId === (currentWs?.workspaceId ?? view.currentWorkspaceId);
             const wsPhotos = ws.memberPhotos ?? memberAvatars;
@@ -325,7 +325,7 @@ function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & 
                   <span className="mi-name">{ws.name}</span>
                   {(ws.memberCount || ws.projectCount) && (
                     <span className="mi-sub">
-                      {[ws.memberCount ? `${ws.memberCount} 人` : null, ws.projectCount ? `${ws.projectCount} 个 Project` : null].filter(Boolean).join(" · ")}
+                      {[ws.memberCount ? `${ws.memberCount} 人` : null, ws.projectCount ? `${ws.projectCount} 个项目` : null].filter(Boolean).join(" · ")}
                     </span>
                   )}
                 </span>
@@ -407,7 +407,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
         type="button"
         className="pnav-icon-button"
         aria-label="项目设置"
-        title="Project 设置与成员"
+        title="项目设置与成员"
         disabled={!current}
         data-active={view.activePage === "info"}
         onClick={actions.openProjectSettings}
@@ -415,7 +415,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
         <IconAdjustmentsHorizontal size={15} aria-hidden="true" />
       </button>
       {open && (
-        <div className="pnav-menu" role="menu" aria-label="切换 Project">
+        <div className="pnav-menu" role="menu" aria-label="切换项目">
           <div className="pnav-menu-label">项目</div>
           {availability.state !== "ready" && (
             <div className="pnav-menu-status">
@@ -448,7 +448,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
           <div className="pnav-menu-sep" />
           <button type="button" role="menuitem" className="pnav-menu-create" onClick={() => choose(actions.createProject)}>
             <IconPlus size={15} aria-hidden="true" />
-            <span className="mi-main"><span className="mi-name">新建 Project</span></span>
+            <span className="mi-main"><span className="mi-name">新建项目</span></span>
           </button>
         </div>
       )}
@@ -720,7 +720,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
       const canPublish = !view.offline && view.canPublishPersonal !== false;
       items.push({
         id: "publish",
-        label: "发布到 Project…",
+        label: "发布到项目…",
         icon: <IconUpload size={15} aria-hidden="true" />,
         separatorBefore: items.length > 0,
         disabled: !canPublish,
@@ -955,7 +955,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                   className="pane-foot"
                   onClick={() => actions.selectSpace?.("team")}
                 >
-                  另有 {view.publishedSessionCount} 个会话已发布到 Project，在「团队」空间里。
+                  另有 {view.publishedSessionCount} 个会话已发布到项目，在「团队」空间里。
                 </button>
               )}
             </div>
@@ -1028,12 +1028,12 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             </div>
           </div>
 
-          <div className="my-sessions" aria-label="Project 协作会话">
+          <div className="my-sessions" aria-label="项目协作会话">
             <div className="sb-scroll">
               <WorkspaceSwitch view={view} actions={actions} dualTrack />
 
               <div className="sb-block-head">
-                <span>Project 协作会话</span>
+                <span>项目协作会话</span>
                 {hasProject && view.sessionsAvailability.state === "ready" && (
                   <span className="sb-block-act count">
                     {mySessions.length} 我 / {peerSessionCount} 队友
@@ -1091,7 +1091,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                             type="button"
                             className="pnav-icon-button cp-gear"
                             aria-label={`${project.name} 资料与成员`}
-                            title="Project 资料与成员"
+                            title="项目资料与成员"
                             data-active={isCurrent && view.activePage === "info"}
                             onClick={() => {
                               if (actions.openProjectSettingsFor) {
@@ -1185,7 +1185,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                   })}
                   <button type="button" className="nav-item cp-create-proj" onClick={actions.createProject}>
                     <IconPlus size={14} aria-hidden="true" />
-                    <span className="nav-label">新建 Project</span>
+                    <span className="nav-label">新建项目</span>
                   </button>
                 </>
               )}
@@ -1196,7 +1196,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
         <>
           {/* 1. Workspace 团队组 + 团队知识库入口（单栏独立预览兼容分支） */}
           <div className="side-group">
-            <p className="pnav-eyebrow">团队</p>
+            <p className="pnav-eyebrow">协作空间</p>
             <WorkspaceSwitch view={view} actions={actions} dualTrack={false} />
             <button
               type="button"
@@ -1204,7 +1204,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
               data-active={knowActive}
               aria-current={knowActive ? "page" : undefined}
               disabled={!view.workspaceName}
-              title="Workspace 团队知识库"
+              title="团队知识库"
               onClick={() => actions.openPage("knowledge")}
             >
               <IconBook size={15} aria-hidden="true" />
@@ -1224,7 +1224,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
             {view.projectsAvailability.state === "failed" && !view.projects.length && (
               <Status value={view.projectsAvailability} area="projects" actions={actions} />
             )}
-            <div className="pnav-tools" aria-label="Project 导航">
+            <div className="pnav-tools" aria-label="项目导航">
               <button
                 type="button"
                 className="pnav-nav-item"
@@ -1234,7 +1234,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                 onClick={() => actions.openPage("board")}
               >
                 <IconLayoutGrid size={15} aria-hidden="true" />
-                <span className="pnav-nav-label">Project 看板</span>
+                <span className="pnav-nav-label">项目看板</span>
               </button>
               <button
                 type="button"

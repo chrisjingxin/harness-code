@@ -88,12 +88,12 @@ export function buildCommandPaletteGroups({
   const mine = mySessions.filter(s => hit(s.title)).slice(0, cap)
   if (mine.length) {
     out.push({
-      label: q ? "我的团队会话" : "当前 Project 会话",
+      label: q ? "我的团队会话" : "当前项目会话",
       items: mine.map(s => ({
         kind: "session",
         id: s.conversationId,
         title: s.title,
-        sub: `${projectName || "Project"} · ${s.timeLabel}`,
+        sub: `${projectName || "项目"} · ${s.timeLabel}`,
         user: memberById.get(s.ownerUserId),
         self: true,
       })),
@@ -113,7 +113,7 @@ export function buildCommandPaletteGroups({
           kind: "session",
           id: s.conversationId,
           title: s.title,
-          sub: `${owner?.userName ?? "成员"} · ${projectName || "Project"}`,
+          sub: `${owner?.userName ?? "成员"} · ${projectName || "项目"}`,
           user: owner,
         }
       }),
@@ -131,7 +131,7 @@ export function buildCommandPaletteGroups({
         kind: "task",
         id: t.taskId,
         title: t.title,
-        sub: `${projectName || "Project"} · ${PALETTE_TASK_STATUS_LABEL[t.status]}`,
+        sub: `${projectName || "项目"} · ${PALETTE_TASK_STATUS_LABEL[t.status]}`,
         user: memberById.get(t.assigneeId),
       })),
     })

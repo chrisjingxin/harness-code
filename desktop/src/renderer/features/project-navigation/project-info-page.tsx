@@ -151,7 +151,7 @@ export function ProjectInfoPage({
                       name: editing.name.trim(),
                       description: editing.description.trim(),
                       expectedVersion: project.version,
-                    }), "已更新 Project 资料。", () => setEditing(null))
+                    }), "已更新项目资料。", () => setEditing(null))
                   }}
                 >
                   <div className="fld">
@@ -321,7 +321,7 @@ export function ProjectInfoPage({
               )}
               {message("members")}
               <p className="meta" style={{ lineHeight: 1.7 }}>
-                会话同步按 Project 维度生效：只有这里的成员，他们的会话才会出现在顶栏成员条和速览浮层里。
+                会话同步按项目维度生效：只有这里的成员，他们的会话才会出现在顶栏成员条和速览浮层里。
               </p>
             </section>
           </div>

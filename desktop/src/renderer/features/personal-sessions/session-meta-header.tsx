@@ -1,7 +1,7 @@
 /**
  * 会话顶部元信息芯片栏（对齐方案 B 原型 `.c4-chat-head` / `.hui-badge`）：
  * 左侧展示当前共享状态（仅本机 / 已停止同步 / Project 可见与档位）；
- * 右侧提供「发布到 Project…」与「停止共享」动作入口（个人会话不展示团队切换器）。
+ * 右侧提供「发布到项目…」与「停止共享」动作入口（个人会话不展示团队切换器）。
  */
 import { IconLockFilled } from "@tabler/icons-react"
 import type { ReactElement } from "react"
@@ -28,7 +28,7 @@ export function SessionMetaHeader({
   onOpenStopSharing,
 }: SessionMetaHeaderProps): ReactElement {
   const visibilityLabel = shareStatus === "active"
-    ? `Project 可见${projectName ? ` · ${projectName}` : ""}（${shareMode === "summary_only" ? "仅共享摘要" : "完整正文"}）`
+    ? `项目可见${projectName ? ` · ${projectName}` : ""}（${shareMode === "summary_only" ? "仅共享摘要" : "完整正文"}）`
     : shareStatus === "stopped"
       ? "已停止同步 · 仅本机保留"
       : "仅本机"
@@ -36,10 +36,10 @@ export function SessionMetaHeader({
   const badgeTone = shareStatus === "active" ? "accent" : shareStatus === "stopped" ? "warn" : "muted"
   const publishDisabled = offline || !hasPublishableTeams
   const publishDisabledTitle = offline
-    ? "离线状态暂不可发布到团队 Project"
+    ? "离线状态暂不可发布到团队项目"
     : !hasPublishableTeams
       ? "当前账号尚未加入可发布的团队或项目"
-      : "将当前个人会话发布到团队 Project"
+      : "将当前个人会话发布到团队项目"
 
   return (
     <div className="psess-chat-head" role="region" aria-label="会话上下文与共享状态">
@@ -77,7 +77,7 @@ export function SessionMetaHeader({
             title={publishDisabledTitle}
             onClick={onOpenPublish}
           >
-            发布到 Project…
+            发布到项目…
           </button>
         )}
       </div>

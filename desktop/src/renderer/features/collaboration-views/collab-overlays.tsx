@@ -311,7 +311,7 @@ export function CollabMembersPopover({
 
         <div className="pop-foot">
           <IconLockFilled size={12} aria-hidden="true" />
-          <span>会话同步是 Project 维度的，拿到的都是只读快照</span>
+          <span>会话同步是项目维度的，拿到的都是只读快照</span>
         </div>
       </div>
     </>

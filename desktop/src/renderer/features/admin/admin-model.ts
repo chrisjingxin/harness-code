@@ -57,6 +57,6 @@ export const ADMIN_SECTION_META: Readonly<Record<AdminSectionId, { readonly titl
   },
   team: {
     title: "成员角色与仓库",
-    subtitle: "管理当前 Workspace 成员与管理员权限、离职交接清单，以及团队仓库负责人登记（HC-240）。",
+    subtitle: "管理当前协作空间成员与管理员权限、离职交接清单，以及团队仓库负责人登记（HC-240）。",
   },
 }

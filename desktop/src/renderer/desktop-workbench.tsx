@@ -794,7 +794,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
     },
     {
       id: "nav-board",
-      title: "打开 Project 看板",
+      title: "打开项目看板",
       sub: hasTeamOnline && team.slots.current ? team.slots.current.name : "团队项目看板与任务",
       onSelect: () => selectTopNav("board"),
     },
@@ -980,7 +980,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
   } else if (topNav === "board") {
     primaryView = hasTeamOnline
       ? team.slots.pageView
-      : renderTeamUnavailable("Project 看板")
+      : renderTeamUnavailable("项目看板")
   } else if (topNav === "knowledge") {
     primaryView = hasTeamOnline
       ? team.slots.pageView
@@ -1004,7 +1004,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
             subtitle: isOffline ? "离线 · 本机设置" : workspace?.name ?? "个人设置",
           }
         : topNav === "board"
-          ? { title: "Project 看板", subtitle: isOffline ? "离线" : "未入团" }
+          ? { title: "项目看板", subtitle: isOffline ? "离线" : "未入团" }
           : topNav === "knowledge"
             ? { title: "团队知识库", subtitle: isOffline ? "离线" : "未入团" }
             : teamChatActive
@@ -1045,7 +1045,7 @@ function ConfirmedUserWorkbench(props: Hosts & {
           )
         }
         if (topNav === "board" || topNav === "knowledge" || teamChatActive) {
-          const title = topNav === "board" ? "Project 看板" : topNav === "knowledge" ? "团队知识库" : "团队空间"
+          const title = topNav === "board" ? "项目看板" : topNav === "knowledge" ? "团队知识库" : "团队空间"
           return (
             <>
               <span className="tb-name">{title}</span>

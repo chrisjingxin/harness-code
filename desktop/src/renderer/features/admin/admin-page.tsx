@@ -155,12 +155,12 @@ export function AdminPage({
           </span>
         </div>
         <p className="admin-panel-desc" role="status">
-          本机目录记忆按当前团队 Workspace 与具体协作会话作用域隔离读写。
+          本机目录记忆按当前协作空间与具体协作会话作用域隔离读写。
           {isOffline
             ? "当前处于离线状态，重连协作服务并打开任意团队会话后即可在此管理。"
             : !workspace
               ? "当前账号尚未加入团队；个人空间会话直接使用各自绑定的本机工作目录。"
-              : "请先进入「工作台 → 团队」打开或新建一条 Project 协作会话，再回来维护对应的本机工程目录记忆。"}
+              : "请先进入「工作台 → 团队」打开或新建一条项目协作会话，再回来维护对应的本机工程目录记忆。"}
         </p>
         <div className="admin-empty-actions">
           {isOffline && (
@@ -206,7 +206,7 @@ export function AdminPage({
         <p className="admin-panel-desc" role="status">
           {isOffline
             ? "协作服务暂不可达，重连后可查看团队成员角色、办理离职交接或登记团队仓库。"
-            : "当前账号尚未加入任何团队 Workspace。个人对话可正常使用，或前往「账号与登录」确认组织归属。"}
+            : "当前账号尚未加入任何协作空间。个人对话可正常使用，或前往「账号与登录」确认组织归属。"}
         </p>
         <div className="admin-empty-actions">
           {isOffline ? (

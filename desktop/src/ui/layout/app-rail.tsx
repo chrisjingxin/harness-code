@@ -85,7 +85,7 @@ export function AppRail({
     },
     {
       id: "board",
-      label: "Project 看板与任务",
+      label: "项目看板与任务",
       Icon: IconLayoutKanban,
     },
     {

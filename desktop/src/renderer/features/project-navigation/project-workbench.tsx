@@ -58,7 +58,7 @@ const DESKTOP_NAMESPACE = "desktop-window"
 const workspaceDefaults: WorkspacePersonal = { projectId: null, panels: { left: { open: true, width: 304 }, right: { open: true, width: 340 } } }
 const navigationDefaults: ProjectNavigationPersonal = { page: { kind: "new" }, expandedMembers: [], selfCollapsed: false }
 const pageNames: Record<ProjectPage["kind"], string> = {
-  new: "新对话", conversation: "会话", board: "Project 看板", tasks: "任务", task: "任务详情", info: "Project 资料与成员", knowledge: "团队知识库",
+  new: "新对话", conversation: "会话", board: "项目看板", tasks: "任务", task: "任务详情", info: "项目资料与成员", knowledge: "团队知识库",
 }
 const defaultSessions: NavigationSessionSource = {
   entries: [],

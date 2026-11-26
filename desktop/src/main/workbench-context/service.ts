@@ -379,7 +379,7 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     const projectIds = [...(proposal.fields?.projectIds ?? []), ...(proposal.fields?.relatedProjectIds ?? []), ...sources.flatMap(s => s?.projectId ? [s.projectId] : [])]
     if (projectIds.length) {
       const allowed = await this.#allowedProjects(session)
-      if (projectIds.some(id => !allowed.has(id))) throw new Error("提案包含当前无权访问的 Project。")
+      if (projectIds.some(id => !allowed.has(id))) throw new Error("提案包含当前无权访问的项目。")
     }
     const checked: MemorySource[] = []
     for (const raw of sources as MemorySource[]) {

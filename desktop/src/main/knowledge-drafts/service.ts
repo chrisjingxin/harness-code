@@ -71,7 +71,7 @@ export class KnowledgeDraftService {
     if (scope.projectId) {
       const detail = await this.identity.getProjectConversation(scope.workspaceId, scope.projectId, scope.conversationId);
       assertCurrent();
-      if (!detail.ok || detail.value.conversation.ownerUserId !== scope.accountId) throw new Error("只能从本人 Project 会话起草。");
+      if (!detail.ok || detail.value.conversation.ownerUserId !== scope.accountId) throw new Error("只能从本人项目会话起草。");
     }
     // 独立个人会话与 Project 会话是当前同时存在的两种入口；从真实登记决定取材位置。
     const local = await this.local.getRecord(scope.accountId, scope.conversationId);
