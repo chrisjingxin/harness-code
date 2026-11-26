@@ -1,14 +1,17 @@
 /** HC-233 必要主路径冒烟：隔离Markdown、真实HTTP MCP、受控ACP Agent；不接触真实模型或用户记忆目录。 */
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createHash, randomUUID } from "node:crypto"
+import { setTimeout as pause } from "node:timers/promises"
+import { LocalConversationStore } from "../../desktop/src/main/local-conversation-store.ts"
+import { createLocalExecutionCoordinator } from "../../desktop/src/main/local-execution-coordinator.ts"
 import { fileURLToPath } from "node:url"
 import { CollaborationState } from "@workbench/collaboration-client"
 import { LocalAcpHost } from "@workbench/acp-runtime"
 import { WorkbenchContextService, MEMORY_UPDATE_REMINDER } from "../../desktop/src/main/workbench-context/service.ts"
-import { ProjectMemoryStore, renderMemory } from "../../desktop/src/main/workbench-context/memory-store.ts"
-import { applyLocalExecutionUpdate, emptyLocalExecutionView } from "../../desktop/src/renderer/features/session/local-execution-view.ts"
+import { ProjectMemoryStore } from "../../desktop/src/main/workbench-context/memory-store.ts"
 
 const user = "11111111111111111111111111111111"
 const workspaceId = "11111111-1111-4111-8111-111111111111"
@@ -37,171 +40,106 @@ const transport = async input => {
   if (url.pathname.endsWith(`/versions/${versionId}`)) return json({ knowledgeId, termKey: "errors", archived: false, version: { versionId, version: 1, category: "规范", title, authorId: user, createdAtMs: 1, level:"experience",scope:{kind:"workspace",repositoryIds:[]},contentType:"article",contributors:[user],reviewerId:null,reviewedAtMs:null,proposalId:null }, text: "已发布规范正文：团队工程用途依据。" })
   throw new Error(`未预期请求:${url.pathname}`)
 }
-const root = await mkdtemp(join(tmpdir(), "hc233-"))
-const cwd = await mkdir(join(root, "cwd"), { recursive: true })
+const root = await mkdtemp(join(tmpdir(), "hc256-"))
+const cwd = join(root, "cwd"); await mkdir(cwd)
 const identity = new CollaborationState(origin, transport)
 const store = new ProjectMemoryStore(join(root, "memory"))
-const feedback = []
-const service = new WorkbenchContextService({ origin, identity, store, authorizeBinding: async () => true, onFeedback: value => feedback.push(value) })
-let host
-const rpc = async (server, method, params = {}, id = "smoke") => {
+const local = new LocalConversationStore(join(root, "local"), origin)
+const feedback = [], notices = []
+let runScope, coordinator, host
+const service = new WorkbenchContextService({ origin, identity, store, authorizeBinding: async current => current.accountId === user && current.conversationId === runScope?.conversationId, onFeedback: value => feedback.push(value) })
+const serverOf = setup => setup.mcpServers.find(s => s.name === "workbench-context")
+const rpc = async (server, method, params = {}, id = randomUUID()) => {
   const response = await fetch(server.url, { method: "POST", headers: { "content-type": "application/json", ...Object.fromEntries(server.headers.map(h => [h.name, h.value])) }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) })
   assert.equal(response.status, 200)
   const result = (await response.json()).result
-  if (result.isError && !result.structuredContent) throw new Error(result.content[0].text)
+  assert.ok(!result.isError, JSON.stringify(result))
   return method === "tools/call" ? JSON.parse(result.content[0].text) : result
 }
-const tool = (server, name, args = {}, id = name) => rpc(server, "tools/call", { name, arguments: args }, id)
-const setup = binding => service.prepareSession(scope, binding)
-const serverOf = setup => setup.mcpServers.find(s => s.name === "workbench-context")
-const assemble = turnId => service.assembleTurnContext({ scope, userText: "本轮无工程关键词", directoryPath: cwd, turnId })
-const settle = (turnId, outcome = "completed") => service.onTurnSettled({ scope, turnId, outcome })
-const entries = async () => (await store.read(memoryScope))["team.md"].entries
+const tool = (server, name, args) => rpc(server, "tools/call", { name, arguments: args })
+const saved = async (scope, document) => { const result = await store.read(scope, document, () => true); assert.equal(result.status, "ready"); return result }
+const update = async (scope, document, content) => { const old = await saved(scope, document); return store.update(scope, { document, content, expectedRevision: old.revision }, () => true) }
 try {
-  const loginResult = await identity.signIn("80000001"); assert.equal(loginResult.ok, true, JSON.stringify(loginResult))
-  const firstSetup = await setup("binding-1"), server = serverOf(firstSetup)
-  assert.equal(new URL(server.url).hostname, "127.0.0.1")
+  // 原始字节备份、正文/来源保留、损坏只读，以及普通 front matter 代表样本。
+  const legacyScope = { ...memoryScope, workspaceId: "legacy" }, dir = store.directory(legacyScope)
+  await mkdir(dir, { recursive: true })
+  const entry = { entryId: "old-entry", entryRevision: 1, kind: "team_project", name: "旧工程", summary: "旧用途", sources: [{ sourceId: "project:old", kind: "project", projectId }], confirmedAt: now }
+  const body = "# 团队工程概览\n\n## 旧工程\n旧用途\n"
+  const original = `---\nformatVersion: 1\ndocumentRevision: 1\nupdatedAt: ${JSON.stringify(now)}\nentries: ${JSON.stringify([entry])}\n---\n${body}`
+  await writeFile(join(dir, "team.md"), original)
+  const migrated = await saved(legacyScope, "team")
+  assert.ok(migrated.content.startsWith(body) && migrated.content.includes("project:old"))
+  const backup = join(dir, `team.md.hc233-v1.${createHash("sha256").update(original).digest("hex")}.bak`)
+  assert.equal(await readFile(backup, "utf8"), original)
+  assert.equal((await saved(legacyScope, "team")).revision, migrated.revision)
+  const broken = original.replace(JSON.stringify([entry]), "[broken]")
+  await writeFile(join(dir, "personal.md"), broken)
+  assert.equal((await store.read(legacyScope, "personal", () => true)).status, "unavailable")
+  assert.equal((await store.update(legacyScope, { document: "personal", content: "覆盖损坏", expectedRevision: "0".repeat(64) }, () => true)).status, "unavailable")
+  assert.equal(await readFile(join(dir, "personal.md"), "utf8"), broken)
+  assert.equal((await update(legacyScope, "team", migrated.content + "\n保留健康文件独立保存。\n")).status, "saved")
+  assert.equal((await readdir(dir)).filter(x => x.endsWith(".bak")).length, 1)
+  const unsafeScope = { ...memoryScope, workspaceId: "linked" }; await mkdir(store.directory(unsafeScope), { recursive: true })
+  await symlink(join(dir, "team.md"), join(store.directory(unsafeScope), "team.md"))
+  assert.equal((await store.read(unsafeScope, "team", () => true)).reason, "unsafe_path")
+
+  assert.equal((await identity.signIn("80000001")).ok, true)
+  const created = await local.create(user, { workspaceId, title: "隔离主路径", directoryPath: cwd }); assert.equal(created.ok, true)
+  runScope = { ...scope, projectId: null, conversationId: created.value.conversationId }
+  const setup = await service.prepareSession(runScope, "manual"), server = serverOf(setup)
   const init = await rpc(server, "initialize", { protocolVersion: "2025-03-26" })
-  assert.equal(init.protocolVersion, "2025-03-26")
-  assert.ok(init.instructions.includes("list_team_knowledge") && init.instructions.includes("current_turn_user"))
-  assert.equal((await rpc(server, "tools/list")).tools.length, 4)
-  assert.ok(Buffer.byteLength(MEMORY_UPDATE_REMINDER) <= 256)
-  const context = await assemble("first")
-  assert.ok(context.contextBlocks[0].text.includes("其他工程"), context.contextBlocks[0].text)
-  assert.ok(!context.contextBlocks[0].text.includes("团队知识标题（按需读取固定版本）"))
-  service.confirmTurnDelivered(scope, "first", context.preparedKnowledge)
-  await assert.rejects(tool(server, "query_project_memory", { workspaceId: "伪造范围" }), /参数无效/)
-  await assert.rejects(tool(server, "propose_project_memory_update", { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "无来源", summary: "" }, sourceIds: ["未读来源"] }), /实际读过/)
-  const query = await tool(server, "query_project_memory")
-  assert.ok(query.entries.length >= 3)
-  const before = await entries()
-  const referenceId = (await tool(server, "list_team_knowledge")).items[0].referenceId
-  assert.equal((await tool(server, "read_team_knowledge", { referenceId })).text.includes("已发布规范正文"), true)
-  assert.equal((await tool(server, "read_team_knowledge", { referenceId })).alreadyRead, true)
-  assert.equal((await tool(server, "read_team_knowledge", { referenceId })).text, undefined)
-  assert.equal((await tool(server, "read_team_knowledge", { referenceId, force: true })).text.includes("已发布规范正文"), true)
-  const proposal = { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "新增工程", summary: "来自真实读取的固定规范", aliases: ["new"] }, sourceIds: [referenceId] }
-  const pending = await tool(server, "propose_project_memory_update", proposal, "proposal-1")
-  assert.equal(pending.status, "pending")
-  assert.equal((await entries()).length, before.length, "pending不能提前写入")
-  assert.equal((await tool(server, "propose_project_memory_update", proposal, "duplicate")).entryId, pending.entryId)
-  await settle("first")
-  assert.ok((await entries()).some(e => e.entryId === pending.entryId), "预检与保存使用相同生成ID")
-  assert.deepEqual(feedback.slice(-3).map(f => f.result.status), ["pending", "saving", "saved"])
-  await assemble("cancelled")
-  await tool(server, "read_team_knowledge", { referenceId })
-  const updated = await tool(server, "query_project_memory", { entryId: pending.entryId })
-  assert.equal(updated.entries[0].entryRevision, 1)
-  const revisions = updated.documentRevisions
-  assert.equal((await tool(server, "propose_project_memory_update", { ...proposal, entryId: pending.entryId, baseEntryRevision: 1 })).status, "no_change")
-  assert.deepEqual((await tool(server, "query_project_memory", { entryId: pending.entryId })).documentRevisions, revisions)
-  await tool(server, "propose_project_memory_update", { ...proposal, fields: { ...proposal.fields, name: "取消不保存" } }, "cancel-proposal")
-  await settle("cancelled", "cancelled")
-  assert.ok(!(await entries()).some(e => e.name === "取消不保存"))
-  await assemble("limits")
-  await tool(server, "read_team_knowledge", { referenceId })
-  const unconfirmed = await tool(server, "propose_project_memory_update", { ...proposal, kind: "personal_directory", fields: { name: "未确认目录", summary: "", rootPath: root, relativePath: "." } })
-  assert.equal(unconfirmed.status, "needs_confirmation")
-  const huge = await tool(server, "propose_project_memory_update", { ...proposal, fields: { name: "超限工程", summary: "长".repeat(2000) } })
-  assert.equal(huge.status, "error")
-  const confirmed = await service.confirmDirectory(scope, { path: root, fields: { name: "本人选定工程", summary: "直接确认" }, baseEntryRevision: 0 })
-  assert.equal(confirmed.status, "saved")
-  await settle("limits", "failed")
-  assert.ok((await store.read(memoryScope))["personal.md"].entries.some(e => e.entryId === confirmed.entryId))
-  // 并发不同条目可合并，同条目过期更新不能覆盖。
-  const source = [{ sourceId: "knowledge:smoke", kind: "knowledge" }]
-  const conflictProposal = { operation: "upsert", kind: "team_repository", entryId: pending.entryId, baseEntryRevision: 1, fields: { summary: "新用途" }, sourceIds: ["knowledge:smoke"] }
-  assert.equal((await store.update(memoryScope, conflictProposal, source, true, () => true)).status, "saved")
-  assert.equal((await store.update(memoryScope, { ...conflictProposal, fields: { summary: "过期用途" } }, source, true, () => true)).status, "conflict")
-  const otherScope = { ...memoryScope, workspaceId: "another-team" }
-  assert.equal((await store.read(otherScope))["team.md"].entries.length, 0)
-  assert.equal((await store.read({ ...memoryScope, accountId: "another-user" }))["team.md"].entries.length, 0)
-  assert.equal((await store.read({ ...memoryScope, origin: "http://127.0.0.1:9998" }))["team.md"].entries.length, 0)
-  // 只在生成/更新阶段限制两份正文合计；超限不能覆盖已保存文件。
-  const budgetScope = { ...memoryScope, workspaceId: "budget-team" }
-  for (let i = 0; i < 3; i++) {
-    const result = await store.update(budgetScope, { operation: "upsert", kind: i === 2 ? "personal_directory" : "team_repository", baseEntryRevision: 0, fields: { name: `预算工程${i}`, summary: "长".repeat(850), ...(i === 2 ? { rootPath: root, relativePath: "." } : {}) }, sourceIds: ["confirmed"] }, [{ sourceId: "confirmed", kind: "user_confirmation", confirmedDirectory: root }], true, () => true)
-    assert.equal(result.status, "saved", JSON.stringify(result))
-  }
-  const beforeBudget = await store.read(budgetScope)
-  const overBudget = await store.update(budgetScope, { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "合计超限", summary: "长".repeat(850) }, sourceIds: ["knowledge:smoke"] }, source, true, () => true)
-  assert.equal(overBudget.status, "error")
-  assert.ok(overBudget.message.includes("8 KiB"))
-  assert.deepEqual(await store.read(budgetScope), beforeBudget)
-  // 用户确认目录可在Agent尚未连接时保存和移除；不改变其他会话目录。
-  const unconnectedScope = { ...scope, conversationId: "33333333-3333-4333-8333-333333333334" }
-  const direct = await service.confirmDirectory(unconnectedScope, { path: root, fields: { name: "本人选定工程", summary: "直接确认" }, baseEntryRevision: 0 })
-  assert.equal(direct.status, "no_change")
-  const cacheBefore = titleReads
-  await Promise.all([service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation }), service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })])
-  assert.equal(titleReads, cacheBefore + 1)
-  await service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })
-  assert.equal(titleReads, cacheBefore + 1)
-  title = "更新后标题"; service.knowledge.invalidate(workspaceId)
-  assert.equal((await service.knowledge.list({ ...memoryScope, generation: identity.personalIdentity().generation })).items[0].title, title)
-  assert.equal(titleReads, cacheBefore + 2)
-  let view = applyLocalExecutionUpdate(emptyLocalExecutionView, { kind: "accepted", turnId: "ui", text: "用户原文", author: { id: user, displayName: "本人" } })
-  view = applyLocalExecutionUpdate(view, { kind: "context-tool", turnId: "ui", tool: { id: "project-memory:1", title: "准备更新项目记忆", status: "in_progress" } })
-  view = applyLocalExecutionUpdate(view, { kind: "finished", turnId: "ui" })
-  assert.equal(view.entries.find(e => e.kind === "tool").status, "running")
-  view = applyLocalExecutionUpdate(view, { kind: "context-tool", turnId: "ui", tool: { id: "project-memory:1", title: "已记住新增工程", status: "completed", output: "team.md" } })
-  assert.equal(view.entries.filter(e => e.kind === "tool").length, 1)
-  assert.equal(view.entries.find(e => e.kind === "tool").status, "completed")
-  // 真实 ACP 子进程消费配置与每轮实际 blocks；明确不代表共享协调器已完成接线。
-  const agent = fileURLToPath(new URL("./fixtures/context-acp-agent.mjs", import.meta.url))
-  host = new LocalAcpHost({ executable: process.execPath, args: [agent] }, { bindingDirectory: join(root, "native-bindings"), bindingNamespace: origin, restorePolicy: "fallback-new" })
-  const agentSetup = await setup("agent-binding"), session = await host.bind(scope, cwd, agentSetup)
-  const send = async (session, contextId, mode = "baseline") => {
-    const assembled = await assemble(contextId)
-    if (mode === "zero") assert.equal(assembled.contextBlocks.length, 0)
-    else if (mode === "team-delta") {
-      assert.equal(assembled.contextBlocks.length, 1)
-      assert.ok(assembled.contextBlocks[0].text.includes("<本机记忆 team.md（已更新）>"))
-      assert.ok(!assembled.contextBlocks[0].text.includes("<本机记忆 personal.md"))
-    } else assert.ok(assembled.contextBlocks.length > 0)
-    let unsubscribe, timeout
-    const done = new Promise((resolve, reject) => {
-      timeout = setTimeout(() => reject(new Error("受控ACP超时")), 20_000)
-      unsubscribe = session.subscribe(event => { if (["completed", "failed", "cancelled"].includes(event.type)) resolve(event) })
-    })
-    try {
-      assert.equal(session.sendPrompt([{ type: "text", text: "用户原文" }, ...assembled.contextBlocks]).status, "accepted")
-      service.confirmTurnDelivered(scope, contextId, assembled.preparedKnowledge)
-      const event = await done
-      assert.equal(event.type, "completed", JSON.stringify(event))
-      await settle(contextId)
-    } finally { clearTimeout(timeout); unsubscribe?.() }
-  }
-  await send(session, "agent-first", "baseline")
-  assert.ok((await entries()).some(e => e.name === "Agent归纳工程"))
-  await send(session, "agent-second-delta", "team-delta")
-  await send(session, "agent-third-zero", "zero")
-  await session.close()
-  const restoredSetup = await setup("agent-restored")
-  const restored = await host.bind(scope, cwd, restoredSetup)
-  await send(restored, "agent-restored-turn")
-  await host.close(); host = undefined
-  const oldServer = serverOf(restoredSetup)
-  await assemble("late-account")
-  await tool(oldServer, "read_team_knowledge", { referenceId })
-  await tool(oldServer, "propose_project_memory_update", { ...proposal, fields: { name: "旧账号迟到", summary: "不得保存" } })
-  await identity.signOut()
-  await settle("late-account")
-  assert.ok(!(await entries()).some(e => e.name === "旧账号迟到"))
-  assert.equal((await fetch(oldServer.url, { method: "POST", headers: { Authorization: oldServer.headers[0].value } })).status, 401)
-  const file = join(store.directory(memoryScope), "team.md")
-  const original = await readFile(file, "utf8")
-  await writeFile(file, "坏文件")
-  const protectedWrite = await store.update(memoryScope, proposal, source, true, () => true)
-  assert.equal(protectedWrite.status, "error")
-  assert.equal(await readFile(file, "utf8"), "坏文件")
-  await writeFile(file, original)
-  const bodies = await store.read(memoryScope)
-  assert.ok(Buffer.byteLength(renderMemory("team.md", bodies["team.md"].entries) + renderMemory("personal.md", bodies["personal.md"].entries)) <= 8192)
-  console.log(JSON.stringify({ result: "PASS", markdown: "隔离/完整正文/原子保存/修订/冲突/超限/损坏保护", mcp: "真实回环HTTP四工具/固定知识版本/pending→saved/取消失败/撤销", acp: "受控Agent实际消费配置与每轮正文，关闭恢复后复用", ui: "既有工具卡终态后同卡更新", reminderBytes: Buffer.byteLength(MEMORY_UPDATE_REMINDER), scope: "模块冒烟；正式协调器和双账号服务端联调仍待接线" }, null, 2))
-} finally {
-  await host?.close()
-  await service.dispose()
-  identity.dispose()
-  await rm(root, { recursive: true, force: true })
-}
+  assert.ok(init.instructions.includes("update_project_memory")); assert.ok(Buffer.byteLength(MEMORY_UPDATE_REMINDER) <= 256)
+  assert.deepEqual((await rpc(server, "tools/list")).tools.map(x => x.name), ["read_project_memory", "update_project_memory", "list_team_knowledge", "read_team_knowledge"])
+  const context = await service.assembleTurnContext({ scope: runScope, userText: "新事实", directoryPath: cwd, turnId: "manual" })
+  service.confirmTurnDelivered(runScope, "manual", context.preparedKnowledge)
+  const first = await tool(server, "read_project_memory", { document: "team" })
+  assert.equal(first.status, "ready")
+  const candidates = await Promise.all(["甲", "乙"].map(name => tool(server, "update_project_memory", { document: "team", content: first.content + name, expectedRevision: first.revision })))
+  assert.deepEqual(candidates.map(x => x.status).sort(), ["conflict", "saved"])
+  assert.equal((await tool(server, "read_project_memory", { document: "../../elsewhere" })).status, "error")
+  const personal = await tool(server, "read_project_memory", { document: "personal" })
+  const markdown = "---\nformatVersion: 1\ntitle: 自由文档\n---\n用户确认目录：/并不存在/也可记录，无需Git证明。\n"
+  assert.equal((await tool(server, "update_project_memory", { document: "personal", content: markdown, expectedRevision: personal.revision })).status, "saved")
+  assert.equal((await tool(server, "read_project_memory", { document: "personal" })).content, markdown)
+  const big = await tool(server, "read_project_memory", { document: "team" })
+  const largeText = "长".repeat(3200)
+  const large = await tool(server, "update_project_memory", { document: "team", content: largeText, expectedRevision: big.revision })
+  assert.equal(large.status, "saved"); assert.equal(large.size.overTarget, true)
+  const oversized = await fetch(server.url, { method: "POST", headers: { "content-type": "application/json", ...Object.fromEntries(server.headers.map(h => [h.name, h.value])) }, body: JSON.stringify({ jsonrpc: "2.0", id: "large", method: "tools/call", params: { name: "update_project_memory", arguments: { document: "team", content: "大".repeat(24000), expectedRevision: large.revision } } }) })
+  assert.equal(oversized.status, 413)
+  assert.equal((await saved(memoryScope, "team")).content, largeText)
+  const ref = (await tool(server, "list_team_knowledge", {})).items[0].referenceId
+  assert.ok((await tool(server, "read_team_knowledge", { referenceId: ref })).text)
+  assert.equal((await tool(server, "read_team_knowledge", { referenceId: ref })).alreadyRead, true)
+  await service.onTurnSettled({ scope: runScope, turnId: "manual", outcome: "failed" })
+  assert.equal((await saved(memoryScope, "personal")).content, markdown, "失败不回滚saved")
+  assert.equal((await service.readMemory({ ...runScope, workspaceId: null }, "team")).reason, "no_team")
+  assert.equal((await service.readMemory({ ...runScope, accountId: "other" }, "team")).status, "unavailable")
+
+  // 真协调器 → 真 ACP 子进程 → HTTP MCP，两轮增量以及保存后取消/失败。
+  await update(memoryScope, "team", "# 团队工程记忆\n")
+  await update(memoryScope, "personal", "# 个人工程记忆\n")
+  const report = join(root, "prompts.jsonl")
+  host = new LocalAcpHost({ executable: process.execPath, args: [fileURLToPath(new URL("./fixtures/context-turn-acp-agent.mjs", import.meta.url)), report], env: { PATH: process.env.PATH } }, { bindingDirectory: join(root, "native"), bindingNamespace: origin, restorePolicy: "fallback-new" })
+  coordinator = createLocalExecutionCoordinator({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (_, n) => notices.push(n) } }, identity, null, { host }, { origin, grantsDir: join(root, "grants"), localConversations: local, contextSession: { prepare: (s, id) => service.prepareSession(s, id), release: (s, id) => service.revokeSession(s, id) }, contextAssembler: service })
+  await coordinator.captureDirectorySelection()(cwd)
+  const ready = await coordinator.prepare(runScope, cwd); assert.ok(ready.ok && ready.value.available, JSON.stringify(ready))
+  async function until(check) { for (let n = 0; n < 120; n++) { if (await check()) return; await pause(30) } throw Error("受控协调器等待超时") }
+  async function send(message) { const key = randomUUID(), receipt = await coordinator.send(runScope, ready.value.bindingId, key, message, []); assert.ok(receipt.ok && receipt.value.status === "accepted", JSON.stringify(receipt)); return { key, receipt: receipt.value } }
+  async function finish(run) { await until(() => notices.some(n => n.kind === "finished" && n.turnId === run.receipt.turnId)); return notices.find(n => n.kind === "finished" && n.turnId === run.receipt.turnId) }
+  const one = await send("HC241_CONTEXT_ONE"); assert.equal((await finish(one)).failure, undefined)
+  const two = await send("HC241_CONTEXT_TWO"); assert.equal((await finish(two)).failure, undefined)
+  const prompts = (await readFile(report, "utf8")).trim().split("\n").map(JSON.parse)
+  const secondText = JSON.stringify(prompts[1].prompt)
+  assert.ok(secondText.includes("team.md（已更新）") && !secondText.includes("personal.md"))
+  const cancelled = await send("HC241_CONTEXT_CANCEL")
+  await until(() => feedback.some(f => f.turnId === cancelled.key && f.result.status === "saved"))
+  await coordinator.cancel(runScope, ready.value.bindingId, cancelled.receipt.turnId); await finish(cancelled)
+  assert.ok((await saved(memoryScope, "team")).content.includes("取消后保留"))
+  const failed = await send("HC241_CONTEXT_FAIL"); assert.ok((await finish(failed)).failure)
+  assert.ok((await saved(memoryScope, "team")).content.includes("失败后保留"))
+  const cleared = await update(memoryScope, "personal", ""); assert.equal(cleared.status, "saved")
+  assert.equal((await saved(memoryScope, "personal")).content, "")
+  assert.notEqual((await saved({ ...memoryScope, accountId: "other" }, "team")).content, (await saved(memoryScope, "team")).content)
+  console.log("PASS HC-256：原件迁移/损坏保护/普通front matter；真实HTTP MCP即时保存、CAS冲突继续、8KiB建议/64KiB拒绝；真实协调器ACP两轮增量、取消/失败保留saved；知识固定版读取与去重。UI未操作。")
+} finally { await coordinator?.dispose(); await host?.close(); await service.dispose(); identity.dispose(); await rm(root, { recursive: true, force: true }) }

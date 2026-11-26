@@ -1,7 +1,7 @@
 /**
  * 团队知识库与本机记忆分层增量注入单元测试：
  * 覆盖 L0 MCP instructions、首轮基线去目录、次轮零注入、规约新增/改版/归档差量、
- * 本机记忆单边更新、current_turn_user 别名、跨轮已读与 force 重读、list level 筛选、
+ * 本机记忆单边更新、普通 Markdown 即时保存、跨轮已读与 force 重读、list level 筛选、
  * 发送未受理不推进快照，以及协调器 session-reset / session-opened / usage 压缩兜底重置。
  */
 import assert from "node:assert/strict"
@@ -49,9 +49,8 @@ const { LocalConversationStore } = await import("../src/main/local-conversation-
 const { ProjectMemoryStore } = await import("../src/main/workbench-context/memory-store.ts") as {
   ProjectMemoryStore: typeof ProjectMemoryStoreType
 }
-const { WorkbenchContextService, CURRENT_TURN_USER_SOURCE_ID } = await import("../src/main/workbench-context/service.ts") as {
+const { WorkbenchContextService } = await import("../src/main/workbench-context/service.ts") as {
   WorkbenchContextService: typeof WorkbenchContextServiceType
-  CURRENT_TURN_USER_SOURCE_ID: string
 }
 
 const ORIGIN = "http://127.0.0.1:9999"
@@ -298,7 +297,7 @@ test("L0 MCP initialize 提供常驻 instructions 与增强工具参数，保持
     const init = await ctx.mcpCall(server, "initialize", { protocolVersion: "2025-03-26" }) as { instructions?: string }
     assert.ok(typeof init.instructions === "string" && init.instructions.length > 0)
     assert.match(init.instructions, /list_team_knowledge/)
-    assert.match(init.instructions, /current_turn_user/)
+    assert.match(init.instructions, /update_project_memory/)
     assert.match(init.instructions, /force: true/)
 
     const listed = await ctx.mcpCall(server, "tools/list") as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }
@@ -337,32 +336,17 @@ test("首轮基线不含知识目录，无变化次轮严格零注入，规约�
     assert.equal(ctx.versionReads.length, readsBeforeTurn2)
     ctx.service.confirmTurnDelivered(ctx.scope, "t-2", turn2.preparedKnowledge)
 
-    // 在第 2 轮利用 current_turn_user 提交 team_project 更新，验证终态落盘后仅 team.md 增量触发
+    // 当前轮立即保存普通 MD，终态只清理轮次，之后仅 team.md 增量触发。
+    const original = await ctx.mcpCall(server, "tools/call", { name: "read_project_memory", arguments: { document: "team" } })
+    const updatedText = original.content + "\n## 订单子系统\n负责订单状态流转。\n"
     const proposed = await ctx.mcpCall(server, "tools/call", {
-      name: "propose_project_memory_update",
-      arguments: {
-        operation: "upsert",
-        kind: "team_project",
-        baseEntryRevision: 0,
-        fields: { name: "订单子系统", summary: "负责订单状态流转。" },
-        sourceIds: [CURRENT_TURN_USER_SOURCE_ID],
-      },
+      name: "update_project_memory", arguments: { document: "team", content: updatedText, expectedRevision: original.revision },
     }) as { status: string }
-    assert.equal(proposed.status, "pending")
-    await assert.rejects(
-      ctx.mcpCall(server, "tools/call", {
-        name: "propose_project_memory_update",
-        arguments: { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "假", summary: "" }, sourceIds: ["fake_source"] },
-      }),
-      /实际读过/,
-    )
+    assert.equal(proposed.status, "saved")
+    const savedMemory = await ctx.store.read({ origin: ORIGIN, accountId: USER_ID, workspaceId: WORKSPACE_ID }, "team", () => true)
+    assert.equal(savedMemory.status, "ready")
+    assert.equal(savedMemory.status === "ready" && savedMemory.content, updatedText)
     await ctx.service.onTurnSettled({ scope: ctx.scope, turnId: "t-2", outcome: "completed" })
-
-    // 验证实际落盘的是规范 conversation:<id>:<turnId> 而非符号别名
-    const savedMemory = await ctx.store.read({ origin: ORIGIN, accountId: USER_ID, workspaceId: WORKSPACE_ID })
-    const addedProject = savedMemory["team.md"].entries.find(e => e.name === "订单子系统")
-    assert.ok(addedProject)
-    assert.equal(addedProject.sources[0]?.sourceId, `conversation:${ctx.scope.conversationId}:t-2`)
 
     // 第 3 轮：仅 team.md 变化（新增了订单子系统）+ 规约A 升级到 v2 + 新增规约B v1
     ctx.setItems([
@@ -458,17 +442,11 @@ test("跨轮 read_team_knowledge 去重、force 重读、list level 筛选与发
     assert.equal(dupRead.text, undefined)
     assert.equal(ctx.getReadReports(), 1)
 
+    const original = await ctx.mcpCall(server, "tools/call", { name: "read_project_memory", arguments: { document: "team" } })
     const memUpdate = await ctx.mcpCall(server, "tools/call", {
-      name: "propose_project_memory_update",
-      arguments: {
-        operation: "upsert",
-        kind: "team_repository",
-        baseEntryRevision: 0,
-        fields: { name: "幂等网关", summary: "基于先前已读经验整理。" },
-        sourceIds: [expRef],
-      },
+      name: "update_project_memory", arguments: { document: "team", content: original.content + "\n幂等网关：基于先前已读经验整理。\n", expectedRevision: original.revision },
     }) as { status: string }
-    assert.equal(memUpdate.status, "pending")
+    assert.equal(memUpdate.status, "saved")
 
     const forcedRead = await ctx.mcpCall(server, "tools/call", {
       name: "read_team_knowledge",

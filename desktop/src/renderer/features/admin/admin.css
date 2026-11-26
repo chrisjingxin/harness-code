@@ -75,7 +75,7 @@
   box-shadow: inset 0 0 0 1px var(--border, var(--line));
 }
 
-/* DirectoryMemory 在管理台独立承载时的表单整齐排列 */
+/* ProjectMemory 在管理台独立承载时的表单整齐排列 */
 .admin-memory-host .conversation-reference-targets {
   display: flex;
   flex-direction: column;
@@ -116,3 +116,7 @@
   color: var(--fg, var(--text));
   box-shadow: inset 0 0 0 1px var(--border, var(--line));
 }
+
+/* 在既有表单区域提供正文编辑，不影响聊天、引用和文件视图。 */
+.project-memory textarea { width: 100%; min-height: 12rem; resize: vertical; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); }
+.project-memory details { max-height: 28rem; overflow: auto; }

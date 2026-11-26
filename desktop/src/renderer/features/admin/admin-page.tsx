@@ -1,7 +1,7 @@
 /**
  * 【功能定义】1200px 居中「管理与设置」主工作区（HC-255 停点 2）：
  * 按左侧 AdminSidebar 选中的 5 个真实设置分区，分别在宽屏居中 .page-shell 内组织展示：
- * 外观/密度/快捷键、外部 IM 通知偏好、本机目录记忆（严格按活跃团队会话作用域挂载）、账号身份与团队成员交接。
+ * 外观/密度/快捷键、外部 IM 通知偏好、本机项目记忆（严格按活跃团队会话作用域挂载）、账号身份与团队成员交接。
  * 不虚构任何未接后端的占位选项。
  */
 import { IconRefresh } from "@tabler/icons-react"
@@ -12,7 +12,7 @@ import type { InboxHost, LocalExecutionScope, OrganizationHost } from "../../../
 import { IdentityPanel, type useCollaborationIdentity } from "../../../ui/index.js"
 import { NotificationPreferencesSection } from "../inbox/index.js"
 import { AgentPreflightCard } from "../personal-sessions/agent-preflight-card.js"
-import { DirectoryMemory } from "../workbench-context/directory-memory.js"
+import { ProjectMemory } from "../workbench-context/project-memory.js"
 import { TeamSettings } from "../workspace/team-settings.js"
 import { ADMIN_SECTION_META, type AdminSectionId } from "./admin-model.js"
 import "./admin.css"
@@ -34,7 +34,6 @@ export type AdminPageProps = {
   readonly isOffline: boolean
   readonly memoryScope: LocalExecutionScope | null
   readonly memoryWorkspaceName: string | null
-  readonly memoryProjectName: string | null
   readonly onReconnect: () => void
   readonly onBackToWorkbench: () => void
   readonly onSelectSection: (section: AdminSectionId) => void
@@ -55,7 +54,6 @@ export function AdminPage({
   isOffline,
   memoryScope,
   memoryWorkspaceName,
-  memoryProjectName,
   onReconnect,
   onBackToWorkbench,
   onSelectSection,
@@ -136,15 +134,15 @@ export function AdminPage({
     body = memoryScope && contextBridge ? (
       <div className="panel admin-panel admin-memory-host">
         <div className="panel-head">
-          <h2>当前会话关联的本机工程目录</h2>
+          <h2>当前团队的本机项目记忆</h2>
           <span className="hui-badge" data-tone="accent" data-size="xs">
-            {[memoryWorkspaceName, memoryProjectName].filter(Boolean).join(" / ") || "团队作用域"}
+            {memoryWorkspaceName || "团队作用域"}
           </span>
         </div>
         <p className="admin-panel-desc">
-          以下目录映射写入本机上下文记忆文件，供当前团队会话按需索引与关联本机副本，不改动原有会话起始目录。
+          两份 Markdown 由当前 Agent 或本人维护，仅保存在本机，适用于此会话所属团队。
         </p>
-        <DirectoryMemory scope={memoryScope} host={contextBridge} />
+        <ProjectMemory scope={memoryScope} host={contextBridge} />
       </div>
     ) : (
       <div className="panel admin-panel">
@@ -155,12 +153,12 @@ export function AdminPage({
           </span>
         </div>
         <p className="admin-panel-desc" role="status">
-          本机目录记忆按当前协作空间与具体协作会话作用域隔离读写。
+          本机项目记忆按账号和团队隔离，通过本人会话核对访问资格。
           {isOffline
             ? "当前处于离线状态，重连协作服务并打开任意团队会话后即可在此管理。"
             : !workspace
               ? "当前账号尚未加入团队；个人空间会话直接使用各自绑定的本机工作目录。"
-              : "请先进入「工作台 → 团队」打开或新建一条项目协作会话，再回来维护对应的本机工程目录记忆。"}
+              : "请先进入「工作台 → 团队」打开或新建一条项目协作会话，再回来维护对应的本机项目记忆。"}
         </p>
         <div className="admin-empty-actions">
           {isOffline && (

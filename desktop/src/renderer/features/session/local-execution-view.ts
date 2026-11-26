@@ -446,7 +446,7 @@ export function applyLocalExecutionUpdate(state: LocalExecutionView, update: Loc
         } : {}),
       }
     }
-    if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running" && !entry.id.includes(":tool:project-memory:")) {
+    if (entry.kind === "tool" && entry.id.startsWith(`${entryPrefix}:tool:`) && entry.status === "running") {
       return { ...entry, status: "failed" as const }
     }
     if (entry.kind === "reasoning" && entry.id.startsWith(`${entryPrefix}:reasoning:`) && entry.active) {

@@ -13,7 +13,7 @@ for await(const line of createInterface({input:process.stdin})){
   if(!prompt.includes('propose_team_knowledge_draft')){
    write({jsonrpc:'2.0',method:'session/update',params:{sessionId:m.params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'已确认：退款回调必须以业务幂等键防止重复记账。'}}}})
   }else{
-   const tools=(await call('tools/list',{})).tools.map(t=>t.name);if(tools.length!==3||tools.includes('propose_project_memory_update'))throw Error('起草凭据权限不符')
+   const tools=(await call('tools/list',{})).tools.map(t=>t.name);if(tools.length!==3||tools.some(name=>name==='read_project_memory'||name==='update_project_memory'))throw Error('起草凭据权限不符')
    const list=JSON.parse((await call('tools/call',{name:'list_team_knowledge',arguments:{query:'回调',scope:'all'}})).content[0].text),item=list.items.find(i=>i.title==='回调幂等经验')??list.items[0]
    if(!item)throw Error('未发现已发布基线')
    const read=JSON.parse((await call('tools/call',{name:'read_team_knowledge',arguments:{referenceId:item.referenceId}})).content[0].text)

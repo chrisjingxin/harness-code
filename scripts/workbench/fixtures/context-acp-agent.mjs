@@ -32,7 +32,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         continue
       }
       if (!sawBaseline) {
-        if (!prompt.includes("团队工程概览") || !prompt.includes("personal.md") || !prompt.includes("其他工程") || !prompt.includes("propose_project_memory_update")) throw new Error("首轮基线完整正文或提醒未实际送达")
+        if (!prompt.includes("team.md") || !prompt.includes("personal.md") || !prompt.includes("update_project_memory")) throw new Error("首轮基线完整正文或提醒未实际送达")
         sawBaseline = true
       }
       const init = await call("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "controlled", version: "1" } })
@@ -49,10 +49,11 @@ for await (const line of createInterface({ input: process.stdin })) {
         const forced = await call("tools/call", { name: "read_team_knowledge", arguments: { referenceId: title.referenceId, force: true } })
         if (!JSON.parse(forced.content[0].text).text.includes("已发布规范正文")) throw new Error("force 重读固定版本正文失败")
       }
-      const proposed = await call("tools/call", { name: "propose_project_memory_update", arguments: { operation: "upsert", kind: "team_repository", baseEntryRevision: 0, fields: { name: "Agent归纳工程", summary: "从本轮实际读取的团队规范确认工程用途。", aliases: ["agent-smoke"] }, sourceIds: [title.referenceId] } })
+      const latest = JSON.parse((await call("tools/call", { name: "read_project_memory", arguments: { document: "team" } })).content[0].text)
+      const proposed = await call("tools/call", { name: "update_project_memory", arguments: { document: "team", content: latest.content + "\nAgent归纳工程：来自固定知识的工程用途。\n", expectedRevision: latest.revision } })
       const status = JSON.parse(proposed.content[0].text).status
-      if (!["pending", "no_change"].includes(status)) throw new Error(`提案失败:${status}`)
-      write({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `受控Agent已实际读取固定知识并提案:${status}` } } } })
+      if (!["saved", "no_change"].includes(status)) throw new Error(`保存失败:${status}`)
+      write({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `受控Agent已实际读取固定知识并保存:${status}` } } } })
       write({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } })
     } else if (message.method === "session/cancel") write({ jsonrpc: "2.0", id: message.id, result: {} })
     else write({ jsonrpc: "2.0", id: message.id, result: {} })

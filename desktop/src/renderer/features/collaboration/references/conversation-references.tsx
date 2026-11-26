@@ -7,7 +7,7 @@ import type { SnapshotRequestedRange } from "@workbench/collaboration-client/typ
 import type { ConversationActions, ConversationMentionOrigin, ConversationReferenceView, ConversationScope } from "../../../../ui/index.js"
 import type { SessionDraftScope, SessionDraftTarget, SessionReferenceDraftResult } from "../../session/index.js"
 import "./references.css"
-import { DirectoryMemory } from "../../workbench-context/directory-memory.js"
+import { ProjectMemory } from "../../workbench-context/project-memory.js"
 import type { LocalExecutionScope } from "../../../../shared/index.js"
 
 /** 取材与草稿变更使用发起会话的账号、项目及当前设备。 */
@@ -289,7 +289,7 @@ export function useConversationReferences(
       flow={flow}
       sessions={sessions}
       pendingDraft={pendingDraft}
-      memoryScope={scope ? { accountId: scope.accountId, workspaceId: scope.workspaceId, projectId: scope.projectId, conversationId: scope.conversationId ?? "" } : undefined}
+      memoryScope={scope ? { accountId: scope.accountId, workspaceId: scope.workspaceId, projectId: scope.projectId } : undefined}
       onRange={supportsRange ? range => {
         if (active.current === flow && flow.request.kind === "preview") void load({ ...flow.request, range }, flow.mention)
       } : undefined}
@@ -340,7 +340,7 @@ function ReferenceDialog({ flow, sessions, pendingDraft, memoryScope, onRange, o
   flow: Flow
   sessions: readonly ReferenceSession[]
   pendingDraft: boolean
-  memoryScope?: LocalExecutionScope
+  memoryScope?: Omit<LocalExecutionScope, "conversationId">
   onRange?(range?: SnapshotRequestedRange): void
   onClose(): void
   onRetry(): void
@@ -422,8 +422,8 @@ function ReferenceDialog({ flow, sessions, pendingDraft, memoryScope, onRange, o
             </button>
           )}
         </fieldset>}
-        {preview.snapshot.sourceConversationId && selection?.kind === "existing" && memoryScope && typeof window !== "undefined" && window.workbenchContext &&
-          <DirectoryMemory scope={{ ...memoryScope, conversationId: selection.conversationId }} host={window.workbenchContext} />}
+        {preview.snapshot.sourceConversationId && selection?.kind === "existing" && sessions.some(session => session.id === selection.conversationId) && memoryScope?.workspaceId && typeof window !== "undefined" && window.workbenchContext &&
+          <ProjectMemory scope={{ ...memoryScope, conversationId: selection.conversationId }} host={window.workbenchContext} />}
         {preview.message && <p role="alert">{preview.message}</p>}
         {preview.busy && <p role="status">{preview.busy === "directory" ? "正在选择目录…" : "正在应用草稿变更…"}</p>}
       </>}

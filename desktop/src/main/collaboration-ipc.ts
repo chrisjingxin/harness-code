@@ -322,13 +322,12 @@ export function bindCollaborationIpc(
     onFeedback: feedback => {
       if (window.isDestroyed() || window.webContents.isDestroyed()) return
       const result = feedback.result
-      const pending = result.status === "pending" || result.status === "saving"
-      const failed = ["error", "conflict", "cancelled"].includes(result.status)
+      const failed = ["error", "conflict", "unavailable"].includes(result.status)
       window.webContents.send("workbench:local-execution:notice", {
         kind: "context-tool", scope: feedback.scope, bindingId: feedback.bindingId, requestId: feedback.turnId,
         tool: {
-          id: feedback.toolId, kind: "other", title: result.message,
-          status: pending ? "in_progress" : failed ? "failed" : "completed",
+          id: feedback.toolId, kind: "other", title: "message" in result ? result.message : "已读取项目记忆。",
+          status: failed ? "failed" : "completed",
           output: JSON.stringify(result, null, 2),
         },
       })

@@ -22,7 +22,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { id: "appearance", label: "外观、密度与快捷键" },
       { id: "agents", label: "本机 Agent" },
       { id: "notifications", label: "通知与提醒" },
-      { id: "memory", label: "本机目录记忆" },
+      { id: "memory", label: "本机项目记忆" },
     ],
   },
   {
@@ -48,8 +48,8 @@ export const ADMIN_SECTION_META: Readonly<Record<AdminSectionId, { readonly titl
     subtitle: "管理跨团队协作的外部 IM 轻通知开关、订阅事件、免打扰时段与合批窗口，对话正文绝不外传。",
   },
   memory: {
-    title: "本机目录记忆",
-    subtitle: "维护当前活跃团队会话关联的本机工程目录副本，不改变原会话起始目录（HC-233）。",
+    title: "本机项目记忆",
+    subtitle: "查看和编辑当前团队的两份本机 Markdown 记忆，供本人会话使用（HC-256）。",
   },
   account: {
     title: "账号与登录",

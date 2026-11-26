@@ -16,27 +16,28 @@ async function prompt(m){
   if(text.includes('<本机记忆'))throw Error('无团队或斜杠消息不应附带材料')
  }else{
   if(text.startsWith('HC241_CONTEXT_TWO')){
-   if(!text.includes('<本机记忆 team.md（已更新）>')||!text.includes('跨轮验证工程'))throw Error('第一轮提案更新的team.md未以增量送达第二轮')
-   if(text.includes('<本机记忆 personal.md'))throw Error('未变更的personal.md不应在第二轮重复送达')
+   if(!text.includes('<本机记忆 team.md（已更新）>')||!text.includes('跨轮验证工程'))throw Error('首轮保存未增量送达次轮')
+   if(text.includes('<本机记忆 personal.md'))throw Error('未变更文档不应重复送达')
+   const memory=await call('read_project_memory',{document:'team'})
+   if(!memory.content.includes('跨轮验证工程'))throw Error('首轮更新没有即时保存')
+  }else{
+   if(text.startsWith('HC241_CONTEXT_ONE')&&(!text.includes('<本机记忆 team.md>')||!text.includes('<本机记忆 personal.md>')||!text.includes('update_project_memory')))throw Error('首轮基线/指引未送达')
    const items=(await call('list_team_knowledge',{scope:'all'})).items
    const rule=items.find(x=>x.title==='匹配仓库规约')
-   const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read')
-   if(!duplicate.alreadyRead||duplicate.text)throw Error('已提供规约未跨轮登记')
-   const memory=await call('query_project_memory',{query:'跨轮验证工程'})
-   if(memory.entries.length!==1)throw Error('第一轮提案没有保存')
-  }else{
-   if(!text.includes('<本机记忆 team.md>')||!text.includes('<本机记忆 personal.md>')||!text.includes('propose_project_memory_update'))throw Error('首轮基线完整正文未送达')
-   const items=(await call('list_team_knowledge',{scope:'all'})).items
-   const rule=items.find(x=>x.title==='匹配仓库规约'),experience=items.find(x=>x.title==='真实工具知识')
-   const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read')
-   if(!duplicate.alreadyRead||duplicate.text)throw Error('实际自动规约未在会话登记')
-   const read=await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-read')
-   if(!read.text||!(await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-repeat')).alreadyRead)throw Error('真实读取/去重失败')
-   update(m.params.sessionId,{sessionUpdate:'tool_call',toolCallId:'knowledge-read',title:'read_team_knowledge',kind:'read',status:'completed',rawOutput:read,content:[{type:'content',content:{type:'text',text:JSON.stringify(read)}}]})
-   const name=text.startsWith('HC241_CONTEXT_FAIL')?'失败不得保存':text.startsWith('HC241_CONTEXT_CANCEL')?'取消不得保存':'跨轮验证工程'
-   const proposal=await call('propose_project_memory_update',{operation:'upsert',kind:'team_repository',baseEntryRevision:0,fields:{name,summary:'来自实际固定知识读取的跨轮事实。'},sourceIds:[experience.referenceId]},'memory-write')
-   if(proposal.status!=='pending')throw Error('应先pending后终态保存')
-   update(m.params.sessionId,{sessionUpdate:'tool_call',toolCallId:'memory-write',title:'propose_project_memory_update',kind:'other',status:'completed'})
+   if(rule){const duplicate=await call('read_team_knowledge',{referenceId:rule.referenceId},'rule-read');if(!duplicate.alreadyRead||duplicate.text)throw Error('已提供规约未登记')}
+   const experience=items.find(x=>x.title==='真实工具知识')??items.find(x=>x.level!=='rule')
+   if(experience){
+    const read=await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-read')
+    if(!read.text&&!read.alreadyRead)throw Error('知识读取失败')
+    if(!(await call('read_team_knowledge',{referenceId:experience.referenceId},'knowledge-repeat')).alreadyRead)throw Error('知识去重失败')
+    update(m.params.sessionId,{sessionUpdate:'tool_call',toolCallId:'knowledge-read',title:'read_team_knowledge',kind:'read',status:'completed',rawOutput:read,content:[{type:'content',content:{type:'text',text:JSON.stringify(read)}}]})
+   }
+   const name=text.startsWith('HC241_CONTEXT_FAIL')?'失败后保留':text.startsWith('HC241_CONTEXT_CANCEL')?'取消后保留':'跨轮验证工程'
+   const before=await call('read_project_memory',{document:'team'})
+   const result=await call('update_project_memory',{document:'team',content:before.content+'\n## '+name+'\n普通工程信息，无需结构化证明。\n',expectedRevision:before.revision},'memory-write')
+   if(result.status!=='saved')throw Error('必须在工具返回时立即saved')
+   if(!(await call('read_project_memory',{document:'team'})).content.includes(name))throw Error('终态前文件未保存')
+   update(m.params.sessionId,{sessionUpdate:'tool_call',toolCallId:'memory-write',title:'update_project_memory',kind:'other',status:'completed'})
    if(text.startsWith('HC241_CONTEXT_FAIL')){write({jsonrpc:'2.0',id:m.id,error:{code:-32603,message:'受控发送失败'}});return}
    if(text.startsWith('HC241_CONTEXT_CANCEL')){waitingCancel=m;return}
   }

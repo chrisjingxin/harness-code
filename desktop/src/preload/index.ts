@@ -81,9 +81,8 @@ const localConversations: LocalConversationsHost = {
 contextBridge.exposeInMainWorld("localConversations", localConversations)
 
 const workbenchContext: WorkbenchContextHost = {
-  listDirectories: scope => ipcRenderer.invoke("workbench:context:list-directories", scope),
-  confirmDirectory: (scope, input) => ipcRenderer.invoke("workbench:context:confirm-directory", scope, input),
-  removeDirectory: (scope, entryId, revision) => ipcRenderer.invoke("workbench:context:remove-directory", scope, entryId, revision),
+  readMemory: (scope, document) => ipcRenderer.invoke("workbench:context:read-memory", scope, document),
+  updateMemory: (scope, input) => ipcRenderer.invoke("workbench:context:update-memory", scope, input),
 }
 contextBridge.exposeInMainWorld("workbenchContext", workbenchContext)
 const knowledgeDrafts:KnowledgeDraftsHost={

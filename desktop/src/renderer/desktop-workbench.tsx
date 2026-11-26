@@ -971,7 +971,6 @@ function ConfirmedUserWorkbench(props: Hosts & {
         isOffline={isOffline}
         memoryScope={memoryScope}
         memoryWorkspaceName={workspace?.name ?? null}
-        memoryProjectName={team.slots.current?.name ?? null}
         onReconnect={() => { void props.identity.refresh() }}
         onBackToWorkbench={() => selectTopNav("chat")}
         onSelectSection={setAdminSection}

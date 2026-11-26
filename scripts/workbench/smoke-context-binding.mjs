@@ -149,7 +149,7 @@ try {
   await coordinator.dispose(); coordinator = undefined
   assert.equal(await accessStatus(prepared.at(-1).setup), 401)
   assert.deepEqual(events.slice(-2), ["release", "close"])
-  console.log(JSON.stringify({ result: "PASS", binding: "真实协调器prepare→ACP new/load配置→回环MCP四工具；保留已有MCP配置", lifecycle: "复用不换凭据/换Agent先撤销/旧bindingId不误撤销/bind失败/准备及bind期间换账号/关闭撤销", degradation: "准备失败与HTTP MCP不支持均显示现有诊断，真实普通对话完成", task: "HC-233进行中，实际正文发送与稳定轮次仍待HC-239" }, null, 2))
+  console.log(JSON.stringify({ result: "PASS", binding: "真实协调器prepare→ACP new/load配置→回环MCP四工具；保留已有MCP配置", lifecycle: "复用不换凭据/换Agent先撤销/旧bindingId不误撤销/bind失败/准备及bind期间换账号/关闭撤销", degradation: "准备失败与HTTP MCP不支持均显示现有诊断，真实普通对话完成", task: "HC-256接入与凭据边界证据，正文与即时保存见smoke-workbench-context" }, null, 2))
 } finally {
   await coordinator?.dispose()
   await service.dispose()

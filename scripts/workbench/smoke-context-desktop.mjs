@@ -61,7 +61,7 @@ try {
   ui = await connect(pages.webSocketDebuggerUrl)
   const state = await until(() => ui.evaluate("document.readyState === 'complete' && window.workbenchContext && ({ title: document.title, text: document.body.innerText, methods: Object.keys(window.workbenchContext) })"), "正式入口")
   assert.ok(state.text.length > 10)
-  assert.deepEqual(state.methods.sort(), ["confirmDirectory", "listDirectories", "removeDirectory"])
+  assert.deepEqual(state.methods.sort(), ["readMemory", "updateMemory"])
   assert.ok(!logs.includes("桌面启动失败") && !logs.includes("桌面页面加载失败"), logs.slice(-1600))
   console.log(JSON.stringify({ result: "PASS", entry: "已构建正式Electron窗口", page: state.title, contextPort: state.methods, boundary: "仅正常入口与受限端口；未登入账号，业务接线另验" }, null, 2))
 } finally {
