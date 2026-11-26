@@ -12,7 +12,7 @@ scope: 在独立 Harness Agent 实现内提供 Python ACP 接入适配，复用�
 acceptance: 真实 Harness 经 ACP 可建会话、流式运行、取消/回答和恢复；平台不导入内核类型，切换到其他 Agent 无需 Harness/Python；ACP通信.md 缺口表中归属 HC-200 的行全部「已关闭」附测试证据或用户确认放弃带日期。
 user_docs: 实现阶段按范围更新独立桌面用户指南、docs/user/快速开始.md、docs/user/安全与沙箱.md 与 docs/user/Web界面.md；当前不新增产品运行承诺
 developer_docs: docs/developer/architecture/多人协作工作台顶层设计.md、docs/developer/architecture/ACP通信.md；后续按本 Task 同名文件补 Spec、Plan、Todo
-test_evidence: 2026-11-25 M1 会话 MCP 定向 6 通过；真实本机 MCP 发现与调用通过；详见维护停点 M1
+test_evidence: 2026-11-26 M2 原A桌面真实模型回复、两次只读MCP调用及run.completed复验通过，项目记忆返回1条、团队知识返回4条；HTTP/SSE MCP补充22项路由/模型/Plugin保护及3项资源回归通过；回环模型直连12项代理/资源回归、4项provider终态、2项模拟流式及真实17工具SDK通路通过；2026-11-25 M1 会话 MCP 定向6通过，详见维护停点
 references: docs/developer/task/HC-192-协作工作台与会话交接.md；设计基线 02505619be4026c3dba0ec27aca729ae01a26968
 completed_at: -
 ---
@@ -392,3 +392,52 @@ Python/TypeScript 双端以 mock 模型验证真实 ACP 进程、取消/恢复�
 `ae4101ff` 已由同事交付会话 MCP 选择器 `McpConnectionManager.acquire_covering` 及 `agent/tests/test_session_mcp_engine.py`。本次冲突选择远端实现，不保留我方另一套全局/会话 selector；只叠加 `release_side_runtime` 的停止新借用、等待已有 Engine 释放后回收。原有 M1 复现与修复记录是 rebase 前证据，不将远端选择器记作本次新增。
 
 合并后在 `agent/` 执行 `.venv/bin/python -m pytest tests/test_session_mcp_engine.py tests/host/test_session_mcp_runtime.py tests/host/test_server.py::test_agent_engine_pool_filters_plugin_mcp_tools_to_resolved_view -q --tb=short`：4 通过。覆盖远端精确/覆盖资源选择与配置漂移拒绝、本机真实 MCP 工具调用、父/子工具白名单、解绑后的租约保留及 acquire_covering 不再借用已排空资源。未继续 rebase 或暂存；交统筹处理 Git 流程。
+
+## 维护停点 M2：本机模型请求绕行代理（2026-11-26，待验收）
+
+本轮经用户授权诊断无法对话。新日志的 MCP 工具加载、runtime.acquire.completed 均正常，随后模型连续 InternalServerError 并收敛为 PROVIDER_RETRY_EXHAUSTED。原日志未记录 HTTP 数字或 body，不能把异常类型直接断言为 HTTP 500；与昨日 MCP 初始化失败是不同阶段。
+
+隔离 Host 使用临时 cwd/config、仅在内存引用实际网关 key，先用受控 HTTPX transport 捕获正式构图后的短请求（系统提示、stream_options 和17个工具定义），不执行工具或用户原 clone 指令。默认 HTTPX 与正式 SDK 的最短请求返回空 body 502。此实际执行进程的环境变量无代理，但 urllib.getproxies() 读到 macOS HTTP/HTTPS/SOCKS 系统代理 origin http://127.0.0.1:7897；受限根会话读取结果为空，已记录执行环境差异。同一完整工具短请求明确 trust_env=False 直连本机3425后返回200、4个SSE块、约2.38秒，排除了这份请求本身的工具schema不兼容。正式实例的最终恢复仍由统筹UI验证，不能用模型列表或最短ping代替。
+
+生产改动只有两个Python文件：harness_gateway.py 共用 URL 的 localhost/字面 IPv4/IPv6 回环判断，ProviderClientPool 回环不读取代理，外部企业 endpoint 继续沿用代理；独立模型构造同步/异步入口使用同一路由，显式传入 transport 保持原 owner 及租约生命周期，独立客户端沿SDK关闭/回收方式处理。managed_agent_executor.py 的现有 provider错误 message 增加有效HTTP数字及固定中文连接/代理提示，不回显原始body、不新增ACP/共享类型、不改UI或配置开关。没有工具降级或关闭工具，没有修改第三方插件、用户key或全局代理。
+
+必要验证：
+
+- `.venv/bin/python -m pytest tests/extensions/test_provider_client_pool.py tests/extensions/test_gateway_usage.py -q --tb=short`：12通过。假系统代理返回502，回环模型可流式成功；外部模型明确经过代理；localhost/127/IPv6与相似外域/私网边界、Host租约复用与关闭、独立同步/异步关闭均验证。
+- `.venv/bin/python -m pytest tests/runtime/test_managed_agent_executor.py -k 'exhausted_provider_failure or does_not_retry_provider_request_rejection' -q --tb=short`：4通过、28未选；有效HTTP提示和原始body脱敏、确定性错误不重试保持。
+- `HARNESS_RUN_LOOPBACK_E2E=1 .venv/bin/python -m pytest tests/extensions/test_gateway_e2e.py -q --tb=short`：2通过。受控完整Agent工具请求/正文与reasoning_content流式路径不受影响。
+- 修复后的正式 ProviderClientPool + create_openai_compatible_model 携17个原样工具定义，对本机3425做一次受控短消息调用：PASS、4块、有正文、0个工具调用、传入共享transport身份保持。不是只用无工具ping证明恢复，也未替代统筹正式UI验证。
+- 完整payload及一次性脚本仅在权限0700/0600的 /private/tmp/hc200-provider-diag，未保存密钥、未上传。审批拒绝再次将完整payload经默认代理发送，后续采用更安全的回环直连与本地假代理夹具，未绕过审批。未改用户profile、未重放或执行旧clone指令。
+
+仅Python源码，无需四workspace构建；新Harness进程导入即可生效。正式A/B应用由统筹负责，等待原A profile完整Agent回复与run终态证据。未commit/push，保持待验收，不归档。
+
+### M2 补充：HTTP/SSE MCP 同类代理修复（2026-11-26，待验收）
+
+正式模型已成功：`agent-1795673849697-8433-0000.active.jsonl` 中 run `337711fa-6345-46a9-b6ae-3d627d68ca32`，`model.completed` 2394ms、`run.completed`；同一进程 `workbench-context` 仍在约195ms报 `ExceptionGroup / MCP_CONNECT_FAILED`，因此四个记忆/知识工具未注册。实际日志已只读取稳定字段，未输出会话正文或 MCP 凭据。
+
+根因与修复：模型 transport 已显式直连，但普通 HTTP/SSE MCP 仍走 MCP SDK 默认客户端；Plugin 工厂仅禁 redirect，也会读系统代理。新回归使用隔离本机四工具 MCP 和返回502的假系统代理；在同一夹具中重现未应用直连策略的SDK路径：`ExceptionGroup → HTTPStatusError(502)`、代理收到1次请求、本机MCP收到0次。没有把正式payload送往默认系统代理，也未接触用户的随机端口或运行任务。
+
+将 URL 判定原样迁入轻量 `extensions/http_transport.py`，模型和 MCP 共用一个 `is_loopback_endpoint`，删除原模型私有判断，不留 alias 或两套策略。MCP 在展开URL环境变量后，为明确回环地址选择直连工厂；外部普通MCP仍走原SDK，外部Plugin仍保留代理。工厂透传 auth/headers/timeout，普通HTTP/SSE沿用SDK默认重定向，Plugin（Claude/portable）仍拒绝自动跟随；直连底层 transport 继续按HTTPX默认验证证书并读取CA环境，不设置 verify=False。连接仍由SDK的async context关闭，不新增后台、开关或fallback，MCP不导入模型模块。
+
+必要证据（在agent目录执行）：
+
+- `.venv/bin/python -m pytest tests/extensions/test_mcp_http_transport.py tests/extensions/test_provider_client_pool.py tests/extensions/test_gateway_usage.py tests/extensions/test_mcp.py -k 'test_mcp_http_transport or provider_client_pool or gateway_usage or plugin_http_disables_redirect_following or claude_plugin_http_disables_redirect_following or build_connections_http' -q --tb=short`：22通过、84未选。真实本机HTTP/SSE四工具发现与调用、session/config/Plugin来源、测试认证头到达本机且代理零请求；外部Plugin仍经假代理；跨源307未跟随，目标未收到凭据；TLS证书检查与主机名检查保留；模型URL边界、Pool复用与关闭不回退。4条 DeprecationWarning 来自锁定适配器使用旧SDK名称，未为本次修复升级依赖。
+- `.venv/bin/python -m pytest tests/test_session_mcp_engine.py tests/host/test_session_mcp_runtime.py -q --tb=short`：3通过；快照覆盖选择、父子工具白名单、真实MCP租约保留和释放不受影响。
+- 初次在实际工具沙箱内启动受控端口遇PermissionError；自动审查通过后在可监听回环的受控环境通过，未改生产代码规避限制。没有启动或关闭用户桌面，没有重启其clone任务，没有真实模型或第三方账号请求。
+
+同一M2的Spec/Plan/Todo、配置架构和故障排查已补齐MCP范围。全部既有10文件模型修复保留，增量只涉及MCP、轻量URL模块与必要回归/文档。Python源码由新Agent进程导入生效，无需重建桌面；正式原账号服务复验及生效时机交统筹安排，不在当前运行任务中强行热替换。未commit/push，仍待验收。
+
+M2 TLS 补充复核：统筹指出模型 `trust_env=False` 也可能忽略CA环境。已在原有模型 Pool 与独立同步/异步客户端上沿用 MCP 的显式默认 transport，使代理发现关闭、TLS/CA读取保持。新增 `test_loopback_clients_preserve_certificate_environment` 分别验证 SSL_CERT_FILE 和 SSL_CERT_DIR，Host每个客户端及独立客户端均读取预期CA配置，证书/主机名检查开启。
+
+CA调整后 `tests/extensions/test_provider_client_pool.py tests/extensions/test_gateway_usage.py tests/extensions/test_mcp_http_transport.py` 组合先通过19项（含SSL_CERT_FILE），再将CA用例补齐为FILE/DIR两档，定向 `-k certificate_environment` 2通过、11未选。与前述22项组合有重合，不累计宣称为不重复测试数。未再调用实际网关或打断当前用户任务。文档/任务/diff检查通过；OpenWiki命令仍缺失（127）。正式MCP新进程复验由统筹在任务结束后安排。
+
+### M2 正式桌面复验（2026-11-26，统筹完成）
+
+经用户明确授权，使用原 A profile `HarnessCode-Test-A`、原账号沈北辰连接既有 Java 服务 `http://101.34.239.51:18084`，在原 Project「远程仓库test」会话 `c590b79b-2d06-4ba8-bd7d-ddba66c3c779` 验证。保留其已有完整正文共享设置；诊断消息明确禁止执行命令、克隆、读写工程文件与更新记忆或知识。没有自动重发旧失败请求。
+
+- 普通文本诊断：正式界面显示 Agent 回复「连接正常」；原生线程 `e80f4f83-3285-4495-8e20-b6a97206c949` 的 run `337711fa-6345-46a9-b6ae-3d627d68ca32` 已 `run.completed`。
+- MCP 修复生效后：新进程日志 `agent-1795675196888-14055-0000.active.jsonl` 记录 `mcp.connection.completed`，4 个工具、82ms；原线程恢复成功。
+- 原会话实际发送只读诊断，逐项选择「允许一次」并提交：`query_project_memory(query=test1)` 与 `list_team_knowledge(scope=applicable)` 均在界面显示已完成，最终回复分别返回 1 条目录记忆、4 条知识，未执行写工具。
+- 对应 run `6a6207eb-648b-4024-863e-762fc0914949` 的两个 `tool.completed` 为 completed（508ms、271ms），三个模型回合均 attempt 1，最终 `runtime.released → run.completed`；界面恢复可输入状态。界面总耗时约 124 秒包含人工审批等待，不作为模型或工具延迟结论。
+
+本次普通对话、工具发现、单次授权、真实本机记忆读取、既有服务知识读取及最终回复链路已通过。没有扩展为双账号协作或 Windows 全面验收；应用保持打开供用户继续测试。仍待用户验收，未提交或推送。

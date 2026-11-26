@@ -27,12 +27,34 @@ except ImportError as exc:  # pragma: no cover - packaging guard
     ) from exc
 
 from harness_agent.config.config import ModelSettings
+from harness_agent.extensions.http_transport import is_loopback_endpoint
 from harness_agent.runtime.resource_lifecycle import (
     ResourceScope,
     ResourceState,
     SharedResourceHandle,
     SharedResourceLease,
 )
+
+
+class _ModelHttpClient(httpx.Client):
+    """独立模型持有的同步客户端，沿 SDK 方式在丢弃模型后回收连接。"""
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass  # 解释器退出或构造失败时不能让清理异常盖过原错误。
+
+
+class _AsyncModelHttpClient(httpx.AsyncClient):
+    """独立模型持有的异步客户端；共享 Host 租约不使用此关闭器。"""
+
+    def __del__(self) -> None:
+        try:
+            if not self.is_closed:
+                asyncio.get_running_loop().create_task(self.aclose())
+        except Exception:
+            pass  # 与 SDK 默认客户端一致：事件循环已退出时由进程回收连接。
 
 
 class ProviderClientPool:
@@ -53,7 +75,15 @@ class ProviderClientPool:
         async with self._lock:
             resource = self._resources.get(key)
             if resource is None or resource.state is not ResourceState.READY:
-                client = httpx.AsyncClient(timeout=settings.timeout_seconds)
+                # HTTPX 也会读取 macOS 系统代理；回环模型必须直达本机，
+                # 否则即使没有代理环境变量也可能把模型请求交给系统代理。
+                direct = is_loopback_endpoint(settings.base_url)
+                client = httpx.AsyncClient(
+                    timeout=settings.timeout_seconds,
+                    trust_env=not direct,
+                    # 显式 transport 继续读取 CA 环境，只禁用客户端代理发现。
+                    transport=httpx.AsyncHTTPTransport() if direct else None,
+                )
                 resource = SharedResourceHandle(
                     name=f"provider-http:{key[:12]}",
                     scope=ResourceScope.HOST,
@@ -106,6 +136,16 @@ def create_openai_compatible_model(
     }
     if async_client is not None:
         kwargs["http_async_client"] = async_client
+    if is_loopback_endpoint(settings.base_url):
+        kwargs["http_client"] = _ModelHttpClient(
+            timeout=settings.timeout_seconds, trust_env=False,
+            transport=httpx.HTTPTransport(),
+        )
+        if async_client is None:
+            kwargs["http_async_client"] = _AsyncModelHttpClient(
+                timeout=settings.timeout_seconds, trust_env=False,
+                transport=httpx.AsyncHTTPTransport(),
+            )
     if settings.reasoning is not None:
         # ChatOpenAI 的 reasoning_effort 是 Chat Completions 参数；不能传
         # Responses 专属 reasoning/output_version，以免兼容网关改走 /responses。

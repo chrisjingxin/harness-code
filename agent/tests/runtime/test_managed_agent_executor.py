@@ -413,6 +413,8 @@ async def test_executor_exhausted_provider_failure_is_stable_and_retryable() -> 
 
     assert error.value.code == "PROVIDER_RETRY_EXHAUSTED"
     assert error.value.retryable is True
+    assert "HTTP 503" in str(error.value)
+    assert "代理" in str(error.value)
     assert "RAW_GATEWAY_SECRET" not in str(error.value)
 
 

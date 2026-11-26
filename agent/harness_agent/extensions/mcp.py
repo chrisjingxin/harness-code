@@ -52,11 +52,13 @@ import re
 import time
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from types import MappingProxyType
 from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlsplit
 
 from harness_agent.diagnostic_log.runtime import ensure_log
+from harness_agent.extensions.http_transport import is_loopback_endpoint
 from harness_agent.runtime.resource_lifecycle import (
     ResourceScope,
     ResourceState,
@@ -302,19 +304,30 @@ def _server_status(
     return result
 
 
-def _create_plugin_http_client(
+def _create_mcp_http_client(
     headers: dict[str, str] | None = None,
     timeout: Any | None = None,
     auth: Any | None = None,
+    *,
+    direct: bool,
+    follow_redirects: bool,
 ) -> Any:
-    """为 Plugin HTTP/SSE 禁用自动 redirect，避免认证 header 跨 origin 传播。"""
+    """回环 MCP 直连，Plugin 不跟随重定向；其余 SDK 认证和 TLS 行为保持。"""
     import httpx
+    from mcp.shared._httpx_utils import MCP_DEFAULT_TIMEOUT, MCP_DEFAULT_SSE_READ_TIMEOUT
+
+    if timeout is None and follow_redirects:
+        timeout = httpx.Timeout(MCP_DEFAULT_TIMEOUT, read=MCP_DEFAULT_SSE_READ_TIMEOUT)
 
     return httpx.AsyncClient(
         headers=headers,
         timeout=timeout,
         auth=auth,
-        follow_redirects=False,
+        follow_redirects=follow_redirects,
+        trust_env=not direct,
+        # 只禁用代理发现。底层 transport 仍按 HTTPX 默认读取 CA 环境并验证 TLS，
+        # 不把回环直连误变成关闭证书检查或忽略企业证书配置。
+        transport=httpx.AsyncHTTPTransport() if direct else None,
     )
 
 
@@ -1256,6 +1269,11 @@ class McpConnectionManager:
         # Claude `.mcp.json` 与 portable `mcp.json` 保留各自的 placeholder、
         # environment 和 timeout 语义；但两者都是已安装 Plugin 的 header 来源，
         # 都不能让凭据随跨源 redirect 自动转发。
-        if is_portable_plugin or is_plugin_source:
-            conn["httpx_client_factory"] = _create_plugin_http_client
+        direct = is_loopback_endpoint(url)
+        if direct or is_portable_plugin or is_plugin_source:
+            conn["httpx_client_factory"] = partial(
+                _create_mcp_http_client,
+                direct=direct,
+                follow_redirects=not (is_portable_plugin or is_plugin_source),
+            )
         return conn

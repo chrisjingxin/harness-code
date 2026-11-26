@@ -36,6 +36,7 @@ from harness_agent.runtime.provider_retry import (
     is_provider_error,
     is_provider_rate_limited,
     is_provider_transient,
+    provider_status_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -773,9 +774,12 @@ def _provider_terminal_error(error: BaseException) -> ManagedAgentExecutionError
             retryable=True,
         )
     if is_provider_transient(error):
+        status = provider_status_code(error)
+        # 只展示经过校验的 HTTP 数字，不读取可能包含凭据/请求原文的 provider body。
+        status_hint = f"（HTTP {status}）" if status is not None and 400 <= status <= 599 else ""
         return ManagedAgentExecutionError(
             "PROVIDER_RETRY_EXHAUSTED",
-            "Provider retry budget exhausted",
+            f"模型请求重试后仍失败{status_hint}，请检查模型网关连接及代理设置。",
             retryable=True,
         )
     return ManagedAgentExecutionError(

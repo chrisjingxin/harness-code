@@ -829,3 +829,11 @@ npm run project:check && npm run check:boundaries                     # 项目�
 最后一名会话解除绑定时，侧路资源停止接受新借用；已有 Engine 的工具保持可用，最后一个 Engine 释放后再回收。不能用强制关闭绕过未释放的借用。
 
 验收：隔离 Host 与真实受控 MCP 能完成构图和工具调用；父/子工具视图不越权；共享会话解绑不会提前关闭连接；不操作用户运行中的双实例、不发送其会话、不修改模型配置。
+
+## 2026-11-26 维护规格：回环模型直连
+
+本机模型 endpoint 的 hostname 为 localhost 或字面 IPv4/IPv6 loopback 时，模型 HTTP transport 不读取环境/系统代理；外部企业模型继续沿用当前代理行为。只按 URL 本身判定，不做 DNS 解析，不把私网地址、相似域名当回环。Host 共享 transport 与独立模型构造均遵守同一规则，显式传入的 transport 仍由原 owner 管理。
+
+系统或网关错误只呈现固定原因与有效 HTTP 状态，不回显 provider body、凭据或原始请求；不关闭工具、不降级 schema、不增加配置开关。正式实例仍由统筹重开并验证回复。
+
+M2 补充（HTTP/SSE MCP）：会话、用户或 Plugin 配置在展开环境变量后的 URL 为明确回环时，也不读取系统代理。轻量 URL 判定供模型与 MCP 共用，MCP 不导入模型依赖；外部 HTTP/SSE 保留代理，模型和 MCP 的回环底层 transport 都继续读取 SSL_CERT_FILE/SSL_CERT_DIR 并验证证书，SDK 原有 timeout/auth/headers/TLS 及 Plugin 不跟随重定向的保护保持。回环只决定路由，不授予工具权限或扩大来源范围。
