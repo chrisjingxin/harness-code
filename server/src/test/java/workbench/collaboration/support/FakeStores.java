@@ -42,15 +42,23 @@ public final class FakeStores {
     public static final class FakeIdentity implements IdentityRepository {
         public final Map<String, User> users = new HashMap<>();
         public final List<String> members = new ArrayList<>();
+        public final Map<String, workbench.collaboration.domain.identity.WorkspaceRole> roles = new HashMap<>();
 
         public void addMember(String workspaceId, String userId) {
             members.add(workspaceId + ":" + userId);
         }
 
+        public void addAdmin(String workspaceId, String userId) {
+            addMember(workspaceId, userId);
+            roles.put(workspaceId + ":" + userId, workbench.collaboration.domain.identity.WorkspaceRole.ADMIN);
+        }
+
         @Override public void lockWorkspace(String workspaceId) {}
         @Override public Optional<workbench.collaboration.domain.identity.WorkspaceMember> findMember(String workspaceId,String userId) {
-            return memberExists(workspaceId,userId) ? Optional.of(new workbench.collaboration.domain.identity.WorkspaceMember(workspaceId,userId,
-                workbench.collaboration.domain.identity.WorkspaceRole.DEVELOPER,true,1,1,1,1)) : Optional.empty();
+            String key = workspaceId + ":" + userId;
+            return memberExists(workspaceId, userId) ? Optional.of(new workbench.collaboration.domain.identity.WorkspaceMember(
+                workspaceId, userId, roles.getOrDefault(key, workbench.collaboration.domain.identity.WorkspaceRole.DEVELOPER),
+                true, 1, 1, 1, 1)) : Optional.empty();
         }
         @Override public Optional<User> findUserById(String id) { return Optional.ofNullable(users.get(id)); }
         @Override public Optional<User> findUserByUserNo(String userNo) { return Optional.empty(); }

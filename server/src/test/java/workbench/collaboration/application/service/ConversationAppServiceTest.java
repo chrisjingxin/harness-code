@@ -100,7 +100,8 @@ class ConversationAppServiceTest {
     @Test
     void 非项目成员与外人登记一律404() {
         assertThatThrownBy(() -> service.register(OUTSIDER, WS, PROJECT, registerBody()))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
+        identity.addMember(OTHER_WS, OWNER);
         assertThatThrownBy(() -> service.register(OWNER, OTHER_WS, PROJECT, registerBody()))
                 .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
     }
@@ -138,7 +139,7 @@ class ConversationAppServiceTest {
         assertThat(JSON.readTree(running).path("conversations").size()).isEqualTo(0);
 
         assertThatThrownBy(() -> service.list(OUTSIDER, WS, PROJECT, null, null))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
     }
 
     @Test
@@ -148,7 +149,7 @@ class ConversationAppServiceTest {
         String detail = service.detail(MEMBER, WS, PROJECT, conversationId);
         assertThat(JSON.readTree(detail).path("conversation").path("conversationId").asString()).isEqualTo(conversationId);
         assertThatThrownBy(() -> service.detail(OUTSIDER, WS, PROJECT, conversationId))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
         // 跨项目会话同样 404，不泄露存在性
         assertThatThrownBy(() -> service.detail(MEMBER, WS, OTHER_REPO, conversationId))
                 .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
@@ -171,7 +172,7 @@ class ConversationAppServiceTest {
         assertThat(tail.get(0).path("sequence").asInt()).isEqualTo(4);
 
         assertThatThrownBy(() -> service.history(OUTSIDER, WS, PROJECT, conversationId, 0, 100))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
     }
 
     @Test
@@ -227,7 +228,7 @@ class ConversationAppServiceTest {
         assertThat(JSON.readTree(created).path("conversation").path("stoppedAt").isNull()).isTrue();
 
         assertThatThrownBy(() -> service.stopSharing(OUTSIDER, WS, PROJECT, conversationId))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
         assertThatThrownBy(() -> service.stopSharing(MEMBER, WS, PROJECT, conversationId))
                 .isInstanceOf(ApiProblem.class)
                 .extracting("status", "code")

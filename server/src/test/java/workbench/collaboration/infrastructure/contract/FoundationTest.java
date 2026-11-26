@@ -37,7 +37,10 @@ class FoundationTest {
                 "wb_conversation", "wb_conversation_repository", "wb_snapshot",
                 "wb_task", "wb_task_transition", "wb_task_link", "wb_task_request",
                 "wb_knowledge_item", "wb_knowledge_version", "wb_notification_outbox",
-                "wb_user_notification_pref", "wb_external_notification_delivery");
+                "wb_user_notification_pref", "wb_external_notification_delivery",
+                "wb_knowledge_version_repository", "wb_knowledge_proposal", "wb_knowledge_proposal_event",
+                "wb_knowledge_request", "wb_knowledge_read_receipt", "wb_knowledge_usage",
+                "wb_knowledge_feedback", "wb_knowledge_review_event");
     }
 
     private static Set<String> compliantColumns() {
@@ -69,7 +72,24 @@ class FoundationTest {
                 "wb_task_request.project_id", "wb_task_request.actor_id", "wb_task_request.request_id", "wb_task_request.fingerprint", "wb_task_request.response",
                 "wb_knowledge_item.workspace_id", "wb_knowledge_item.knowledge_id", "wb_knowledge_item.term_key",
                 "wb_knowledge_item.current_version_id", "wb_knowledge_item.version", "wb_knowledge_item.indexed_version", "wb_knowledge_item.archived",
+                "wb_knowledge_item.last_reviewed_at", "wb_knowledge_item.reviewed_feedback_id",
                 "wb_knowledge_version.knowledge_id", "wb_knowledge_version.version_id", "wb_knowledge_version.version", "wb_knowledge_version.text",
+                "wb_knowledge_version.level", "wb_knowledge_version.scope_kind", "wb_knowledge_version.content_type",
+                "wb_knowledge_version.contributors", "wb_knowledge_version.proposal_id", "wb_knowledge_version.reviewer_id", "wb_knowledge_version.reviewed_at",
+                "wb_knowledge_version_repository.version_id", "wb_knowledge_version_repository.repository_id",
+                "wb_knowledge_proposal.proposal_id", "wb_knowledge_proposal.workspace_id", "wb_knowledge_proposal.proposer_id",
+                "wb_knowledge_proposal.proposer_member_version", "wb_knowledge_proposal.content", "wb_knowledge_proposal.revision",
+                "wb_knowledge_proposal.status", "wb_knowledge_proposal.submitted_at",
+                "wb_knowledge_proposal_event.proposal_id", "wb_knowledge_proposal_event.content",
+                "wb_knowledge_proposal_event.actor_id", "wb_knowledge_proposal_event.kind",
+                "wb_knowledge_request.workspace_id", "wb_knowledge_request.actor_id", "wb_knowledge_request.request_id",
+                "wb_knowledge_request.fingerprint", "wb_knowledge_request.response",
+                "wb_knowledge_read_receipt.read_id", "wb_knowledge_read_receipt.knowledge_id", "wb_knowledge_read_receipt.version_id",
+                "wb_knowledge_usage.knowledge_id", "wb_knowledge_usage.version_id", "wb_knowledge_usage.read_count",
+                "wb_knowledge_feedback.knowledge_id", "wb_knowledge_feedback.version_id", "wb_knowledge_feedback.user_id",
+                "wb_knowledge_feedback.value", "wb_knowledge_feedback.event_id",
+                "wb_knowledge_review_event.knowledge_id", "wb_knowledge_review_event.version_id", "wb_knowledge_review_event.actor_id",
+                "wb_knowledge_review_event.kind", "wb_knowledge_review_event.note",
                 "wb_notification_outbox.workspace_id", "wb_notification_outbox.user_id", "wb_notification_outbox.project_id",
                 "wb_notification_outbox.event_id", "wb_notification_outbox.event_type", "wb_notification_outbox.object_id",
                 "wb_user_notification_pref.user_id", "wb_user_notification_pref.external_enabled", "wb_user_notification_pref.subscribed_events",
@@ -92,7 +112,7 @@ class FoundationTest {
     void 空库列出全部缺失表并拒绝启动() {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> foundation(Set.of(), Set.of()).validate());
-        assertTrue(error.getMessage().contains("22"));
+        assertTrue(error.getMessage().contains("30"));
     }
 
     @Test

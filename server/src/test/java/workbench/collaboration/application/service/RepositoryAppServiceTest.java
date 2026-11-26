@@ -45,7 +45,7 @@ class RepositoryAppServiceTest {
         identity.users.put(OWNER, FakeStores.user(OWNER, "80278667", "负责人", true));
         identity.users.put(MEMBER, FakeStores.user(MEMBER, "80278668", "成员", true));
         identity.users.put(OUTSIDER, FakeStores.user(OUTSIDER, "80278669", "外人", true));
-        identity.addMember(WS, OWNER);
+        identity.addAdmin(WS, OWNER);
         identity.addMember(WS, MEMBER);
         service = new RepositoryAppService(
                 new ProjectAccessPolicy(identity, projects, repositories),
@@ -103,10 +103,10 @@ class RepositoryAppServiceTest {
     @Test
     void 归档单向且归档后拒绝修改409() {
         String repositoryId = repositoryIdOf(service.create(OWNER, WS, createBody()));
-        String archived = service.patch(OWNER, WS, repositoryId, "{\"status\":\"archived\"}");
+        String archived = service.patch(OWNER, WS, repositoryId, "{\"status\":\"archived\",\"expectedVersion\":1}");
         assertThat(JSON.readTree(archived).path("status").asString()).isEqualTo("archived");
 
-        assertThatThrownBy(() -> service.patch(OWNER, WS, repositoryId, "{\"name\":\"改名\"}"))
+        assertThatThrownBy(() -> service.patch(OWNER, WS, repositoryId, "{\"name\":\"改名\",\"expectedVersion\":2}"))
                 .isInstanceOf(ApiProblem.class).extracting("status", "code")
                 .containsExactly(409, "REPOSITORY_ARCHIVED");
 

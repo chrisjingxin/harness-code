@@ -84,8 +84,8 @@ class ProjectAppServiceTest {
         service.addMember(OWNER, WS, projectId, memberBody(MEMBER));
 
         assertThatThrownBy(() -> service.detail(OUTSIDER, WS, projectId))
-                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
-        // OUTSIDER 连团队都进不去列表语义——直接调 detail 也须 404 而非泄露
+                .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(403);
+        // OUTSIDER 非当前团队成员，在工作区门槛拦截返回 403 WORKSPACE_MEMBER_REQUIRED
 
         service.removeMember(OWNER, WS, projectId, MEMBER);
         assertThatThrownBy(() -> service.detail(MEMBER, WS, projectId))
@@ -95,6 +95,7 @@ class ProjectAppServiceTest {
     @Test
     void 跨团队项目按404隐藏() {
         String projectId = projectIdOf(service.create(OWNER, WS, createBody()));
+        identity.addMember(OTHER_WS, OWNER);
         assertThatThrownBy(() -> service.detail(OWNER, OTHER_WS, projectId))
                 .isInstanceOf(ApiProblem.class).extracting("status").isEqualTo(404);
     }
