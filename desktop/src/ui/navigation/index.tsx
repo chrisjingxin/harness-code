@@ -16,7 +16,7 @@ import {
   IconInbox,
   IconLayoutGrid,
   IconListCheck,
-  IconLock,
+  IconLockFilled,
   IconPencil,
   IconPlus,
   IconRefresh,
@@ -106,7 +106,6 @@ export type ProjectNavigationView = {
   currentProjectId: string | null;
   currentProjectRepo?: string | null;
   currentProjectMemberCount?: number | null;
-  localDeviceName?: string | null;
   groups: readonly NavigationMemberGroup[];
   membersAvailability: NavigationAvailability;
   sessionsAvailability: NavigationAvailability;
@@ -303,7 +302,7 @@ function WorkspaceSwitch({ view, actions, dualTrack }: ProjectNavigationProps & 
 
       {open && workspaces.length > 0 && (
         <div className="pnav-menu" role="menu" aria-label="切换 Workspace">
-          <div className="pnav-menu-label">Workspace</div>
+          <div className="pnav-menu-label">团队</div>
           {workspaces.map((ws) => {
             const on = ws.workspaceId === (currentWs?.workspaceId ?? view.currentWorkspaceId);
             const wsPhotos = ws.memberPhotos ?? memberAvatars;
@@ -417,7 +416,7 @@ function ProjectSwitch({ view, actions }: ProjectNavigationProps) {
       </button>
       {open && (
         <div className="pnav-menu" role="menu" aria-label="切换 Project">
-          <div className="pnav-menu-label">Project</div>
+          <div className="pnav-menu-label">项目</div>
           {availability.state !== "ready" && (
             <div className="pnav-menu-status">
               <span>{text(availability)}</span>
@@ -469,24 +468,22 @@ function useScrollIntoViewOnLanding(ref: { current: HTMLButtonElement | null }, 
   }, [landing, ref]);
 }
 
-function SessionRow({ entry, active, landing, showMeTag, localDeviceName, select, canOpenMenu, onOpenMenu }: {
+function SessionRow({ entry, active, landing, showMeTag, select, canOpenMenu, onOpenMenu }: {
   entry: NavigationSessionEntry;
   active: boolean;
   landing?: boolean;
   showMeTag?: boolean;
-  localDeviceName?: string | null;
   select: ProjectNavigationActions["selectConversation"];
   canOpenMenu: boolean;
   onOpenMenu: (x: number, y: number) => void;
 }) {
   const rowRef = useRef<HTMLButtonElement>(null);
   useScrollIntoViewOnLanding(rowRef, landing);
-  const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
+  const isOtherDevice = entry.remoteSelf === true;
   const isStopped = entry.badge?.text === "已停止同步";
   const hasUnread = !isStopped && Boolean(
     entry.badge?.text.includes("有更新") || entry.badge?.text.includes("未同步"),
   );
-  const deviceLabel = isOtherDevice ? "其他设备 · 只读" : localDeviceName ? `本机 · ${localDeviceName}` : "本机";
 
   return (
     <div
@@ -501,7 +498,7 @@ function SessionRow({ entry, active, landing, showMeTag, localDeviceName, select
         ref={rowRef}
         type="button"
         className={`sess-item pnav-session${active ? " is-active" : ""}${landing ? " is-landing" : ""}`}
-        title={entry.title}
+        title={isOtherDevice ? `${entry.title}（其他设备 · 只读）` : entry.title}
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => select(entry.conversationId)}
@@ -511,8 +508,8 @@ function SessionRow({ entry, active, landing, showMeTag, localDeviceName, select
           <span className="sess-title pnav-ellipsis">{entry.title}</span>
         </span>
         <span className="sess-meta">
-          {isOtherDevice && <IconLock size={10} aria-hidden="true" />}
-          <span className="line">{deviceLabel} · {entry.timeLabel}</span>
+          {isOtherDevice && <IconLockFilled size={12} aria-hidden="true" />}
+          <span className="line">{isOtherDevice ? "只读" : "本机"} · {entry.timeLabel}</span>
           {entry.badge && entry.badge.text !== "本机" && (
             <span className="hui-badge" data-tone={toBadgeTone(entry.badge.tone)} data-size="xs">{entry.badge.text}</span>
           )}
@@ -580,10 +577,8 @@ function PersonalSessionRow({
         </span>
         <span className="sess-meta">
           {entry.status === "running" && <span className="sess-run" title="运行中" aria-label="运行中" />}
-          {entry.shareStatus === "stopped" ? (
+          {entry.shareStatus === "stopped" && (
             <span className="hui-badge" data-tone="warn" data-size="xs">已停止同步</span>
-          ) : (
-            <IconLock size={10} aria-hidden="true" />
           )}
           <span className="line">{entry.shareStatus === "stopped" ? entry.timeLabel : `本机 · ${entry.timeLabel}`}</span>
         </span>
@@ -737,7 +732,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
   }
 
   function openTeamSessionMenu(entry: NavigationSessionEntry, x: number, y: number) {
-    const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
+    const isOtherDevice = entry.remoteSelf === true;
     const isStopped = entry.badge?.text === "已停止同步";
     const items: SessionContextMenuItem[] = [];
     if (actions.renameConversation && !isOtherDevice) {
@@ -1123,7 +1118,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                   <p className="cp-empty">暂无已发布会话</p>
                                 )}
                                 {mySessions.map((entry) => {
-                                  const isOtherDevice = entry.badge?.text.includes("其他设备") ?? false;
+                                  const isOtherDevice = entry.remoteSelf === true;
                                   const isStopped = entry.badge?.text === "已停止同步";
                                   const canOpenMenu = !isOtherDevice && Boolean(
                                     actions.renameConversation || (actions.stopSharingConversation && !isStopped),
@@ -1135,7 +1130,6 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                       active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
                                       landing={view.landingConversationId === entry.conversationId}
                                       showMeTag
-                                      localDeviceName={view.localDeviceName}
                                       select={actions.selectConversation}
                                       canOpenMenu={canOpenMenu}
                                       onOpenMenu={(x, y) => openTeamSessionMenu(entry, x, y)}
@@ -1170,7 +1164,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                                             <span className="sess-title pnav-ellipsis">{entry.title}</span>
                                           </span>
                                           <span className="sess-meta">
-                                            <IconLock size={10} aria-hidden="true" />
+                                            <IconLockFilled size={12} aria-hidden="true" />
                                             <span className="line">只读 · {entry.timeLabel}</span>
                                             {entry.badge && (
                                               <span className="hui-badge" data-tone={toBadgeTone(entry.badge.tone)} data-size="xs">{entry.badge.text}</span>
@@ -1202,7 +1196,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
         <>
           {/* 1. Workspace 团队组 + 团队知识库入口（单栏独立预览兼容分支） */}
           <div className="side-group">
-            <p className="pnav-eyebrow">Workspace</p>
+            <p className="pnav-eyebrow">团队</p>
             <WorkspaceSwitch view={view} actions={actions} dualTrack={false} />
             <button
               type="button"
@@ -1225,7 +1219,7 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
 
           {/* 2. Project 切换 + Project 看板 / 任务入口 */}
           <div className="side-group">
-            <p className="pnav-eyebrow">Project</p>
+            <p className="pnav-eyebrow">项目</p>
             <ProjectSwitch view={view} actions={actions} />
             {view.projectsAvailability.state === "failed" && !view.projects.length && (
               <Status value={view.projectsAvailability} area="projects" actions={actions} />
@@ -1341,7 +1335,6 @@ export function ProjectNavigation({ view, actions }: ProjectNavigationProps): Re
                         key={`${view.currentProjectId}:${entry.conversationId}`}
                         entry={entry}
                         active={effectiveActivePage === "conversation" && view.selectedConversationId === entry.conversationId}
-                        localDeviceName={view.localDeviceName}
                         select={actions.selectConversation}
                         canOpenMenu={Boolean(actions.renameConversation && !isOtherDevice)}
                         onOpenMenu={(x, y) => openTeamSessionMenu(entry, x, y)}

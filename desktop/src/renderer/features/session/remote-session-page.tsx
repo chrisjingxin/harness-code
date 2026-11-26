@@ -33,6 +33,7 @@ import {
   IconGitBranch,
   IconLink,
   IconLock,
+  IconLockFilled,
   IconMessage,
   IconPlus,
   IconRefresh,
@@ -205,7 +206,7 @@ export function RemoteSessionPage({
                 {!isSummaryOnly && !isStopped ? (
                   <span className="hui-lamp" aria-hidden="true" />
                 ) : (
-                  <IconLock size={11} aria-hidden="true" />
+                  <IconLockFilled size={12} aria-hidden="true" />
                 )}
                 <span>
                   {isSummaryOnly
@@ -238,7 +239,7 @@ export function RemoteSessionPage({
               </span>
               {conversation.repositories.map(repo => (
                 <span key={repo.repositoryId} className="hui-badge" data-tone="muted" data-size="xs">
-                  <IconGitBranch size={11} aria-hidden="true" />
+                  <IconGitBranch size={12} aria-hidden="true" />
                   <span>{repo.name}</span>
                 </span>
               ))}

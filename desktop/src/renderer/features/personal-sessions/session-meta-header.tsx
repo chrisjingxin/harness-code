@@ -3,7 +3,7 @@
  * 左侧展示当前共享状态（仅本机 / 已停止同步 / Project 可见与档位）；
  * 右侧提供「发布到 Project…」与「停止共享」动作入口（个人会话不展示团队切换器）。
  */
-import { IconLock } from "@tabler/icons-react"
+import { IconLockFilled } from "@tabler/icons-react"
 import type { ReactElement } from "react"
 import type { ConversationShareMode } from "@workbench/collaboration-client/types"
 import type { LocalConversationShareStatus } from "../../../shared/index.js"
@@ -52,7 +52,7 @@ export function SessionMetaHeader({
         >
           {shareStatus === "active"
             ? <span className="hui-lamp" aria-hidden="true" />
-            : <IconLock size={11} aria-hidden="true" />}
+            : <IconLockFilled size={12} aria-hidden="true" />}
           <span>{visibilityLabel}</span>
         </span>
       </div>

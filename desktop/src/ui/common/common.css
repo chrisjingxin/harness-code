@@ -111,7 +111,7 @@
 }
 .wb-seg button {
   border: none; background: transparent; color: var(--text-soft);
-  padding: 4px 10px; border-radius: 4px;
+  padding: 4px 10px; border-radius: var(--radius-xs);
   font-size: var(--text-sm); font-weight: 500; cursor: pointer;
 }
 .wb-seg button:hover:not(:disabled) { color: var(--text); }
@@ -133,11 +133,11 @@
 .wb-status-badge[data-tone="success"] { color: var(--success-fg); background: var(--success-tint); box-shadow: none; }
 .wb-status-badge[data-tone="warning"] { color: var(--warning-fg); background: var(--warning-tint); box-shadow: none; }
 .wb-status-badge[data-tone="danger"] { color: var(--danger-fg); background: var(--danger-tint); box-shadow: none; }
-.wb-status-badge[data-tone="accent"] { color: var(--accent); background: var(--accent-tint); box-shadow: none; }
+.wb-status-badge[data-tone="accent"] { color: var(--accent-text); background: var(--accent-tint); box-shadow: none; }
 
 .wb-kbd {
   font-family: var(--font-mono); font-size: var(--text-2xs); line-height: 1.1;
-  padding: 2px 5px; border-radius: 4px;
+  padding: 2px 5px; border-radius: var(--radius-xs);
   background: var(--surface-2); color: var(--muted);
   box-shadow: inset 0 0 0 1px var(--line);
   white-space: nowrap;

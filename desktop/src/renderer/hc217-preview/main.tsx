@@ -33,7 +33,7 @@ const projects: readonly Fixture[] = [
     entries: [
       entry("c-1", self, "支付失败重试方案", "15:56", { text: "本机", tone: "neutral" }),
       entry("c-2", self, "订单回传接口梳理", "14:20", { text: "本机", tone: "neutral" }),
-      entry("c-3", self, "支付异常分析", "昨天", { text: "其他设备 · 只读", tone: "neutral" }),
+      { ...entry("c-3", self, "支付异常分析", "昨天"), remoteSelf: true },
       ...Array.from({ length: 9 }, (_, index) => entry(`c-self-${index}`, self, `历史讨论 ${index + 1}`, `11-0${(index % 9) + 1}`, { text: "本机", tone: "neutral" })),
       entry("c-4", zhang, "服务 A · 幂等接口设计", "16:08", { text: "未同步", tone: "accent" }),
       entry("c-5", zhang, "支付超时监控补充", "15:12", { text: "有更新", tone: "warning" }),

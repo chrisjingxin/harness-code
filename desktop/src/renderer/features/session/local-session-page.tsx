@@ -599,7 +599,7 @@ export function LocalSessionPage({
                   markdown: planForm.markdown,
                 })}
               >
-                <IconArrowsMaximize size={13} stroke={1.8} aria-hidden="true" />
+                <IconArrowsMaximize size={13} aria-hidden="true" />
                 <span>放大查看</span>
               </button>
             </div>
@@ -671,7 +671,7 @@ export function LocalSessionPage({
       {diagnostic && <p className="session-restore-banner" role="status">{diagnostic}</p>}
       {showRestoreBanner ? (
         <div className="session-restore-banner" role="status">
-          <IconAlertTriangle size={14} stroke={1.8} />
+          <IconAlertTriangle size={14} />
           <span className="session-restore-banner-text">{capabilities.restoreNotice}</span>
           <button
             type="button"
@@ -679,14 +679,14 @@ export function LocalSessionPage({
             aria-label="关闭恢复提示"
             onClick={() => setDismissedRestoreKey(restoreKey)}
           >
-            <IconX size={13} stroke={1.8} />
+            <IconX size={13} />
           </button>
         </div>
       ) : null}
 
       {capabilityError ? (
         <div className="session-restore-banner session-restore-banner-error" role="alert">
-          <IconAlertTriangle size={14} stroke={1.8} />
+          <IconAlertTriangle size={14} />
           <span className="session-restore-banner-text">{capabilityError}</span>
           <button
             type="button"
@@ -694,7 +694,7 @@ export function LocalSessionPage({
             aria-label="关闭错误提示"
             onClick={() => setCapabilityError(null)}
           >
-            <IconX size={13} stroke={1.8} />
+            <IconX size={13} />
           </button>
         </div>
       ) : null}
@@ -708,7 +708,7 @@ export function LocalSessionPage({
             onClick={() => setPlanCollapsed(prev => !prev)}
           >
             <span className="session-plan-header-left">
-              {planCollapsed ? <IconChevronRight size={14} stroke={1.8} /> : <IconChevronDown size={14} stroke={1.8} />}
+              {planCollapsed ? <IconChevronRight size={14} /> : <IconChevronDown size={14} />}
               <span>执行计划</span>
             </span>
             <span className="session-plan-summary">
@@ -736,9 +736,9 @@ export function LocalSessionPage({
                           <li key={`${planIdx}-${entryIdx}`} className={`session-plan-entry is-${entry.status}`}>
                             <span className="session-plan-entry-icon" aria-hidden="true">
                               {entry.status === "completed" ? (
-                                <IconCheck size={13} stroke={2} />
+                                <IconCheck size={13} />
                               ) : entry.status === "in_progress" ? (
-                                <IconLoader2 size={13} stroke={2} className="session-plan-spin" />
+                                <IconLoader2 size={13} className="session-plan-spin" />
                               ) : (
                                 <span className="session-plan-dot" />
                               )}
@@ -764,7 +764,7 @@ export function LocalSessionPage({
                               markdown: plan.content,
                             })}
                           >
-                            <IconArrowsMaximize size={12} stroke={1.8} aria-hidden="true" />
+                            <IconArrowsMaximize size={12} aria-hidden="true" />
                             <span>放大查看</span>
                           </button>
                         </div>
@@ -774,7 +774,7 @@ export function LocalSessionPage({
                   }
                   return (
                     <div key={plan.id} className="session-plan-file">
-                      <IconFileText size={14} stroke={1.8} />
+                      <IconFileText size={14} />
                       {messageRendering.openFile ? (
                         <button
                           type="button"
@@ -1023,7 +1023,7 @@ export function LocalSessionPage({
                 aria-label="关闭放大查看"
                 onClick={() => setExpandedPlan(null)}
               >
-                <IconX size={16} stroke={1.8} aria-hidden="true" />
+                <IconX size={16} aria-hidden="true" />
               </button>
             </div>
             <div ref={expandedPlanBodyRef} className="session-plan-zoom-body">

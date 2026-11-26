@@ -330,7 +330,6 @@ export type ProjectWorkbenchProps = {
   onSelectWorkspace?(workspaceId: string): void
   colorScheme?: "light" | "dark"
   onToggleTheme?(): void
-  localDeviceName?: string | null
   user: UserSummary
   titleBarClassName: string
   settings: ReactNode
@@ -839,7 +838,6 @@ export function useProjectWorkbenchSlots(props: ProjectWorkbenchProps) {
     currentProjectId: projectId,
     currentProjectRepo: currentRepoLabel,
     currentProjectMemberCount: members.length,
-    localDeviceName: props.localDeviceName ?? undefined,
     groups,
     membersAvailability: shell.detail.availability.state === "ready" && shell.team.availability.state === "failed"
       ? shell.team.availability

@@ -2,7 +2,7 @@
  * 右侧文件/变更 Dock（1:1 还原原型稿 .rail）：
  * 支持“文件”与“变更”双 Tab、可拖拽调宽、点击文件直接在中央分屏或右侧预览打开。
  */
-import { IconClock, IconFolder, IconGitBranch, IconLock, IconX } from "@tabler/icons-react"
+import { IconClock, IconFolder, IconGitBranch, IconLockFilled, IconX } from "@tabler/icons-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement, RefObject } from "react"
 import { FileTypeIcon } from "../common/file-type-icon.js"
@@ -117,7 +117,7 @@ export function ProjectDock(props: ProjectDockProps): ReactElement {
             <div className="project-rail-block">
               <span className="project-rail-title">会话</span>
               <div className="project-dir-line"><IconClock size={12} aria-hidden="true" /><span>最近更新 {sessionMeta.updatedLabel}</span></div>
-              <div className="project-dir-line"><IconLock size={12} aria-hidden="true" /><span>{sessionMeta.modeLabel}</span></div>
+              <div className="project-dir-line"><IconLockFilled size={12} aria-hidden="true" /><span>{sessionMeta.modeLabel}</span></div>
             </div>
           )}
         </div>

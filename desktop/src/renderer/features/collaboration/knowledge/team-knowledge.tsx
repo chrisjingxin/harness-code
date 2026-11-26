@@ -72,6 +72,7 @@ export interface TeamKnowledgeProps {
   readonly rendering?: RenderingActions
   readonly controls?: ReactNode
   readonly headerActions?: ReactNode
+  readonly tabs?: ReactNode
   readonly initialItemId?: string
   readonly selectedRequest?: { readonly itemId: string; readonly token: number }
   versionExtras?(version: KnowledgeVersionContent): ReactNode
@@ -107,6 +108,7 @@ function KnowledgePage({
   rendering,
   controls,
   headerActions,
+  tabs,
   initialItemId,
   selectedRequest,
   onEditItem,
@@ -231,10 +233,11 @@ function KnowledgePage({
   const readable = Boolean(reference?.status === "ready")
   const historyAvailable = Boolean(actions.readHistory && actions.readVersion)
   return (
-    <section className="team-knowledge-page page-wrap" aria-label="团队知识库">
+    <section className="team-knowledge-page page-shell" aria-label="团队知识库">
+      {tabs}
       <header className="page-head team-knowledge-head">
         <div>
-          <h1>团队知识库</h1>
+          <h1 className="sr">团队知识库</h1>
           <p>{subtitle ?? `${teamName} · 团队共享规范、架构与约定，按固定版本引用到当前会话`}</p>
         </div>
         {headerActions && <div className="team-knowledge-head-actions">{headerActions}</div>}

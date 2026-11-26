@@ -89,8 +89,8 @@ export function buildSessionBadge(input: {
       case "syncing": return { text: "同步中", tone: "accent" }
       case "sync_failed": return { text: "同步失败", tone: "danger" }
       case "has_update": return { text: "有更新", tone: "warning" }
-      case "unsynced": return remoteSyncedSequence > 0 ? { text: "未同步", tone: "accent" } : { text: "其他设备 · 只读", tone: "neutral" }
-      case "synced": return { text: "其他设备 · 只读", tone: "neutral" }
+      case "unsynced": return remoteSyncedSequence > 0 ? { text: "未同步", tone: "accent" } : undefined
+      case "synced": return undefined
     }
   }
   switch (syncStatus) {
@@ -124,6 +124,7 @@ export function toNavigationSessionEntries(
       ownerUserId: item.ownerUserId,
       title: item.title || "未命名会话",
       timeLabel: formatShortTime(item.updatedAt, nowMs),
+      remoteSelf: kind === "remote_self" || undefined,
       badge: buildSessionBadge({
         kind,
         syncStatus,

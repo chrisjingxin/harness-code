@@ -323,7 +323,7 @@ export function SessionCentralFilePanels({
                   title="关闭"
                   onClick={() => state.onCloseFile(tab.path)}
                 >
-                  <IconX size={11} aria-hidden="true" />
+                  <IconX size={12} aria-hidden="true" />
                 </button>
               </div>
             )

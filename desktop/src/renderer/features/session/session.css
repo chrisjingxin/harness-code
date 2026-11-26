@@ -16,7 +16,7 @@
   align-items: center;
   gap: 5px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--border, var(--line));
   color: var(--fg-2, var(--text-soft));
@@ -28,20 +28,20 @@
 }
 
 .session-tag[data-tone="accent"] {
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-tint, var(--accent-soft-2));
   box-shadow: none;
 }
 
 .session-tag[data-tone="success"] {
   color: var(--success-fg, var(--success));
-  background: var(--success-tint, color-mix(in srgb, var(--success) 10%, var(--surface)));
+  background: var(--success-tint);
   box-shadow: none;
 }
 
 .session-tag[data-tone="warning"] {
   color: var(--warn-fg, var(--warning));
-  background: var(--warn-tint, color-mix(in srgb, var(--warning) 10%, var(--surface)));
+  background: var(--warn-tint);
   box-shadow: none;
 }
 
@@ -619,7 +619,7 @@
   margin-right: 2px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--meta, var(--subtle));
   cursor: pointer;
@@ -754,7 +754,7 @@
 }
 .filepane-diff-scroll .code .add {
   color: var(--success-fg, var(--success));
-  background: var(--success-tint, color-mix(in srgb, var(--success) 10%, transparent));
+  background: var(--success-tint);
 }
 .filepane-diff-scroll .code .del {
   color: var(--danger-fg, var(--danger));
@@ -821,16 +821,16 @@
   padding: 10px 14px;
   border: none;
   border-radius: var(--radius-lg, 12px);
-  background: color-mix(in srgb, var(--warn-tint, rgba(217, 119, 6, 0.12)) 48%, var(--surface));
-  box-shadow: inset 0 0 0 1px var(--warn-ring, color-mix(in srgb, var(--warning) 35%, transparent)), var(--panel-shadow);
+  background: color-mix(in srgb, var(--warn-tint) 48%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--warn-ring), var(--panel-shadow);
   color: var(--warn-fg, var(--warning));
   font-size: var(--text-xs, 12px);
   line-height: 1.5;
 }
 
 .session-restore-banner-error {
-  background: color-mix(in srgb, var(--danger-tint, rgba(220, 38, 38, 0.12)) 40%, var(--surface));
-  box-shadow: inset 0 0 0 1px var(--danger-ring, color-mix(in srgb, var(--danger) 35%, transparent)), var(--panel-shadow);
+  background: color-mix(in srgb, var(--danger-tint) 40%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--danger-ring), var(--panel-shadow);
   color: var(--danger-fg, var(--danger));
 }
 
@@ -846,7 +846,7 @@
   width: 20px;
   height: 20px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -987,7 +987,7 @@
 
 .session-plan-priority {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   font-weight: 600;
   background: var(--surface-2);
@@ -1168,7 +1168,7 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-2);
   color: var(--muted);
   font-family: var(--font-mono);
@@ -1247,10 +1247,11 @@
   position: fixed;
   inset: 0;
   z-index: 60;
+  -webkit-app-region: no-drag;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--overlay-scrim, rgba(15, 23, 42, 0.45));
+  background: var(--overlay-scrim);
   backdrop-filter: blur(2px);
 }
 

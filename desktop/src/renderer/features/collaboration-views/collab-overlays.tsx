@@ -6,7 +6,7 @@ import type { ReactElement } from "react"
 import type { KnowledgeSummary, TaskSummary } from "@workbench/collaboration-client/types"
 import type { NavigationMember, NavigationSessionEntry } from "../../../ui/index.js"
 import { resolveFallbackDemoAvatar, resolveUserPhoto } from "../../demo-avatars.js"
-import { IconBook, IconChevronDown, IconCompass, IconListCheck, IconLock, IconMessageCircle, IconSearch, IconX } from "@tabler/icons-react"
+import { IconBook, IconChevronDown, IconCompass, IconListCheck, IconLockFilled, IconMessageCircle, IconSearch, IconX } from "@tabler/icons-react"
 import {
   buildCommandPaletteGroups,
   type PaletteItem,
@@ -310,7 +310,7 @@ export function CollabMembersPopover({
         </div>
 
         <div className="pop-foot">
-          <IconLock size={12} aria-hidden="true" />
+          <IconLockFilled size={12} aria-hidden="true" />
           <span>会话同步是 Project 维度的，拿到的都是只读快照</span>
         </div>
       </div>

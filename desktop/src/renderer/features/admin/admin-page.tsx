@@ -1,6 +1,6 @@
 /**
  * 【功能定义】1200px 居中「管理与设置」主工作区（HC-255 停点 2）：
- * 按左侧 AdminSidebar 选中的 5 个真实设置分区，分别在宽屏居中 .page-wrap 内组织展示：
+ * 按左侧 AdminSidebar 选中的 5 个真实设置分区，分别在宽屏居中 .page-shell 内组织展示：
  * 外观/密度/快捷键、外部 IM 通知偏好、本机目录记忆（严格按活跃团队会话作用域挂载）、账号身份与团队成员交接。
  * 不虚构任何未接后端的占位选项。
  */
@@ -229,10 +229,10 @@ export function AdminPage({
 
   return (
     <section className="admin-stage" aria-label={`管理与设置 · ${meta.title}`}>
-      <div className="page-wrap">
+      <div className="page-shell">
         <div className="page-head">
           <div>
-            <h1>{meta.title}</h1>
+            <h1 className="sr">{meta.title}</h1>
             <p>{meta.subtitle}</p>
           </div>
         </div>

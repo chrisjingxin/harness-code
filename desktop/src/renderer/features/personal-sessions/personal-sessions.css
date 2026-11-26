@@ -44,7 +44,7 @@
   color: var(--fg-2, var(--text-soft));
 }
 .psess-preflight.is-ready > svg {
-  color: var(--success-fg, #15803d);
+  color: var(--success-fg);
   flex: none;
 }
 .psess-preflight-retry {
@@ -66,8 +66,8 @@
   color: var(--text);
 }
 .psess-preflight.is-blocked {
-  background: color-mix(in srgb, var(--warn-tint, rgba(217, 119, 6, 0.12)) 48%, var(--surface));
-  box-shadow: inset 0 0 0 1px var(--warn-ring, color-mix(in srgb, var(--warn, #d97706) 35%, var(--line)));
+  background: color-mix(in srgb, var(--warn-tint) 48%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--warn-ring);
 }
 .psess-preflight-head {
   display: flex;
@@ -75,7 +75,7 @@
   gap: 8px;
 }
 .psess-preflight-head > svg {
-  color: var(--warn-fg, #b45309);
+  color: var(--warn-fg);
   margin-top: 2px;
   flex: none;
 }
@@ -195,8 +195,8 @@
   margin-bottom: 12px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--warn-tint, rgba(217, 119, 6, 0.12)) 65%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #d97706) 35%, var(--line));
+  background: color-mix(in srgb, var(--warn-tint) 65%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 35%, var(--line));
   font-size: var(--text-xs);
   line-height: 1.55;
   color: var(--text);
@@ -204,7 +204,7 @@
 .psess-warn-box svg {
   flex: none;
   margin-top: 2px;
-  color: var(--warn-fg, #b45309);
+  color: var(--warn-fg);
 }
 .psess-fieldset {
   margin: 0 0 12px;

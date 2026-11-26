@@ -126,9 +126,10 @@
   position: fixed;
   inset: 0;
   z-index: 100;
+  -webkit-app-region: no-drag;
   display: grid;
   place-items: center;
-  background: var(--scrim, rgba(0, 0, 0, 0.44));
+  background: var(--scrim);
   padding: 30px;
 }
 .team-removal-dialog {
@@ -163,6 +164,6 @@
   margin: 12px 0;
 }
 .team-removal-dialog::backdrop {
-  background: var(--scrim, rgba(0, 0, 0, 0.44));
+  background: var(--scrim);
   backdrop-filter: blur(2px);
 }

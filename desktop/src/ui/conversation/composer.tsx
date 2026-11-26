@@ -8,6 +8,7 @@ import {
   IconApps,
   IconArrowUp,
   IconAt,
+  IconBolt,
   IconBook,
   IconCheck,
   IconChecklist,
@@ -25,7 +26,6 @@ import {
   IconShield,
   IconShieldExclamation,
   IconSlash,
-  IconSparkles,
   IconUser,
   IconX,
 } from "@tabler/icons-react"
@@ -72,7 +72,7 @@ const permissionIcons = {
   read: IconLock,
   supervised: IconShield,
   edit: IconPencil,
-  auto: IconSparkles,
+  auto: IconBolt,
   full: IconShieldExclamation,
 } as const
 
@@ -1237,13 +1237,13 @@ export function ConversationComposer(props: ComposerProps): ReactElement {
 
 function renderContextMenuIcon(icon: ConversationContextMenuIcon): ReactElement {
   switch (icon) {
-    case "file": return <IconPaperclip size={16} stroke={1.7} />
-    case "folder": return <IconFolder size={16} stroke={1.7} />
-    case "mention": return <IconAt size={16} stroke={1.7} />
-    case "action": return <IconSlash size={16} stroke={1.7} />
-    case "knowledge": return <IconBook size={16} stroke={1.7} />
-    case "conversation": return <IconMessages size={16} stroke={1.7} />
-    case "external": return <IconApps size={16} stroke={1.7} />
+    case "file": return <IconPaperclip size={16} />
+    case "folder": return <IconFolder size={16} />
+    case "mention": return <IconAt size={16} />
+    case "action": return <IconSlash size={16} />
+    case "knowledge": return <IconBook size={16} />
+    case "conversation": return <IconMessages size={16} />
+    case "external": return <IconApps size={16} />
   }
 }
 

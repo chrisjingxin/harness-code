@@ -365,7 +365,7 @@ export function InboxPage(props: InboxPageProps) {
   return (
     <section className="inbox-page" aria-label="收件箱">
       <div className="inbox-scroll">
-        <div className="inbox-wrap page-wrap">
+        <div className="page-shell">
           {/* 1. 顶部方案 A 本机等待确认置顶区（绝不混入云端红点角标） */}
           {localItems.length > 0 && (
             <section className="inbox-local-banner" aria-label="本机等待你确认">
@@ -412,9 +412,9 @@ export function InboxPage(props: InboxPageProps) {
           )}
 
           {/* 2. LoopForge 风格无眉标页头 + 右侧分段标签 */}
-          <header className="inbox-page-head page-head">
+          <header className="page-head">
             <div>
-              <h1>Inbox · 全局待办收件箱</h1>
+              <h1 className="sr">Inbox · 待办与审批</h1>
               <p>收口跨团队任务指派与待验收拍板；本机工具审批留在原会话处理。</p>
             </div>
             <div className="inbox-seg seg" role="tablist" aria-label="收件箱分组">

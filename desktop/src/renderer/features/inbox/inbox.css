@@ -12,16 +12,6 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--pad-stage, 24px) clamp(20px, 3vw, 28px) 40px;
-}
-
-.inbox-wrap {
-  max-width: 1200px;
-  width: 100%;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .inbox-muted {
@@ -34,7 +24,7 @@
   border-radius: var(--radius-lg);
   padding: 12px 14px;
   background: var(--warn-tint);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #d97706) 32%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 32%, var(--line));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -84,7 +74,7 @@
 }
 
 .inbox-local-row.is-error {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 36%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 36%, var(--line));
 }
 
 .inbox-local-main {
@@ -132,29 +122,6 @@
 }
 
 /* 2. LoopForge 无眉标页头与分段控制 */
-.inbox-page-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 0;
-}
-
-.inbox-page-head h1 {
-  margin: 0;
-  font-size: var(--text-xl, 22px);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  color: var(--fg, var(--text));
-}
-
-.inbox-page-head p {
-  margin: 4px 0 0;
-  font-size: var(--text-sm, 13px);
-  color: var(--meta);
-}
 
 .inbox-seg {
   border-radius: var(--radius-md);
@@ -172,7 +139,7 @@
 }
 
 .inbox-seg button.is-active {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--border, var(--line));
+  box-shadow: var(--elev-card);
 }
 
 .inbox-seg-count {
@@ -187,8 +154,8 @@
 }
 
 .inbox-seg-count.is-strong {
-  background: var(--danger-vivid, #dc2626);
-  color: #ffffff;
+  background: var(--danger-vivid);
+  color: var(--danger-on);
   font-weight: 700;
 }
 
@@ -287,7 +254,7 @@
   color: var(--success-fg);
 }
 .inbox-stream-pill.is-connected .inbox-stream-dot {
-  background: var(--success, #15803d);
+  background: var(--success);
 }
 
 .inbox-stream-pill.is-retrying,
@@ -296,7 +263,7 @@
 }
 .inbox-stream-pill.is-retrying .inbox-stream-dot,
 .inbox-stream-pill.is-connecting .inbox-stream-dot {
-  background: var(--warn, var(--warning, #d97706));
+  background: var(--warn);
 }
 
 .inbox-stream-pill.is-offline,
@@ -305,7 +272,7 @@
 }
 .inbox-stream-pill.is-offline .inbox-stream-dot,
 .inbox-stream-pill.is-unavailable .inbox-stream-dot {
-  background: var(--danger, #b91c1c);
+  background: var(--danger);
 }
 
 /* 4. LoopForge 双栏主从审阅布局 (.review-layout -> .k-side + .k-doc) */
@@ -388,7 +355,7 @@
   padding: 18px 20px;
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: var(--panel-shadow, 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px var(--border, var(--line)));
+  box-shadow: var(--panel-shadow);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -579,7 +546,7 @@
   text-align: center;
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: var(--panel-shadow, 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px var(--border, var(--line)));
+  box-shadow: var(--panel-shadow);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -600,7 +567,7 @@
 }
 
 .inbox-empty-block.is-error {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #b91c1c) 35%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, var(--line));
 }
 
 .inbox-truncated-note,
@@ -708,6 +675,6 @@
 
 .desktop-notif-saved {
   font-size: var(--text-xs);
-  color: var(--success-fg, #166534);
+  color: var(--success-fg);
   font-weight: 500;
 }

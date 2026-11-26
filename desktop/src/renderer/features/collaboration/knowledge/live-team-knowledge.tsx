@@ -126,13 +126,36 @@ export function LiveTeamKnowledge({
     }
   }
 
-  const tabs=<nav className="knowledge-tabs" aria-label="知识管理"><button className="wb-button wb-button-secondary" aria-pressed={view==="published"} onClick={()=>setView("published")}>已发布</button><button className="wb-button wb-button-secondary" aria-pressed={view==="mine"} onClick={()=>setView("mine")}>我的提议</button>{canManage&&<><button className="wb-button wb-button-secondary" aria-pressed={view==="review"} onClick={()=>setView("review")}>待审核</button><button className="wb-button wb-button-secondary" aria-pressed={view==="recheck"} onClick={()=>setView("recheck")}>待复核</button></>}</nav>
-  if(view!=="published")return <>{tabs}<KnowledgeGovernance key={JSON.stringify([namespace,accountId,workspaceId,view,canManage])} host={host} workspaceId={workspaceId} accountId={accountId} admin={canManage} view={view} onChanged={()=>refreshMetadata(scope)}/></>
+  const tabs = (
+    <nav className="seg knowledge-view-tabs" aria-label="知识管理">
+      <button type="button" aria-pressed={view === "published"} onClick={() => setView("published")}>已发布</button>
+      <button type="button" aria-pressed={view === "mine"} onClick={() => setView("mine")}>我的提议</button>
+      {canManage && (
+        <>
+          <button type="button" aria-pressed={view === "review"} onClick={() => setView("review")}>待审核</button>
+          <button type="button" aria-pressed={view === "recheck"} onClick={() => setView("recheck")}>待复核</button>
+        </>
+      )}
+    </nav>
+  )
+  if (view !== "published") return (
+    <section className="page-shell" aria-label="知识管理">
+      {tabs}
+      <KnowledgeGovernance
+        key={JSON.stringify([namespace, accountId, workspaceId, view, canManage])}
+        host={host}
+        workspaceId={workspaceId}
+        accountId={accountId}
+        admin={canManage}
+        view={view}
+        onChanged={() => refreshMetadata(scope)}
+      />
+    </section>
+  )
   return <>
-    {tabs}
-    {canManage&&<KnowledgeDraftButton key={JSON.stringify([namespace,accountId,workspaceId])} workspaceId={workspaceId} accountId={accountId} maintenance/>}
     <TeamKnowledge
       key={updated?.revision ?? 0}
+      tabs={tabs}
       scope={{ namespace, accountId, teamId: workspaceId }}
       teamName={teamName}
       items={items}
@@ -147,9 +170,12 @@ export function LiveTeamKnowledge({
       }}
       versionExtras={v => <KnowledgeFeedback key={JSON.stringify([accountId, workspaceId, v.itemId, v.versionId])} host={host} workspaceId={workspaceId} knowledgeId={v.itemId} versionId={v.versionId} />}
       headerActions={canManage ? (
-        <button className="wb-button wb-button-primary wb-button-small" type="button" onClick={() => setEditing({})}>
-          新建知识条目
-        </button>
+        <>
+          <KnowledgeDraftButton key={JSON.stringify([namespace, accountId, workspaceId])} workspaceId={workspaceId} accountId={accountId} maintenance />
+          <button className="wb-button wb-button-primary wb-button-small" type="button" onClick={() => setEditing({})}>
+            新建知识条目
+          </button>
+        </>
       ) : (
         <button className="wb-button wb-button-primary wb-button-small" type="button" onClick={() => setProposalInitial(blankProposal())}>
           提出新知识

@@ -66,7 +66,7 @@
   background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-sm);
   box-shadow: inset 0 0 0 1px var(--line); outline: none;
 }
-.pnav-form-row select:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--selected); }
+.pnav-form-row select:focus-visible { box-shadow: var(--focus-ring-field); }
 
 /* MemberAvatar 原语在项目资料页中的尺寸 */
 .panel .pnav-avatar {
@@ -74,5 +74,5 @@
   width: 30px; height: 30px; border-radius: 50%;
   background: var(--surface-3); color: var(--text-soft); font-size: 11px; font-weight: 600;
 }
-.panel .pnav-avatar[data-self="true"] { background: var(--accent-soft-2); color: var(--accent); }
+.panel .pnav-avatar[data-self="true"] { background: var(--accent-soft-2); color: var(--accent-text); }
 .panel .pnav-avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }

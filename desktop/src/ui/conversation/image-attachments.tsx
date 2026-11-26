@@ -312,7 +312,7 @@ export function ComposerImagesBar({
                   onRemove(item)
                 }}
               >
-                <IconX size={11} aria-hidden="true" />
+                <IconX size={12} aria-hidden="true" />
               </button>
             </div>
           )

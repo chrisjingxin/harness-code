@@ -173,10 +173,10 @@ export function ProjectBoard(props: ProjectBoardProps) {
 
   return (
     <div className="project-board-scroll">
-      <main className="project-board page-wrap" aria-label="Project 看板">
+      <main className="project-board page-shell" aria-label="Project 看板">
         <header className="page-head project-board-head">
           <div>
-            <h1>Project 看板</h1>
+            <h1 className="sr">Project 看板</h1>
             <p>{description?.trim() ? description : `${projectName} · 统一追踪任务四列流转与成员协同进展`}</p>
           </div>
           <div className="project-board-actions">
@@ -315,7 +315,7 @@ export function ProjectBoard(props: ProjectBoardProps) {
             <>
               <section className="board" aria-label="任务状态四列">
                 {columnsModel.columns.map(col => (
-                  <section key={col.status} className="col" aria-label={col.label}>
+                  <section key={col.status} className="col" aria-label={col.label} title={col.tasks.length === 0 ? `暂无${col.label}任务` : undefined}>
                     <header className="col-head">
                       <span className="hui-badge" data-tone={boardTaskStatusTone(col.status)} data-size="xs">
                         {col.label}

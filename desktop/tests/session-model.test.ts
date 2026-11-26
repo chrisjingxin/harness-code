@@ -54,7 +54,8 @@ test("deriveSyncStatus 与 buildSessionBadge 正确表达五种本地同步状�
   assert.equal(deriveSyncStatus({ kind: "remote_other", remoteSyncedSequence: 4, localSyncedSequence: 2, syncing: false, syncError: "timeout" }), "sync_failed")
 
   assert.deepEqual(buildSessionBadge({ kind: "local", syncStatus: "synced", remoteSyncedSequence: 3 }), { text: "本机", tone: "neutral" })
-  assert.deepEqual(buildSessionBadge({ kind: "remote_self", syncStatus: "synced", remoteSyncedSequence: 2 }), { text: "其他设备 · 只读", tone: "neutral" })
+  assert.equal(buildSessionBadge({ kind: "remote_self", syncStatus: "synced", remoteSyncedSequence: 2 }), undefined)
+  assert.equal(buildSessionBadge({ kind: "remote_self", syncStatus: "unsynced", remoteSyncedSequence: 0 }), undefined)
   assert.deepEqual(buildSessionBadge({ kind: "remote_self", syncStatus: "has_update", remoteSyncedSequence: 5 }), { text: "有更新", tone: "warning" })
   assert.deepEqual(buildSessionBadge({ kind: "remote_other", syncStatus: "unsynced", remoteSyncedSequence: 0 }), { text: "仅简报", tone: "neutral" })
   assert.deepEqual(buildSessionBadge({ kind: "remote_other", syncStatus: "unsynced", remoteSyncedSequence: 3 }), { text: "未同步", tone: "accent" })

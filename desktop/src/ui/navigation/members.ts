@@ -23,6 +23,8 @@ export type NavigationSessionEntry = {
   timeLabel: string;
   /** 行内标识文本与语气由会话模块决定，例如"未同步""有更新""只读"。 */
   badge?: { text: string; tone: "neutral" | "accent" | "warning" | "danger" };
+  /** 本人其他设备的只读会话：行内只保留锁图标与"只读 · 时间"，设备信息放入行 title。 */
+  remoteSelf?: boolean;
 };
 
 export type NavigationMemberGroup = {

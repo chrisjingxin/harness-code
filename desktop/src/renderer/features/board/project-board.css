@@ -1,4 +1,4 @@
-/* 融合项目看板：1200px 居中 .page-wrap、状态四列 .board / 成员进展与右侧 .t-drawer 抽屉 */
+/* 融合项目看板：统一 .page-shell 页宽与内边距、状态四列 .board / 成员进展与右侧 .t-drawer 抽屉 */
 .project-board-scroll {
   height: 100%;
   min-height: 0;
@@ -8,34 +8,7 @@
   background: var(--bg);
 }
 
-.project-board {
-  max-width: 1200px;
-  width: 100%;
-  margin: 0 auto;
-  padding: var(--pad-stage, 24px) clamp(20px, 3vw, 28px) 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.project-board > .page-head,
-.project-board > .view-bar {
-  margin-bottom: 0;
-}
-
-.project-board-head h1 {
-  margin: 0;
-  font-size: var(--text-xl, 22px);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  color: var(--fg);
-}
-
 .project-board-head p {
-  margin: 4px 0 0;
-  font-size: var(--text-sm, 13px);
-  color: var(--meta);
   overflow-wrap: anywhere;
 }
 
@@ -61,7 +34,7 @@
   font-size: var(--text-xs);
 }
 .project-board-bar .seg button.is-active {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--border);
+  box-shadow: var(--elev-card);
 }
 
 .project-board-select {
@@ -171,7 +144,7 @@
   transition: box-shadow var(--motion-fast) var(--ease-standard);
 }
 .tcard:hover {
-  box-shadow: 0 0 0 1px var(--border-strong), 0 2px 6px -2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, .06);
 }
 .tcard.is-active {
   box-shadow: 0 0 0 1.5px var(--accent);
@@ -390,6 +363,9 @@
 .t-drawer:focus {
   outline: none;
 }
+.t-drawer:focus-visible {
+  box-shadow: var(--focus-ring-field), -8px 0 28px rgba(0, 0, 0, 0.09), inset 1px 0 0 var(--border);
+}
 .t-drawer-head {
   flex: none;
   display: flex;
@@ -427,6 +403,21 @@
   .board,
   .project-board-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* 单列堆叠时空列折叠为仅列头一行，空态文案由列 title 与视觉隐藏节点承担 */
+  .col:has(.col-empty) {
+    padding: 6px 10px;
+  }
+  .col-empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

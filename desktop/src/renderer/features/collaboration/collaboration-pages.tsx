@@ -114,7 +114,7 @@ function UnavailablePage({ title, contextName, message, onBack }: {
   onBack?: () => void
 }) {
   return (
-    <section className="collaboration-unavailable page-wrap" aria-label={title}>
+    <section className="collaboration-unavailable page-shell" aria-label={title}>
       <header className="page-head">
         <div>
           {onBack && <button type="button" className="wb-button wb-button-quiet wb-button-small" onClick={onBack}>返回看板</button>}
