@@ -4,10 +4,16 @@
  */
 import { realpath, stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
-import { prepareSessionSetup } from "./session-setup.js"
 import type { ListSessionsResponse } from "@agentclientprotocol/sdk"
+import {
+  AgentProcess,
+  DEFAULT_IDLE_TIMEOUT_MS,
+  DEFAULT_MAX_LIVE_PROCESSES,
+  resolveHostBudget,
+} from "./agent-process.js"
 import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
-import { BoundSession } from "./session.js"
+import { prepareSessionSetup } from "./session-setup.js"
+import { BoundSession, type CachedWorkspaceCapabilities } from "./session.js"
 import type {
   AgentCommand,
   LocalAcpAvailability,
@@ -79,13 +85,16 @@ export interface LocalAcpSession {
   subscribe(listener: (event: LocalAcpEvent) => void): () => void
   /** 订阅会话级更新（计划、命令表、模式、配置、用量、会话重开回放与表单请求）。 */
   subscribeSession(listener: (event: LocalAcpSessionUpdateEvent) => void): () => void
-  /** 结束执行、释放绑定，等待 Agent 进程确认退出。 */
+  /** 结束执行、释放绑定，在独占模式等待 Agent 进程退出，在共享模式仅关闭原生会话。 */
   close(): Promise<void>
 }
 
 export class LocalAcpHost {
   readonly #command?: AgentCommand
   readonly #sessions = new Map<string, BoundSession>()
+  readonly #sharedProcesses = new Map<string, AgentProcess>()
+  readonly #sharedAcquireTails = new Map<string, Promise<void>>()
+  readonly #workspaceCapabilities = new Map<string, CachedWorkspaceCapabilities>()
   readonly #diagnostics = new Set<(event: LocalAcpDiagnostic) => void>()
   #closing?: Promise<void>
 
@@ -129,6 +138,8 @@ export class LocalAcpHost {
       buildNativeBindingIdentity(this.options.bindingNamespace, scope, root, identity.dev, identity.ino, this.#command),
     )
     const diagnosticScope = Object.freeze({ ...scope })
+    const workspaceKey = `${root}\0${identity.dev}\0${identity.ino}`
+    const shared = this.options.shareProcessPerWorkspace === true
     const bound = new BoundSession(
       root,
       identity.dev,
@@ -144,6 +155,18 @@ export class LocalAcpHost {
       },
       this.options,
       preparedSetup,
+      {
+        acquireProcess: () => shared
+          ? this.#acquireSharedProcess(workspaceKey, root, identity.dev, identity.ino)
+          : this.#acquireExclusiveProcess(root, identity.dev, identity.ino),
+        releaseSharedProcess: proc => {
+          proc.scheduleIdleCheck()
+        },
+        onCapabilitiesObserved: capabilities => {
+          this.#workspaceCapabilities.set(workspaceKey, capabilities)
+        },
+      },
+      this.#workspaceCapabilities.get(workspaceKey),
     )
 
     this.#sessions.set(key, bound)
@@ -156,8 +179,77 @@ export class LocalAcpHost {
     return () => { this.#diagnostics.delete(listener) }
   }
 
-  /** 应用退出时关闭所有绑定。单个账号切换可以只关闭对应句柄。 */
+  /** 应用退出时关闭所有绑定与共享进程。单个账号切换可以只关闭对应句柄。 */
   close(): Promise<void> {
-    return this.#closing ??= Promise.all([...this.#sessions.values()].map(session => session.close())).then(() => undefined)
+    return this.#closing ??= Promise.resolve().then(async () => {
+      await Promise.all([...this.#sessions.values()].map(session => session.close()))
+      const remaining = [...this.#sharedProcesses.values()]
+      this.#sharedProcesses.clear()
+      this.#workspaceCapabilities.clear()
+      await Promise.all(remaining.map(proc => proc.stop().catch(() => {})))
+    })
+  }
+
+  #resolveBudget() {
+    return resolveHostBudget(this, this.options.maxLiveProcesses ?? DEFAULT_MAX_LIVE_PROCESSES)
+  }
+
+  #acquireSharedProcess(workspaceKey: string, root: string, dev: bigint, ino: bigint): Promise<AgentProcess> {
+    const command = this.#command
+    if (!command) throw new Error("尚未配置本机 Agent。")
+    const task = (this.#sharedAcquireTails.get(workspaceKey) ?? Promise.resolve()).then(async () => {
+      if (this.#closing) throw new Error("本机执行宿主已关闭。")
+      const existing = this.#sharedProcesses.get(workspaceKey)
+      if (existing && !existing.disconnected && !existing.stopping && !existing.evicting) {
+        existing.touchActivity()
+        return existing
+      }
+      const budget = this.#resolveBudget()
+      await budget.makeRoom()
+      if (this.#closing) throw new Error("本机执行宿主已关闭。")
+      const proc = new AgentProcess({
+        root,
+        device: dev,
+        inode: ino,
+        command,
+        hostOptions: this.options,
+        shared: true,
+        idleTimeoutMs: this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+        budget,
+        onRemoveFromPool: () => {
+          if (this.#sharedProcesses.get(workspaceKey) === proc) {
+            this.#sharedProcesses.delete(workspaceKey)
+          }
+        },
+      })
+      this.#sharedProcesses.set(workspaceKey, proc)
+      return proc
+    })
+    const settled = task.then(() => {}, () => {})
+    this.#sharedAcquireTails.set(workspaceKey, settled)
+    return task.finally(() => {
+      if (this.#sharedAcquireTails.get(workspaceKey) === settled) {
+        this.#sharedAcquireTails.delete(workspaceKey)
+      }
+    })
+  }
+
+  async #acquireExclusiveProcess(root: string, dev: bigint, ino: bigint): Promise<AgentProcess> {
+    const command = this.#command
+    if (!command) throw new Error("尚未配置本机 Agent。")
+    if (this.#closing) throw new Error("本机执行宿主已关闭。")
+    const budget = this.#resolveBudget()
+    await budget.makeRoom()
+    if (this.#closing) throw new Error("本机执行宿主已关闭。")
+    return new AgentProcess({
+      root,
+      device: dev,
+      inode: ino,
+      command,
+      hostOptions: this.options,
+      shared: false,
+      idleTimeoutMs: this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+      budget,
+    })
   }
 }

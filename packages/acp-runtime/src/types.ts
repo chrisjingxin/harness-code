@@ -321,4 +321,10 @@ export type LocalAcpHostOptions = LocalAcpSessionSetup & {
   readonly maxFsFileBytes?: number
   /** 初始化与建会话握手超时（毫秒），默认 15000。 */
   readonly handshakeTimeoutMs?: number
+  /** 同一工作区 `(root, dev, ino)` 下多个会话是否共享同一个 Agent 子进程，默认 `false`（仅对支持单进程多会话的 Agent 开启）。 */
+  readonly shareProcessPerWorkspace?: boolean
+  /** 进程内无活跃轮次且无挂起交互后的空闲自动回收时长（毫秒），默认 `15 * 60 * 1000`；传 `0` 禁用空闲定时回收。 */
+  readonly idleTimeoutMs?: number
+  /** 最大常驻 Agent 进程数（超出时按 LRU 淘汰最早空闲进程），默认 `4`；传 `0` 不做数量淘汰。 */
+  readonly maxLiveProcesses?: number
 }

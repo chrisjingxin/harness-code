@@ -48,7 +48,7 @@ export type ClientCapabilityContext = {
   readonly enableFs: boolean
   readonly enableTerminal: boolean
   readonly maxFsFileBytes?: number
-  getSessionId(): string | undefined
+  hasSessionId(sessionId: string): boolean
   isActive(): boolean
 }
 
@@ -63,11 +63,12 @@ export type ClientCapabilityController = {
     | "killTerminal"
     | "releaseTerminal"
   >
-  cleanupTerminals(): Promise<void>
+  cleanupTerminals(sessionId?: string): Promise<void>
 }
 
 type ManagedTerminal = {
   readonly id: string
+  readonly sessionId: string
   readonly child: ChildProcessByStdio<null, Readable, Readable>
   readonly exited: Promise<TerminalExitStatus>
   readonly byteLimit: number
@@ -95,8 +96,7 @@ async function assertRootUnchanged(ctx: ClientCapabilityContext): Promise<void> 
 }
 
 function assertValidSession(ctx: ClientCapabilityContext, sessionId: string): void {
-  const active = ctx.getSessionId()
-  if (!ctx.isActive() || !active || sessionId !== active) {
+  if (!ctx.isActive() || !sessionId || !ctx.hasSessionId(sessionId)) {
     throw RequestError.invalidParams("会话尚未就绪或 sessionId 不匹配。")
   }
 }
@@ -322,7 +322,7 @@ export function createClientCapabilityHandlers(ctx: ClientCapabilityContext): Cl
     if (!ctx.enableTerminal) throw RequestError.methodNotFound("terminal")
     assertValidSession(ctx, sessionId)
     const terminal = terminals.get(terminalId)
-    if (!terminal || terminal.released) {
+    if (!terminal || terminal.released || terminal.sessionId !== sessionId) {
       throw RequestError.resourceNotFound(terminalId)
     }
     return terminal
@@ -380,6 +380,7 @@ export function createClientCapabilityHandlers(ctx: ClientCapabilityContext): Cl
     const exited = new Promise<TerminalExitStatus>(resolvePromise => { resolveExited = resolvePromise })
     const terminal: ManagedTerminal = {
       id,
+      sessionId: params.sessionId,
       child,
       exited,
       byteLimit,
@@ -468,9 +469,15 @@ export function createClientCapabilityHandlers(ctx: ClientCapabilityContext): Cl
     return {}
   }
 
-  async function cleanupTerminals(): Promise<void> {
-    const active = [...terminals.values()]
-    terminals.clear()
+  async function cleanupTerminals(sessionId?: string): Promise<void> {
+    const active = sessionId === undefined
+      ? [...terminals.values()]
+      : [...terminals.values()].filter(terminal => terminal.sessionId === sessionId)
+    if (sessionId === undefined) {
+      terminals.clear()
+    } else {
+      for (const terminal of active) terminals.delete(terminal.id)
+    }
     await Promise.all(active.map(async terminal => {
       terminal.released = true
       await stopTerminalProcess(terminal)

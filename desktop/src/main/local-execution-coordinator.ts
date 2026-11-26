@@ -692,6 +692,14 @@ export function createLocalExecutionCoordinator(
     let imageBlocks: readonly LocalAcpPromptBlock[] = []
     let claimedImages: readonly PersonalDraftImage[] = []
     if (images.length > 0) {
+      if (!binding.session.getState?.()?.agentCapabilities && binding.session.connect) {
+        try {
+          await binding.session.connect()
+        } catch {
+          // 握手失败时交由后续能力判定返回明确提示。
+        }
+        if (!isCurrent(login)) return forbidden()
+      }
       const supportsImage = Boolean(binding.session.getState?.()?.agentCapabilities?.promptCapabilities?.image)
       if (!supportsImage) {
         return ok({ status: "rejected", reason: "当前 Agent 暂不支持图片输入，移除图片或切换支持图片的 Agent 后可发送。" })
@@ -1338,9 +1346,6 @@ export function createLocalExecutionCoordinator(
                 }).catch(() => {})
               }
             }
-            if (existing.session.getAvailability().available && existing.session.connect && !existing.session.getState?.()?.connected) {
-              try { await existing.session.connect() } catch { /* 初始化失败时保留绑定等待下次重试。 */ }
-            }
             if (!isCurrent(login)) {
               await release(key, existing)
               return { ...forbidden(), directoryStatus: "unavailable" }
@@ -1613,6 +1618,9 @@ export function createLocalExecutionCoordinator(
                 return
               }
               if (sessionEvent.type === "initialized" || sessionEvent.type === "session-opened") {
+                if (binding.activeTurn && !binding.activeTurn.steerKind) {
+                  binding.activeTurn.steerKind = steeringKind(binding, binding.activeTurn.userText)
+                }
                 if (sessionEvent.type === "session-opened") {
                   const nextId = sessionEvent.state.sessionId
                   if ((binding.lastNativeSessionId && nextId && binding.lastNativeSessionId !== nextId)
@@ -1641,13 +1649,6 @@ export function createLocalExecutionCoordinator(
                 directoryPath: path,
                 providerId: resolvedProviderId,
               }).catch(() => {})
-            }
-          }
-          if (session.getAvailability().available && session.connect && !session.getState?.()?.connected) {
-            try {
-              await session.connect()
-            } catch {
-              // 冷启动连接或认证未完成时保留绑定，交由后续发送或切换代理处理。
             }
           }
           if (!isCurrent(login)) {

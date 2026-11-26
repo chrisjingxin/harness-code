@@ -14,6 +14,7 @@ import type {
   AcpAgentInfo,
   AcpAgentList,
 } from "./descriptor.js"
+import { attachHostBudget, DEFAULT_MAX_LIVE_PROCESSES, ProcessBudget } from "./agent-process.js"
 import { buildAugmentedGuiPath, findInPath, isExecutableFile } from "./discovery.js"
 import { LocalAcpHost } from "./index.js"
 import { buildNativeBindingIdentity, nativeBinding } from "./native-binding.js"
@@ -130,6 +131,10 @@ export type AcpAgentRegistryOptions = {
   readonly discoveryOptions?: AcpAgentDiscoveryOptions
   /** 默认在检测到 `WORKBENCH_ACP_EXECUTABLE` 时追加 `"custom"` 描述符并置为默认项。 */
   readonly includeCustomFromEnv?: boolean
+  /** 注册表内所有 Provider 共享的空闲回收超时（毫秒），默认 15 分钟。 */
+  readonly idleTimeoutMs?: number
+  /** 注册表内所有 Provider 共享的最大常驻 Agent 进程数，默认 4。 */
+  readonly maxLiveProcesses?: number
 }
 
 export type ResolvedAgentHost = {
@@ -147,6 +152,9 @@ export class AcpAgentRegistry {
   readonly #env: Readonly<Record<string, string | undefined>>
   readonly #bindingDirectory?: string
   readonly #discoveryOptions?: AcpAgentDiscoveryOptions
+  readonly #idleTimeoutMs?: number
+  readonly #maxLiveProcesses?: number
+  readonly #budget: ProcessBudget
   readonly #descriptors = new Map<string, AcpAgentDescriptor>()
   readonly #hosts = new Map<string, LocalAcpHost>()
   #unconfiguredHost?: LocalAcpHost
@@ -155,6 +163,9 @@ export class AcpAgentRegistry {
     this.#env = options.env ?? process.env
     this.#bindingDirectory = options.bindingDirectory
     this.#discoveryOptions = options.discoveryOptions
+    this.#idleTimeoutMs = options.idleTimeoutMs
+    this.#maxLiveProcesses = options.maxLiveProcesses
+    this.#budget = new ProcessBudget(options.maxLiveProcesses ?? DEFAULT_MAX_LIVE_PROCESSES)
 
     for (const descriptor of options.descriptors ?? []) {
       this.#descriptors.set(descriptor.id, descriptor)
@@ -276,8 +287,14 @@ export class AcpAgentRegistry {
         extraClientCapabilitiesMeta: descriptor.hostHints.extraClientCapabilitiesMeta,
         promptTurnIdMetaKey: descriptor.hostHints.promptTurnIdMetaKey,
         sessionLoadReplayIdleMs: descriptor.hostHints.sessionLoadReplayIdleMs,
+        ...(descriptor.hostHints.shareProcessPerWorkspace !== undefined
+          ? { shareProcessPerWorkspace: descriptor.hostHints.shareProcessPerWorkspace }
+          : {}),
+        ...(this.#idleTimeoutMs !== undefined ? { idleTimeoutMs: this.#idleTimeoutMs } : {}),
+        ...(this.#maxLiveProcesses !== undefined ? { maxLiveProcesses: this.#maxLiveProcesses } : {}),
       }
       host = new LocalAcpHost(resolution.command, hostOptions)
+      attachHostBudget(host, this.#budget)
       this.#hosts.set(targetId, host)
     }
     return { providerId: targetId, host, available: true, clientMeta: descriptor.hostHints.extraClientCapabilitiesMeta }

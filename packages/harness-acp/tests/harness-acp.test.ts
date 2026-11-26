@@ -27,6 +27,7 @@ test("Harness 客户端提示开启 elicitation 与 fs 能力，并导出完整�
   assert.equal(HARNESS_HOST_HINTS.enableElicitation, true)
   assert.equal(HARNESS_HOST_HINTS.enableClientFs, true)
   assert.equal(HARNESS_HOST_HINTS.restorePolicy, "fallback-new")
+  assert.equal(HARNESS_HOST_HINTS.shareProcessPerWorkspace, true)
   assert.equal(HARNESS_CLIENT_EXTENSION_CAPABILITIES.version, 1)
   assert.ok(HARNESS_CLIENT_EXTENSION_CAPABILITIES.capabilities.includes("approval"))
   assert.ok(HARNESS_CLIENT_EXTENSION_CAPABILITIES.capabilities.includes("goal"))

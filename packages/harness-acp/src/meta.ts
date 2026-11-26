@@ -23,6 +23,7 @@ export const HARNESS_HOST_HINTS: AcpAgentHostHints = {
   enableClientFs: true,
   promptTurnIdMetaKey: "workbenchTurnId",
   restorePolicy: "fallback-new",
+  shareProcessPerWorkspace: true,
 }
 
 export type HarnessAgentCapabilitiesMeta = {

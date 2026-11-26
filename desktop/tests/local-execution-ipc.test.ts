@@ -1922,3 +1922,88 @@ test("HC-239 支持无团队与断网个人会话本地多轮执行、LocalConve
   }
 })
 
+test("prepare 懒连接不阻塞调用 session.connect，且冷会话首次带图片发送时自动握手校验多模态", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc-lazy-connect-"))
+  try {
+    const workdir = join(root, "work")
+    const imagesDir = join(root, "images")
+    await mkdir(workdir, { recursive: true })
+    const identity = await createSignedInState(USER_A)
+    const { window } = createFakeWindow()
+    const imageStore = new LocalImageStore(imagesDir, ORIGIN)
+    const staged = await imageStore.stage(USER_A, { bytes: PNG_TEST_BYTES, mimeType: "image/png", name: "shot.png" })
+
+    let connectCount = 0
+    let connected = false
+    let turnCounter = 0
+    const listeners = new Set<AcpListener>()
+    const sentBlocks: unknown[] = []
+
+    const coordinator = createLocalExecutionCoordinator(window, identity, null, {
+      host: {
+        bind: async () => ({
+          getAvailability: () => ({ available: true as const }),
+          getState: () => ({
+            connected,
+            authMethods: [],
+            configOptions: [],
+            availableCommands: [],
+            plans: [],
+            restoreStatus: { kind: "none" as const },
+            ...(connected ? { agentCapabilities: { promptCapabilities: { image: true } } } : {}),
+          }),
+          connect: async () => {
+            connectCount += 1
+            connected = true
+            return {
+              connected: true,
+              authMethods: [],
+              configOptions: [],
+              availableCommands: [],
+              plans: [],
+              restoreStatus: { kind: "new" as const, sessionId: "lazy-1" },
+              agentCapabilities: { promptCapabilities: { image: true } },
+            }
+          },
+          send: () => ({ status: "rejected" as const, reason: "agent-not-configured" as const }),
+          sendPrompt: (blocks: unknown) => {
+            sentBlocks.push(blocks)
+            return { status: "accepted" as const, turnId: `lazy-turn-${++turnCounter}` }
+          },
+          cancel: () => true,
+          answerPermission: () => true,
+          subscribe: (fn: AcpListener) => {
+            listeners.add(fn)
+            return () => { listeners.delete(fn) }
+          },
+          close: async () => { listeners.clear() },
+        }) as unknown as BoundSession,
+        subscribeDiagnostics: () => () => {},
+        close: async () => {},
+      },
+    }, { images: imageStore })
+
+    try {
+      const scope = { accountId: USER_A, workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, conversationId: CONV_ID }
+      await coordinator.captureDirectorySelection()(workdir)
+      const prep = await coordinator.prepare(scope, workdir)
+      assert.equal(prep.ok, true)
+      assert.equal(prep.directoryStatus, "ready")
+      assert.equal(connectCount, 0)
+      if (!prep.ok) return
+      assert.equal(prep.value.available, true)
+
+      const sent = await coordinator.send(scope, prep.value.bindingId, REQ_ID, "请看截图", [], [], [staged])
+      assert.equal(sent.ok && sent.value.status === "accepted", true)
+      assert.equal(connectCount, 1)
+      assert.equal(sentBlocks.length, 1)
+    } finally {
+      await coordinator.dispose()
+      identity.dispose()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+

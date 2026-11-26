@@ -124,7 +124,6 @@ export class WorkbenchContextService implements LocalExecutionContextAssembler {
     const session: Session = { scope: structuredClone(scope), generation: login.generation, bindingId, token: randomBytes(32).toString("base64url"), revoked: false, delivered: emptyDeliveredContext() }
     this.#sessions.set(scopeKey(scope), session)
     try {
-      await this.#authorize(session)
       const url = await this.#server.start()
       await this.#authorize(session)
       return { ...existing, mcpServers: [...(existing.mcpServers ?? []).filter(s => s.name !== "workbench-context"), { name: "workbench-context", type: "http", url, headers: [{ name: "Authorization", value: `Bearer ${session.token}` }] }] }

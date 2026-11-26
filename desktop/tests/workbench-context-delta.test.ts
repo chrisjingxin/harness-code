@@ -594,3 +594,57 @@ test("协调器在 session-reset、换原生 sessionId/断开、及 Token 断崖
     await ctx.cleanup()
   }
 })
+
+test("WorkbenchContextService.prepareSession 仅发起一次 refreshIdentity 鉴权", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wb-ctx-auth-once-"))
+  try {
+    let meCalls = 0
+    const user = {
+      id: USER_ID,
+      userNo: "80000001",
+      userName: "测试成员",
+      photo: "",
+      orgId: "org",
+      orgNo: "001",
+      orgName: "研发",
+      orgPathName: "研发",
+    }
+    const identity = new CollaborationState(ORIGIN, async input => {
+      const path = new URL(String(input)).pathname
+      if (path.endsWith("/csrf")) return jsonOk({ headerName: "X-CSRF-TOKEN", token: "csrf-test" })
+      if (path.endsWith("/demo-login")) {
+        return jsonOk({ user, workspaces: [{ id: WORKSPACE_ID, slug: "ws", name: "团队", role: "admin", memberVersion: 1, accessVersion: 1 }] })
+      }
+      if (path.endsWith("/me")) {
+        meCalls += 1
+        return jsonOk({ user, workspaces: [{ id: WORKSPACE_ID, slug: "ws", name: "团队", role: "admin", memberVersion: 1, accessVersion: 1 }] })
+      }
+      if (path.endsWith("/logout")) return jsonOk(null)
+      return new Response("not found", { status: 404 })
+    })
+    assert.equal((await identity.signIn("80000001")).ok, true)
+    const service = new WorkbenchContextService({
+      origin: ORIGIN,
+      identity,
+      store: new ProjectMemoryStore(join(root, "memory")),
+      authorizeBinding: async () => true,
+    })
+    try {
+      const before = meCalls
+      const setup = await service.prepareSession({
+        accountId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        projectId: PROJECT_ID,
+        conversationId: CONV_ID,
+      }, "binding-1")
+      assert.ok(setup.mcpServers?.some(s => s.name === "workbench-context"))
+      assert.equal(meCalls - before, 1)
+    } finally {
+      await service.dispose()
+      identity.dispose()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+

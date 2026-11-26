@@ -7,7 +7,7 @@ import type { AgentCommand, LocalAcpHostOptions } from "./types.js"
 /** 宿主在创建 `LocalAcpHost` 时需要启用的标准客户端协议能力提示。 */
 export type AcpAgentHostHints = Pick<
   LocalAcpHostOptions,
-  "enableClientFs" | "enableClientTerminal" | "enableElicitation" | "restorePolicy" | "extraClientCapabilitiesMeta" | "sessionLoadReplayIdleMs" | "promptTurnIdMetaKey"
+  "enableClientFs" | "enableClientTerminal" | "enableElicitation" | "restorePolicy" | "extraClientCapabilitiesMeta" | "sessionLoadReplayIdleMs" | "promptTurnIdMetaKey" | "shareProcessPerWorkspace"
 >
 
 /** 可选的外部环境与探测路径覆盖选项，便于单测注入隔离目录或禁用系统 PATH 兜底。 */
