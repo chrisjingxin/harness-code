@@ -321,6 +321,9 @@
 .knowledge-proposal-dialog { width:min(820px,calc(100% - 32px)); }
 .knowledge-source-summary { display:grid;gap:6px;margin-top:12px; }
 .knowledge-feedback { display:grid;gap:8px;padding:10px 0;color:var(--muted);font-size:var(--text-xs); }
+.knowledge-feedback-note { display:flex;gap:6px;align-items:center; }
+.knowledge-feedback-note input { flex:1 1 auto;min-width:0; }
+.knowledge-feedback-saved { color:var(--success-fg, var(--success)); }
 .knowledge-feedback input,.knowledge-source-summary textarea,.knowledge-review-detail textarea { font:inherit;color:var(--fg);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px; }
 .knowledge-review-detail label { display:grid;gap:6px; }
 

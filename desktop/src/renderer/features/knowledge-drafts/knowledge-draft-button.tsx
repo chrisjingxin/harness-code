@@ -1,11 +1,16 @@
 /** 可见的本机起草入口：选本人定稿 → 展示真实执行/审批 → 编辑结构化候选 → 本人确认提交。 */
 import { useEffect, useRef, useState } from "react";
-import type { KnowledgeDraftState, LocalExecutionScope, LocalConversationRecord, KnowledgeDraftSource } from "../../../shared/index.js";
+import type { KnowledgeDraftState, LocalExecutionScope, KnowledgeDraftSource } from "../../../shared/index.js";
 import type { ConversationInteractionAnswer, ConversationPersonalState } from "../../../ui/index.js";
 import { ConversationInteraction } from "../../../ui/conversation/interaction.js";
 import { toConversationInteraction, toElicitationAnswer } from "../session/elicitation-form.js";
 import { KnowledgeProposalEditor } from "../collaboration/knowledge/knowledge-governance.js";
 import { KnowledgeDraftSourcePreview } from "./source-preview.js";
+import {
+  formatKnowledgeDraftCandidateLabel,
+  loadKnowledgeDraftCandidates,
+  type KnowledgeDraftSessionCandidate,
+} from "./knowledge-draft-candidates.js";
 import "../collaboration/knowledge/team-knowledge.css";
 function DraftElicitation({ run, onError }: {
   run: KnowledgeDraftState;
@@ -44,17 +49,33 @@ function KnowledgeDraftDialog({ initialScope, workspaceId, accountId, maintenanc
 }) {
   const dialog = useRef<HTMLDialogElement>(null), active = useRef(true), runId = useRef<string | null>(null), starting = useRef(false);
   const [sourceRevision, setSourceRevision] = useState(0);
-  const [records, setRecords] = useState<readonly LocalConversationRecord[]>([]), [sourceScope, setSourceScope] = useState(initialScope), [turns, setTurns] = useState<KnowledgeDraftSource["turns"]>([]), [selected, setSelected] = useState<string[]>([]), [run, setRun] = useState<KnowledgeDraftState | null>(null), [error, setError] = useState(""), [candidate, setCandidate] = useState<number | null>(null), [busy, setBusy] = useState(false);
+  const [candidates, setCandidates] = useState<readonly KnowledgeDraftSessionCandidate[]>([]), [loadingCandidates, setLoadingCandidates] = useState(!initialScope), [sourceScope, setSourceScope] = useState(initialScope), [turns, setTurns] = useState<KnowledgeDraftSource["turns"]>([]), [selected, setSelected] = useState<string[]>([]), [run, setRun] = useState<KnowledgeDraftState | null>(null), [error, setError] = useState(""), [candidate, setCandidate] = useState<number | null>(null), [busy, setBusy] = useState(false);
   useEffect(() => { active.current = true; dialog.current?.showModal(); const unsub = window.knowledgeDrafts.onState(s => { if (!active.current || s.scope.accountId !== accountId || s.scope.workspaceId !== workspaceId || !starting.current && s.executionId !== runId.current)
     return; if (sourceScope && s.scope.conversationId !== sourceScope.conversationId)
     return; runId.current = s.executionId; setRun(s); }); return () => { active.current = false; unsub(); dialog.current?.close(); if (runId.current)
     void window.knowledgeDrafts.release(runId.current); }; }, [accountId, workspaceId, sourceScope?.conversationId]);
-  useEffect(() => { let current = true; void window.localConversations.list({ workspaceId, includePublished: true }).then(r => { if (current) {
-    if (r.ok)
-      setRecords(r.value.filter(x => x.directoryPath));
-    else
-      setError(r.error.message);
-  } }); return () => { current = false; }; }, [workspaceId]);
+  useEffect(() => {
+    if (initialScope) {
+      setLoadingCandidates(false);
+      return;
+    }
+    let current = true;
+    setLoadingCandidates(true);
+    void loadKnowledgeDraftCandidates({
+      accountId,
+      workspaceId,
+      localConversations: window.localConversations,
+      organization: window.organization,
+      projectConversations: window.projectConversations,
+      personal: window.personal,
+    }).then(res => {
+      if (!current) return;
+      setCandidates(res.candidates);
+      if (res.error) setError(res.error);
+      setLoadingCandidates(false);
+    });
+    return () => { current = false; };
+  }, [accountId, workspaceId, initialScope]);
   useEffect(() => { let current = true; setTurns([]); setSelected([]); setError(""); if (sourceScope && !maintenance)
     void window.knowledgeDrafts.source(sourceScope).then(r => { if (!current)
       return; if (r.ok) {
@@ -95,8 +116,8 @@ function KnowledgeDraftDialog({ initialScope, workspaceId, accountId, maintenanc
     if (active.current)
       setBusy(false);
   } }
-  return <><dialog ref={dialog} className="team-knowledge-dialog knowledge-proposal-dialog" aria-label="本机知识起草" onCancel={e => { e.preventDefault(); onClose(); }}><h2>{maintenance ? "整理团队知识" : "从本机会话起草团队知识"}</h2><p>当前本机 Agent 将归纳所选材料并检索已有知识。起草使用独立临时会话及该 Agent 默认设置，内容仅形成候选。</p>{!initialScope && <label>选择本人可执行会话<select disabled={running} value={sourceScope?.conversationId ?? ""} onChange={e => { const r = records.find(x => x.conversationId === e.target.value); if (r)
-    setSourceScope({ accountId, workspaceId, projectId: r.projectId, conversationId: r.conversationId }); }}><option value="">请选择已有本人会话</option>{records.map(r => <option key={r.conversationId} value={r.conversationId}>{r.title}</option>)}</select></label>}
+  return <><dialog ref={dialog} className="team-knowledge-dialog knowledge-proposal-dialog" aria-label="本机知识起草" onCancel={e => { e.preventDefault(); onClose(); }}><h2>{maintenance ? "整理团队知识" : "从本机会话起草团队知识"}</h2><p>当前本机 Agent 将归纳所选材料并检索已有知识。起草使用独立临时会话及该 Agent 默认设置，内容仅形成候选。</p>{!initialScope && <label>选择本人可执行会话<select disabled={running || loadingCandidates} value={sourceScope?.conversationId ?? ""} onChange={e => { const r = candidates.find(x => x.conversationId === e.target.value); if (r)
+    setSourceScope({ accountId, workspaceId, projectId: r.projectId, conversationId: r.conversationId }); }}><option value="">{loadingCandidates ? "正在读取本人可执行会话…" : candidates.length ? "请选择已有本人会话" : "暂无已绑定本机目录的本人会话"}</option>{candidates.map(c => <option key={c.conversationId} value={c.conversationId}>{formatKnowledgeDraftCandidateLabel(c)}</option>)}</select></label>}
   {!maintenance && <fieldset disabled={running}><legend>准备交给 Agent 的定稿轮次（最多64 KiB）</legend><button type="button" className="wb-button wb-button-secondary wb-button-small" onClick={() => setSourceRevision(v => v + 1)}>重新读取定稿</button>{turns.length ? turns.map(t => <label className="knowledge-draft-turn" key={t.turnId}><input type="checkbox" checked={selected.includes(t.turnId)} onChange={e => setSelected(a => e.target.checked ? [...a, t.turnId] : a.filter(id => id !== t.turnId))}/>{t.userText.slice(0, 100)}<details><summary>查看本轮定稿材料</summary><KnowledgeDraftSourcePreview turn={t}/></details></label>) : <p>暂无可起草的完整定稿，请先完成一轮本机对话；刚完成的 Project 定稿等待共享成功后可重新读取。</p>}</fieldset>}
   {run && <section aria-label="知识起草状态"><p role="status">{run.message}</p>{run.permission && <section><h3>{run.permission.title}</h3>{run.permission.tool?.input && <pre>{run.permission.tool.input}</pre>}{run.permission.options.map(o => <button className="wb-button wb-button-secondary" key={o.id} onClick={() => void window.knowledgeDrafts.answerPermission(run.executionId, run.permission!.id, o.id).then(r => { if (!r.ok)
       setError(r.error.message); })}>{o.label}</button>)}</section>}{run.elicitation && <DraftElicitation key={run.elicitation.id} run={run} onError={setError}/>}

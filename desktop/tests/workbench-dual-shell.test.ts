@@ -27,6 +27,7 @@ import { resolveDeepLinkNavigation } from "../src/renderer/features/inbox/inbox-
 import {
   resolveFallbackTeamPageForTopNav,
   resolveProjectPageNavTarget,
+  resolveReturnToInboxOnNav,
 } from "../src/renderer/features/project-navigation/contracts.ts"
 import { ProjectNavigation } from "../src/ui/navigation/index.tsx"
 import { buildSessionBadge } from "../src/renderer/features/session/session-model.ts"
@@ -464,4 +465,12 @@ test("resolveFallbackTeamPageForTopNav 存在待定位任务时不覆盖非看�
     }),
     { kind: "knowledge" },
   )
+})
+
+test("resolveReturnToInboxOnNav 在任务定位跳转看板时保留返回按钮，主动切栏时清除", () => {
+  assert.equal(resolveReturnToInboxOnNav(true, "board", { preserveReturnToInbox: true }), true)
+  assert.equal(resolveReturnToInboxOnNav(true, "board"), false)
+  assert.equal(resolveReturnToInboxOnNav(true, "chat"), false)
+  assert.equal(resolveReturnToInboxOnNav(true, "inbox"), true)
+  assert.equal(resolveReturnToInboxOnNav(false, "board", { preserveReturnToInbox: true }), false)
 })

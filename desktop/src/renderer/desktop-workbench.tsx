@@ -29,7 +29,12 @@ import type {
 } from "../shared/index.js"
 import { ACCENT_OPTIONS, AppRail, DEFAULT_ACCENT, IdentityPanel, ProjectNavigation, WorkbenchLayout, useCollaborationIdentity } from "../ui/index.js"
 import type { AccentId, NavigationInboxView, NavigationSpaceKind, NavigationWorkspaceItem, WorkbenchNavId } from "../ui/index.js"
-import { resolveFallbackTeamPageForTopNav, useProjectShell, useProjectWorkbenchSlots } from "./features/project-navigation/index.js"
+import {
+  resolveFallbackTeamPageForTopNav,
+  resolveReturnToInboxOnNav,
+  useProjectShell,
+  useProjectWorkbenchSlots,
+} from "./features/project-navigation/index.js"
 import type { DualTrackNavigationProps, ProjectPageProviders } from "./features/project-navigation/index.js"
 import { LocalSessionPage, createSessionPageProvider, useProjectSessions } from "./features/session/index.js"
 import type { LocalSessionExecutionPort, ProjectConversationSummary } from "./features/session/index.js"
@@ -350,12 +355,12 @@ function ConfirmedUserWorkbench(props: Hosts & {
   const selectTopNav = useCallback((
     next: WorkbenchNavId,
     targetSpace?: NavigationSpaceKind,
-    options?: { readonly preserveTeamPage?: boolean },
+    options?: { readonly preserveTeamPage?: boolean; readonly preserveReturnToInbox?: boolean },
   ) => {
     if (targetSpace) props.onSelectSpace(targetSpace)
     setTopNav(next)
     if (next === "admin") setLeftOpen(true)
-    if (next !== "inbox") setReturnToInbox(false)
+    setReturnToInbox(current => resolveReturnToInboxOnNav(current, next, options))
     if (!options?.preserveTeamPage) {
       syncTeamPageOnNavRef.current(next, targetSpace)
     }
@@ -1333,7 +1338,11 @@ function useTeamWorkspaceBridge(props: {
   inboxActive: boolean
   cloudActionCount: number
   returnToInbox: boolean
-  onSelectNav(nav: WorkbenchNavId, targetSpace?: NavigationSpaceKind, options?: { readonly preserveTeamPage?: boolean }): void
+  onSelectNav(
+    nav: WorkbenchNavId,
+    targetSpace?: NavigationSpaceKind,
+    options?: { readonly preserveTeamPage?: boolean; readonly preserveReturnToInbox?: boolean },
+  ): void
   onOpenCommandPalette(): void
   onToggleLeftSidebar(): void
   onOpenRightPanel(): void
@@ -1449,7 +1458,7 @@ function useTeamWorkspaceBridge(props: {
     if (!shell.scope || shell.scope.projectId !== reveal.projectId) return
     const targetScope = shell.scope
     if (reveal.kind === "task") {
-      props.onSelectNav("board", "team", { preserveTeamPage: true })
+      props.onSelectNav("board", "team", { preserveTeamPage: true, preserveReturnToInbox: true })
       refreshTaskMetadata(targetScope)
       setTaskDetailRevision(value => value + 1)
       shell.openPage({ kind: "task", taskId: reveal.taskId })

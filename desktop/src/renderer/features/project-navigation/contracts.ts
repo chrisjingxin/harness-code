@@ -29,6 +29,19 @@ export function resolveProjectPageNavTarget(kind: ProjectPage["kind"]): ProjectP
 }
 
 /**
+ * 顶层导航切换时决定是否保留「返回收件箱」标记：
+ * 只有切回 `inbox` 或由收件箱/深链任务定位显式声明保留时才维持原值，其余主动切栏一律清除。
+ */
+export function resolveReturnToInboxOnNav(
+  current: boolean,
+  next: WorkbenchNavId,
+  options?: { readonly preserveReturnToInbox?: boolean },
+): boolean {
+  if (next === "inbox" || options?.preserveReturnToInbox) return current
+  return false
+}
+
+/**
  * 当顶层导航停留在看板或团队知识且当前团队子页尚未对齐时，决定是否补跳兜底子页。
  * 存在待消费的任务定位（`pendingRevealKind === "task"`）时禁止回落到普通 `"board"`，
  * 避免同帧 `useEffect` 覆盖刚打开的 `{ kind: "task", taskId }` 抽屉。
