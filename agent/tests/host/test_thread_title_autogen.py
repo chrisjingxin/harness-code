@@ -183,3 +183,39 @@ async def test_auto_title_skipped_in_echo_mode(tmp_path: Path) -> None:
     await _wait_autogen(server)
     assert called is False
     await server.close()
+
+
+async def test_auto_title_drops_tool_call_markup_output(tmp_path: Path) -> None:
+    """起名模型吐出伪工具调用标记时静默丢弃：不写标题、不广播。"""
+    from harness_agent.host.agent_host import AgentHost
+
+    project = tmp_path / "project"
+    project.mkdir()
+    frames: list[dict[str, Any]] = []
+
+    async def capture(message: dict[str, Any]) -> None:
+        frames.append(message)
+
+    server = AgentHost(allow_echo=False, config_home=tmp_path / "home", workspace=project)
+    server.send = capture
+
+    async def draft(*, model_settings: Any, user_message: str) -> str:
+        del model_settings, user_message
+        return '<tool_call> {"name": "knowledge_read"}'
+
+    server._draft_thread_title = draft  # type: ignore[method-assign]
+    server._title_model_settings = lambda _profile=None: object()  # type: ignore[method-assign]
+    await server.dispatch(_initialize(["threads.read"]))
+    store = await server._ensure_thread_persistence()
+    await accept_thread(store, "thread-1", "请检查当前改动")
+    server._schedule_thread_title_autogen(
+        thread_id="thread-1",
+        user_message="请检查当前改动",
+        requested_profile_id=None,
+        owner_connection_id=server._owner_connection.connection_id,
+    )
+    await _wait_autogen(server)
+
+    assert (await store.list_threads())[0].title is None
+    assert [frame for frame in frames if frame.get("method") == "thread.summary"] == []
+    await server.close()

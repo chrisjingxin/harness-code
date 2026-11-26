@@ -460,3 +460,20 @@ export function mergeLoadedPersonalRuntime(
     needsPersist,
   }
 }
+
+/**
+ * Agent 上报标题是否值得写回本机会话记录：
+ * 仅当本次运行内该会话有用户活动（受理过执行）且标题相对上次上报/本地记录确实变化，
+ * 避免断连重放把手动改名覆盖掉。
+ */
+export function shouldPersistAgentTitle(input: {
+  readonly title: string
+  readonly previousAgentTitle: string | undefined
+  readonly hadActivity: boolean
+  readonly recordTitle: string | undefined
+}): boolean {
+  return input.hadActivity
+    && input.title !== input.previousAgentTitle
+    && input.recordTitle !== undefined
+    && input.recordTitle !== input.title
+}

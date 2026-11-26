@@ -1492,15 +1492,23 @@ function useTeamWorkspaceBridge(props: {
   const preferredConversationId = selectedConversationId ?? lastLocalConversationId
   const scope = shell.scope
   const isBoardPage = isBoardRoutePage(currentPage)
+  const boardVisible = Boolean(props.isBoardActive && isBoardPage)
   const { refresh: refreshBoard, ...board } = useProjectBoard(
     props.projectUpdates,
     scope,
-    Boolean(props.isBoardActive && isBoardPage),
+    boardVisible,
   )
+  // 成员移除等变更不回推给操作者本人；从其他页面返回看板时补拉一次任务元数据。
+  const boardVisibleRef = useRef(boardVisible)
+  useEffect(() => {
+    const wasVisible = boardVisibleRef.current
+    boardVisibleRef.current = boardVisible
+    if (!wasVisible && boardVisible && scope) refreshTaskMetadata(scope)
+  }, [boardVisible, scope, refreshTaskMetadata])
   // 订阅跟随团队外壳。切页面、切项目时只替换刷新目标，正文读取仍在原页面动作内。
   const notification = useProjectUpdates(props.projectUpdates, props.user.id, props.workspaceId, {
     projectId: scope?.projectId ?? null,
-    isBoardActive: Boolean(props.isBoardActive && isBoardPage),
+    isBoardActive: boardVisible,
     refreshProjectList: () => { void shell.projects.reload() },
     refreshProjectDetail: () => { void shell.detail.reload() },
     refreshConversations: () => {

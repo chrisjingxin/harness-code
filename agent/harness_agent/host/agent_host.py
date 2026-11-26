@@ -2688,6 +2688,8 @@ class AgentHost:
                 ),
                 timeout=self._title_autogen_timeout_seconds,
             )
+            if _looks_like_tool_call_markup(raw):
+                return
             summary = await persistence.apply_auto_title(thread_id, raw)
             if summary is None:
                 return
@@ -7051,6 +7053,17 @@ def _settings_value_schema_error(
     if error.validator in {"pattern", "type"}:
         return "SETTINGS_VALUE_INVALID"
     return None
+
+
+_TOOL_CALL_MARKUP_TITLE_RE = re.compile(
+    r"<\s*/?\s*(tool_call|tool_use|function_call|invoke)\b|^\s*[\[{]\s*\"(name|tool|function)\"\s*:",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_tool_call_markup(text: str) -> bool:
+    """起名模型偶尔把标题写成伪工具调用标记，命中即整条丢弃。"""
+    return bool(_TOOL_CALL_MARKUP_TITLE_RE.search(text))
 
 
 def _thread_summary_payload(summary: Any) -> dict[str, object]:

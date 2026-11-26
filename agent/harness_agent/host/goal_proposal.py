@@ -164,10 +164,11 @@ class GoalProposalRunAdapter:
                 return AdapterOutcome("cancelled", message="Goal proposal cancelled")
             if decision == "rejected":
                 raw_feedback = response.get("feedback")
+                if not isinstance(raw_feedback, str) or not raw_feedback.strip():
+                    await services.store.cancel_proposal(pending.request_id, now_ms=services.now_ms())
+                    return AdapterOutcome("cancelled", message="Goal proposal rejected")
                 try:
-                    feedback = validate_goal_text(
-                        raw_feedback if isinstance(raw_feedback, str) else "",
-                    )
+                    feedback = validate_goal_text(raw_feedback)
                 except GoalStoreError:
                     return AdapterOutcome("failed", "GOAL_OBJECTIVE_INVALID", "goal feedback is required")
                 context = GoalProposalContext(

@@ -369,3 +369,42 @@ test("resolveInboxTaskActions 精准判定受让人、创建人与离职代管�
     { canAccept: false, canReview: false, canCancel: false },
   )
 })
+
+test("用户主动停止的 finished 不归入执行出错，普通失败仍归入", () => {
+  let signals: Readonly<Record<string, LocalAttentionSignal>> = {}
+  const scope = makeScope({ conversationId: "conv-stop" })
+
+  signals = applyLocalExecutionNoticeToSignals(signals, {
+    scope,
+    bindingId: "b-1",
+    turnId: "t-1",
+    sequence: 1,
+    kind: "finished",
+    failure: "网络超时",
+    availability: { available: true },
+  }, 1_000)
+  assert.ok(signals["conv-stop"]?.error)
+
+  signals = applyLocalExecutionNoticeToSignals(signals, {
+    scope,
+    bindingId: "b-1",
+    turnId: "t-2",
+    sequence: 2,
+    kind: "finished",
+    failure: "本轮已停止。",
+    cancelled: true,
+    availability: { available: true },
+  }, 2_000)
+  assert.equal(signals["conv-stop"]?.error, undefined)
+
+  signals = applyLocalExecutionNoticeToSignals(signals, {
+    scope,
+    bindingId: "b-1",
+    turnId: "t-3",
+    sequence: 3,
+    kind: "finished",
+    failure: "本轮已停止。",
+    availability: { available: true },
+  }, 3_000)
+  assert.ok(signals["conv-stop"]?.error)
+})

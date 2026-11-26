@@ -534,6 +534,7 @@ class _Reservation:
         ({"decision": "accepted"}, "契约测试通过", "completed"),
         ({"decision": "edited", "criteria": ["协议和类型检查通过"]}, "协议和类型检查通过", "completed"),
         ({"decision": "cancelled"}, None, "cancelled"),
+        ({"decision": "rejected", "feedback": ""}, None, "cancelled"),
     ],
 )
 async def test_proposal_adapter_accepts_edits_or_cancels_without_transcript(

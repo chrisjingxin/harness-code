@@ -14,6 +14,7 @@ import {
   decodeHistoryToTimelineEntries,
   deriveSyncStatus,
   emptySyncState,
+  isToolCallMarkupTitle,
   mergeIncrementalHistory,
   resolveConversationTitle,
   toNavigationSessionEntries,
@@ -266,3 +267,12 @@ test("HC-239 summary_only 与 stopped 状态正确反映在会话徽标与看板
   assert.equal(getBoardSyncLabel({ conversation: peerStopped, deviceOnline: false }, "user-self", null), "已停止同步 · 本机未同步正文")
 })
 
+
+test("isToolCallMarkupTitle 识别伪工具调用标记并放行普通标题", () => {
+  assert.equal(isToolCallMarkupTitle('<tool_call> {"name": "knowledge_read"}'), true)
+  assert.equal(isToolCallMarkupTitle('{"name": "knowledge_read", "arguments": {}}'), true)
+  assert.equal(isToolCallMarkupTitle('{"tool": "knowledge_read"}'), true)
+  assert.equal(isToolCallMarkupTitle("</INVOKE>"), true)
+  assert.equal(isToolCallMarkupTitle("修掉登录失败"), false)
+  assert.equal(isToolCallMarkupTitle("tool_call 相关的讨论"), false)
+})

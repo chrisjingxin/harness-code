@@ -437,7 +437,7 @@ export function toConversationInteraction(
           submitLabel: "提交修改",
         } : decision === "rejected" ? {
           feedbackLabel: "拒绝说明",
-          feedbackPlaceholder: "可选填写拒绝原因…",
+          feedbackPlaceholder: "填写原因后 Agent 会重新起草目标；留空则放弃本次目标",
           submitLabel: "确认拒绝",
         } : {}),
         availability: { enabled: true },

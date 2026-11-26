@@ -174,7 +174,7 @@ export type LocalExecutionNotice =
       | { readonly kind: "thought"; readonly sequence: number; readonly text: string }
       | { readonly kind: "tool"; readonly sequence: number; readonly tool: LocalExecutionTool }
       | { readonly kind: "permission"; readonly sequence: number; readonly request: LocalExecutionPermission | null }
-      | { readonly kind: "finished"; readonly sequence: number; readonly failure?: string; readonly availability: LocalExecutionAvailability; readonly ephemeral?: boolean; readonly runSummary?: LocalExecutionRunSummary }
+      | { readonly kind: "finished"; readonly sequence: number; readonly failure?: string; readonly cancelled?: boolean; readonly availability: LocalExecutionAvailability; readonly ephemeral?: boolean; readonly runSummary?: LocalExecutionRunSummary }
     ))
 
 /** 轮次快照只在本机解析，页面只提交轮次、文件或确认凭据。 */

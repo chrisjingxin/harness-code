@@ -52,6 +52,7 @@ import {
   mergeLoadedPersonalRuntime,
   localTurnsBeforeLiveTail,
   partitionPersonalRecords,
+  shouldPersistAgentTitle,
   type PersonalRuntimeState,
 } from "./personal-sessions-model.js"
 import type { PersonalNewSessionDraft } from "./personal-new-session-page.js"
@@ -216,6 +217,9 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const [records, setRecords] = useState<readonly LocalConversationRecord[]>([])
   const recordsRef = useRef(records)
   recordsRef.current = records
+  const titleActivityRef = useRef(new Set<string>())
+  const lastAgentTitleRef = useRef(new Map<string, string>())
+  const renameConversationRef = useRef<((conversationId: string, title: string) => Promise<string | null>) | null>(null)
 
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "failed">(
     localConversations ? "loading" : "ready",
@@ -443,6 +447,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const onExecutionAccepted = useCallback((source: SessionExecutionScope, conversationId: string, revision: number) => {
     const rec = recordsRef.current.find(item => item.conversationId === conversationId)
     if (!rec || source.accountId !== user.id) return
+    titleActivityRef.current.add(conversationId)
     mutatePersonalRuntime(rec, prev => ({
       ...prev,
       personal: applyConversationPersonalChange(prev.personal, { kind: "clear-draft", expectedRevision: revision }),
@@ -468,6 +473,19 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
   const onExecutionSessionTitleChange = useCallback((scope: LocalExecutionScope, title: string | undefined) => {
     if (!mountedRef.current) return
     const key = localExecutionKey(scope)
+    if (title) {
+      const previousAgentTitle = lastAgentTitleRef.current.get(key)
+      lastAgentTitleRef.current.set(key, title)
+      const rec = recordsRef.current.find(item => item.conversationId === scope.conversationId)
+      if (shouldPersistAgentTitle({
+        title,
+        previousAgentTitle,
+        hadActivity: titleActivityRef.current.has(scope.conversationId),
+        recordTitle: rec?.title,
+      })) {
+        void renameConversationRef.current?.(scope.conversationId, title).catch(() => {})
+      }
+    }
     setAgentTitles(prev => {
       if (!title) {
         if (!(key in prev)) return prev
@@ -705,6 +723,7 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
     }
     return null
   }, [localConversations])
+  renameConversationRef.current = renameConversation
 
   const chooseSessionDirectory = useCallback((conversationId: string) => {
     if (!localConversations) return

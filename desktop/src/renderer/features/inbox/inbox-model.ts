@@ -201,7 +201,7 @@ export function applyLocalExecutionNoticeToSignals(
   }
 
   if (notice.kind === "finished") {
-    if (notice.failure) {
+    if (notice.failure && !notice.cancelled) {
       return {
         ...signals,
         [id]: {

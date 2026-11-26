@@ -1475,6 +1475,7 @@ export function createLocalExecutionCoordinator(
               publish(login, {
                 ...source,
                 kind: "finished",
+                ...(turnStatus === "cancelled" ? { cancelled: true } : {}),
                 ...(turn.ephemeral ? { ephemeral: true } : {}),
                 ...(event.type === "completed" ? { runSummary: {
                   agentName,

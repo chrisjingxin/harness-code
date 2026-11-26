@@ -30,6 +30,7 @@ import {
   type PromptQueueView,
 } from "../../../shared/index.js"
 import { MAX_QUEUED_PROMPT_CHARS } from "../../../ui/conversation/annotations-codec.js"
+import { isToolCallMarkupTitle } from "./session-model.js"
 import type { LocalSessionExecutionPort, SessionExecutionScope } from "./contracts.js"
 import { toConversationInteraction } from "./elicitation-form.js"
 import {
@@ -173,7 +174,8 @@ export function useLocalExecution(
   ): void {
     screen.timeline = applyLocalExecutionUpdate(screen.timeline, { kind: "session-state", state })
     const title = state.connected ? state.sessionTitle?.trim() : undefined
-    current.current.onSessionTitleChange?.(scope, title || undefined)
+    const usableTitle = title && isToolCallMarkupTitle(title) ? undefined : title || undefined
+    current.current.onSessionTitleChange?.(scope, usableTitle)
   }
 
   function applyElicitationNotice(

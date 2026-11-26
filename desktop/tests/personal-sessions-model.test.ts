@@ -18,6 +18,7 @@ import {
   projectLocalConversationHistory,
   partitionPersonalRecords,
   resolvePublishTargets,
+  shouldPersistAgentTitle,
   type PersonalRuntimeState,
 } from "../src/renderer/features/personal-sessions/personal-sessions-model.ts"
 import { EMPTY_PERSONAL_STATE, applyConversationPersonalChange } from "../src/renderer/features/session/session-model.ts"
@@ -326,4 +327,49 @@ test("Project 本人本机终态保留失败与停止，按实际正文配对成
   const beforeLive = projectLocalConversationHistory([], turns.slice(0, 2), owner, live)
   assert.ok(beforeLive.some(entry => entry.id === "local-turn:failed:user"))
   assert.ok(!beforeLive.some(entry => entry.id === "local-turn:cancelled:user"))
+})
+
+test("shouldPersistAgentTitle 只在本次运行内用户活动后的真实变化时落库", () => {
+  // 恢复重放且无本机活动：不落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "整理账单",
+    previousAgentTitle: undefined,
+    hadActivity: false,
+    recordTitle: "整理账单",
+  }), false)
+  // 受理后首个自动标题：落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "整理账单",
+    previousAgentTitle: undefined,
+    hadActivity: true,
+    recordTitle: "新会话",
+  }), true)
+  // 活动后 /title 从 A 改为 B：落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "新名字",
+    previousAgentTitle: "旧名字",
+    hadActivity: true,
+    recordTitle: "旧名字",
+  }), true)
+  // 重复同一标题：不落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "整理账单",
+    previousAgentTitle: "整理账单",
+    hadActivity: true,
+    recordTitle: "旧名字",
+  }), false)
+  // 与本地记录标题一致：不落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "整理账单",
+    previousAgentTitle: "旧名字",
+    hadActivity: true,
+    recordTitle: "整理账单",
+  }), false)
+  // 无本地记录：不落库
+  assert.equal(shouldPersistAgentTitle({
+    title: "整理账单",
+    previousAgentTitle: undefined,
+    hadActivity: true,
+    recordTitle: undefined,
+  }), false)
 })

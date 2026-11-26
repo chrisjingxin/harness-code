@@ -302,6 +302,13 @@ export function directoryBasename(directoryPath: string | null): string {
   return parts.at(-1) || directoryPath
 }
 
+/** 部分 ACP Agent 会把伪工具调用标记误报为会话标题，命中即整条丢弃。 */
+const TOOL_CALL_MARKUP_TITLE_RE = /<\s*\/?\s*(tool_call|tool_use|function_call|invoke)\b|^\s*[{[]\s*"(?:name|tool|function)"\s*:/i
+
+export function isToolCallMarkupTitle(title: string): boolean {
+  return TOOL_CALL_MARKUP_TITLE_RE.test(title)
+}
+
 /** 本机手动标题优先于当前 Agent 建议与服务端登记标题。 */
 export function resolveConversationTitle(conversationTitle: string, sessionTitle?: string | null, customTitle?: string): string {
   return customTitle?.trim() || sessionTitle?.trim() || conversationTitle.trim() || "未命名会话"
