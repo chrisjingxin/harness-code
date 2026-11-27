@@ -632,8 +632,6 @@
   padding: 20px;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong, var(--line-strong)) transparent;
 }
 .collaboration-modal-scroll:has(> .desktop-settings) {
   display: flex;

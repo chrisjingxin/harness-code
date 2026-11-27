@@ -80,7 +80,6 @@
 .project-file-tree {
   min-height: 0; flex: 1; overflow: auto; padding: 0; outline: none;
   display: flex; flex-direction: column; gap: 1px;
-  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
 }
 .project-file-tree:focus-visible { outline: none; box-shadow: var(--focus-ring-field); }
 .project-file-row {
@@ -113,7 +112,7 @@
 .project-file-tabs {
   flex: 0 0 auto; min-width: 0; display: flex; align-items: stretch; gap: 2px;
   overflow-x: auto; padding: 4px 8px 0;
-  box-shadow: inset 0 -1px 0 var(--line-soft); scrollbar-width: thin;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
 }
 .project-file-tab {
   min-height: 30px; max-width: 190px; flex: 0 0 auto;
@@ -167,11 +166,11 @@
 .project-file-code-view {
   position: relative;
   flex: 1; min-height: 0; display: flex; overflow: auto;
-  background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  background: var(--surface);
 }
 .project-file-markdown-view {
   flex: 1; min-height: 0; overflow: auto; padding: 20px 24px;
-  background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  background: var(--surface);
 }
 .project-file-markdown-view > .markdown { max-width: 860px; margin: 0 auto; }
 .project-file-code-meta, .project-file-code-error { display: block; padding: 14px; }
@@ -301,7 +300,7 @@
 .project-git-sel-clear:hover { background: var(--hover); color: var(--text); }
 .project-git-panel input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
 
-.project-git-review { flex: 1 1 auto; min-height: min(100px, 25%); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.project-git-review { flex: 1 1 auto; min-height: min(100px, 25%); overflow: auto; }
 .project-git-files { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px 10px; }
 
 .project-git-file {
@@ -358,7 +357,7 @@
 .project-git-dir-name { font-weight: 500; color: var(--text-soft); }
 .project-git-dir-count { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--subtle); font-variant-numeric: tabular-nums; flex: none; }
 
-.project-git-diff { max-height: min(340px, 36dvh); min-height: 100px; overflow: auto; box-shadow: inset 0 1px 0 var(--line); background: var(--surface); scrollbar-width: thin; }
+.project-git-diff { max-height: min(340px, 36dvh); min-height: 100px; overflow: auto; box-shadow: inset 0 1px 0 var(--line); background: var(--surface); }
 .project-git-diff-title { display: flex; align-items: center; gap: 7px; padding: 8px 12px; box-shadow: inset 0 -1px 0 var(--line-soft); background: var(--field-bg); color: var(--text-soft); font-size: var(--text-xs); }
 .project-git-diff-title > svg { flex-shrink: 0; }
 .project-git-diff-title > span:first-of-type { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }

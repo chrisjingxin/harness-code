@@ -15,13 +15,6 @@
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  scrollbar-gutter: stable;
-}
-.wb-conversation-scroll:hover,
-.wb-conversation-scroll:focus-within {
-  scrollbar-color: var(--border-strong) transparent;
 }
 .wb-conversation-timeline { display: flex; flex-direction: column; min-height: 100%; padding: 12px 0 14px; }
 .wb-conversation-empty { margin: auto; max-width: 520px; color: var(--subtle); text-align: center; transform: translateY(48px); }
@@ -170,7 +163,7 @@ button.wb-conversation-tool-group-header[aria-disabled="true"] { cursor: default
 .wb-conversation-tool-group-progress { color: var(--muted); }
 .wb-conversation-tool-group-failures { color: var(--danger-text); }
 .wb-conversation-tool-group-header .wb-conversation-chevron { margin-left: auto; }
-.wb-conversation-tool-group-body { margin: 0 0 4px 6.25px; padding: 2px 0 2px 8px; border-left: 1.5px solid var(--border); max-height: min(18rem, 50vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.wb-conversation-tool-group-body { margin: 0 0 4px 6.25px; padding: 2px 0 2px 8px; border-left: 1.5px solid var(--border); max-height: min(18rem, 50vh); overflow-y: auto; overscroll-behavior: contain; }
 .wb-conversation-tool-group-body[data-fade-top="true"][data-fade-bottom="true"] { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
 .wb-conversation-tool-group-body[data-fade-top="true"]:not([data-fade-bottom="true"]) { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px); mask-image: linear-gradient(to bottom, transparent, #000 16px); }
 .wb-conversation-tool-group-body[data-fade-bottom="true"]:not([data-fade-top="true"]) { -webkit-mask-image: linear-gradient(to top, transparent, #000 16px); mask-image: linear-gradient(to top, transparent, #000 16px); }
@@ -243,7 +236,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 
 /* 锚定刻度：细横线贴在会话列左侧，悬停或聚焦放大并浮出提问预览；窄容器与触屏下整条隐藏。 */
 .wb-conversation-minimap { position: absolute; left: 18px; top: 50%; z-index: 3; display: none; max-height: 60%; transform: translateY(-50%); }
-.wb-conversation-minimap-track { display: flex; flex-direction: column; width: 24px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.wb-conversation-minimap-track { display: flex; flex-direction: column; width: 24px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .wb-conversation-minimap-tick { display: flex; align-items: center; justify-content: flex-end; width: 24px; height: 14px; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .wb-conversation-minimap-tick::after { content: ""; display: block; width: 12px; height: 2.5px; border-radius: 2px; background: var(--meta); opacity: .55; transition: width var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard); }
 .wb-conversation-minimap-tick:hover::after,
@@ -554,13 +547,9 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   pointer-events: none;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
   color: var(--fg, var(--text));
   user-select: none;
 }
-.wb-composer-backdrop::-webkit-scrollbar { background: transparent; }
-.wb-composer-backdrop::-webkit-scrollbar-thumb { background: transparent; }
 .wb-composer-inline-command {
   padding: 1px 0;
   margin: 0;
@@ -592,8 +581,6 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   resize: none;
   background: transparent;
   color: var(--fg, var(--text));
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
 }
 .wb-composer-editor[data-highlighted="true"] .wb-composer-textarea {
   color: transparent;
@@ -756,7 +743,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-context-menu-badge[data-tone="danger"] { color: var(--danger); }
 
 .wb-command-menu, .wb-mention-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 4px); z-index: 20; margin: 0; padding: 6px; border: 1px solid var(--border, var(--line)); border-radius: 14px; background: var(--surface); box-shadow: var(--elev-pop); }
-.wb-command-menu { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.wb-command-menu { max-height: 260px; overflow-y: auto; }
 .wb-composer-menu-empty { margin: 8px; color: var(--muted); font-size: var(--text-sm, 12.5px); }
 .wb-command-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: center; gap: 8px; width: 100%; min-height: var(--control-standard); padding: 6px 8px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--fg, var(--text)); text-align: left; cursor: pointer; font-family: var(--font-mono); font-size: var(--text-xs, 12px); }
 .wb-command-item:hover, .wb-command-item[data-selected="true"] { background: var(--selected); }
@@ -923,7 +910,6 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   max-height: min(46vh, 380px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
   padding: 15px;
   border: none;
   border-radius: var(--radius-lg, 12px);
@@ -948,7 +934,7 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
 .wb-interaction-deadline.is-expired { color: var(--danger-text); }
 .wb-interaction-description { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wb-interaction-preview, .wb-interaction-extension { min-width: 0; overflow-wrap: anywhere; }
-.wb-interaction-preview { max-height: 168px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); padding-top: 6px; scrollbar-width: thin; }
+.wb-interaction-preview { max-height: 168px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); padding-top: 6px; }
 .wb-interaction-preview:has(.session-plan-elicitation-preview) { max-height: min(36vh, 300px); padding: 0; background: var(--surface); }
 .wb-interaction-approval-options { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .wb-interaction-option, .wb-interaction-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control-compact); padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text-soft); font-size: 13px; cursor: pointer; }
@@ -1192,7 +1178,6 @@ button.wb-conversation-process-header[aria-disabled="true"] { cursor: default; }
   line-height: 1.5;
   resize: vertical;
   outline: none;
-  scrollbar-width: thin;
 }
 .wb-composer-quote-field textarea:focus {
   border-color: var(--accent);

@@ -68,7 +68,9 @@
 :root[data-density="standard"] { --pad-stage: 24px; --gap-list: 4px; }
 :root[data-density="wide"] { --pad-stage: 32px; --gap-list: 6px; }
 
-*, *::before, *::after { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* 统一隐藏全部滚动条（仍保留滚动行为）；各组件不再单独声明滚动条样式。 */
+*, *::before, *::after { box-sizing: border-box; scrollbar-width: none; }
+::-webkit-scrollbar { display: none; }
 body { margin: 0; }
 h1, h2, h3, h4 { margin: 0; font-family: var(--font-display); line-height: var(--leading-tight); font-weight: 600; letter-spacing: 0; text-wrap: balance; }
 p { margin: 0; text-wrap: pretty; }
