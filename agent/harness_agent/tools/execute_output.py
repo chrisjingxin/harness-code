@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import sys
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -37,11 +38,31 @@ DEFAULT_MAX_LINE_CHARS = 500
 
 _SAFE_ID_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 _VIRTUAL_TOOL_OUTPUT_PREFIX = "/.harness/tool-outputs"
-_EXECUTE_DESCRIPTION_HINT = (
-    "\n注意：命令默认已在当前工作区根目录执行，不要写 cd <workspace>；"
-    "超长输出会自动头尾折叠并保存完整日志到 /.harness/tool-outputs/...，"
-    "请直接运行命令本身，不要在命令尾拼接 | tail 或 | grep 截断后反复重跑。"
-)
+
+
+def _runtime_shell_label(platform: str | None = None) -> str:
+    """返回当前宿主平台与默认 Shell 标识，供模型避免跨平台命令试错。"""
+    host = (platform if platform is not None else sys.platform).lower()
+    if host == "darwin":
+        return "macOS（/bin/sh）"
+    if host.startswith("linux"):
+        return "Linux（/bin/sh）"
+    if host == "win32":
+        return "Windows（cmd）"
+    return f"{host}（/bin/sh）"
+
+
+def build_execute_description_hint(platform: str | None = None) -> str:
+    """构造进程内恒定的 ``execute`` 工具提示，包含 OS/Shell 与防截断约束。"""
+    env_label = _runtime_shell_label(platform)
+    return (
+        f"\n注意：命令运行在 {env_label}，默认已在当前工作区根目录执行，不要写 cd <workspace>；"
+        "超长输出会自动头尾折叠并保存完整日志到 /.harness/tool-outputs/...，"
+        "请信任自动折叠直接运行命令本身，避免使用 | head、| tail、| grep 或重定向截断后反复重跑。"
+    )
+
+
+_EXECUTE_DESCRIPTION_HINT = build_execute_description_hint()
 
 
 def _extract_text(content: object) -> str:
@@ -176,6 +197,7 @@ class ExecuteOutputMiddleware(AgentMiddleware):
         tail_lines: int = DEFAULT_TAIL_LINES,
         head_char_budget: int = DEFAULT_HEAD_CHAR_BUDGET,
         tail_char_budget: int = DEFAULT_TAIL_CHAR_BUDGET,
+        platform: str | None = None,
     ) -> None:
         super().__init__()
         self._backend = backend
@@ -184,6 +206,11 @@ class ExecuteOutputMiddleware(AgentMiddleware):
         self._tail_lines = tail_lines
         self._head_char_budget = head_char_budget
         self._tail_char_budget = tail_char_budget
+        self._description_hint = (
+            build_execute_description_hint(platform)
+            if platform is not None
+            else _EXECUTE_DESCRIPTION_HINT
+        )
 
     def wrap_model_call(
         self,
@@ -201,13 +228,12 @@ class ExecuteOutputMiddleware(AgentMiddleware):
         """异步注入 ``execute`` 工具说明。"""
         return await handler(self._with_execute_hint(request))
 
-    @staticmethod
-    def _with_execute_hint(request: ModelRequest) -> ModelRequest:
+    def _with_execute_hint(self, request: ModelRequest) -> ModelRequest:
         """在发给模型前为 ``execute`` 工具声明追加工作目录与输出折叠说明。"""
         tools = getattr(request, "tools", None)
         if not tools:
             return request
-        hint_marker = _EXECUTE_DESCRIPTION_HINT.strip()
+        hint_marker = self._description_hint.strip()
         updated_tools: list[Any] = []
         changed = False
         for tool in tools:
@@ -215,14 +241,14 @@ class ExecuteOutputMiddleware(AgentMiddleware):
                 desc = tool.description or ""
                 if hint_marker not in desc:
                     updated_tools.append(
-                        tool.model_copy(update={"description": f"{desc}{_EXECUTE_DESCRIPTION_HINT}"})
+                        tool.model_copy(update={"description": f"{desc}{self._description_hint}"})
                     )
                     changed = True
                     continue
             elif isinstance(tool, dict) and tool.get("name") == "execute":
                 desc = str(tool.get("description") or "")
                 if hint_marker not in desc:
-                    updated_tools.append({**tool, "description": f"{desc}{_EXECUTE_DESCRIPTION_HINT}"})
+                    updated_tools.append({**tool, "description": f"{desc}{self._description_hint}"})
                     changed = True
                     continue
             updated_tools.append(tool)

@@ -26,6 +26,7 @@ from harness_agent.tools.execute_output import (
     _EXECUTE_DESCRIPTION_HINT,
     DEFAULT_MAX_INLINE_CHARS,
     ExecuteOutputMiddleware,
+    build_execute_description_hint,
 )
 from harness_agent.tools.snapshot_file_contract import create_snapshot_file_tool_contract
 
@@ -323,3 +324,48 @@ async def test_create_harness_agent_exposes_execute_hint_in_model_tools(
     exec_tool = next(t for t in model.bound_batches[-1] if getattr(t, "name", None) == "execute")
     assert _EXECUTE_DESCRIPTION_HINT.strip() in exec_tool.description
     assert exec_tool.description.count(_EXECUTE_DESCRIPTION_HINT.strip()) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_execute_description_hint_includes_os_shell_and_no_truncation() -> None:
+    """build_execute_description_hint 需随宿主平台注入 OS/Shell 与防截断说明。"""
+    cases = (
+        ("darwin", "macOS（/bin/sh）"),
+        ("linux", "Linux（/bin/sh）"),
+        ("win32", "Windows（cmd）"),
+    )
+    for plat, label in cases:
+        hint = build_execute_description_hint(plat)
+        assert label in hint
+        assert "| head" in hint
+        assert "| tail" in hint
+        assert "| grep" in hint
+        assert "重定向截断" in hint
+
+    middleware = ExecuteOutputMiddleware(platform="darwin")
+    original_execute = StructuredTool.from_function(
+        func=lambda command: command,
+        name="execute",
+        description="Execute a shell command.",
+    )
+
+    class _FakeModelRequest:
+        def __init__(self, tools: list[Any]) -> None:
+            self.tools = tools
+
+        def override(self, **kwargs: Any) -> "_FakeModelRequest":
+            return _FakeModelRequest(list(kwargs["tools"]))
+
+    seen: list[list[Any]] = []
+
+    async def handler(req: Any) -> str:
+        seen.append(req.tools)
+        return "ok"
+
+    assert await middleware.awrap_model_call(_FakeModelRequest([original_execute]), handler) == "ok"  # type: ignore[arg-type]
+    assert await middleware.awrap_model_call(_FakeModelRequest(seen[0]), handler) == "ok"  # type: ignore[arg-type]
+    assert original_execute.description == "Execute a shell command."
+    for batch in seen:
+        desc = batch[0].description
+        assert "macOS（/bin/sh）" in desc
+        assert desc.count(build_execute_description_hint("darwin").strip()) == 1

@@ -628,3 +628,11 @@ api_key = "test"
     assert result["messages"][-1].content == "SMOKE_SUCCESS"
     executions = await registry.list(root)
     assert any(item.agent_id == "explore" and item.status is ExecutionStatus.COMPLETED for item in executions)
+
+
+def test_explore_prompt_declares_depth_tiers_and_readonly_constraints() -> None:
+    """EXPLORE_PROMPT 必须包含 Quick/Medium/Thorough 三档深度与只读约束。"""
+    from harness_agent.runtime.builtin_agents import EXPLORE_PROMPT
+
+    for token in ("Quick", "Medium", "Thorough", "只读代码搜索", "没有写文件、命令执行、网络访问、MCP"):
+        assert token in EXPLORE_PROMPT
