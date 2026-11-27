@@ -94,6 +94,12 @@ from harness_agent.tools.file_tools import (
     HARNESS_FILE_TOOL_NAMES,
     FileToolContractError,
 )
+from harness_agent.tools.outline import (
+    DEFAULT_OUTLINE_MAX_CHARS,
+    MAX_OUTLINE_MAX_CHARS,
+    extract_file_outline,
+    format_batch_outlines,
+)
 from harness_agent.tools.plan_file import is_plan_virtual_path
 from harness_agent.tools.snapshot_file_schema import (
     CanonicalDeleteFileSchema,
@@ -108,6 +114,7 @@ from harness_agent.tools.snapshot_file_schema import (
     optional_path_argument as _optional_path,
     edits_argument as _edits_argument,
     path_argument as _path,
+    paths_argument as _paths,
     positive_int_argument as _positive_int,
     require_canonical_argument_keys as _require_canonical_argument_keys,
     snapshot_id_argument as _snapshot_id,
@@ -203,6 +210,8 @@ class SnapshotFileToolContract:
                 return self._glob(request, args, tool_call_id)
             if name == "grep":
                 return self._grep(request, args, tool_call_id)
+            if name == "outline_files":
+                return self._outline_files(request, args, tool_call_id)
             raise FileToolContractError("FILE_TOOL_NAME_UNSUPPORTED")
         except Exception as exc:  # noqa: BLE001 - 工具边界不得泄露原始 backend 异常栈
             return self._error(
@@ -811,6 +820,34 @@ class SnapshotFileToolContract:
         return ToolMessage(
             content=str(truncate_if_too_long(format_grep_matches(result.matches or [], output_mode))),
             name="grep",
+            tool_call_id=tool_call_id,
+            status="success",
+        )
+
+    def _outline_files(
+        self, request: ToolCallRequest, args: dict[str, Any], tool_call_id: str
+    ) -> ToolMessage:
+        """批量提取多个文件的符号与行号大纲，不签发编辑 Snapshot。"""
+        paths = _paths(args, "paths", "outline_files")
+        raw_max_chars = args.get("max_chars", DEFAULT_OUTLINE_MAX_CHARS)
+        max_chars = _positive_int(raw_max_chars, "max_chars")
+        if max_chars < 1000 or max_chars > MAX_OUTLINE_MAX_CHARS:
+            raise FileToolContractError("OUTLINE_MAX_CHARS_INVALID")
+
+        entries: list[tuple[str, str]] = []
+        for path in paths:
+            try:
+                document = self._text_backend.read_text_document(path)
+                _require_mutation_size(document)
+                block = extract_file_outline(path, document.content)
+            except Exception as exc:  # noqa: BLE001 - 单文件失败隔离，不拖垮整批大纲
+                block = f"## Outline: {path}\n[error: {_error_code(exc)}]"
+            entries.append((path, block))
+
+        rendered, _omitted = format_batch_outlines(entries, max_chars=max_chars)
+        return ToolMessage(
+            content=rendered,
+            name="outline_files",
             tool_call_id=tool_call_id,
             status="success",
         )

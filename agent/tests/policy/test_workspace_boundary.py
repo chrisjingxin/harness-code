@@ -452,3 +452,72 @@ async def test_execution_context_workspace_is_used_when_cwd_is_omitted(tmp_path:
         pass
 
     assert destination.read_text(encoding="utf-8") == "ok"
+
+
+@pytest.mark.parametrize(
+    "bad_paths",
+    [
+        [],
+        ["/ok.py", "/../etc/passwd"],
+        ["/ok.py", "/"],
+        ["/ok.py", "/.harness/tool-outputs/a.txt"],
+        ["/ok.py", "/etc/passwd"],
+    ],
+)
+def test_outline_files_rejects_empty_virtual_root_or_escape_paths(
+    tmp_path: Path, bad_paths: list[str]
+):
+    """outline_files 列表中任意路径越界、指根目录或 /.harness 时整批拒绝。"""
+    middleware = WorkspaceBoundaryMiddleware(tmp_path)
+    invoked = False
+
+    def handler(_req: object) -> object:
+        nonlocal invoked
+        invoked = True
+        return SimpleNamespace(status="success")
+
+    request = SimpleNamespace(
+        tool_call={
+            "name": "outline_files",
+            "id": "batch-bad",
+            "args": {"paths": bad_paths},
+        }
+    )
+    result = middleware.wrap_tool_call(request, handler)
+    assert invoked is False
+    assert result.status == "error"
+
+
+def test_outline_files_rewrites_trusted_external_paths(tmp_path: Path):
+    """outline_files 对主工作区和已信任外部路径逐项校验并在执行前重写 backend 路径。"""
+    outside = tmp_path.parent / f"outline-ext-{tmp_path.name}"
+    outside.mkdir(exist_ok=True)
+    ext_file = outside / "lib.py"
+    ext_file.write_text("def ext():\n    pass\n", encoding="utf-8")
+    try:
+        middleware = WorkspaceBoundaryMiddleware(tmp_path, auto_trust_session=True)
+        raw_paths = ["/main.py", str(ext_file)]
+        request = SimpleNamespace(
+            tool_call={
+                "name": "outline_files",
+                "id": "batch-ext",
+                "args": {"paths": raw_paths},
+            }
+        )
+        assert middleware.allows_approval(request) is True
+        # allows_approval 不得原地污染 paths 列表
+        assert request.tool_call["args"]["paths"] == ["/main.py", str(ext_file)]
+
+        captured: dict[str, Any] = {}
+
+        def handler(req: object) -> object:
+            captured["paths"] = list(req.tool_call["args"]["paths"])
+            return SimpleNamespace(status="success")
+
+        result = middleware.wrap_tool_call(request, handler)
+        assert result.status == "success"
+        assert captured["paths"][0] == "/main.py"
+        assert captured["paths"][1].startswith("/@ext/")
+    finally:
+        ext_file.unlink(missing_ok=True)
+        outside.rmdir()

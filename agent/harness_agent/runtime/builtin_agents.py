@@ -27,7 +27,7 @@ FORCED_EXCLUSIONS: frozenset[str] = frozenset(
 """任何内置 child 都不可拥有的工具。"""
 
 EXPLORE_TOOL_ALLOWLIST: frozenset[str] = frozenset(
-    {"glob", "grep", "ls", "lsp", "read_file", "codebase_explore"}
+    {"glob", "grep", "ls", "lsp", "read_file", "outline_files", "codebase_explore"}
 )
 """explore 角色上限；还要和父能力、本机实现求交。"""
 
@@ -35,6 +35,7 @@ _MIDDLEWARE_INJECTED: frozenset[str] = frozenset(
     {
         "ls",
         "read_file",
+        "outline_files",
         "write_file",
         "edit_file",
         "delete_file",
@@ -53,7 +54,7 @@ GENERAL_PURPOSE_DESCRIPTION = (
 )
 
 EXPLORE_DESCRIPTION = (
-    "只读代码定位与结构调查子代理。只能使用 ls、read_file、glob、grep、lsp、codebase_explore。"
+    "只读代码定位与结构调查子代理。只能使用 ls、read_file、outline_files、glob、grep、lsp、codebase_explore。"
     "适合按文件名、符号或内容搜索，以及回答代码在哪、结构如何连接。"
     "需要改文件、执行命令、访问网络或向用户提问时不要用它。"
 )
@@ -72,7 +73,7 @@ GENERAL_PURPOSE_PROMPT = """你是主 Agent 派出的通用子代理，只完成
 
 EXPLORE_PROMPT = """你是只读代码搜索子代理。用尽可能少的上下文，给父 Agent 一份可交接的调查结果。
 
-你只能使用 ls、read_file、glob、grep、lsp、codebase_explore。没有写文件、命令执行、网络访问、MCP、Skill 目录或向用户提问的能力。只搜当前工作区和 AGENTS.md，不要按主 Agent 的工作流 Skill 行事。
+你只能使用 ls、read_file、outline_files、glob、grep、lsp、codebase_explore。没有写文件、命令执行、网络访问、MCP、Skill 目录或向用户提问的能力。只搜当前工作区和 AGENTS.md，不要按主 Agent 的工作流 Skill 行事。
 
 深度档位（默认 Medium，按父 Agent 任务自动匹配）：
 - **Quick**：点查 2～5 个关键文件或符号，拿到明确答案立即收口。
@@ -81,7 +82,7 @@ EXPLORE_PROMPT = """你是只读代码搜索子代理。用尽可能少的上下
 
 做法：
 - 这是一次短时聚焦调查，有严格的轮次与时间预算，拿到主干结构即可收敛交付。
-- 先用 glob、grep 或 lsp 定位，再按需 read_file（尽量带 offset/limit 读关键区间），不要整文件通读。
+- 先用 glob、grep 或 lsp 定位；面对多个未知文件或大文件时，先用 `outline_files` 一次批量获取符号与精确行号，再同一轮并行调用 `read_file(offset, limit)` 精确读关键区间，不要整文件通读。
 - 在同一轮尽量批量并行发出所有独立的定位与读取请求，减少无谓串行往返。
 - 第一次搜索落空时，换一种模式、路径或符号查询后即可定论；不要逐个盲读整个仓库。
 

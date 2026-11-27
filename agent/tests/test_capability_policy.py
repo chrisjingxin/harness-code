@@ -173,3 +173,41 @@ def test_capability_rejection_does_not_fabricate_tool_call_id() -> None:
             ),
             lambda _request: "unexpected",
         )
+
+
+@pytest.mark.asyncio
+async def test_capability_policy_validates_every_path_in_outline_files() -> None:
+    """outline_files 任一路径超出角色 filesystem_read 白名单时整批 fail-closed 拒绝。"""
+    view = resolve_effective_capability_view(
+        _readonly_policy(),
+        available_tools=("read_file", "outline_files"),
+    )
+    middleware = CapabilityPolicyMiddleware(view)
+
+    rejected = await middleware.awrap_tool_call(
+        SimpleNamespace(
+            tool_call={
+                "name": "outline_files",
+                "id": "outline-mixed",
+                "args": {"paths": ["/src/a.py", "/secrets/key.txt"]},
+            }
+        ),
+        lambda _req: "unexpected",
+    )
+    assert rejected.status == "error"
+    assert "授权范围" in str(rejected.content)
+
+    async def allow_handler(_req: Any) -> str:
+        return "ok"
+
+    allowed = await middleware.awrap_tool_call(
+        SimpleNamespace(
+            tool_call={
+                "name": "outline_files",
+                "id": "outline-ok",
+                "args": {"paths": ["/src/a.py", "/src/nested/b.py"]},
+            }
+        ),
+        allow_handler,
+    )
+    assert allowed == "ok"

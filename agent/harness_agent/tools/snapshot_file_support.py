@@ -252,6 +252,8 @@ def error_message(code: str) -> str:
         "INVALID_EDIT": "空 old_string 只允许单独初始化当前 Snapshot 对应的空文件。",
         "OVERLAPPING_EDITS": "edits 中有两处匹配到的文本区间重叠。",
         "TOO_MANY_EDITS": "edits 的项数超过单次调用上限，或该文件只允许单次修改。",
+        "TOO_MANY_OUTLINE_FILES": "outline_files 单次最多读取 20 个文件路径。",
+        "OUTLINE_MAX_CHARS_INVALID": "outline_files 的 max_chars 必须在 1000～24000 之间。",
         "EDIT_TEXT_TOO_LARGE": "edits 的单个字符串或总大小超过上限。",
         "VIRTUAL_READONLY": "虚拟文件只允许读取。",
         "FILE_TOOL_SCHEMA_INVALID": (

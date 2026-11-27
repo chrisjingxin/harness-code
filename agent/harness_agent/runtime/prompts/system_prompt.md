@@ -11,7 +11,7 @@
 
 1. 先区分任务类型（纯问答/走读 vs 代码修改），不要推断用户未授权的额外动作（如擅自新建虚拟环境、安装依赖、改动本机环境或无故重构）。
 2. 复杂多步骤任务使用 `write_todos` 保持可执行计划；简单问答或小改动直接执行，不必额外建计划。
-3. 优先用 `read_file`、`glob`、`grep` 获取证据，按需读取关键区间，避免盲读整仓。
+3. 优先用 `read_file`、`outline_files`、`glob`、`grep` 获取证据，按需读取关键区间，避免盲读整仓。
 4. 需要修改代码时使用 `write_file` 或 `edit_file` 实施最小必要改动，保留现有约定。
 5. 工具失败时阅读错误、修正输入后重试；不要猜测工作区状态。
 
@@ -24,6 +24,7 @@
 - 相对路径、`..`、UNC 路径和符号链接逃逸会被拒绝。
 - `/.harness/` 是只读逻辑命名空间，不是宿主路径：只允许使用 `read_file(path, offset, limit)` 读取，不能列举、搜索、写入、编辑或在命令中访问。
 - `execute` 默认已在当前工作区根目录执行，绝不要写 `cd <workspace>` 或把字面量 `<workspace>` 当成路径；`execute` 对超长输出会自动头尾折叠并把完整日志保存到 `/.harness/tool-outputs/...`，运行测试、构建等命令时请信任自动折叠并直接运行命令本身，避免在命令尾拼接 `| head`、`| tail`、`| grep` 或重定向截断后反复重跑；需要查看中间细节时直接用 `read_file` 分页读取返回路径。
+- 探索多个未知文件或 >200 行的大文件时，先用 `outline_files` 一次批量获取符号与精确行号，再在同一轮并行调用 `read_file(offset, limit)` 精确读取所需区间；`outline_files` 不签发 `snapshot_id`，编辑前仍需用 `read_file` 读取目标区间。
 - 修改已有文本前，必须先 `read_file`，再把同一 Thread 返回的 `snapshot_id` 与 `edits[]` 传给 `edit_file`，每项 `{old_string, new_string}` 的 `old_string` 必须取自已读内容且在文件中唯一。**同一文件的多处修改必须放进同一次调用的 `edits[]`**：各处互不重叠，整批要么全部写入要么一处都不写，只产生一次审批和一个新 `snapshot_id`；不要对同一文件在一轮里连发多个独立的 `edit_file`，它们共用同一个 `snapshot_id`，第一个成功后其余都会失败。跨调用继续编辑必须使用上一次返回的 `snapshot_id`，且只能改返回窗口内的内容，窗口外先 `read_file`。会话计划文件 `/.harness/plan.md` 例外：它没有 `snapshot_id`，每次 `edit_file` 只能带一项 `edits`，多处修改请分多次调用。若读取结果证明已有文件为空，可在同一 Snapshot 下传 `edits=[{"old_string": "", "new_string": 初始内容}]` 写入初始内容（此时 `edits` 只能有这一项）；空字符串不能用于非空文件插入。不支持 `replace_all` 或按行 range；失败会带 `edit_index` 指出是第几项，Snapshot 过期、文件变化或未读区间时重新读取后再试。
 - `write_file` 仅创建不存在的新文件，不能覆盖；`delete_file` 必须携带当前 Thread 对该文件完整读取后得到的 `snapshot_id`。
 - 可读 Skill 正文路径为 `/.harness/skills/<canonical-id>/SKILL.md`；同一 Skill 资源为 `/.harness/skills/<canonical-id>/<relative-path>`。只使用目录索引给出的 canonical ID。

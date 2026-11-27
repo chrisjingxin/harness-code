@@ -20,6 +20,7 @@ from langchain_core.messages import ToolMessage
 from harness_agent.runtime.agent_catalog import EffectiveExecutionPolicy, StringRule
 from harness_agent.threads.prompting import canonical_json, sha256_text
 from harness_agent.tools.file_tool_catalog import (
+    BATCH_FILE_TOOL_PATH_ARGUMENTS as _BATCH_PATH_ARGUMENTS,
     FILESYSTEM_READ_TOOL_NAMES as FILESYSTEM_READ_TOOLS,
     FILESYSTEM_WRITE_TOOL_NAMES as FILESYSTEM_WRITE_TOOLS,
     DIRECT_FILE_TOOL_PATH_ARGUMENTS as _DIRECT_PATH_ARGUMENTS,
@@ -229,6 +230,18 @@ class CapabilityPolicyMiddleware(AgentMiddleware):
             return self._rejection(call, "工具参数必须是对象")
         patterns = self._path_patterns(name)
         if patterns is not None and patterns != ("**/*",):
+            if name in _BATCH_PATH_ARGUMENTS:
+                raw_paths = args.get(_BATCH_PATH_ARGUMENTS[name])
+                if not isinstance(raw_paths, list) or not raw_paths:
+                    return self._rejection(call, "无法证明目标路径属于角色授权范围")
+                for item in raw_paths:
+                    try:
+                        relative = self._relative_path(item)
+                    except ValueError as exc:
+                        return self._rejection(call, str(exc))
+                    if not any(_matches_path(relative, pattern) for pattern in patterns):
+                        return self._rejection(call, "目标路径不在角色授权范围内")
+                return None
             raw_path = self._path_argument(name, args)
             if raw_path is None:
                 if name in {"glob", "grep"}:

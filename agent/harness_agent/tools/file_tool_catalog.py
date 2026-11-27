@@ -20,6 +20,7 @@ class FileToolSpec:
     handled_by_contract: bool = False
     resident: bool = False
     path_optional: bool = False
+    path_list: bool = False
 
     def schema_shape(self) -> dict[str, object]:
         """返回参与 AgentEngine fingerprint 的确定性 schema 形状。"""
@@ -88,6 +89,15 @@ FILE_TOOL_SPECS = (
         resident=True,
     ),
     FileToolSpec(
+        "outline_files",
+        (("paths", "array"), ("max_chars", "integer")),
+        "paths",
+        "read",
+        handled_by_contract=True,
+        resident=True,
+        path_list=True,
+    ),
+    FileToolSpec(
         "lsp",
         (
             ("action", "string"),
@@ -113,7 +123,12 @@ FILE_TOOL_PATH_ARGUMENTS = {
     spec.name: spec.path_argument for spec in FILE_TOOL_SPECS
 }
 DIRECT_FILE_TOOL_PATH_ARGUMENTS = {
-    spec.name: spec.path_argument for spec in FILE_TOOL_SPECS if not spec.path_optional
+    spec.name: spec.path_argument
+    for spec in FILE_TOOL_SPECS
+    if not spec.path_optional and not spec.path_list
+}
+BATCH_FILE_TOOL_PATH_ARGUMENTS = {
+    spec.name: spec.path_argument for spec in FILE_TOOL_SPECS if spec.path_list
 }
 BUILTIN_FILE_TOOL_NAMES = frozenset(
     spec.name for spec in FILE_TOOL_SPECS if spec.deepagents_builtin
@@ -128,6 +143,7 @@ FILE_TOOL_SCHEMA_SHAPES = tuple(spec.schema_shape() for spec in FILE_TOOL_SPECS)
 
 
 __all__ = [
+    "BATCH_FILE_TOOL_PATH_ARGUMENTS",
     "BUILTIN_FILE_TOOL_NAMES",
     "FILESYSTEM_READ_TOOL_NAMES",
     "FILESYSTEM_WRITE_TOOL_NAMES",

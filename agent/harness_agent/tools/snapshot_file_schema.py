@@ -10,6 +10,11 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from harness_agent.tools.file_tools import FileToolContractError
+from harness_agent.tools.outline import (
+    DEFAULT_OUTLINE_MAX_CHARS,
+    MAX_OUTLINE_FILES,
+    MAX_OUTLINE_MAX_CHARS,
+)
 from harness_agent.tools.plan_file import is_plan_virtual_path
 
 DEFAULT_READ_LIMIT = 100
@@ -86,11 +91,34 @@ class CanonicalDeleteFileSchema(BaseModel):
     snapshot_id: str = Field(description="由同一 Thread 完整 read_file 返回的 Snapshot ID。")
 
 
+class CanonicalOutlineFilesSchema(BaseModel):
+    """批量提取多文件结构大纲与行号范围的参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paths: list[str] = Field(
+        min_length=1,
+        max_length=MAX_OUTLINE_FILES,
+        description=(
+            f"以 / 开头、相对于工作区根目录的文件路径列表，一次最多 {MAX_OUTLINE_FILES} 个。"
+        ),
+    )
+    max_chars: int = Field(
+        default=DEFAULT_OUTLINE_MAX_CHARS,
+        ge=1000,
+        le=MAX_OUTLINE_MAX_CHARS,
+        description=(
+            f"返回文本最大字符数（1000～{MAX_OUTLINE_MAX_CHARS}，默认 {DEFAULT_OUTLINE_MAX_CHARS}）。"
+        ),
+    )
+
+
 _CANONICAL_SCHEMAS = {
     "read_file": CanonicalReadFileSchema,
     "write_file": CanonicalWriteFileSchema,
     "edit_file": CanonicalEditFileSchema,
     "delete_file": CanonicalDeleteFileSchema,
+    "outline_files": CanonicalOutlineFilesSchema,
 }
 _CANONICAL_ARGUMENT_KEYS = {
     name: frozenset(schema.model_fields) for name, schema in _CANONICAL_SCHEMAS.items()
@@ -123,6 +151,14 @@ def create_file_tool_definitions() -> tuple[BaseTool, ...]:
             "delete_file",
             "仅删除同一 Thread 已完整读取且 Snapshot 仍为当前版本的文件。",
             CanonicalDeleteFileSchema,
+        ),
+        (
+            "outline_files",
+            (
+                "批量提取多个文件的类、函数、类型与标题行号范围，适合先快速定位再并行 "
+                "read_file(offset, limit)；不签发 snapshot_id，编辑前仍需调用 read_file。"
+            ),
+            CanonicalOutlineFilesSchema,
         ),
     )
     return tuple(
@@ -161,6 +197,31 @@ def path_argument(args: dict[str, Any], field: str, name: str) -> str:
             return path
         raise FileToolContractError("VIRTUAL_READONLY")
     return path
+
+
+def paths_argument(args: dict[str, Any], field: str, name: str) -> list[str]:
+    """校验批量文件工具路径列表，禁止 /.harness 并按首次出现顺序去重。"""
+    raw = args.get(field)
+    if not isinstance(raw, list) or not raw:
+        raise FileToolContractError("FILE_TOOL_PATH_INVALID")
+    if len(raw) > MAX_OUTLINE_FILES:
+        raise FileToolContractError("TOO_MANY_OUTLINE_FILES")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            raise FileToolContractError("FILE_TOOL_PATH_INVALID")
+        try:
+            path = validate_path(item)
+        except ValueError as exc:
+            raise FileToolContractError("FILE_TOOL_PATH_INVALID") from exc
+        if is_harness_virtual_path(path):
+            raise FileToolContractError("VIRTUAL_READONLY")
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
 
 
 def optional_path_argument(args: dict[str, Any], field: str, name: str) -> str | None:
@@ -237,6 +298,7 @@ def is_harness_virtual_path(path: str) -> bool:
 __all__ = [
     "CanonicalDeleteFileSchema",
     "CanonicalEditFileSchema",
+    "CanonicalOutlineFilesSchema",
     "CanonicalReadFileSchema",
     "CanonicalWriteFileSchema",
     "DEFAULT_READ_LIMIT",
@@ -249,6 +311,7 @@ __all__ = [
     "non_negative_int_argument",
     "optional_path_argument",
     "path_argument",
+    "paths_argument",
     "positive_int_argument",
     "require_canonical_argument_keys",
     "snapshot_id_argument",

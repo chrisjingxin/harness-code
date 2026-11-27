@@ -28,6 +28,7 @@ from acp.schema import ToolCallLocation, ToolKind
 
 from harness_agent.policy.tool_risk import TOOL_KIND_MAP
 from harness_agent.tools.file_tool_catalog import (
+    BATCH_FILE_TOOL_PATH_ARGUMENTS,
     DIRECT_FILE_TOOL_PATH_ARGUMENTS,
     FILE_TOOL_PATH_ARGUMENTS,
 )
@@ -51,6 +52,7 @@ _TITLE_ARGUMENT_BY_TOOL: dict[str, str] = {
 ACP_KIND_BY_TOOL: Mapping[str, ToolKind] = {
     # 读
     "read_file": "read",
+    "outline_files": "read",
     "ls": "read",
     "lsp": "read",
     "codebase_explore": "read",
@@ -91,6 +93,13 @@ def tool_title(name: str, args: Mapping[str, object] | None) -> str:
     """
     raw: object | None = None
     if args:
+        if name in BATCH_FILE_TOOL_PATH_ARGUMENTS:
+            batch_raw = args.get(BATCH_FILE_TOOL_PATH_ARGUMENTS[name])
+            if isinstance(batch_raw, list):
+                valid = [item for item in batch_raw if isinstance(item, str) and item]
+                if valid:
+                    suffix = f" (+{len(valid) - 1})" if len(valid) > 1 else ""
+                    return sanitize_line(f"{name} {valid[0]}{suffix}")
         # 专用参数表优先：`grep`/`glob` 在文件工具表里也有 `path`，但标题要用 `pattern`。
         argument_name = _TITLE_ARGUMENT_BY_TOOL.get(name) or FILE_TOOL_PATH_ARGUMENTS.get(name)
         if argument_name is not None:
@@ -154,8 +163,22 @@ class PathLocator:
 
     def locations(self, name: str, args: Mapping[str, object] | None) -> list[ToolCallLocation]:
         """返回文件位置列表；无法确定时返回空列表，绝不抛异常。"""
+        if not args:
+            return []
+        if name in BATCH_FILE_TOOL_PATH_ARGUMENTS:
+            raw_list = args.get(BATCH_FILE_TOOL_PATH_ARGUMENTS[name])
+            if not isinstance(raw_list, list):
+                return []
+            locations: list[ToolCallLocation] = []
+            seen: set[str] = set()
+            for item in raw_list:
+                resolved = self._resolve(item, tool_name=name)
+                if resolved and resolved not in seen:
+                    seen.add(resolved)
+                    locations.append(ToolCallLocation(path=resolved))
+            return locations
         argument_name = DIRECT_FILE_TOOL_PATH_ARGUMENTS.get(name)
-        if argument_name is None or not args:
+        if argument_name is None:
             return []
         raw = args.get(argument_name)
         resolved = self._resolve(raw, tool_name=name)

@@ -27,6 +27,7 @@ TOOL_KIND_MAP: dict[str, ToolKind] = {
     "web_search": ToolKind.READ,
     "lsp": ToolKind.READ,
     "codebase_explore": ToolKind.READ,
+    "outline_files": ToolKind.READ,
     "tool_search": ToolKind.READ,
     "memory_search": ToolKind.READ,
     # EDIT

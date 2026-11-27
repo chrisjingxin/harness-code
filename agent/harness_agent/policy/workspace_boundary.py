@@ -22,13 +22,17 @@ from harness_agent.policy.workspace_roots import (
     TrustCandidate,
     WorkspaceRootRegistry,
 )
-from harness_agent.tools.file_tool_catalog import DIRECT_FILE_TOOL_PATH_ARGUMENTS
+from harness_agent.tools.file_tool_catalog import (
+    BATCH_FILE_TOOL_PATH_ARGUMENTS,
+    DIRECT_FILE_TOOL_PATH_ARGUMENTS,
+)
 from harness_agent.tools.plan_file import is_plan_virtual_path
 
 _DIRECT_PATH_ARGUMENTS = DIRECT_FILE_TOOL_PATH_ARGUMENTS
+_BATCH_PATH_ARGUMENTS = BATCH_FILE_TOOL_PATH_ARGUMENTS
 _SEARCH_TOOLS = frozenset({"glob", "grep"})
 _VIRTUAL_ROOT = "/.harness"
-_READ_TOOLS = frozenset({"ls", "read_file", "glob", "grep"})
+_READ_TOOLS = frozenset({"ls", "read_file", "glob", "grep", "outline_files"})
 
 
 class WorkspacePathPolicy:
@@ -180,6 +184,28 @@ class WorkspaceBoundaryMiddleware(AgentMiddleware[dict[str, Any], ContextT, Resp
                     )
                     if backend_path is not None and rewrite_backend_path:
                         args[field] = backend_path
+            elif tool_name in _BATCH_PATH_ARGUMENTS:
+                field = _BATCH_PATH_ARGUMENTS[tool_name]
+                raw_paths = args.get(field)
+                if not isinstance(raw_paths, list) or not raw_paths:
+                    raise ValueError(f"{field} 必须是非空文件路径列表")
+                rewritten: list[str] = []
+                for item in raw_paths:
+                    if _is_virtual_path(item):
+                        raise ValueError("/.harness 仅允许通过 read_file 只读分页访问")
+                    if item == "/":
+                        raise ValueError("文件路径不能是根目录")
+                    backend_path = self._resolve_path_arg(
+                        item,
+                        tool_name=tool_name,
+                        field=field,
+                        request=request,
+                        pending_trust=pending_trust,
+                        run_id=run_id,
+                    )
+                    rewritten.append(backend_path if backend_path is not None else str(item))
+                if rewrite_backend_path:
+                    args[field] = rewritten
             elif tool_name in _SEARCH_TOOLS:
                 if args.get("path") is not None:
                     backend_path = self._resolve_path_arg(

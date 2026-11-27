@@ -149,3 +149,21 @@ class TestPathLocator:
     def test_locator_never_raises_on_weird_input(self, tmp_path: Path) -> None:
         """展示逻辑绝不能抛异常打断事件流。"""
         assert PathLocator(primary_path_resolver(tmp_path)).locations("read_file", None) == []
+
+    def test_outline_files_kind_title_and_multi_locations(self, tmp_path: Path) -> None:
+        """outline_files 映射到 read，展示首路径与附加计数，并解析全部有效位置。"""
+        assert tool_kind("outline_files") == "read"
+        assert tool_title("outline_files", {"paths": ["/src/a.py"]}) == "outline_files /src/a.py"
+        assert (
+            tool_title("outline_files", {"paths": ["/src/a.py", "/src/b.py", "/src/c.py"]})
+            == "outline_files /src/a.py (+2)"
+        )
+        locator = PathLocator(primary_path_resolver(tmp_path))
+        locs = locator.locations(
+            "outline_files",
+            {"paths": ["/src/a.py", "/etc/passwd", "/src/a.py", "/src/b.py"]},
+        )
+        assert [loc.path for loc in locs] == [
+            str(tmp_path / "src" / "a.py"),
+            str(tmp_path / "src" / "b.py"),
+        ]
