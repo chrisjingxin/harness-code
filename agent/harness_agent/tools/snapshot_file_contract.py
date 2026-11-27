@@ -268,9 +268,11 @@ class SnapshotFileToolContract:
         """
         path = _path(args, "file_path", "read_file")
         offset = _non_negative_int(args.get("offset", 0), "offset")
-        limit = _positive_int(args.get("limit", DEFAULT_READ_LIMIT), "limit")
-        if limit > MAX_READ_LIMIT:
-            raise FileToolContractError("READ_LIMIT_EXCEEDED")
+        requested_limit = _positive_int(args.get("limit", DEFAULT_READ_LIMIT), "limit")
+        # 模型常按 outline 行数传入 >200 的 limit；运行时自动截齐至 MAX_READ_LIMIT，
+        # 既避免无意义的失败重试，又保证 seen_range 只记录实际渲染行。
+        limit_clamped = requested_limit > MAX_READ_LIMIT
+        limit = min(requested_limit, MAX_READ_LIMIT)
         if _is_virtual(path):
             return self._read_virtual(request, path, offset, limit, tool_call_id)
         if Path(path).suffix.lower() == ".ipynb":
@@ -297,6 +299,15 @@ class SnapshotFileToolContract:
             "content": rendered,
             "truncated": context_truncated,
         }
+        if (
+            limit_clamped
+            and not context_truncated
+            and offset + shown_count < record.line_count
+        ):
+            payload["notice"] = (
+                f"单次 read_file 最多返回 {MAX_READ_LIMIT} 行，已自动截齐至 {MAX_READ_LIMIT} 行；"
+                f"如需继续查看后续内容，请设置 offset={offset + shown_count}。"
+            )
         # 读大文件首页且未覆盖全文时附带精简结构大纲，不扩大可编辑 seen_range。
         if (
             offset == 0

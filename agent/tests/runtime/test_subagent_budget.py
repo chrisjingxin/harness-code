@@ -106,10 +106,11 @@ def _make_context(
 
 
 def test_subagent_budget_round_and_deadline_phases() -> None:
-    """explore 默认 15 轮、通用默认 30 轮，且时间窗口从第 2 轮起生效。"""
+    """explore 默认 8 轮、通用默认 30 轮，且时间窗口从第 2 轮起生效。"""
+    assert DEFAULT_EXPLORE_MAX_ROUNDS == 8
     assert default_max_rounds_for("explore") == DEFAULT_EXPLORE_MAX_ROUNDS
     assert default_max_rounds_for("general-purpose") == DEFAULT_SUBAGENT_MAX_ROUNDS
-    assert default_max_rounds_for("explore", 8) == 8
+    assert default_max_rounds_for("explore", 12) == 12
 
     now = 100.0
     budget = SubagentBudget.for_delegation(
@@ -449,9 +450,53 @@ async def test_subagent_budget_blocks_read_file_before_harness_file_tools_middle
     assert len(tool_msgs) == 2
     assert "HELLO_BUDGET_CHECK" in str(tool_msgs[0].content)
     assert tool_msgs[0].status != "error"
-    assert tool_msgs[1].status == "error"
+    assert tool_msgs[1].status == "success"
     assert "已达到子代理轮次/时间预算上限" in str(tool_msgs[1].content)
     assert "HELLO_BUDGET_CHECK" not in str(tool_msgs[1].content)
     assert len(model.received) == 3
     round2_text = "\n".join(str(getattr(m, "content", "")) for m in model.received[1])
     assert "【预算已达上限】" in round2_text
+
+
+def test_subagent_budget_stop_does_not_mark_tool_failed_in_stream_or_acp(tmp_path: Path) -> None:
+    """预算刹停返回的跳过提示经执行流与 ACP 翻译后为 completed，不在 UI 显红。"""
+    from harness_agent.host.acp.tool_display import PathLocator
+    from harness_agent.host.acp.translate import RunTranslator
+    from harness_agent.runtime.execution_stream import StreamSession, translate_stream_event
+    from harness_agent.runtime.subagent_budget import _blocked_tool_message
+    from tests.support.acp_harness import primary_path_resolver
+
+    blocked = _blocked_tool_message(
+        SimpleNamespace(tool_call={"id": "call_budget_stop", "name": "read_file"})  # type: ignore[arg-type]
+    )
+    assert blocked.status == "success"
+
+    session = StreamSession(run_id="r-budget")
+    start_chunk = AIMessageChunk(
+        content="",
+        tool_call_chunks=[{"id": "call_budget_stop", "name": "read_file", "args": "{}", "index": 0}],
+    )
+    start_signals = list(translate_stream_event(("messages", (start_chunk, {})), session))
+    end_signals = list(translate_stream_event(("updates", {"tools": {"messages": [blocked]}}), session))
+    completed = [sig for sig in end_signals if sig.type == "tool.completed"]
+    assert len(completed) == 1
+    assert completed[0].payload["result"]["is_error"] is False
+
+    translator = RunTranslator("r-budget", PathLocator(primary_path_resolver(tmp_path)))
+    updates = []
+    for sig in [*start_signals, *completed]:
+        res = translator.feed(
+            {
+                "event_id": f"e-{sig.type}",
+                "type": sig.type,
+                "thread_id": "t1",
+                "run_id": "r-budget",
+                "sequence": 1,
+                "timestamp_ms": 0,
+                "execution_id": "root-r-budget",
+                "agent_id": "main",
+                "payload": sig.payload,
+            }
+        )
+        updates.extend(res.updates)
+    assert updates[-1].status == "completed"

@@ -21,7 +21,8 @@ from langchain.agents.middleware.types import (
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import SystemMessage, ToolMessage
 
-DEFAULT_EXPLORE_MAX_ROUNDS = 15
+DEFAULT_EXPLORE_MAX_ROUNDS = 8
+"""explore 子代理默认最大轮次：第 7 轮预警，第 8 轮强制收口交卷。"""
 DEFAULT_SUBAGENT_MAX_ROUNDS = 30
 DEFAULT_WRAP_UP_WINDOW_SECONDS = 30.0
 
@@ -162,11 +163,13 @@ def _apply_budget_prompt(
 
 def _blocked_tool_message(request: ToolCallRequest) -> ToolMessage:
     tool_call = request.tool_call if isinstance(request.tool_call, dict) else {}
+    # 预算达限属于正常的收敛保护而非工具执行异常，因此保持 status="success"，
+    # 避免 execution_stream / ACP / 桌面端 UI 将刹停卡片误标红为“失败”。
     return ToolMessage(
-        content="已达到子代理轮次/时间预算上限，工具调用已停止。请勿再调用工具，立即基于已有证据输出最终摘要回复。",
+        content="已达到子代理轮次/时间预算上限，本次工具调用已跳过。请勿再调用工具，立即基于已有证据输出最终摘要回复。",
         tool_call_id=str(tool_call.get("id") or ""),
         name=str(tool_call.get("name") or ""),
-        status="error",
+        status="success",
     )
 
 

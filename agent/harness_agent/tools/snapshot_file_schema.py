@@ -38,7 +38,7 @@ class CanonicalReadFileSchema(BaseModel):
         default=DEFAULT_READ_LIMIT,
         ge=1,
         le=MAX_READ_LIMIT,
-        description=f"读取的最大源行数，最多 {MAX_READ_LIMIT} 行。",
+        description=f"读取的最大源行数，最多 {MAX_READ_LIMIT} 行（超出上限时自动按 {MAX_READ_LIMIT} 行截齐返回）。",
     )
 
 

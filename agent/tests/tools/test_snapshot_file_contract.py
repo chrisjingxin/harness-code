@@ -1769,3 +1769,61 @@ def test_file_diff_full_text_drops_both_keys_over_limit(tmp_path: Path) -> None:
     just = "a" * 262144
     p = _file_diff_details(tmp_path, "write_file", {"content": just})
     assert p["new_text"] == just
+
+
+def test_read_file_clamps_oversized_limit_without_widening_seen_range(tmp_path: Path) -> None:
+    """超限 limit 自动截齐到 200 行返回，附带续读提示且不扩大可编辑 seen_range。"""
+    big = tmp_path / "big.py"
+    big.write_text(
+        "\n".join(f"def fn_{i}(): return {i}" for i in range(1, 261)) + "\n",
+        encoding="utf-8",
+    )
+    small = tmp_path / "small.py"
+    small.write_text(
+        "\n".join(f"line_{i} = {i}" for i in range(1, 51)) + "\n",
+        encoding="utf-8",
+    )
+    local = _contract(tmp_path)
+
+    # 1. 大文件传 limit=300：截齐到 200 行，带 notice 与 inline outline
+    msg = local.dispatch(_request("read_file", {"file_path": "/big.py", "offset": 0, "limit": 300}))
+    assert msg.status == "success"
+    data = _payload(msg)
+    assert data["ok"] is True
+    assert data["shown_lines"] == {"start_line": 1, "end_line": 200}
+    assert data["total_lines"] == 260
+    assert "offset=200" in data["notice"]
+    assert "outline" in data
+
+    # 2. Snapshot 的 seen_range 只涵盖实际渲染的 1..200 行，改第 220 行必须被 UNREAD_RANGE 拦截
+    edit_res = _payload(
+        local.dispatch(
+            _request(
+                "edit_file",
+                {
+                    "file_path": "/big.py",
+                    "snapshot_id": data["snapshot_id"],
+                    "edits": [{"old_string": "def fn_220(): return 220", "new_string": "def fn_220(): return 0"}],
+                },
+            )
+        )
+    )
+    assert edit_res["ok"] is False
+    assert edit_res["error"]["code"] == "UNREAD_RANGE"
+
+    # 3. 剩余行数不足 200 行的短文件即使传 limit=300，也不附带多余 notice
+    short_msg = local.dispatch(
+        _request("read_file", {"file_path": "/small.py", "offset": 0, "limit": 300})
+    )
+    assert short_msg.status == "success"
+    short_data = _payload(short_msg)
+    assert short_data["shown_lines"] == {"start_line": 1, "end_line": 50}
+    assert "notice" not in short_data
+
+    # 4. 非法 limit（<=0）仍按参数错误拦截
+    for bad_limit in (0, -5):
+        bad_msg = local.dispatch(
+            _request("read_file", {"file_path": "/small.py", "offset": 0, "limit": bad_limit})
+        )
+        assert bad_msg.status == "error"
+        assert _payload(bad_msg)["error"]["code"] == "FILE_TOOL_LIMIT_INVALID"
