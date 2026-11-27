@@ -96,8 +96,10 @@ from harness_agent.tools.file_tools import (
 )
 from harness_agent.tools.outline import (
     DEFAULT_OUTLINE_MAX_CHARS,
+    INLINE_OUTLINE_MIN_LINES,
     MAX_OUTLINE_MAX_CHARS,
     extract_file_outline,
+    extract_inline_outline,
     format_batch_outlines,
 )
 from harness_agent.tools.plan_file import is_plan_virtual_path
@@ -295,6 +297,16 @@ class SnapshotFileToolContract:
             "content": rendered,
             "truncated": context_truncated,
         }
+        # 读大文件首页且未覆盖全文时附带精简结构大纲，不扩大可编辑 seen_range。
+        if (
+            offset == 0
+            and not context_truncated
+            and record.line_count > INLINE_OUTLINE_MIN_LINES
+            and shown_count < record.line_count
+        ):
+            inline_outline = extract_inline_outline(path, document.content)
+            if inline_outline is not None:
+                payload["outline"] = inline_outline
         return _message("read_file", tool_call_id, payload)
 
     def _read_without_snapshot(

@@ -12,7 +12,11 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 
 from harness_agent.runtime.agent import create_harness_agent
-from harness_agent.tools.outline import extract_file_outline, format_batch_outlines
+from harness_agent.tools.outline import (
+    extract_file_outline,
+    extract_inline_outline,
+    format_batch_outlines,
+)
 
 
 class _ToolCallingModel(GenericFakeChatModel):
@@ -25,7 +29,7 @@ class _ToolCallingModel(GenericFakeChatModel):
 def test_extract_python_ast_and_syntax_fallback() -> None:
     """Python 支持精确 AST 行号区间，语法错误时降级到正则扫描。"""
     py_src = (
-        "class Engine:\n"
+        "class Engine(BaseEngine):\n"
         "    def start(self) -> None:\n"
         "        pass\n\n"
         "    async def stop(self) -> None:\n"
@@ -35,10 +39,10 @@ def test_extract_python_ast_and_syntax_fallback() -> None:
     )
     out = extract_file_outline("/pkg/engine.py", py_src)
     assert "## Outline: /pkg/engine.py (9 lines)" in out
-    assert "L1-L6 [class] Engine" in out
-    assert "  L2-L3 [method] start" in out
-    assert "  L5-L6 [async method] stop" in out
-    assert "L8-L9 [async function] run_once" in out
+    assert "L1-L6 [class] Engine(BaseEngine)" in out
+    assert "  L2-L3 [method] start(self) -> None" in out
+    assert "  L5-L6 [async method] stop(self) -> None" in out
+    assert "L8-L9 [async function] run_once() -> int" in out
 
     broken = (
         "def good_helper(x):\n"
@@ -70,8 +74,8 @@ def test_extract_ts_go_rust_java_markdown_and_configs() -> None:
     ts_out = extract_file_outline("/src/server.ts", ts_src)
     assert "L2-L4 [interface] Config" in ts_out
     assert "L5-L10 [class] Server" in ts_out
-    assert "  L7-L9 [method] handle" in ts_out
-    assert "L11-L13 [function] boot" in ts_out
+    assert "  L7-L9 [method] handle(req: unknown)" in ts_out
+    assert "L11-L13 [function] boot()" in ts_out
 
     go_src = (
         "package main\n"
@@ -84,7 +88,7 @@ def test_extract_ts_go_rust_java_markdown_and_configs() -> None:
     )
     go_out = extract_file_outline("/cmd/hub.go", go_src)
     assert "L2-L4 [struct] Hub" in go_out
-    assert "L5-L7 [func] Run" in go_out
+    assert "L5-L7 [func] Run()" in go_out
 
     rs_src = (
         "pub struct Store {\n"
@@ -99,7 +103,7 @@ def test_extract_ts_go_rust_java_markdown_and_configs() -> None:
     rs_out = extract_file_outline("/src/lib.rs", rs_src)
     assert "L1-L3 [struct] Store" in rs_out
     assert "L4-L8 [impl] Store" in rs_out
-    assert "  L5-L7 [fn] size" in rs_out
+    assert "  L5-L7 [fn] size(&self) -> usize" in rs_out
 
     java_src = (
         "public class App {\n"
@@ -282,3 +286,128 @@ async def test_create_harness_agent_outline_files_then_read_and_edit(
     )
     assert state2["messages"][-1].content == "EDIT_OK"
     assert "return f'hi {name}'" in target.read_text(encoding="utf-8")
+
+
+def test_extract_inline_outline_handles_empty_and_truncation() -> None:
+    """无结构符号时返回 None，超长时在预算边界截断并提示 outline_files。"""
+    assert extract_inline_outline("/notes.txt", "plain text\nonly\n") is None
+
+    many_funcs = "\n".join(f"def helper_fn_{i}(x: int) -> int:\n    return x + {i}\n" for i in range(40))
+    inline = extract_inline_outline("/big.py", many_funcs, max_chars=260)
+    assert inline is not None
+    assert "L1-L2 [function] helper_fn_0(x: int) -> int" in inline
+    assert "可调用 outline_files" in inline
+
+
+@pytest.mark.asyncio
+async def test_read_file_attaches_inline_outline_for_large_file_without_expanding_seen_range(
+    tmp_path: Path,
+) -> None:
+    """read_file 读 >250 行大文件首页自动附带精简大纲，但不扩大可编辑 seen_range。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    big_lines = [
+        "def head_fn() -> str:",
+        "    return 'head'",
+        *[f"# filler line {i}" for i in range(256)],
+        "def tail_target(x: int) -> str:",
+        "    return f'tail:{x}'",
+    ]
+    assert len(big_lines) == 260
+    (workspace / "big.py").write_text("\n".join(big_lines) + "\n", encoding="utf-8")
+    (workspace / "small.py").write_text("def tiny() -> int:\n    return 1\n", encoding="utf-8")
+
+    model = _ToolCallingModel(
+        messages=iter(
+            [
+                # 1. 读大文件首页（应附带 outline）
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "read_file",
+                            "args": {"file_path": "/big.py", "offset": 0, "limit": 50},
+                            "id": "read_big_head",
+                        }
+                    ],
+                ),
+                # 2. 读大文件非首页 & 小文件首页（均不应附带 outline）
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "read_file",
+                            "args": {"file_path": "/big.py", "offset": 50, "limit": 50},
+                            "id": "read_big_mid",
+                        },
+                        {
+                            "name": "read_file",
+                            "args": {"file_path": "/small.py", "offset": 0, "limit": 50},
+                            "id": "read_small",
+                        },
+                    ],
+                ),
+                AIMessage(content="INSPECTED"),
+            ]
+        )
+    )
+    agent = create_harness_agent(
+        model,
+        cwd=str(workspace),
+        approval_mode="yolo",
+        enable_memory=False,
+        enable_skills=False,
+        enable_ask_user=False,
+    )
+    state = await agent.ainvoke(
+        {"messages": [HumanMessage(content="inspect big and small")]},
+        config={"configurable": {"thread_id": "test-inline-outline-read"}},
+    )
+    assert state["messages"][-1].content == "INSPECTED"
+    tool_msgs = [m for m in state["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 3
+
+    big_head = json.loads(str(tool_msgs[0].content))
+    assert "outline" in big_head
+    assert "tail_target(x: int) -> str" in big_head["outline"]
+    snap_id = big_head["snapshot_id"]
+
+    big_mid = json.loads(str(tool_msgs[1].content))
+    small = json.loads(str(tool_msgs[2].content))
+    assert "outline" not in big_mid
+    assert "outline" not in small
+
+    # 验证附带了 tail_target 的大纲行号，但仍未读第 259-260 行 -> edit_file 必须被 UNREAD_RANGE 拦截
+    model.messages = iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "edit_file",
+                        "args": {
+                            "file_path": "/big.py",
+                            "snapshot_id": snap_id,
+                            "edits": [
+                                {
+                                    "old_string": "return f'tail:{x}'",
+                                    "new_string": "return f'changed:{x}'",
+                                }
+                            ],
+                        },
+                        "id": "edit_unread_tail",
+                    }
+                ],
+            ),
+            AIMessage(content="BLOCKED"),
+        ]
+    )
+    state2 = await agent.ainvoke(
+        {"messages": [HumanMessage(content="try unread tail edit")]},
+        config={"configurable": {"thread_id": "test-inline-outline-read"}},
+    )
+    assert state2["messages"][-1].content == "BLOCKED"
+    edit_msg = next(m for m in reversed(state2["messages"]) if isinstance(m, ToolMessage))
+    edit_payload = json.loads(str(edit_msg.content))
+    assert edit_payload["ok"] is False
+    assert edit_payload["error"]["code"] == "UNREAD_RANGE"

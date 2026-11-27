@@ -131,7 +131,12 @@ def create_file_tool_definitions() -> tuple[BaseTool, ...]:
         ("ls", "列出一个以 / 开头的目录路径。", LsSchema),
         (
             "read_file",
-            "读取文件局部内容；可安全编辑的 UTF-8 文本会返回当前 Thread Snapshot。",
+            (
+                "读取文件局部内容；可安全编辑的 UTF-8 文本会返回当前 Thread Snapshot"
+                "（读 >250 行大文件开头时自动附带精简结构大纲）。"
+                "不要用它连续翻页盲读大文件或逐个摸底多个未知文件；先用 outline_files "
+                "一次批量拿符号行号，再并行 read_file(offset, limit) 精准读目标区间。"
+            ),
             CanonicalReadFileSchema,
         ),
         ("write_file", "只创建新的 UTF-8 文本文件；目标已存在时失败。", CanonicalWriteFileSchema),
@@ -155,8 +160,9 @@ def create_file_tool_definitions() -> tuple[BaseTool, ...]:
         (
             "outline_files",
             (
-                "批量提取多个文件的类、函数、类型与标题行号范围，适合先快速定位再并行 "
-                "read_file(offset, limit)；不签发 snapshot_id，编辑前仍需调用 read_file。"
+                "批量提取多个文件的类、函数签名、类型与标题行号范围。"
+                "摸底仓库或未知大文件时，建议单次传入 5～20 个关键文件路径（不要每次只传 1 个），"
+                "1 轮拿齐行号后再并行 read_file(offset, limit)；不签发 snapshot_id，编辑前仍需调用 read_file。"
             ),
             CanonicalOutlineFilesSchema,
         ),
