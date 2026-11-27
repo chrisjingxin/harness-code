@@ -1,9 +1,10 @@
 /**
  * HC-257 单元测试：个人会话整理 IPC——归档/置顶/显示目录通道参数校验与错误语义、
  * 删除收紧（运行中与团队侧记录拒绝）以及删除后的真实清理链（协调器遗忘、个人视图文件、检查点）。
+ * HC-239 跟进覆盖完整发布从第 0 轮补传已完成历史，以及真实待传账本的超限拒绝。
  */
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { register } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -61,6 +62,7 @@ const { createLocalExecutionCoordinator } = await import("../src/main/local-exec
 const { digest } = await import("../src/main/project-service/git-command.ts") as {
   digest: typeof digestFn
 }
+const { ConversationUploads } = await import("@workbench/collaboration-client")
 
 const ORIGIN = "http://127.0.0.1:9999"
 const USER_A = "11111111111111111111111111111111"
@@ -163,6 +165,62 @@ async function waitFor(predicate: () => boolean, timeoutMs = 6000) {
     await new Promise(resolve => setTimeout(resolve, 10))
   }
 }
+
+test("完整发布从第0轮交付全部已完成历史，真实上传账本跳过超限轮次", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hc239-publish-history-"))
+  const identity = await createSignedInState(USER_A)
+  let unbind: (() => void) | undefined
+  try {
+    const store = new LocalConversationStore(root, ORIGIN)
+    assert.equal((await store.create(USER_A, { conversationId: CONV_ID, workspaceId: null })).ok, true)
+    for (const [index, status] of ["completed", "cancelled", "failed", "completed", "completed"].entries()) {
+      assert.equal((await store.appendTurn(USER_A, CONV_ID, {
+        turnId: `history-${index}`,
+        userText: `问题-${index}`,
+        reply: index === 3 ? "超限".repeat(20_000) : `答复-${index}`,
+        status: status as "completed" | "cancelled" | "failed",
+        acceptedAtMs: index * 10 + 1,
+        completedAtMs: index * 10 + 2,
+      })).ok, true)
+    }
+    const notices: unknown[] = []
+    const uploadsRoot = join(root, "isolated-uploads")
+    // 不启用上传账号：使用真实待传账本，但任何网络调用都意味着夹具越界。
+    const uploads = new ConversationUploads(uploadsRoot, {
+      watermark: async () => { throw new Error("不应访问服务器") },
+      upload: async () => { throw new Error("不应访问服务器") },
+    }, notice => { notices.push(notice) })
+    const attempted: string[] = []
+    const enqueue = uploads.enqueue.bind(uploads)
+    uploads.enqueue = async (scope, turn) => { attempted.push(turn.turnId); await enqueue(scope, turn) }
+    const { window } = createFakeWindow()
+    const { registered, fakeIpc } = createFakeIpc()
+    unbind = bindLocalConversationsIpc(window, `${ORIGIN}/index.html`, identity, store, uploads, fakeIpc as never)
+    const result = await registered.get("workbench:local-conversations:mark-published")!({
+      sender: window.webContents,
+      senderFrame: window.webContents.mainFrame,
+    }, CONV_ID, {
+      workspaceId: "66666666-6666-4666-8666-666666666666",
+      projectId: "77777777-7777-4777-8777-777777777777",
+      shareMode: "full",
+      historyFromTurnIndex: 0,
+    }) as IpcResult
+    assert.equal(result.ok, true)
+    assert.deepEqual(attempted, ["history-0", "history-3", "history-4"])
+    const pending = JSON.parse(await readFile(join(uploadsRoot, USER_A, `${CONV_ID}.json`), "utf8"))
+    assert.deepEqual(pending.turns.map((turn: { turnId: string }) => turn.turnId), ["history-0", "history-4"])
+    assert.equal(pending.turns.every((turn: { shareMode: string; messages: unknown[] }) =>
+      turn.shareMode === "full" && turn.messages.length === 2), true)
+    assert.match(JSON.stringify(notices), /32 KiB/)
+    const detail = await store.get(USER_A, CONV_ID)
+    assert.equal(detail.ok && detail.value.record.shareMode, "full")
+    assert.equal(detail.ok && detail.value.record.shareStatus, "active")
+  } finally {
+    unbind?.()
+    identity.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test("整理通道参数校验、参数个数与未登录拒绝", async () => {
   const root = await mkdtemp(join(tmpdir(), "hc257-ipc-guard-"))

@@ -8,16 +8,18 @@ priority: P1
 status: 待验收
 owner: 用户（本机）
 branch: harness_lody
-scope: 将本机 team.md、personal.md 改为当前 Agent 自主维护的普通 Markdown，通过桌面 MCP 整文读取及带内容版本的即时原子保存；迁移旧结构化记忆并保留原件，替换管理台与引用预览的条目协议；保留身份隔离、现有首轮全量后续变更增量和团队知识链路。本期完整实现交付待验收，未自动归档。
-acceptance: Agent 可将用户新增或纠正的工程信息即时写入两份 MD，saved 后取消或失败不回滚；冲突与可恢复失败作为普通工具结果返回且会话可继续；超过8KiB仅提示整理；旧数据有原件备份且损坏文件不覆盖；两处 UI 可查看编辑相同两份 MD；账号、Team、会话及实际目录授权边界保持有效。
+scope: 将本机 team.md、personal.md 改为当前 Agent 自主维护的普通 Markdown，通过桌面 MCP 整文读取及带内容版本的即时原子保存；迁移旧结构化记忆并保留原件，管理台保留查看编辑，引用预览按用户修订移除记忆展示；保留身份隔离、现有首轮全量后续变更增量和团队知识链路。本期交付待验收，未自动归档。
+acceptance: Agent 可将用户新增或纠正的工程信息即时写入两份 MD，saved 后取消或失败不回滚；冲突与可恢复失败作为普通工具结果返回且会话可继续；超过8KiB仅提示整理；旧数据有原件备份且损坏文件不覆盖；管理台可查看编辑两份 MD，引用弹窗不显示本人项目记忆且保留原引用流程；账号、Team、会话及实际目录授权边界保持有效。
 user_docs: docs/user/独立桌面工作台.md
 developer_docs: docs/developer/spec/HC-256-AI自主维护项目记忆.md；docs/developer/plan/HC-256-AI自主维护项目记忆.md；docs/developer/todo/HC-256-AI自主维护项目记忆.md；docs/developer/architecture/项目记忆与团队知识上下文.md
-test_evidence: 2026-11-26隔离HTTP MCP/真实ACP/协调器与存储主路径通过，增量接点4项通过，绑定及凭据冒烟通过，desktop类型/构建与边界自检通过；统筹CUA组件mock-host正常保存和账号/Team存储隔离证据复用；正式Electron/IPC双入口与真实用户迁移未操作
+test_evidence: 2026-11-26引用预览入口修订的desktop类型/构建、docs:check、tasks:check、diff检查通过；初版MCP/ACP/协调器/存储及统筹CUA组件证据保留，不重跑未受影响链路；此次未操作真实UI或A/B
 references: docs/developer/task/HC-233-项目记忆与团队知识读取.md；docs/developer/task/HC-239-个人优先使用本机Agent.md；docs/developer/task/HC-241-知识分级与审核沉淀.md
 completed_at: -
 ---
 
 # HC-256 AI自主维护项目记忆
+
+> **2026-11-26 用户交互修订：** 用户在引用他人会话的预览中看到本人 team.md/personal.md，确认不应在此展示。当前仅「管理与设置 → 本机项目记忆」提供手动查看编辑；初版两入口交付和验证记录保留历史，由本修订替代当前入口要求。两份 MD 的内容、自动注入和 MCP 能力不变。
 
 ## 当前阶段与授权
 
@@ -39,7 +41,7 @@ completed_at: -
 - 以 `read_project_memory(document)` 和 `update_project_memory(document, content, expectedRevision)` 替换旧两个记忆工具；沿既有桌面 HTTP MCP 与标准 ACP 配置提供给支持该 MCP 接入方式的 Agent。
 - 保留服务 origin、账号、Team、登录代次、本人真实会话和原生绑定的隔离；保留本地原子写入、路径保护及现有目录执行授权。
 - 保留现有首轮完整基线、后续仅发送发生变化文档的机制；每份发生变化的文档发送完整正文，不按当前 Project、cwd 或关键词过滤。
-- 将管理台和引用预览的 DirectoryMemory 替换为同一轻量 Markdown 查看/编辑组件，删除旧条目端口及消费者；复用现有主题、Markdown 和工具卡。
+- 管理台使用轻量 Markdown 查看/编辑组件；引用预览不展示本人项目记忆，只保留原引用流程。旧条目端口已删除，复用现有主题、Markdown 和工具卡。
 - 旧文件经过原件备份和原子迁移，损坏文件只读保护。迁移只在 tmp 隔离副本验证，真实用户迁移时机由统筹决定。
 - 本机 `team.md` 仍是当前账号在该 Team 的本地记忆；团队共享知识的检索、固定版本、审核、贡献和读取回执沿现有路径，不新增服务端 API、schema、ACP 方法、第二模型或用户配置。
 
@@ -52,11 +54,11 @@ completed_at: -
 | A3 | 两个会话持同一旧版本写同一文档时，仅一个保存；另一个收到普通 `conflict`，重读合并后可继续。写入 team 与 personal 分别反馈，后一次失败不撤销前一次保存。 |
 | A4 | 合计超过 8 KiB 的正文仍可保存并提示整理；超过现有 64 KiB MCP 请求技术限制时明确拒绝且原件不变；任何读取/注入均不静默截断。 |
 | A5 | tmp 中的合法旧文件迁移前后保留业务正文和来源信息，原件备份逐字节一致；损坏、符号链接、越界路径不被覆盖；中断后重试不产生重复业务内容。 |
-| A6 | 管理台和引用预览显示同一 Team 的两份 MD，可分别预览、编辑、保存、遇冲突重读；无条目下拉、目录映射清单或新增记忆目录选择器。 |
+| A6 | 管理台显示当前 Team 的两份 MD，可分别预览、编辑、保存、遇冲突重读；引用预览不显示本人 MD，快照、范围、目标本人会话、草稿和新会话目录选择保持原行为。 |
 | A7 | 首轮完整提供两份 MD，送达后相同内容不重复提供；改变其中一份时只发送该份完整正文；恢复/换绑定沿原有基线重建，知识读取和审核不受影响。 |
 | A8 | 不同账号/Team 相互不可读写；退出、旧登录代次、无团队、他人会话及起草凭据不能修改记忆；记忆中的路径不会赋予文件访问权限或改变会话 cwd。 |
 
-## 交付记录与后续
+## 初版交付记录与后续（历史）
 
 本期已交付普通 MD 存储及惰性迁移、即时 MCP 读写、既有增量上下文接线与两处轻量 UI，并更新用户文档和长期架构；没有操作真实用户文件或正在使用的 A/B 实例。具体协议和数据保护见 [Spec](../spec/HC-256-AI自主维护项目记忆.md)，模块及停点见 [Plan](../plan/HC-256-AI自主维护项目记忆.md)，逐项状态见 [Todo](../todo/HC-256-AI自主维护项目记忆.md)。本期标待验收，不自动归档、提交或推送。
 
@@ -93,3 +95,13 @@ Review：对照 Spec 和 diff 核对旧协议退出、成功落盘边界、独�
 最终文档收口：`npm run tasks:sync`、`npm run docs:check`、`npm run tasks:check`、`git diff --check` 均通过。组件改名后同步修正 HC-255 Plan 的本地源码链接；其余旧过程正文保留历史。真实 Java/MySQL 的 smoke-context-turns 只迁移协议并做语法检查，本轮未连接真实服务重跑；两个旧 CDP 桌面脚本均未运行。
 
 已向授权统筹 `01a18544-fba1-7952-b136-c72415113ebb`（local）回调实际改动、迁移规则、命令结果、未验证边界、重启要求及当前 worktree 文件列表。首次回调因自动审批服务用量限制未执行，用户继续后已补发成功。保持待验收并停止，不归档、不提交推送。
+
+## 2026-11-26 用户交互修订：移除引用预览记忆入口
+
+用户确认引用他人会话时不应展示本人两份项目记忆，统筹据此派发删除引用预览中的 ProjectMemory。基线为 `harness_lody@a5b8d0f8`，开工工作区干净。生产改动仅在 `conversation-references.tsx` 删除记忆专用导入、memoryScope 参数/透传及组件挂载；管理台入口保留。快照、取材范围、目标本人会话、草稿、新会话目录选择、自动上下文、MCP、存储/身份和真实目录授权均不改动。
+
+此次沿用本卡留痕，更新当前 Spec/Plan/Todo、用户文档与架构说明；上文初版两入口交付/验证为历史，不作为当前引用预览的验收要求。只做 desktop typecheck/build、diff 和文档/任务检查，不新增镜像 JSX 测试、不重跑未受影响 MCP/存储全套，不操控或重启真实 A/B。CodeGraph/OpenWiki 缺失沿用已知限制，不手改生成页，不提交推送或切分支。
+
+修订验证：`npm --workspace @workbench/desktop run typecheck`、`npm --workspace @workbench/desktop run build`、`npm run docs:check`、`npm run tasks:check`、`git diff --check` 均退出 0。复核源码 diff 仅删除引用预览记忆依赖与挂载，管理台 ProjectMemory 导入和挂载保留；全工作区仅 1 个生产源码与上述 6 个文档变化。已生成新构建，未操作界面或重启真实实例，不把源码核对写成 UI 实测。保持待验收。
+
+此次修订已向授权统筹 `01a18544-fba1-7952-b136-c72415113ebb`（local）回调文件范围、检查结果与边界，按派发停止；未提交推送或归档。

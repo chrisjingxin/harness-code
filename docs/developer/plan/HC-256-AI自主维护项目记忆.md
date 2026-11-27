@@ -2,6 +2,8 @@
 
 > 2026-11-26 统筹审查通过并派发完整实施。依次依据 [Task](../task/HC-256-AI自主维护项目记忆.md)、[Spec](../spec/HC-256-AI自主维护项目记忆.md) 执行；停点 0 为已完成的文档审查，原停点 1/2/3 合为本次完整交付的内部顺序，不再等待三轮派发。[Todo](../todo/HC-256-AI自主维护项目记忆.md) 维护勾选状态。
 
+> **2026-11-26 用户交互修订：** 原两入口方案改为仅在管理台查看和编辑两份 MD。此次只删除 conversation-references.tsx 中的记忆专用导入、作用域参数/透传和组件挂载，保留引用业务与其它记忆能力。初版两入口交付/验证历史保留在文末与 Task，由此修订替代当前入口要求。
+
 ## 现状、方案与不动边界
 
 旧实现把 Markdown 渲染结果、条目字段和来源证明捆绑，AI 的普通文字更新可能卡在目录确认，再因工具异常导致运行失败。改造将内容交给当前 Agent，宿主只处理身份、文件和并发；保留现有会话基线/变更增量与知识读取，避免覆盖同事已交付的上下文实现。
@@ -18,7 +20,7 @@
 | `desktop/src/main/collaboration-ipc.ts`、会话工具卡 | pending/saving/终态结果映射 | 显示即时保存结果，沿同一 requestId/turnId/tool ID；不新增聊天展示协议。 |
 | `desktop/src/renderer/features/workbench-context/directory-memory.tsx` | 结构化目录下拉和原生确认 | 改为同目录 `project-memory.tsx` 的轻量 ProjectMemory 组件，复用安全 Markdown、主题与文本框，删除旧组件；不建设新编辑器或版本系统。 |
 | `renderer/features/admin/admin-page.tsx`、`admin.css`、`renderer/desktop-workbench.tsx` | 管理台 memory 分区、范围标签与本人会话作用域 | 消费两份 MD 编辑器，标签按账号/Team 表达，保留本人会话授权锚点与空状态。 |
-| `renderer/features/collaboration/references/conversation-references.tsx` | 引用预览 DirectoryMemory，替换 conversationId | 复用新编辑器；确认读取当前用户目标本人会话，不沿共享来源越权，不扩大引用/会话 UI。 |
+| `renderer/features/collaboration/references/conversation-references.tsx` | 初版曾挂载 ProjectMemory | 按用户修订删除记忆专用导入、memoryScope 参数/透传和组件挂载；保留快照、范围、本人目标会话、草稿及新会话目录选择。 |
 | `scripts/workbench/smoke-workbench-context.mjs`、`smoke-context-turns.mjs` 及相关 context/knowledge-draft ACP 夹具 | 旧工具名、pending/终态与条目断言 | 迁移必要受影响夹具与断言，检查新协议及原基线/增量；不保留旧测试入口兼容层。 |
 
 `directory-facts.ts` 仅当最后消费者属于已删除的记忆事实证明时删除；知识适用范围还需要的 Git/仓库识别不删。`TeamKnowledge`、知识草稿/审核、服务端、线上契约、通用 ACP 方法、可选 Agent 内核均不扩展。先通过引用检索确认旧来源登记方法的实际消费者，再删除仅为记忆服务的死代码，不凭名字批量删除。
@@ -47,15 +49,15 @@
 
 可观察结果：tmp 中 MCP 已 saved 的文字在终态前落盘；终态后仍在；工具卡对应原调用；增量夹具中相同正文不重复发送。仅完成必要接点检查，不运行全库回归，记录后继续内部步骤 3。
 
-## 内部步骤 3：两处 UI 与收口
+## 内部步骤 3：管理台 UI 与收口（按用户修订）
 
-替换 shared/preload/IPC 的旧三端口；接入统一轻量 ProjectMemory 组件，更新管理台和引用预览。清理旧组件、旧导出、旧条目文案和专用样式；保留中央聊天、头像、工具 UI、右侧文件/Git 以及真实会话目录选择和审批。
+初版已替换 shared/preload/IPC 的旧三端口并接入轻量 ProjectMemory。当前保留管理台入口，移除引用预览的记忆挂载及参数；自动注入、MCP、存储、身份和目录授权保持原实现。保留中央聊天、头像、工具 UI、右侧文件/Git 以及原引用流程。
 
-实施方仅做真实 HTTP MCP、协调器与存储的必要隔离冒烟，运行受影响的桌面类型/构建和必要边界检查；已有等价验证可直接复用。两处入口、Markdown 预览、编辑保存/取消、空正文、冲突草稿及作用域切换由统筹用 cua_repl 检查，或在证据中明确标记未做；禁止沿用 smoke-context-tool-desktop.mjs 的 CDP 界面动作。所有界面动作只走 CUA，不触碰真实 A/B 实例。
+此次只运行 desktop typecheck/build、diff 和文档/任务检查，复用已通过且未受影响的 MCP/存储及管理台组件证据。不新增镜像 JSX 测试，不操控或重启真实 A/B；若需要界面操作，只走 CUA，不沿用旧 CDP 脚本。
 
 收口时更新用户文档、本架构实施状态、Task/Todo/看板及必要冒烟证据，检查仅删除旧 canonical 路径且没有兼容残留。检视 OpenWiki 是否受本卡源变更影响；生成器可用时按仓库约定刷新，不手改生成页，不启动旧 CLI。未完成的真实迁移、双机、Windows/TDSQL 全验收明确留给统筹/HC-204。
 
-可观察结果：两处编辑入口读取同一份文件且保存状态真实；全卡授权范围完成后标待验收并回调，不自动归档、提交或推送。
+可观察结果：引用弹窗不展示两份本人 MD，管理台仍可查看编辑两份 MD；原引用选择与草稿流程保留。保持待验收并回调，不自动归档、提交或推送。
 
 ## 验证与风险处理
 
@@ -63,6 +65,10 @@
 
 实际外部编辑存在检查与替换之间的并发窗口，Spec 已写明边界；主路径保证同桌面多会话/UI 的内容版本冲突保护。迁移或权限问题返回实际状态，不尝试“修复”损坏原件；共享文件碰到他人未提交改动时保留并协调。发现协议与 Spec 冲突时先回写上游，不自行扩展后台 API 或换用新模型。
 
-## 本期交付验证（2026-11-26）
+## 初版交付验证历史（2026-11-26）
 
 普通 MD/迁移、MCP/增量、共享端口和两处 UI 消费均已实施，证据和诚实边界见 Task。已批准新版本首次正常访问时惰性迁移；本轮未读取真实用户记忆、未启动真实 A/B。统筹提供 CUA 组件＋mock host 正常编辑保存证据，直接复用；正式 Electron/IPC 两入口的端到端操作及完整失败矩阵仍未验证。OpenWiki 刷新已尝试，当前环境没有 openwiki 命令（退出127），未手改生成页。
+
+## 用户交互修订验证（2026-11-26）
+
+已移除引用预览的项目记忆依赖和挂载，管理台入口保留。desktop typecheck/build、docs:check、tasks:check、git diff --check 均通过。此次未改自动注入、MCP、存储和身份/目录授权，不重跑其既有验证；未操作或重启真实 A/B，保持待验收。

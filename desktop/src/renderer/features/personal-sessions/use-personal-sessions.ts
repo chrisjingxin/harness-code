@@ -12,7 +12,7 @@
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { AcpAgentList } from "@workbench/acp-runtime/types"
-import type { ConversationShareMode, UserSummary } from "@workbench/collaboration-client/types"
+import type { UserSummary } from "@workbench/collaboration-client/types"
 import {
   MAX_SENT_IMAGE_RECORDS,
   localExecutionKey,
@@ -67,7 +67,7 @@ export type PrePublishGuardHook = (input: {
   readonly turns: readonly LocalConversationTurn[]
   readonly targetWorkspaceId: string
   readonly targetProjectId: string
-  readonly shareMode: ConversationShareMode
+  readonly shareMode: "full"
 }) => Promise<{ readonly allowed: true } | { readonly allowed: false; readonly reason: string }>
 
 export type UsePersonalSessionsOptions = {
@@ -1045,9 +1045,8 @@ export function usePersonalSessions(options: UsePersonalSessionsOptions) {
       projectId: input.projectId,
       shareMode: input.shareMode,
       syncedSequence: regRes.value.conversation.syncedSequence,
-      ...(input.shareMode === "full" && input.historyFromTurnIndex !== undefined
-        ? { historyFromTurnIndex: input.historyFromTurnIndex }
-        : {}),
+      // 发布统一带入全部已完成历史，不再保留可漏传历史的可选分支。
+      historyFromTurnIndex: input.historyFromTurnIndex,
     }).catch(() => null)
     if (!markRes || !markRes.ok) {
       return markRes ? markRes.error.message : "本地发布状态更新失败，请重试。"

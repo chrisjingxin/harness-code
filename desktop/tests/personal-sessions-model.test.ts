@@ -225,7 +225,7 @@ test("resolvePublishTargets 汇总已加入全部团队中的活跃 Project 供�
   assert.deepEqual(targets.map(t => t.workspaceName), ["支付研发", "风控组"])
 })
 
-test("inspectPublishHistory 检测已完成历史范围与超过 32 KiB 限制的轮次", () => {
+test("inspectPublishHistory 检查全部已完成历史并标出超过 32 KiB 限制的轮次", () => {
   const turns: LocalConversationTurn[] = [
     makeTurn({ turnId: "t1", userText: "短问题", reply: "短答复" }),
     makeTurn({ turnId: "t2", userText: "被取消", reply: "", status: "cancelled" }),
@@ -233,15 +233,10 @@ test("inspectPublishHistory 检测已完成历史范围与超过 32 KiB 限制�
     makeTurn({ turnId: "t4", userText: "收尾问题", reply: "收尾答复" }),
   ]
 
-  const all = inspectPublishHistory(turns, 0)
+  const all = inspectPublishHistory(turns)
   assert.equal(all.completedTurns.length, 3)
-  assert.equal(all.selectedCount, 3)
+  assert.deepEqual(all.completedTurns.map(item => item.turn.turnId), ["t1", "t3", "t4"])
   assert.deepEqual(all.oversizedDisplayIndices, [2])
-
-  // t4 的原始数组下标是 3，跳过超限第 2 完成轮后无超限提示
-  const tailOnly = inspectPublishHistory(turns, 3)
-  assert.equal(tailOnly.selectedCount, 1)
-  assert.deepEqual(tailOnly.oversizedDisplayIndices, [])
 })
 
 test("localTurnsToTimelineEntries 与 localRecordToConversationSummary 正确投影展示结构", () => {
