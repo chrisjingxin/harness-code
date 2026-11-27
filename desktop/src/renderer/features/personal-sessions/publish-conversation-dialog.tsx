@@ -1,13 +1,13 @@
 /**
  * 「发布到 Project…」弹窗（对齐方案 B 原型与 HC-239 Spec）：
  * - 汇总当前账号所加入全部团队下的活跃 Project 作为可选目标；
- * - 支持选择「完整定稿正文」（可选带入发布前全量或从第 N 轮起的历史，并检查 32 KiB 限制）或「仅共享状态与成果摘要」（自动同步已定稿轮次默认摘要并支持编辑）；
- * - 需显式勾选不可收回确认框后提交。
+ * - 选择项目并确认后，共享全部已有已完成历史及后续定稿；
+ * - 提交范围固定，大小限制按现有上传器提示，错误与忙碌反馈保持可见。
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ReactElement } from "react"
 import { IconAlertTriangle, IconX } from "@tabler/icons-react"
-import type { ConversationShareMode, ProjectSummary } from "@workbench/collaboration-client/types"
+import type { ProjectSummary } from "@workbench/collaboration-client/types"
 import type {
   LocalConversationRecord,
   LocalConversationTurn,
@@ -25,8 +25,8 @@ export type PublishConversationSubmitInput = {
   readonly workspaceId: string
   readonly projectId: string
   readonly projectName: string
-  readonly shareMode: ConversationShareMode
-  readonly historyFromTurnIndex?: number
+  readonly shareMode: "full"
+  readonly historyFromTurnIndex: 0
   readonly initialBrief: string
 }
 
@@ -53,31 +53,13 @@ export function PublishConversationDialog({
   const [loadError, setLoadError] = useState("")
   const [targets, setTargets] = useState<readonly PublishTargetOption[]>([])
   const [selectedTargetKey, setSelectedTargetKey] = useState("")
-  const [shareMode, setShareMode] = useState<ConversationShareMode>("full")
-  const [bringHistory, setBringHistory] = useState(false)
-  const [fromCompletedRank, setFromCompletedRank] = useState(1)
-  const [briefText, setBriefText] = useState(() => buildDefaultPublishBrief(record, turns))
-  const briefEditedRef = useRef(false)
-  const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [submitError, setSubmitError] = useState("")
-  const dialogRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
     const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
     return () => { returnTo?.focus() }
   }, [])
-
-  // 切换目标会话时重置手动编辑标记；turns 异步加载完成后若用户未手改则自动刷新默认摘要。
-  useEffect(() => {
-    briefEditedRef.current = false
-  }, [record.conversationId])
-
-  useEffect(() => {
-    if (!briefEditedRef.current) {
-      setBriefText(buildDefaultPublishBrief(record, turns))
-    }
-  }, [record, turns])
 
   useEffect(() => {
     let cancelled = false
@@ -132,18 +114,7 @@ export function PublishConversationDialog({
     [targets, selectedTargetKey],
   )
 
-  const baseInspection = useMemo(() => inspectPublishHistory(turns, 0), [turns])
-  const completedTurns = baseInspection.completedTurns
-  const selectedStartTurnIndex = useMemo(() => {
-    if (!bringHistory || completedTurns.length === 0) return undefined
-    const clampedRank = Math.max(1, Math.min(fromCompletedRank, completedTurns.length))
-    return completedTurns[clampedRank - 1]?.turnIndex ?? 0
-  }, [bringHistory, completedTurns, fromCompletedRank])
-
-  const activeInspection = useMemo(
-    () => selectedStartTurnIndex !== undefined ? inspectPublishHistory(turns, selectedStartTurnIndex) : null,
-    [turns, selectedStartTurnIndex],
-  )
+  const history = useMemo(() => inspectPublishHistory(turns), [turns])
 
   async function submit() {
     if (busy) return
@@ -152,27 +123,14 @@ export function PublishConversationDialog({
       setSubmitError("请选择要发布到的活跃项目。")
       return
     }
-    if (shareMode === "summary_only" && !briefText.trim()) {
-      setSubmitError("仅共享摘要时，请填写可展示给队友的状态与成果摘要。")
-      return
-    }
-    if (!confirmed) {
-      setSubmitError("请先勾选不可收回共享范围确认。")
-      return
-    }
-    const initialBrief = shareMode === "summary_only"
-      ? briefText.trim()
-      : (completedTurns.length > 0 ? buildDefaultPublishBrief(record, turns).trim() : "")
     setBusy(true)
     const err = await onPublish({
       workspaceId: selectedTarget.workspaceId,
       projectId: selectedTarget.project.projectId,
       projectName: selectedTarget.project.name,
-      shareMode,
-      ...(shareMode === "full" && selectedStartTurnIndex !== undefined
-        ? { historyFromTurnIndex: selectedStartTurnIndex }
-        : {}),
-      initialBrief,
+      shareMode: "full",
+      historyFromTurnIndex: 0,
+      initialBrief: history.completedTurns.length > 0 ? buildDefaultPublishBrief(record, turns).trim() : "",
     }).catch(() => "发布到项目失败，请重试。")
     setBusy(false)
     if (err) {
@@ -189,7 +147,6 @@ export function PublishConversationDialog({
       onKeyDown={event => { if (event.key === "Escape" && !busy) { event.stopPropagation(); onClose() } }}
     >
       <form
-        ref={dialogRef}
         className="dlg pnav-dialog psess-publish-dialog"
         role="dialog"
         aria-modal="true"
@@ -216,7 +173,7 @@ export function PublishConversationDialog({
 
         <div className="dlg-body">
           <p className="psess-dlg-lead">
-            发布后项目成员可见会话简报；已被他人同步的内容无法收回。本机草稿、自动材料与本机记忆绝不上传。
+            将已有已完成对话和后续定稿共享给项目成员，成员按需同步正文；已同步内容无法收回。
           </p>
 
           <div className="fld">
@@ -246,122 +203,34 @@ export function PublishConversationDialog({
             )}
           </div>
 
-          <fieldset className="psess-fieldset">
-            <legend>共享档位</legend>
-            <label className="psess-radio-card">
-              <input
-                type="radio"
-                name="shareMode"
-                value="full"
-                checked={shareMode === "full"}
-                disabled={busy}
-                onChange={() => setShareMode("full")}
-              />
-              <div>
-                <strong>完整定稿正文</strong>
-                <p>默认仅同步发布后的新对话；队友可查看简报并按需拉取定稿回复与工具摘要。</p>
-              </div>
-            </label>
-            <label className="psess-radio-card">
-              <input
-                type="radio"
-                name="shareMode"
-                value="summary_only"
-                checked={shareMode === "summary_only"}
-                disabled={busy}
-                onChange={() => setShareMode("summary_only")}
-              />
-              <div>
-                <strong>仅共享状态与成果摘要</strong>
-                <p>不上传任何历史与后续对话正文，仅在看板和会话卡向队友同步简报与运行状态。</p>
-              </div>
-            </label>
-          </fieldset>
-
-          {shareMode === "full" && completedTurns.length > 0 && (
-            <div className="psess-history-box">
-              <label className="c4-check">
-                <input
-                  type="checkbox"
-                  checked={bringHistory}
-                  disabled={busy}
-                  onChange={event => setBringHistory(event.target.checked)}
-                />
-                <span>一并带入发布前已定稿的历史轮次（共 {completedTurns.length} 轮已完成，默认不同步历史）</span>
-              </label>
-              {bringHistory && (
-                <div className="psess-history-range">
-                  <label htmlFor="shareFromTurn">同步范围</label>
-                  <select
-                    id="shareFromTurn"
-                    value={fromCompletedRank}
-                    disabled={busy}
-                    onChange={event => setFromCompletedRank(Number(event.target.value) || 1)}
-                  >
-                    <option value={1}>全部已完成轮次（第 1～{completedTurns.length} 轮）</option>
-                    {completedTurns.slice(1).map(item => (
-                      <option key={item.displayIndex} value={item.displayIndex}>
-                        从第 {item.displayIndex} 轮起（共 {completedTurns.length - item.displayIndex + 1} 轮）
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {activeInspection && activeInspection.oversizedDisplayIndices.length > 0 && (
-                <div className="psess-warn-box" role="alert">
-                  <IconAlertTriangle size={14} aria-hidden="true" />
-                  <span>
-                    第 {activeInspection.oversizedDisplayIndices.join("、")} 轮存在超过单条 32 KiB 上限的内容，将被自动跳过，其余未超限轮次正常上传。
-                  </span>
-                </div>
-              )}
+          <p className="help">
+            当前共 {history.completedTurns.length} 轮已完成对话，将按现有大小限制分批上传。本机草稿、自动材料与本机记忆不上传。
+          </p>
+          {history.oversizedDisplayIndices.length > 0 && (
+            <div className="psess-warn-box" role="alert">
+              <IconAlertTriangle size={14} aria-hidden="true" />
+              <span>
+                第 {history.oversizedDisplayIndices.join("、")} 轮存在超过单条 32 KiB 上限的内容，将被自动跳过，其余未超限轮次正常上传。
+              </span>
             </div>
           )}
-
-          {shareMode === "summary_only" && (
-            <div className="fld">
-              <label htmlFor="shareInitialBrief">状态与成果摘要</label>
-              <textarea
-                id="shareInitialBrief"
-                rows={3}
-                maxLength={2000}
-                value={briefText}
-                disabled={busy}
-                placeholder="简述当前进展、结论或交付给队友查看的成果摘要…"
-                onChange={event => {
-                  briefEditedRef.current = true
-                  setBriefText(event.target.value)
-                }}
-              />
-            </div>
-          )}
-
-          <label className="c4-check">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              disabled={busy}
-              onChange={event => { setConfirmed(event.target.checked); setSubmitError("") }}
-            />
-            <span>
-              我确认向目标项目成员共享
-              {shareMode === "full" ? "（含后续定稿对话，已同步内容不可收回）" : "（仅状态与成果摘要）"}
-            </span>
-          </label>
-
-          {submitError && <p className="err" role="alert">{submitError}</p>}
         </div>
 
-        <div className="dlg-foot">
-          <span className="spacer" />
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={onClose}>取消</button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={busy || loadingTargets || !selectedTarget}
-          >
-            {busy ? "正在发布…" : "确认发布"}
-          </button>
+        {/* 提交反馈与按钮一起保留，避免长正文将失败原因藏到滚动区下方。 */}
+        <div className="psess-publish-actions">
+          {submitError && <p className="err" role="alert">{submitError}</p>}
+
+          <div className="dlg-foot">
+            <span className="spacer" />
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={onClose}>取消</button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || loadingTargets || !selectedTarget}
+            >
+              {busy ? "正在发布…" : "确认发布"}
+            </button>
+          </div>
         </div>
       </form>
     </div>

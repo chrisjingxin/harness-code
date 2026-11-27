@@ -1,5 +1,5 @@
 /**
- * 个人优先会话纯模型：个人/已发布分区、目录折叠分组、本机轮次投影、两档发布目标解析与历史大小检查。
+ * 个人优先会话纯模型：个人/已发布分区、目录折叠分组、本机轮次投影、发布目标解析与历史大小检查。
  *
  * 【功能定义】封装个人空间与发布/停止共享弹窗所需的确定性领域计算，不持有 React 状态或 IPC 调用，
  * 便于渲染层复用并直接在 Vitest/Bun 下独立单元测试。
@@ -40,7 +40,6 @@ export type PublishTargetOption = {
 
 export type PublishHistoryInspection = {
   readonly completedTurns: readonly { readonly turnIndex: number; readonly displayIndex: number; readonly turn: LocalConversationTurn; readonly oversized: boolean }[]
-  readonly selectedCount: number
   readonly oversizedDisplayIndices: readonly number[]
 }
 
@@ -347,12 +346,11 @@ function isTurnOversizedForSync(turn: LocalConversationTurn): boolean {
 }
 
 /**
- * 检查“带入发布前历史轮次”时选中范围内的已完成轮次与超 32 KiB 限制情况，
+ * 检查发布时全部已有已完成轮次与超 32 KiB 限制情况，
  * 让弹窗在发布前给出明确预警。
  */
 export function inspectPublishHistory(
   turns: readonly LocalConversationTurn[],
-  fromTurnIndex = 0,
 ): PublishHistoryInspection {
   const completedTurns: {
     readonly turnIndex: number
@@ -371,11 +369,9 @@ export function inspectPublishHistory(
       oversized: isTurnOversizedForSync(turn),
     })
   })
-  const selected = completedTurns.filter(item => item.turnIndex >= fromTurnIndex)
   return {
     completedTurns,
-    selectedCount: selected.length,
-    oversizedDisplayIndices: selected.filter(item => item.oversized).map(item => item.displayIndex),
+    oversizedDisplayIndices: completedTurns.filter(item => item.oversized).map(item => item.displayIndex),
   }
 }
 

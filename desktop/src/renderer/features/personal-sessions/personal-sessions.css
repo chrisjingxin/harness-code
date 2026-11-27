@@ -181,6 +181,47 @@
 
 .psess-publish-dialog {
   width: min(92vw, 520px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+/* 仅发布弹窗收缩正文；错误和操作区不随正文滚出，其他弹窗沿原布局。 */
+.psess-publish-dialog > .dlg-body {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+}
+.psess-publish-dialog > .dlg-body > * {
+  flex-shrink: 0;
+}
+.psess-publish-dialog > .dlg-head,
+.psess-publish-actions {
+  flex-shrink: 0;
+}
+.psess-publish-dialog .dlg-head > .od-stack {
+  min-width: 0;
+}
+.psess-publish-dialog .dlg-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.psess-publish-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.psess-publish-actions .err {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--danger-fg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+@media (max-height: 560px) {
+  .psess-publish-dialog {
+    padding: 12px;
+    gap: 8px;
+  }
 }
 .psess-dlg-lead {
   margin: 0 0 10px;
@@ -205,71 +246,4 @@
   flex: none;
   margin-top: 2px;
   color: var(--warn-fg);
-}
-.psess-fieldset {
-  margin: 0 0 12px;
-  padding: 0;
-  border: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.psess-fieldset legend {
-  margin-bottom: 6px;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text);
-}
-.psess-radio-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 9px 10px;
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--line);
-  cursor: pointer;
-}
-.psess-radio-card:has(input:checked) {
-  background: color-mix(in srgb, var(--accent-tint) 65%, var(--surface));
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-}
-.psess-radio-card strong {
-  display: block;
-  font-size: var(--text-sm);
-  color: var(--text);
-}
-.psess-radio-card p {
-  margin: 2px 0 0;
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  color: var(--muted);
-}
-.psess-history-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 9px 10px;
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.psess-history-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-left: 22px;
-  font-size: var(--text-xs);
-}
-.psess-history-range select {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--line);
 }
